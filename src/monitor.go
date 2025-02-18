@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	weatherUpdateInterval = 1 * time.Minute
+	weatherUpdateInterval = 10 * time.Minute
 	tempUpdateInterval    = 5 * time.Second
 	networkUpdateInterval = 1 * time.Second
 )

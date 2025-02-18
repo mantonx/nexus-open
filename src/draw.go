@@ -5,6 +5,8 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/gif"
+	"os"
 	"time"
 
 	"golang.org/x/image/font"
@@ -13,19 +15,42 @@ import (
 )
 
 var (
-	d    *font.Drawer // Text drawing context
-	face font.Face    // Font face
+	d          *font.Drawer  // Text drawing context
+	face       font.Face     // Font face
+	background []*image.RGBA // Background image frames
 )
+
+type ImageConfig struct {
+	BackgroundImg string
+	BgColor       string
+}
 
 func InitImageBuffer(width, height int) []byte {
 	return make([]byte, width*height*4)
 }
 
-func CreateImageContext(bgColorStr string, customFace ...font.Face) *image.RGBA {
-	// Create background with specified color
+func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA {
+	var err error
+
+	background, err = ConvertBackgroundImage(config.BackgroundImg)
+
+	if err != nil {
+		// Fallback to solid color if background image fails to load
+		img := image.NewRGBA(image.Rect(0, 0, width, height))
+		bgColor := parseColor(config.BgColor, color.RGBA{R: 0, G: 0, B: 0, A: 255})
+		draw.Draw(img, img.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
+		fmt.Printf("Drawing solid background color: %v\n", bgColor)
+	}
+
+	// Use the first frame of the animated background
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	bgColor := parseColor(bgColorStr, color.RGBA{R: 0, G: 0, B: 0, A: 255})
-	draw.Draw(img, img.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
+
+	if len(background) > 0 {
+		// Convert to 23.3 Hz by dividing by 42.918ms
+		frameIndex := (time.Now().UnixNano() / 42918000) % int64(len(background))
+		draw.Draw(img, img.Bounds(), background[int(frameIndex)], image.Point{}, draw.Src)
+		fmt.Printf("Drawing background frame %d of %d\n", frameIndex, len(background))
+	}
 
 	// Set up font and text drawing context
 	if len(customFace) > 0 && customFace[0] != nil {
@@ -112,6 +137,10 @@ func DrawNetworkStats(currentNetwork NetworkStats) {
 }
 
 func DrawWeather(weatherInfo *WeatherInfo) {
+	if weatherInfo == nil {
+		return
+	}
+
 	weatherText := fmt.Sprintf("Weather: %.1f F, %s, %s mph", weatherInfo.Temperature, weatherInfo.Condition, weatherInfo.WindSpeed)
 	weatherTextWidth := (&font.Drawer{Face: face}).MeasureString(weatherText)
 
@@ -184,4 +213,34 @@ func formatNetworkRate(label string, rate int64) string {
 		return fmt.Sprintf("%s: %.1f Mbps", label, float64(rate)/1024)
 	}
 	return fmt.Sprintf("%s: %d Kbps", label, rate)
+}
+
+// ConvertBackgroundImage converts a PNG image to RGBA format for display
+// The image should be 640x48 pixels
+func ConvertBackgroundImage(imgPath string) ([]*image.RGBA, error) {
+	// Load the image file
+	file, err := os.Open(imgPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open image: %v", err)
+	}
+	defer file.Close()
+
+	// Decode the GIF image
+	gifImg, err := gif.DecodeAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode GIF: %v", err)
+	}
+
+	// Create slice to hold all frames
+	frames := make([]*image.RGBA, len(gifImg.Image))
+
+	// Convert each frame to RGBA
+	for i, img := range gifImg.Image {
+		bounds := img.Bounds()
+		rgba := image.NewRGBA(bounds)
+		draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+		frames[i] = rgba
+	}
+
+	return frames, nil
 }

@@ -1,111 +1,132 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/gousb"
 )
 
+type CreateScreenConfig struct {
+	device  *gousb.Device
+	cputemp float64
+	gputemp float64
+	network NetworkStats
+	weather *WeatherInfo
+}
+
+var deviceMutex sync.Mutex
+
 func UpdateScreen(tempChan <-chan Temperature, networkChan <-chan NetworkStats, weatherChan <-chan *WeatherInfo) {
-	var (
-		currentCPU     float64
-		currentGPU     float64
-		currentNetwork NetworkStats
-		currentWeather *WeatherInfo
-	)
+	state := struct {
+		cpu     float64
+		gpu     float64
+		network NetworkStats
+		weather *WeatherInfo
+	}{}
 
-	ticker := time.NewTicker(time.Second)
+	refreshRate := time.NewTicker(time.Second / 4) // 4 Hz (0.25s)
 
-	defer ticker.Stop()
+	defer refreshRate.Stop()
 
-	// Loop to update screen
-	// If there is new data available, update the screen
-	// Otherwise, keep the screen as is
-	// This loop runs every second
-	for range ticker.C {
+	for {
 		select {
 		case temps := <-tempChan:
-			currentCPU, currentGPU = temps.CPU, temps.GPU
+			state.cpu, state.gpu = temps.CPU, temps.GPU
 		case network := <-networkChan:
-			currentNetwork = network
+			state.network = network
 		case weather := <-weatherChan:
-			currentWeather = weather
-		default:
-			if connected {
-				// Update screen at ~60Hz
-				time.Sleep(time.Second / screenRefreshRate)
-				CreateNexusScreen(device, currentCPU, currentGPU, currentNetwork, currentWeather)
+			state.weather = weather
+		case <-refreshRate.C:
+			if err := updateDeviceScreen(&state); err != nil {
+				log.Printf("Screen update failed: %v", err)
+				resetDevice()
 			}
 		}
 	}
 }
 
-// CreateNexusScreen updates the Nexus display device with system statistics and weather information
-//
-// It takes the following parameters:
-// - device: Pointer to a USB device interface
-// - cputemp: Current CPU temperature in degrees
-// - gputemp: Current GPU temperature in degrees
-// - currentNetwork: Network statistics including upload/download rates
-// - weatherInfo: Pointer to weather information structure
-//
-// The function creates an image buffer, draws various information components including:
-// - CPU and GPU temperatures
-// - Network statistics
-// - Current time
-// - Weather information
-//
-// If the device is nil, the function returns without doing anything.
-// If there are any errors during device communication, it logs the error,
-// marks the device as disconnected and closes the connection.
-func CreateNexusScreen(device *gousb.Device, cputemp, gputemp float64, currentNetwork NetworkStats, weatherInfo *WeatherInfo) {
-	if device == nil {
-		return
+func updateDeviceScreen(state *struct {
+	cpu     float64
+	gpu     float64
+	network NetworkStats
+	weather *WeatherInfo
+}) error {
+	deviceMutex.Lock()
+
+	if !connected || device == nil {
+		deviceMutex.Unlock()
+		return nil
 	}
 
-	// Create and prepare image
-	imageBuffer := InitImageBuffer(width, height)
-	img := CreateImageContext("teal")
-	SetTextColor("yellow")
+	currentDevice := device
+	deviceMutex.Unlock()
 
-	// Draw all components
-	DrawTemperatures(cputemp, gputemp)
-	DrawNetworkStats(currentNetwork)
-	DrawTime()
-	DrawWeather(weatherInfo)
-
-	// Copy image data to buffer
-	copy(imageBuffer, img.Pix)
-
-	// Configure and update device
-	if err := device.SetAutoDetach(true); err != nil {
-		log.Printf("Warning: SetAutoDetach failed: %v", err)
+	config := CreateScreenConfig{
+		device:  currentDevice,
+		cputemp: state.cpu,
+		gputemp: state.gpu,
+		network: state.network,
+		weather: state.weather,
 	}
 
-	if err := setNexusImage(device, imageBuffer); err != nil {
-		log.Printf("Error: Failed to update display: %v", err)
-		connected = false
-		device.Close()
-	}
+	return CreateNexusScreen(config)
 }
 
-// setNexusImage writes image data to a Corsair iCUE Nexus device.
-// It takes a USB device pointer and raw RGBA image data as input.
-// The image data must match the device's width*height*4 bytes resolution.
-// The function splits the image into 120 chunks and sends them sequentially
-// through USB bulk transfer with specific header information.
-//
-// Parameters:
-//   - device: Pointer to a gousb.Device representing the Corsair Nexus USB device
-//   - imageData: Byte slice containing raw RGBA image data (width*height*4 bytes)
-//
-// Returns:
-//   - error: nil if successful, error object with description if failed
-//
-// The function will return early with nil if device is not connected.
-// Errors can occur during interface acquisition, endpoint setup, or data transfer.
+func resetDevice() {
+	deviceMutex.Lock()
+	defer deviceMutex.Unlock()
+
+	if device != nil {
+		device.Close()
+	}
+
+	device = nil
+	connected = false
+}
+
+func CreateNexusScreen(config CreateScreenConfig) error {
+	if device == nil {
+		return nil
+	}
+
+	// Set up device interface
+	if err := device.SetAutoDetach(true); err != nil {
+		return fmt.Errorf("SetAutoDetach failed: %v", err)
+	}
+
+	_, done, err := device.DefaultInterface()
+	if err != nil {
+		connected = false
+		return fmt.Errorf("failed to get default interface: %v", err)
+	}
+
+	defer done()
+
+	// Prepare and draw image
+	imageBuffer := InitImageBuffer(width, height)
+	img := CreateImageContext(ImageConfig{BackgroundImg: "background.gif", BgColor: "black"})
+	SetTextColor("yellow")
+
+	DrawTemperatures(config.cputemp, config.gputemp)
+	DrawNetworkStats(config.network)
+	DrawTime()
+	DrawWeather(config.weather)
+
+	copy(imageBuffer, img.Pix)
+
+	// Update display
+	if err := setNexusImage(device, imageBuffer); err != nil {
+		connected = false
+		return fmt.Errorf("failed to update display: %v", err)
+	}
+
+	return nil
+}
+
 func setNexusImage(device *gousb.Device, imageData []byte) error {
 	if !connected {
 		fmt.Println("iCUE Nexus: not connected.")
@@ -141,6 +162,8 @@ func setNexusImage(device *gousb.Device, imageData []byte) error {
 	data[6] = 248
 	data[7] = 3
 
+	writer := bufio.NewWriterSize(ep, 1024*4)
+
 	// Split the image data into 120 chunks and send them sequentially
 	for i := 0; i <= 120; i++ {
 		data[4] = byte(i)
@@ -163,8 +186,8 @@ func setNexusImage(device *gousb.Device, imageData []byte) error {
 			num2++
 		}
 
-		// Write the data to the USB device
-		_, err = ep.Write(data)
+		// Write the data to the USB device using buffered writer
+		_, err = writer.Write(data)
 
 		// Check for errors during data transfer
 		// If an error occurs, gracefully close the interface and device
@@ -172,8 +195,16 @@ func setNexusImage(device *gousb.Device, imageData []byte) error {
 			done()         // Close the interface
 			device.Close() // Close the device
 			connected = false
+			if err.Error() == "libusb: device was disconnected" {
+				return nil // Device disconnection is expected, don't report as error
+			}
 			return fmt.Errorf("failed to write data: %v", err)
 		}
+	}
+
+	// Flush the buffered writer to ensure all data is sent
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("failed to flush data: %v", err)
 	}
 
 	return nil
