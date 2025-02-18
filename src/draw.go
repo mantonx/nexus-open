@@ -34,6 +34,8 @@ func CreateImageContext(bgColorStr string, customFace ...font.Face) *image.RGBA 
 		face = basicfont.Face7x13 // default font
 	}
 
+	face = LoadSystemFont("Hack-Regular.ttf")
+
 	d = &font.Drawer{
 		Dst:  img,
 		Src:  image.NewUniform(color.RGBA{R: 255, G: 255, B: 255, A: 255}),
@@ -59,8 +61,8 @@ func DrawTime() {
 	currentTime := time.Now()
 	timeStr := currentTime.Format("3:04 PM")
 
-	// Blink the colon every second
-	if (currentTime.UnixNano()/100000000)%2 != 0 && len(timeStr) >= 3 {
+	// Blinking colon effect at 60Hz (every 500ms)
+	if (currentTime.UnixNano()/100000000)%2 == 0 && len(timeStr) >= 3 {
 		if idx := len(timeStr) - 6; idx >= 0 {
 			timeStr = timeStr[:idx] + " " + timeStr[idx+1:]
 		}
