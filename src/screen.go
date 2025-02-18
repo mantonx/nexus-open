@@ -166,6 +166,8 @@ func setNexusImage(device *gousb.Device, imageData []byte) error {
 		// Write the data to the USB device
 		_, err = ep.Write(data)
 
+		// Check for errors during data transfer
+		// If an error occurs, gracefully close the interface and device
 		if err != nil {
 			done()         // Close the interface
 			device.Close() // Close the device

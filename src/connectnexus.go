@@ -148,12 +148,13 @@ func checkDeviceHealth() bool {
 	}
 
 	intf, done, err := device.DefaultInterface()
-	defer done()
 
 	if err != nil {
 		log.Printf("iCUE Nexus: Connection lost - %v", err)
 		return false
 	}
+
+	defer done()
 
 	if intf == nil {
 		log.Println("iCUE Nexus: Invalid interface detected")
