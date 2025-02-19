@@ -34,7 +34,9 @@ func InitializeDevice() {
 //   - Failed to open devices
 //   - Failed to set auto detach
 //   - Failed to get device configuration
-var usbContext *gousb.Context
+var (
+	usbContext *gousb.Context
+)
 
 func ConnectNexus() *gousb.Device {
 	if usbContext == nil {
@@ -59,12 +61,21 @@ func ConnectNexus() *gousb.Device {
 		log.Fatalf("Failed to set auto detach: %v", err)
 	}
 
-	if _, err := device.Config(1); err != nil {
+	config, err := device.Config(1)
+
+	if err != nil {
 		log.Fatalf("Failed to get config: %v", err)
 	}
 
-	// Store config in a package-level variable or let it be garbage collected
-	// when the device is closed
+	intf, err := config.Interface(0, 0)
+
+	if err != nil {
+		log.Fatalf("Failed to get interface: %v", err)
+		return nil
+	}
+
+	usbintf = intf // Set global interface
+
 	return device
 }
 
@@ -132,32 +143,20 @@ func attemptReconnection(maxRetries int) {
 	log.Println("iCUE Nexus: Failed all reconnection attempts")
 }
 
-// checkDeviceHealth verifies the health status of the iCUE Nexus device connection.
-// It checks if:
-// - Device handle exists and is valid
-// - Default interface is accessible
-// - Interface is properly initialized
+// checkDeviceHealth verifies that both the device handle and USB interface are available and accessible.
+// It performs basic validation of device connectivity status.
 //
 // Returns:
-//   - true if device is healthy and ready for communication
-//   - false if any health check fails, logging the specific failure reason
+//   - true if both device handle and interface are valid and accessible
+//   - false if either device handle or interface is nil/invalid
 func checkDeviceHealth() bool {
 	if device == nil {
 		log.Println("iCUE Nexus: Device handle is not available")
 		return false
 	}
 
-	intf, done, err := device.DefaultInterface()
-
-	if err != nil {
-		log.Printf("iCUE Nexus: Connection lost - %v", err)
-		return false
-	}
-
-	defer done()
-
-	if intf == nil {
-		log.Println("iCUE Nexus: Invalid interface detected")
+	if usbintf == nil {
+		log.Println("iCUE Nexus: Default interface is not accessible")
 		return false
 	}
 

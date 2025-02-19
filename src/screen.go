@@ -6,12 +6,9 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/google/gousb"
 )
 
 type CreateScreenConfig struct {
-	device  *gousb.Device
 	cputemp float64
 	gputemp float64
 	network NetworkStats
@@ -21,32 +18,34 @@ type CreateScreenConfig struct {
 var deviceMutex sync.Mutex
 
 func UpdateScreen(tempChan <-chan Temperature, networkChan <-chan NetworkStats, weatherChan <-chan *WeatherInfo) {
-	state := struct {
-		cpu     float64
-		gpu     float64
-		network NetworkStats
-		weather *WeatherInfo
-	}{}
+	go func() {
+		state := struct {
+			cpu     float64
+			gpu     float64
+			network NetworkStats
+			weather *WeatherInfo
+		}{}
 
-	refreshRate := time.NewTicker(time.Second / 4) // 4 Hz (0.25s)
+		refreshRate := time.NewTicker(time.Second / screenRefreshRate) // 24 Hz (~0.042s)
 
-	defer refreshRate.Stop()
+		defer refreshRate.Stop()
 
-	for {
-		select {
-		case temps := <-tempChan:
-			state.cpu, state.gpu = temps.CPU, temps.GPU
-		case network := <-networkChan:
-			state.network = network
-		case weather := <-weatherChan:
-			state.weather = weather
-		case <-refreshRate.C:
-			if err := updateDeviceScreen(&state); err != nil {
-				log.Printf("Screen update failed: %v", err)
-				resetDevice()
+		for {
+			select {
+			case temps := <-tempChan:
+				state.cpu, state.gpu = temps.CPU, temps.GPU
+			case network := <-networkChan:
+				state.network = network
+			case weather := <-weatherChan:
+				state.weather = weather
+			case <-refreshRate.C:
+				if err := updateDeviceScreen(&state); err != nil {
+					log.Printf("Screen update failed: %v", err)
+					resetDevice()
+				}
 			}
 		}
-	}
+	}()
 }
 
 func updateDeviceScreen(state *struct {
@@ -62,11 +61,9 @@ func updateDeviceScreen(state *struct {
 		return nil
 	}
 
-	currentDevice := device
 	deviceMutex.Unlock()
 
 	config := CreateScreenConfig{
-		device:  currentDevice,
 		cputemp: state.cpu,
 		gputemp: state.gpu,
 		network: state.network,
@@ -93,22 +90,9 @@ func CreateNexusScreen(config CreateScreenConfig) error {
 		return nil
 	}
 
-	// Set up device interface
-	if err := device.SetAutoDetach(true); err != nil {
-		return fmt.Errorf("SetAutoDetach failed: %v", err)
-	}
-
-	_, done, err := device.DefaultInterface()
-	if err != nil {
-		connected = false
-		return fmt.Errorf("failed to get default interface: %v", err)
-	}
-
-	defer done()
-
 	// Prepare and draw image
 	imageBuffer := InitImageBuffer(width, height)
-	img := CreateImageContext(ImageConfig{BackgroundImg: "background.gif", BgColor: "black"})
+	img := CreateImageContext(ImageConfig{BackgroundImg: "/home/fictional/Development/nexus-next/src/background.gif", BgColor: "black"})
 	SetTextColor("yellow")
 
 	DrawTemperatures(config.cputemp, config.gputemp)
@@ -119,7 +103,7 @@ func CreateNexusScreen(config CreateScreenConfig) error {
 	copy(imageBuffer, img.Pix)
 
 	// Update display
-	if err := setNexusImage(device, imageBuffer); err != nil {
+	if err := setNexusImage(imageBuffer); err != nil {
 		connected = false
 		return fmt.Errorf("failed to update display: %v", err)
 	}
@@ -127,7 +111,7 @@ func CreateNexusScreen(config CreateScreenConfig) error {
 	return nil
 }
 
-func setNexusImage(device *gousb.Device, imageData []byte) error {
+func setNexusImage(imageData []byte) error {
 	if !connected {
 		fmt.Println("iCUE Nexus: not connected.")
 		return nil
@@ -137,16 +121,9 @@ func setNexusImage(device *gousb.Device, imageData []byte) error {
 		return fmt.Errorf("incoming image data length mismatch")
 	}
 
-	// Get device interface and endpoint
-	intf, done, err := device.DefaultInterface()
-
-	if err != nil {
-		return fmt.Errorf("DefaultInterface(): %v", err)
-	}
-
-	defer done()
-
-	ep, err := intf.OutEndpoint(2)
+	// Get output endpoint from USB interface
+	// libusb: endpoint 2 is not an OUT endpoint
+	ep, err := usbintf.OutEndpoint(2)
 
 	if err != nil {
 		return fmt.Errorf("OutEndpoint(2): %v", err)
@@ -190,10 +167,7 @@ func setNexusImage(device *gousb.Device, imageData []byte) error {
 		_, err = writer.Write(data)
 
 		// Check for errors during data transfer
-		// If an error occurs, gracefully close the interface and device
 		if err != nil {
-			done()         // Close the interface
-			device.Close() // Close the device
 			connected = false
 			if err.Error() == "libusb: device was disconnected" {
 				return nil // Device disconnection is expected, don't report as error

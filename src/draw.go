@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"image/gif"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/image/font"
@@ -15,9 +16,10 @@ import (
 )
 
 var (
-	d          *font.Drawer  // Text drawing context
-	face       font.Face     // Font face
-	background []*image.RGBA // Background image frames
+	d                 *font.Drawer  // Text drawing context
+	face              font.Face     // Font face
+	background        []*image.RGBA // Background image frames
+	getBackgroundOnce sync.Once     // Ensures background is loaded only once
 )
 
 type ImageConfig struct {
@@ -32,7 +34,9 @@ func InitImageBuffer(width, height int) []byte {
 func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA {
 	var err error
 
-	background, err = ConvertBackgroundImage(config.BackgroundImg)
+	getBackgroundOnce.Do(func() {
+		background, err = ConvertBackgroundImage(config.BackgroundImg)
+	})
 
 	if err != nil {
 		// Fallback to solid color if background image fails to load
@@ -46,8 +50,8 @@ func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
 	if len(background) > 0 {
-		// Convert to 23.3 Hz by dividing by 42.918ms
-		frameIndex := (time.Now().UnixNano() / 42918000) % int64(len(background))
+		// Convert to 24 Hz by dividing by 41.666667ms (1000/24)
+		frameIndex := (time.Now().UnixNano() / 41666667) % int64(len(background))
 		draw.Draw(img, img.Bounds(), background[int(frameIndex)], image.Point{}, draw.Src)
 		fmt.Printf("Drawing background frame %d of %d\n", frameIndex, len(background))
 	}
@@ -86,8 +90,8 @@ func DrawTime() {
 	currentTime := time.Now()
 	timeStr := currentTime.Format("3:04 PM")
 
-	// Blinking colon effect at 60Hz (every 500ms)
-	if (currentTime.UnixNano()/100000000)%2 == 0 && len(timeStr) >= 3 {
+	// Blinking colon effect at 1Hz (once per second)
+	if (currentTime.Unix()%2) == 0 && len(timeStr) >= 3 {
 		if idx := len(timeStr) - 6; idx >= 0 {
 			timeStr = timeStr[:idx] + " " + timeStr[idx+1:]
 		}
@@ -122,7 +126,7 @@ func DrawNetworkStats(currentNetwork NetworkStats) {
 	// Network sent text (left-aligned)
 	sentText := formatNetworkRate("Sent", int64(currentNetwork.Sent))
 	d.Dot = fixed.Point26_6{
-		X: fixed.I(width/2 - 90),
+		X: fixed.I(width/2 - 130),
 		Y: fixed.I(15),
 	}
 	d.DrawString(sentText)
@@ -130,7 +134,7 @@ func DrawNetworkStats(currentNetwork NetworkStats) {
 	// Network received text (left-aligned)
 	recvText := formatNetworkRate("Recv", int64(currentNetwork.Received))
 	d.Dot = fixed.Point26_6{
-		X: fixed.I(width/2 - 90),
+		X: fixed.I(width/2 - 130),
 		Y: fixed.I(40),
 	}
 	d.DrawString(recvText)

@@ -31,13 +31,13 @@ type NetworkStats struct {
 //
 // Returns:
 //   - A channel of WeatherInfo pointers through which weather updates are sent
-func StartWeatherMonitor(connected *bool) chan *WeatherInfo {
+func StartWeatherMonitor() chan *WeatherInfo {
 	weatherChan := make(chan *WeatherInfo)
 	weatherInfo := GetWeatherData(location)
 
 	go func() {
 		for {
-			if !*connected {
+			if !connected {
 				continue
 			}
 			weatherInfo = GetWeatherData(location)
@@ -65,12 +65,12 @@ func StartWeatherMonitor(connected *bool) chan *WeatherInfo {
 //
 // Returns:
 //   - chan Temperature - Channel through which temperature updates are sent
-func StartTempatureMonitor(connected *bool) chan Temperature {
+func StartTempatureMonitor() chan Temperature {
 	tempChan := make(chan Temperature)
 
 	go func() {
 		for {
-			if !*connected {
+			if !connected {
 				continue
 			}
 
@@ -115,12 +115,12 @@ func StartTempatureMonitor(connected *bool) chan Temperature {
 //
 // Returns:
 //   - chan NetworkStats - Channel streaming network statistics
-func StartNetworkMonitor(connected *bool) chan NetworkStats {
+func StartNetworkMonitor() chan NetworkStats {
 	networkChan := make(chan NetworkStats)
 
 	go func() {
 		for {
-			if !*connected {
+			if !connected {
 				continue
 			}
 			sent, received, err := GetNetworkUsage()
