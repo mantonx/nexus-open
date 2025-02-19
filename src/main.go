@@ -15,8 +15,8 @@ const (
 )
 
 var (
-	device    *gousb.Device    // Pointer to the Nexus device
-	usbintf   *gousb.Interface // USB interface for the device
+	device    *gousb.Device    // USB device for the iCUE Nexus
+	usbintf   *gousb.Interface // USB interface for the iCUE Nexus
 	connected bool             // Flag to indicate if the Nexus device is connected
 )
 
@@ -36,7 +36,7 @@ func main() {
 	weatherChan := StartWeatherMonitor()
 
 	// // Start screen update loop
-	UpdateScreen(tempChan, networkChan, weatherChan)
+	StartDisplayUpdate(tempChan, networkChan, weatherChan)
 
 	// Start touch input reading
 	StartTouchMonitor()
