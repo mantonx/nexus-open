@@ -23,14 +23,22 @@
 //	}
 //
 // The package relies on the github.com/google/gousb library for USB device communication.
-package main
+package nexus
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/gousb"
 )
+
+type TouchEvent struct {
+	X         int
+	Y         int
+	Pressed   bool
+	Timestamp time.Time
+}
 
 func StartTouchMonitor() <-chan TouchEvent {
 	events := make(chan TouchEvent)
@@ -106,32 +114,81 @@ func processTouchEvents(in *gousb.InEndpoint) error {
 			continue
 		}
 
-		if evt := parseTouchEvent(touchData); evt != nil {
+		if evt := parseTouchEvent(touchData, lastEvent); evt != nil {
 			if lastEvent == nil || *evt != *lastEvent {
-				fmt.Printf("Touch event: x=%d, y=%d, pressed=%v\n", evt.X, evt.Y, evt.Pressed)
+				// fmt.Printf("Touch event: x=%d, y=%d, pressed=%v\n", evt.X, evt.Y, evt.Pressed)
 				lastEvent = evt
 			}
 		}
 	}
 }
 
-// parseTouchEvent processes raw touch input data and converts it to a TouchEvent structure.
-// The function expects a byte slice containing touch event data in a specific format:
-// - First 3 bytes must be [1,2,33] as a header signature
+// parseTouchEvent processes raw touch event data and converts it into a TouchEvent struct.
+// It validates the touch event protocol by checking magic numbers in the first 3 bytes.
+//
+// The function expects raw touch data in the following format:
+// - Bytes 0-2: Protocol magic numbers (1,2,33)
 // - Bytes 5-6: X coordinate (high byte, low byte)
 // - Bytes 7-8: Y coordinate (high byte, low byte)
-// - Byte 2: Press state (33 indicates pressed)
 //
-// Returns nil if the data format is invalid (incorrect header signature).
-// Returns a populated TouchEvent struct if parsing succeeds.
-func parseTouchEvent(data []byte) *TouchEvent {
+// It also detects swipe gestures by comparing the current event with the last event
+// if provided. A swipe is detected when the squared distance between points exceeds 1000.
+//
+// Parameters:
+//   - data: Raw touch event byte array
+//   - lastEvent: Pointer to previous TouchEvent for swipe detection, can be nil
+//
+// Returns:
+//   - *TouchEvent: Parsed touch event or nil if invalid protocol magic numbers
+func parseTouchEvent(data []byte, lastEvent *TouchEvent) *TouchEvent {
+	// Validate protocol magic numbers
 	if data[0] != 1 || data[1] != 2 || data[2] != 33 {
 		return nil
 	}
 
-	return &TouchEvent{
-		X:       int(data[5])*256 + int(data[6]),
-		Y:       int(data[7])*256 + int(data[8]),
-		Pressed: data[2] == 33, // 33 indicates pressed
+	evt := &TouchEvent{
+		X:         int(data[5])*256 + int(data[6]),
+		Y:         int(data[7])*256 + int(data[8]),
+		Pressed:   data[2] == 33,
+		Timestamp: time.Now(),
 	}
+
+	// Process swipe gestures only when we have a previous event
+	if lastEvent != nil && evt.Pressed && lastEvent.Pressed {
+		dx := float64(evt.X - lastEvent.X)
+		dy := float64(evt.Y - lastEvent.Y)
+		duration := time.Since(lastEvent.Timestamp)
+
+		// Calculate velocity in pixels per second for more intuitive values
+		vx := dx / duration.Seconds()
+		vy := dy / duration.Seconds()
+
+		// More natural swipe detection thresholds
+		const (
+			minSwipeVelocity = 200 // pixels/second
+			maxSwipeTime     = 300 // milliseconds
+			directionRatio   = 1.5 // horizontal vs vertical ratio
+		)
+
+		if duration.Milliseconds() < maxSwipeTime {
+			isHorizontal := math.Abs(vx) > math.Abs(vy)*directionRatio
+			isVertical := math.Abs(vy) > math.Abs(vx)*directionRatio
+
+			if isHorizontal && math.Abs(vx) > minSwipeVelocity {
+				if vx < -minSwipeVelocity {
+					fmt.Printf("Left swipe (%.0f px/s)\n", vx)
+				} else if vx > minSwipeVelocity {
+					fmt.Printf("Right swipe (%.0f px/s)\n", vx)
+				}
+			} else if isVertical && math.Abs(vy) > minSwipeVelocity {
+				if vy < -minSwipeVelocity {
+					fmt.Printf("Up swipe (%.0f px/s)\n", vy)
+				} else if vy > minSwipeVelocity {
+					fmt.Printf("Down swipe (%.0f px/s)\n", vy)
+				}
+			}
+		}
+	}
+
+	return evt
 }

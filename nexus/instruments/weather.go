@@ -1,4 +1,4 @@
-package main
+package instruments
 
 import (
 	"context"
@@ -10,22 +10,37 @@ import (
 	"strconv"
 )
 
+var tempUnit string
+var windSpeedUnit string
+
 type WeatherInfo struct {
 	Temperature float64
 	Condition   string
 	WindSpeed   string
 }
 
-func GetWeatherData(location string) *WeatherInfo {
-	lat, lon, err := GetCityCoordinates(location)
+const (
+	openMeteoBaseURL   = "https://api.open-meteo.com/v1/forecast?temperature_unit=%s&wind_speed_unit=%s&latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code,wind_speed_10m,is_day"
+	nominatimSearchURL = "https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1"
+)
 
+func GetWeatherData(location string, unit *string) *WeatherInfo {
+	// Validate and normalize temperature unit
+	if *unit == "imperial" {
+		tempUnit = "fahrenheit"
+		windSpeedUnit = "mph"
+	} else {
+		tempUnit = "celsius"
+		windSpeedUnit = "kmh"
+	}
+
+	lat, lon, err := GetCityCoordinates(location)
 	if err != nil {
 		log.Fatalf("Failed to get city coordinates: %v", err)
 		return nil
 	}
 
-	weather, err := GetWeatherConditions(lat, lon, "fahrenheit")
-
+	weather, err := GetWeatherConditions(lat, lon)
 	if err != nil {
 		log.Fatalf("Failed to get weather forecast: %v", err)
 		return nil
@@ -54,10 +69,10 @@ func GetWeatherData(location string) *WeatherInfo {
 // The function uses the Nominatim API which requires a User-Agent header and returns coordinates as strings
 // that are converted to float64 values before being returned.
 func GetCityCoordinates(city string) (float64, float64, error) {
-	url := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1", url.QueryEscape(city))
+	baseURL := fmt.Sprintf(nominatimSearchURL, url.QueryEscape(city))
 
 	client := &http.Client{}
-	req, err := http.NewRequestWithContext(context.Background(), "GET", url, nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", baseURL, nil)
 
 	if err != nil {
 		return 0, 0, err
@@ -114,13 +129,15 @@ func GetCityCoordinates(city string) (float64, float64, error) {
 // The function uses the Open-Meteo API to fetch weather data including temperature,
 // weather code, wind speed, and daylight status. It converts the weather code to
 // a human-readable condition description internally.
-func GetWeatherConditions(lat, lon float64, tempUnit string) (*WeatherInfo, error) {
-	baseURL := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?temperature_unit=%s&latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code,wind_speed_10m,is_day", tempUnit, lat, lon)
+func GetWeatherConditions(lat, lon float64) (*WeatherInfo, error) {
+	baseURL := fmt.Sprintf(openMeteoBaseURL, tempUnit, windSpeedUnit, lat, lon)
 
 	resp, err := http.Get(baseURL)
+
 	if err != nil {
 		return nil, err
 	}
+
 	defer resp.Body.Close()
 
 	var result struct {

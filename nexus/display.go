@@ -27,12 +27,13 @@
 // Note: The device automatically handles disconnection events and will attempt
 // to gracefully handle connection loss without throwing errors.
 
-package main
+package nexus
 
 import (
 	"bufio"
 	"fmt"
 	"log"
+	"nexus-open/nexus/instruments"
 	"sync"
 	"time"
 )
@@ -40,8 +41,8 @@ import (
 type CreateScreenConfig struct {
 	cputemp float64
 	gputemp float64
-	network NetworkStats
-	weather *WeatherInfo
+	network instruments.NetworkStats
+	weather *instruments.WeatherInfo
 }
 
 var deviceMutex sync.Mutex
@@ -57,13 +58,13 @@ var deviceMutex sync.Mutex
 // If a display update fails, it logs the error and attempts to reset the display device.
 //
 // This function is non-blocking as it launches the update loop in a separate goroutine.
-func StartDisplayUpdate(tempChan <-chan Temperature, networkChan <-chan NetworkStats, weatherChan <-chan *WeatherInfo) {
+func StartDisplayUpdate(tempChan <-chan instruments.SystemTemperature, networkChan <-chan instruments.NetworkStats, weatherChan <-chan *instruments.WeatherInfo) {
 	go func() {
 		state := struct {
 			cpu     float64
 			gpu     float64
-			network NetworkStats
-			weather *WeatherInfo
+			network instruments.NetworkStats
+			weather *instruments.WeatherInfo
 		}{}
 
 		refreshRate := time.NewTicker(time.Second / screenRefreshRate) // 24 Hz (~0.042s)
@@ -102,8 +103,8 @@ func StartDisplayUpdate(tempChan <-chan Temperature, networkChan <-chan NetworkS
 func updateDisplay(state *struct {
 	cpu     float64
 	gpu     float64
-	network NetworkStats
-	weather *WeatherInfo
+	network instruments.NetworkStats
+	weather *instruments.WeatherInfo
 }) error {
 	deviceMutex.Lock()
 
@@ -160,10 +161,10 @@ func drawDisplay(config CreateScreenConfig) error {
 
 	// Prepare and draw image
 	imageBuffer := InitImageBuffer(width, height)
-	img := CreateImageContext(ImageConfig{BackgroundImg: "/home/fictional/Development/nexus-next/src/background.gif", BgColor: "black"})
+	img := CreateImageContext(ImageConfig{BackgroundImg: "/home/fictional/Development/nexus-open/nexus/background.gif", BgColor: "black"})
 	SetTextColor("yellow")
 
-	DrawTemperatures(config.cputemp, config.gputemp)
+	DrawSystemTemperatures(config.cputemp, config.gputemp)
 	DrawNetworkStats(config.network)
 	DrawTime()
 	DrawWeather(config.weather)

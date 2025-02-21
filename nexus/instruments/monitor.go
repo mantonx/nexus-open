@@ -1,4 +1,4 @@
-package main
+package instruments
 
 import (
 	"log"
@@ -11,7 +11,7 @@ const (
 	networkUpdateInterval = 1 * time.Second
 )
 
-type Temperature struct {
+type SystemTemperature struct {
 	CPU float64
 	GPU float64
 }
@@ -31,16 +31,17 @@ type NetworkStats struct {
 //
 // Returns:
 //   - A channel of WeatherInfo pointers through which weather updates are sent
-func StartWeatherMonitor() chan *WeatherInfo {
+func StartWeatherMonitor(location string, unit *string, connected *bool) chan *WeatherInfo {
 	weatherChan := make(chan *WeatherInfo)
-	weatherInfo := GetWeatherData(location)
+	weatherInfo := GetWeatherData(location, unit)
 
 	go func() {
 		for {
-			if !connected {
+			if !*connected {
 				continue
 			}
-			weatherInfo = GetWeatherData(location)
+
+			weatherInfo = GetWeatherData(location, unit)
 			weatherChan <- weatherInfo
 			time.Sleep(weatherUpdateInterval)
 		}
@@ -65,12 +66,12 @@ func StartWeatherMonitor() chan *WeatherInfo {
 //
 // Returns:
 //   - chan Temperature - Channel through which temperature updates are sent
-func StartTempatureMonitor() chan Temperature {
-	tempChan := make(chan Temperature)
+func StartTempatureMonitor(connected *bool) chan SystemTemperature {
+	systemTempChan := make(chan SystemTemperature)
 
 	go func() {
 		for {
-			if !connected {
+			if !*connected {
 				continue
 			}
 
@@ -88,7 +89,7 @@ func StartTempatureMonitor() chan Temperature {
 				continue
 			}
 
-			tempChan <- Temperature{
+			systemTempChan <- SystemTemperature{
 				CPU: cpu,
 				GPU: gpu,
 			}
@@ -96,7 +97,7 @@ func StartTempatureMonitor() chan Temperature {
 		}
 	}()
 
-	return tempChan
+	return systemTempChan
 }
 
 // StartNetworkMonitor initializes and starts a network monitoring goroutine.
@@ -115,12 +116,12 @@ func StartTempatureMonitor() chan Temperature {
 //
 // Returns:
 //   - chan NetworkStats - Channel streaming network statistics
-func StartNetworkMonitor() chan NetworkStats {
+func StartNetworkMonitor(connected *bool) chan NetworkStats {
 	networkChan := make(chan NetworkStats)
 
 	go func() {
 		for {
-			if !connected {
+			if !*connected {
 				continue
 			}
 			sent, received, err := GetNetworkUsage()

@@ -1,4 +1,4 @@
-package main
+package nexus
 
 import (
 	"fmt"
@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"nexus-open/nexus/instruments"
+
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
@@ -20,6 +22,8 @@ var (
 	face              font.Face     // Font face
 	background        []*image.RGBA // Background image frames
 	getBackgroundOnce sync.Once     // Ensures background is loaded only once
+	speedSymbol       string        // Unit for wind speed
+	degreeSymbol      string        // Unit for temperature
 )
 
 type ImageConfig struct {
@@ -43,7 +47,6 @@ func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA
 		img := image.NewRGBA(image.Rect(0, 0, width, height))
 		bgColor := parseColor(config.BgColor, color.RGBA{R: 0, G: 0, B: 0, A: 255})
 		draw.Draw(img, img.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
-		fmt.Printf("Drawing solid background color: %v\n", bgColor)
 	}
 
 	// Use the first frame of the animated background
@@ -53,7 +56,6 @@ func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA
 		// Convert to 24 Hz by dividing by 41.666667ms (1000/24)
 		frameIndex := (time.Now().UnixNano() / 41666667) % int64(len(background))
 		draw.Draw(img, img.Bounds(), background[int(frameIndex)], image.Point{}, draw.Src)
-		fmt.Printf("Drawing background frame %d of %d\n", frameIndex, len(background))
 	}
 
 	// Set up font and text drawing context
@@ -107,22 +109,22 @@ func DrawTime() {
 	d.DrawString(timeStr)
 }
 
-func DrawTemperatures(cpuTemp, gpuTemp float64) {
+func DrawSystemTemperatures(cpuTemp, gpuTemp float64) {
 	d.Dot = fixed.Point26_6{
 		X: fixed.I(10),
 		Y: fixed.I(15),
 	}
-	d.DrawString(fmt.Sprintf("CPU: %.1f C", cpuTemp))
+	d.DrawString(fmt.Sprintf("CPU: %.1f °C", cpuTemp))
 
 	// GPU temperature text (left-aligned, bottom)
 	d.Dot = fixed.Point26_6{
 		X: fixed.I(10),
 		Y: fixed.I(40),
 	}
-	d.DrawString(fmt.Sprintf("GPU: %.1f C", gpuTemp))
+	d.DrawString(fmt.Sprintf("GPU: %.1f °C", gpuTemp))
 }
 
-func DrawNetworkStats(currentNetwork NetworkStats) {
+func DrawNetworkStats(currentNetwork instruments.NetworkStats) {
 	// Network sent text (left-aligned)
 	sentText := formatNetworkRate("Sent", int64(currentNetwork.Sent))
 	d.Dot = fixed.Point26_6{
@@ -140,12 +142,14 @@ func DrawNetworkStats(currentNetwork NetworkStats) {
 	d.DrawString(recvText)
 }
 
-func DrawWeather(weatherInfo *WeatherInfo) {
+func DrawWeather(weatherInfo *instruments.WeatherInfo) {
 	if weatherInfo == nil {
 		return
 	}
 
-	weatherText := fmt.Sprintf("Weather: %.1f F, %s, %s mph", weatherInfo.Temperature, weatherInfo.Condition, weatherInfo.WindSpeed)
+	setMeasurementUnits(unit)
+
+	weatherText := fmt.Sprintf("Weather: %.1f %s, %s, %s %s", weatherInfo.Temperature, degreeSymbol, weatherInfo.Condition, weatherInfo.WindSpeed, speedSymbol)
 	weatherTextWidth := (&font.Drawer{Face: face}).MeasureString(weatherText)
 
 	d.Dot = fixed.Point26_6{
@@ -154,6 +158,19 @@ func DrawWeather(weatherInfo *WeatherInfo) {
 	}
 
 	d.DrawString(weatherText)
+}
+
+func setMeasurementUnits(unit string) {
+	if unit == "metric" {
+		degreeSymbol = "°C"
+		speedSymbol = "km/h"
+	} else if unit == "imperial" {
+		degreeSymbol = "°F"
+		speedSymbol = "mph"
+	} else {
+		degreeSymbol = "K"
+		speedSymbol = "m/s"
+	}
 }
 
 // colorMap returns a map of predefined color names to their corresponding RGBA values.

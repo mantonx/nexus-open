@@ -1,0 +1,84 @@
+{
+  "css.lint.emptyRules": "ignore",
+  "css.lint.float": "error",
+  "css.lint.ieHack": "error",
+  "css.lint.important": "warning",
+  "css.lint.propertyIgnoredDueToDisplay": "warning",
+  "css.lint.universalSelector": "warning",
+  "clang-format.style": "google",
+  "editor.formatOnType": false,
+  "editor.formatOnSave": true,
+  "editor.find.autoFindInSelection": "multiline",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.run": "onSave",
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "editor.tabSize": 2,
+  "files.associations": {
+    ".babelrc": "json5",
+    "Tiltfile": "python",
+    "*.yml": "yaml"
+  },
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true,
+  "go.toolsEnvVars": {
+    "GOPROXY": "https://proxy.golang.org"
+  },
+  "gopls": {
+    "build.buildFlags": [
+      "-tags=integration_test"
+    ],
+    "ui.navigation.importShortcut": "Definition"
+  },
+  "go.toolsManagement.autoUpdate": true,
+  "prettier.configPath": "./.eslintrc.js",
+  "problems.decorations.enabled": true,
+  "protoc": {
+    "options": [
+      "--proto_path=${workspaceRoot}/lib/proto"
+    ]
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true
+  },
+  "typescript.tsdk": "./node_modules/typescript/lib",
+  "typescript.preferences.autoImportFileExcludePatterns": [
+    "lib/typescript/**",
+    "services/axios-web/lib/**",
+  ],
+  "[js]": {
+    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+  },
+  "[ts]": {
+    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+  },
+  "[tsx]": {
+    "editor.defaultFormatter": "dbaeumer.vscode-eslint"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  },
+  "yaml.format.enable": true,
+  "yaml.schemas": {
+    "https://json.schemastore.org/circleciconfig.json": ".circleci/workflows.yml"
+  },
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+  "[go]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll.eslint": "explicit"
+    }
+  },
+}

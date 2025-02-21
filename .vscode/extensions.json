@@ -1,0 +1,19 @@
+{
+    // See https://code.visualstudio.com/docs/editor/extension-marketplace#_workspace-recommended-extensions
+    // for the documentation about the extensions.json format
+    "recommendations": [
+      "charliermarsh.ruff",
+      "davidanson.vscode-markdownlint",
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+      "golang.go",
+      "mikestead.dotenv",
+      "mrmlnc.vscode-json5",
+      "rebornix.project-snippets",
+      "redhat.vscode-yaml",
+      "waderyan.babelrc",
+      "xaver.clang-format",
+      "zxh404.vscode-proto3",
+      "astro-build.astro-vscode",
+    ]
+  }
