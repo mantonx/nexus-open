@@ -29,7 +29,7 @@ func GetWeatherData(location string, unit *string) *WeatherInfo {
 	if *unit == "imperial" {
 		tempUnit = "fahrenheit"
 		windSpeedUnit = "mph"
-	} else {
+	} else { // metric
 		tempUnit = "celsius"
 		windSpeedUnit = "kmh"
 	}

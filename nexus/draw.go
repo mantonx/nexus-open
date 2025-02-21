@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"image/gif"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ var (
 	getBackgroundOnce sync.Once     // Ensures background is loaded only once
 	speedSymbol       string        // Unit for wind speed
 	degreeSymbol      string        // Unit for temperature
+	timeFormat        string        // Time format (12h or 24h)
 )
 
 type ImageConfig struct {
@@ -83,20 +85,32 @@ func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA
 // SetTextColor sets the drawing color for text using either a named color or hex color code
 func SetTextColor(colorStr string) {
 	textColor := parseColor(colorStr, color.RGBA{R: 255, G: 255, B: 255, A: 255})
-	d.Src = image.NewUniform(textColor)
+	if d != nil {
+		d.Src = image.NewUniform(textColor)
+	}
+	fmt.Printf("Text color set to: %s\n", colorStr)
+}
+
+// SetTimeFormat updates the time format used for display
+func SetTimeFormat(format string) {
+	timeFormat = format
 }
 
 // DrawTime draws the current time on the display with a blinking colon
 // The time is right-aligned and positioned at the top of the screen
 func DrawTime() {
 	currentTime := time.Now()
-	timeStr := currentTime.Format("3:04 PM")
+	var timeStr string
 
-	// Blinking colon effect at 1Hz (once per second)
-	if (currentTime.Unix()%2) == 0 && len(timeStr) >= 3 {
-		if idx := len(timeStr) - 6; idx >= 0 {
-			timeStr = timeStr[:idx] + " " + timeStr[idx+1:]
-		}
+	if timeFormat == "12h" {
+		timeStr = currentTime.Format("3:04 PM")
+	} else {
+		timeStr = currentTime.Format("15:04")
+	}
+
+	// Blinking colon effect at 1Hz
+	if (currentTime.Unix() % 2) == 0 {
+		timeStr = strings.Replace(timeStr, ":", " ", 1)
 	}
 
 	timeTextWidth := (&font.Drawer{Face: face}).MeasureString(timeStr)

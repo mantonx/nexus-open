@@ -21,12 +21,14 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "nexus-open",
-		Width:  1024,
-		Height: 768,
+		Title:         "nexus-open",
+		Width:         1024,
+		Height:        768,
+		DisableResize: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
+		Frameless:        false,
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 0, A: 1}, // Yellow
 		OnStartup:        app.startup,
 		Bind: []interface{}{

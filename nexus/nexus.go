@@ -1,7 +1,11 @@
 package nexus
 
 import (
+	"log"
+	"nexus-open/nexus/configuration"
 	"nexus-open/nexus/instruments"
+	"sync"
+	"time"
 
 	"github.com/google/gousb"
 )
@@ -33,17 +37,75 @@ var (
 	connected bool             // Connection status
 )
 
+// Configuration state
+var (
+	config   *configuration.NexusConfig
+	configMu sync.RWMutex
+	updateCh = make(chan struct{}, 1) // Channel to signal config updates
+)
+
+// GetConfig returns the current configuration thread-safely
+func GetConfig() *configuration.NexusConfig {
+	configMu.RLock()
+	defer configMu.RUnlock()
+	return config
+}
+
+// watchConfig monitors for configuration changes
+func watchConfig() {
+	ticker := time.NewTicker(5 * time.Second)
+	for range ticker.C {
+		newConfig, err := configuration.LoadConfig("")
+		if err != nil {
+			log.Printf("Error loading config: %v", err)
+			continue
+		}
+
+		configMu.Lock()
+		if newConfig.Unit != config.Unit ||
+			newConfig.Location != config.Location ||
+			newConfig.TimeFormat != config.TimeFormat ||
+			newConfig.TextColor != config.TextColor ||
+			newConfig.BackgroundColor != config.BackgroundColor {
+			config = newConfig
+			// Update package variables
+			unit = newConfig.Unit
+			location = newConfig.Location
+			select {
+			case updateCh <- struct{}{}: // Signal update
+			default:
+			}
+		}
+		configMu.Unlock()
+	}
+}
+
 func StartNexus() {
+	var err error
+	// Load initial configuration
+	config, err = configuration.LoadConfig("")
+	if err != nil {
+		log.Printf("Error loading initial config: %v", err)
+		return
+	}
+
+	// Set initial settings
+	SetTimeFormat(config.TimeFormat)
+	SetTextColor(config.TextColor)
+
+	// Start configuration watcher
+	go watchConfig()
+
 	// Initialize device connection
 	InitializeDevice()
 
-	// // Start monitoring channels
+	// Start monitoring channels with config access
 	tempChan := instruments.StartTempatureMonitor(&connected)
 	networkChan := instruments.StartNetworkMonitor(&connected)
-	weatherChan := instruments.StartWeatherMonitor(location, &unit, &connected)
+	weatherChan := instruments.StartWeatherMonitor(GetConfig, &connected)
 
-	// Start display update loop
-	StartDisplayUpdate(tempChan, networkChan, weatherChan)
+	// Start display update loop with config update channel
+	StartDisplayUpdate(tempChan, networkChan, weatherChan, updateCh)
 
 	// Start touch input reading
 	StartTouchMonitor()

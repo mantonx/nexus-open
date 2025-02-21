@@ -39,10 +39,13 @@ import (
 )
 
 type CreateScreenConfig struct {
-	cputemp float64
-	gputemp float64
-	network instruments.NetworkStats
-	weather *instruments.WeatherInfo
+	cputemp         float64
+	gputemp         float64
+	network         instruments.NetworkStats
+	weather         *instruments.WeatherInfo
+	timeFormat      string
+	textColor       string
+	backgroundColor string
 }
 
 var deviceMutex sync.Mutex
@@ -58,7 +61,12 @@ var deviceMutex sync.Mutex
 // If a display update fails, it logs the error and attempts to reset the display device.
 //
 // This function is non-blocking as it launches the update loop in a separate goroutine.
-func StartDisplayUpdate(tempChan <-chan instruments.SystemTemperature, networkChan <-chan instruments.NetworkStats, weatherChan <-chan *instruments.WeatherInfo) {
+func StartDisplayUpdate(
+	tempChan <-chan instruments.SystemTemperature,
+	networkChan <-chan instruments.NetworkStats,
+	weatherChan <-chan *instruments.WeatherInfo,
+	configUpdate <-chan struct{},
+) {
 	go func() {
 		state := struct {
 			cpu     float64
@@ -74,11 +82,15 @@ func StartDisplayUpdate(tempChan <-chan instruments.SystemTemperature, networkCh
 		for {
 			select {
 			case temps := <-tempChan:
-				state.cpu, state.gpu = temps.CPU, temps.GPU
+				state.cpu, state.gpu = temps.CPU, temps.GPU // Fix: Change GPU to temps.GPU
 			case network := <-networkChan:
 				state.network = network
 			case weather := <-weatherChan:
 				state.weather = weather
+			case <-configUpdate:
+				// Force weather update on config change
+				config := GetConfig()
+				state.weather = instruments.GetWeatherData(config.Location, &config.Unit)
 			case <-refreshRate.C:
 				if err := updateDisplay(&state); err != nil {
 					log.Printf("Screen update failed: %v", err)
@@ -115,11 +127,17 @@ func updateDisplay(state *struct {
 
 	deviceMutex.Unlock()
 
+	// Get current config for time format
+	currentConfig := GetConfig()
+
 	config := CreateScreenConfig{
-		cputemp: state.cpu,
-		gputemp: state.gpu,
-		network: state.network,
-		weather: state.weather,
+		cputemp:         state.cpu,
+		gputemp:         state.gpu,
+		network:         state.network,
+		weather:         state.weather,
+		timeFormat:      currentConfig.TimeFormat,
+		textColor:       currentConfig.TextColor,
+		backgroundColor: currentConfig.BackgroundColor,
 	}
 
 	return drawDisplay(config)
@@ -161,8 +179,13 @@ func drawDisplay(config CreateScreenConfig) error {
 
 	// Prepare and draw image
 	imageBuffer := InitImageBuffer(width, height)
-	img := CreateImageContext(ImageConfig{BackgroundImg: "/home/fictional/Development/nexus-open/nexus/background.gif", BgColor: "black"})
-	SetTextColor("yellow")
+	img := CreateImageContext(ImageConfig{
+		BackgroundImg: "/home/fictional/Development/nexus-open/nexus/background.gif",
+		BgColor:       config.backgroundColor,
+	})
+
+	SetTextColor(config.textColor)
+	SetTimeFormat(config.timeFormat)
 
 	DrawSystemTemperatures(config.cputemp, config.gputemp)
 	DrawNetworkStats(config.network)

@@ -2,6 +2,7 @@ package instruments
 
 import (
 	"log"
+	"nexus-open/nexus/configuration"
 	"time"
 )
 
@@ -21,27 +22,22 @@ type NetworkStats struct {
 	Received int
 }
 
-// StartWeatherMonitor initializes and returns a channel that streams weather information updates.
-// It continuously monitors weather data in the background and sends updates through the returned channel
-// when the system is connected. The monitoring is controlled by the connected parameter - when false,
-// the monitoring loop continues but does not fetch or send new data.
-//
-// Parameters:
-//   - connected: A pointer to a boolean that controls whether weather updates are active
-//
-// Returns:
-//   - A channel of WeatherInfo pointers through which weather updates are sent
-func StartWeatherMonitor(location string, unit *string, connected *bool) chan *WeatherInfo {
+// StartWeatherMonitor now takes a config getter function
+func StartWeatherMonitor(
+	getConfig func() *configuration.NexusConfig,
+	connected *bool,
+) chan *WeatherInfo {
 	weatherChan := make(chan *WeatherInfo)
-	weatherInfo := GetWeatherData(location, unit)
 
 	go func() {
 		for {
 			if !*connected {
+				time.Sleep(time.Second)
 				continue
 			}
 
-			weatherInfo = GetWeatherData(location, unit)
+			config := getConfig()
+			weatherInfo := GetWeatherData(config.Location, &config.Unit)
 			weatherChan <- weatherInfo
 			time.Sleep(weatherUpdateInterval)
 		}
