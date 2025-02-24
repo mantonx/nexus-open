@@ -5,7 +5,6 @@ import (
 	"nexus-open/nexus/configuration"
 	"nexus-open/nexus/instruments"
 	"sync"
-	"time"
 
 	"github.com/google/gousb"
 )
@@ -22,12 +21,13 @@ const (
 	height            = 48  // Display height in pixels
 	brightness        = 2   // Display brightness (0-2)
 	screenRefreshRate = 24  // Refresh rate in Hz
+	configRefreshRate = 1   // Configuration refresh rate in seconds
 )
 
 // Configuration variables
 var (
-	unit     = "imperial"        // Temperature/wind speed unit
-	location = "Jersey City, NJ" // Default location for weather data
+	unit     = "imperial" // Temperature/wind speed unit (imperial/metric)
+	location string       // User's location (city, country
 )
 
 // Device connection state
@@ -39,46 +39,11 @@ var (
 
 // Configuration state
 var (
-	config   *configuration.NexusConfig
-	configMu sync.RWMutex
-	updateCh = make(chan struct{}, 1) // Channel to signal config updates
+	config          *configuration.NexusConfig
+	configMu        sync.RWMutex
+	updateCh        = make(chan struct{}, 1) // Channel to signal config updates
+	weatherUpdateCh chan<- struct{}          // Channel to trigger weather updates
 )
-
-// GetConfig returns the current configuration thread-safely
-func GetConfig() *configuration.NexusConfig {
-	configMu.RLock()
-	defer configMu.RUnlock()
-	return config
-}
-
-// watchConfig monitors for configuration changes
-func watchConfig() {
-	ticker := time.NewTicker(5 * time.Second)
-	for range ticker.C {
-		newConfig, err := configuration.LoadConfig("")
-		if err != nil {
-			log.Printf("Error loading config: %v", err)
-			continue
-		}
-
-		configMu.Lock()
-		if newConfig.Unit != config.Unit ||
-			newConfig.Location != config.Location ||
-			newConfig.TimeFormat != config.TimeFormat ||
-			newConfig.TextColor != config.TextColor ||
-			newConfig.BackgroundColor != config.BackgroundColor {
-			config = newConfig
-			// Update package variables
-			unit = newConfig.Unit
-			location = newConfig.Location
-			select {
-			case updateCh <- struct{}{}: // Signal update
-			default:
-			}
-		}
-		configMu.Unlock()
-	}
-}
 
 func StartNexus() {
 	var err error
@@ -94,21 +59,38 @@ func StartNexus() {
 	SetTextColor(config.TextColor)
 
 	// Start configuration watcher
-	go watchConfig()
+	go WatchConfig()
 
 	// Initialize device connection
 	InitializeDevice()
 
-	// Start monitoring channels with config access
+	// Start monitoring channels with proper type declarations
 	tempChan := instruments.StartTempatureMonitor(&connected)
 	networkChan := instruments.StartNetworkMonitor(&connected)
-	weatherChan := instruments.StartWeatherMonitor(GetConfig, &connected)
+	weatherChan, weatherTrigger := instruments.StartWeatherMonitor(GetConfig, &connected)
 
-	// Start display update loop with config update channel
-	StartDisplayUpdate(tempChan, networkChan, weatherChan, updateCh)
+	// Store weather update channel globally
+	weatherUpdateCh = weatherTrigger
+
+	// Convert channels to proper types
+	tempChanRead := (<-chan instruments.SystemTemperature)(tempChan)
+	networkChanRead := (<-chan instruments.NetworkStats)(networkChan)
+	weatherChanRead := (<-chan *instruments.WeatherInfo)(weatherChan)
+
+	// Start display update loop with all required channels
+	StartDisplayUpdate(
+		tempChanRead,
+		networkChanRead,
+		weatherChanRead,
+		updateCh,
+		weatherTrigger,
+	)
 
 	// Start touch input reading
 	StartTouchMonitor()
+
+	// Start API server
+	SetupAPI()
 
 	// Keep main thread running
 	select {}

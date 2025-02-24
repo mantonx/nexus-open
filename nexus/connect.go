@@ -13,6 +13,7 @@ func InitializeDevice() {
 		connected = true
 		log.Println("iCUE Nexus: Connected")
 	}
+
 	RetryConnectNexus()
 }
 

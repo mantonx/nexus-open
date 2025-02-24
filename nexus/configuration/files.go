@@ -154,3 +154,25 @@ func ReadImage(filename string) ([]byte, error) {
 
 	return data, nil
 }
+
+// GetImages returns a list of image files in the images directory
+func GetImages() ([]string, error) {
+	imagesDir, err := GetImagesDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get images directory: %w", err)
+	}
+
+	files, err := os.ReadDir(imagesDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read images directory: %w", err)
+	}
+
+	var images []string
+	for _, file := range files {
+		if !file.IsDir() {
+			images = append(images, file.Name())
+		}
+	}
+
+	return images, nil
+}

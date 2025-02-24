@@ -3,6 +3,7 @@ package instruments
 import (
 	"log"
 	"nexus-open/nexus/configuration"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,28 +23,111 @@ type NetworkStats struct {
 	Received int
 }
 
-// StartWeatherMonitor now takes a config getter function
+// WeatherState holds current weather data and update status
+type WeatherState struct {
+	lastLocation string
+	info         *WeatherInfo
+	updating     atomic.Bool
+}
+
+// StartWeatherMonitor initializes and runs a weather monitoring service in the background.
+// It periodically fetches weather data based on the location specified in the configuration.
+//
+// Parameters:
+//   - getConfig: A function that returns the current NexusConfig. Must not be nil.
+//   - connected: A pointer to a boolean indicating if the system is currently connected.
+//
+// Returns:
+//   - A receive-only channel that provides WeatherInfo updates
+//   - A send-only channel to request immediate weather updates
+//
+// The monitor runs in a goroutine and will:
+//   - Update weather data periodically based on weatherUpdateInterval
+//   - Update immediately when requested through the update channel
+//   - Update when location changes in configuration
+//   - Only update when system is connected
+//   - Use atomic operations to prevent concurrent updates
 func StartWeatherMonitor(
 	getConfig func() *configuration.NexusConfig,
 	connected *bool,
-) chan *WeatherInfo {
-	weatherChan := make(chan *WeatherInfo)
+) (chan *WeatherInfo, chan<- struct{}) {
+	if getConfig == nil {
+		log.Fatal("Weather monitor: config getter function is required")
+	}
+
+	weatherChan := make(chan *WeatherInfo, 1)
+
+	updateChan := make(chan struct{}, 1)
+
+	state := &WeatherState{}
 
 	go func() {
-		for {
-			if !*connected {
-				time.Sleep(time.Second)
-				continue
+		ticker := time.NewTicker(weatherUpdateInterval)
+		defer ticker.Stop()
+
+		// Weather update handler
+		updateWeather := func() {
+			if !state.updating.CompareAndSwap(false, true) {
+				return // Already updating
 			}
 
-			config := getConfig()
-			weatherInfo := GetWeatherData(config.Location, &config.Unit)
-			weatherChan <- weatherInfo
-			time.Sleep(weatherUpdateInterval)
+			defer state.updating.Store(false)
+
+			cfg := getConfig()
+
+			if cfg == nil {
+				log.Printf("Weather monitor: no config available")
+				return
+			}
+
+			// Always update if location changed
+			locationChanged := state.lastLocation != cfg.Location
+
+			if locationChanged {
+				log.Printf("Weather monitor: location changed from %q to %q",
+					state.lastLocation, cfg.Location)
+				state.lastLocation = cfg.Location
+			}
+
+			if cfg.Location == "" {
+				return
+			}
+
+			info := GetWeatherData(cfg.Location, &cfg.Unit)
+
+			if info != nil {
+				state.info = info
+				log.Printf("Weather updated for %s: %.1f%s",
+					cfg.Location, info.Temperature,
+					map[string]string{"metric": "°C", "imperial": "°F"}[cfg.Unit])
+				select {
+				case weatherChan <- info:
+				default:
+				}
+			}
+		}
+
+		// Initial update
+		updateWeather()
+
+		// Periodic updates
+		for {
+			select {
+			case <-ticker.C:
+				if *connected {
+					updateWeather()
+				}
+			case <-updateChan:
+				// Immediate update when requested
+				if *connected {
+					log.Printf("Weather monitor: update requested")
+					updateWeather()
+				}
+			}
 		}
 	}()
 
-	return weatherChan
+	return weatherChan, updateChan
 }
 
 // StartTempatureMonitor initializes and runs a temperature monitoring goroutine.

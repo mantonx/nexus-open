@@ -1,42 +1,59 @@
 package main
 
 import (
-	"embed"
+	_ "embed"
 	"nexus-open/nexus"
-
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
+// //go:embed icon.ico
+// var iconBytes []byte
+
+// func onReady() {
+// 	systray.SetIcon(iconBytes)
+// 	systray.SetTitle("Nexus Open")
+// 	systray.SetTooltip("Nexus Open Status")
+
+// 	quitOpenNexus := systray.AddMenuItem("Quit", "Quit the app")
+
+// 	go func() {
+// 		<-quitOpenNexus.ClickedCh
+// 		systray.Quit()
+// 	}()
+
+// 	nexus.StartNexus()
+// }
+
+// func onExit() {
+// 	nexus.StopNexus()
+// }
 
 func main() {
+	nexus.StartNexus()
+	// systray.Run(onReady, onExit)
 	// Create an instance of the app structure
-	app := NewApp()
+	// app := NewApp()
 
 	// Start Nexus in a separate goroutine
-	go nexus.StartNexus()
+	// nexus.StartNexus()
 
-	// Create application with options
-	err := wails.Run(&options.App{
-		Title:         "nexus-open",
-		Width:         1024,
-		Height:        768,
-		DisableResize: true,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		Frameless:        false,
-		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 0, A: 1}, // Yellow
-		OnStartup:        app.startup,
-		Bind: []interface{}{
-			app,
-		},
-	})
+	// // Create application with options
+	// err := wails.Run(&options.App{
+	// 	Title:         "Nexus Open",
+	// 	Width:         1024,
+	// 	Height:        768,
+	// 	DisableResize: true,
+	// 	AssetServer: &assetserver.Options{
+	// 		Assets: assets,
+	// 	},
+	// 	Frameless:        false,
+	// 	BackgroundColour: &options.RGBA{R: 255, G: 255, B: 0, A: 1}, // Yellow
+	// 	OnStartup:        app.startup,
+	// 	Bind: []interface{}{
+	// 		app,
+	// 	},
+	// })
 
-	if err != nil {
-		println("Error:", err.Error())
-	}
+	// if err != nil {
+	// 	println("Error:", err.Error())
+	// }
 }

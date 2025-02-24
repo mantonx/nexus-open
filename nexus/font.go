@@ -30,6 +30,7 @@ var (
 
 	popularFonts = map[string][]string{
 		"windows": {
+			"FiraCodeNerdFont-Regular.ttf",
 			"arial.ttf",
 			"segoeui.ttf",
 			"verdana.ttf",
@@ -42,6 +43,7 @@ var (
 			"cambria.ttf",
 		},
 		"darwin": {
+			"FiraCodeNerdFont-Regular.ttf",
 			"Arial.ttf",
 			"Helvetica.ttf",
 			"Monaco.ttf",
@@ -52,6 +54,7 @@ var (
 			"GeezaPro.ttc",
 		},
 		"linux": {
+			"FiraCodeNerdFont-Regular.ttf",
 			"DejaVuSans.ttf",
 			"Ubuntu.ttf",
 			"NotoSans-Regular.ttf",

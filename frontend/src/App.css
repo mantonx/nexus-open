@@ -68,9 +68,9 @@
 }
 
 .settings-section {
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #eee;
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
 }
 
 .settings-section h2 {
@@ -272,12 +272,10 @@ input[type="file"] {
 
 .gallery-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 1rem;
     flex: 1;
-    min-height: 200px;
-    margin: 0 auto;
-    /* Center grid when no navigation buttons */
+    width: 100%;
 }
 
 .gallery-item {
@@ -288,6 +286,13 @@ input[type="file"] {
     min-height: 200px;
     display: flex;
     flex-direction: column;
+}
+
+.gallery-item.empty {
+    border: 1px dashed #ddd;
+    background: transparent;
+    min-height: 200px;
+    visibility: hidden;
 }
 
 .image-container {
@@ -434,4 +439,44 @@ input[type="file"] {
     100% {
         transform: rotate(360deg);
     }
+}
+
+.tabs-container {
+    margin-bottom: 2rem;
+}
+
+.tabs-header {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.5rem;
+}
+
+.tab-button {
+    padding: 0.5rem 1rem;
+    border: none;
+    background: none;
+    font-size: 1rem;
+    color: #666;
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+    color: #333;
+    background: #f5f5f5;
+}
+
+.tab-button.active {
+    color: #4CAF50;
+    font-weight: 500;
+    border-bottom: 2px solid #4CAF50;
+}
+
+.tab-content {
+    background: #fff;
+    border-radius: 4px;
+    padding: 1rem;
 }

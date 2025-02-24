@@ -14,6 +14,7 @@ var tempUnit string
 var windSpeedUnit string
 
 type WeatherInfo struct {
+	Location    string
 	Temperature float64
 	Condition   string
 	WindSpeed   string
@@ -22,6 +23,8 @@ type WeatherInfo struct {
 const (
 	openMeteoBaseURL   = "https://api.open-meteo.com/v1/forecast?temperature_unit=%s&wind_speed_unit=%s&latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code,wind_speed_10m,is_day"
 	nominatimSearchURL = "https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1"
+	defaultLat         = 40.7128  // New York, NY
+	defaultLon         = -74.0060 // New York, NY
 )
 
 func GetWeatherData(location string, unit *string) *WeatherInfo {
@@ -35,9 +38,11 @@ func GetWeatherData(location string, unit *string) *WeatherInfo {
 	}
 
 	lat, lon, err := GetCityCoordinates(location)
+
 	if err != nil {
-		log.Fatalf("Failed to get city coordinates: %v", err)
-		return nil
+		log.Printf("Failed to get city coordinates: %v, falling back to New York, NY", err)
+		lat = defaultLat
+		lon = defaultLat
 	}
 
 	weather, err := GetWeatherConditions(lat, lon)
@@ -45,6 +50,9 @@ func GetWeatherData(location string, unit *string) *WeatherInfo {
 		log.Fatalf("Failed to get weather forecast: %v", err)
 		return nil
 	}
+
+	// Set the location in the weather info
+	weather.Location = location
 
 	return weather
 }
@@ -68,8 +76,8 @@ func GetWeatherData(location string, unit *string) *WeatherInfo {
 //
 // The function uses the Nominatim API which requires a User-Agent header and returns coordinates as strings
 // that are converted to float64 values before being returned.
-func GetCityCoordinates(city string) (float64, float64, error) {
-	baseURL := fmt.Sprintf(nominatimSearchURL, url.QueryEscape(city))
+func GetCityCoordinates(location string) (float64, float64, error) {
+	baseURL := fmt.Sprintf(nominatimSearchURL, url.QueryEscape(location))
 
 	client := &http.Client{}
 	req, err := http.NewRequestWithContext(context.Background(), "GET", baseURL, nil)
@@ -158,7 +166,7 @@ func GetWeatherConditions(lat, lon float64) (*WeatherInfo, error) {
 	return &WeatherInfo{
 		Temperature: result.Current.Temperature,
 		Condition:   condition,
-		WindSpeed:   fmt.Sprintf("%.1f", result.Current.WindSpeed),
+		WindSpeed:   fmt.Sprintf("\ue31e %.1f", result.Current.WindSpeed),
 	}, nil
 }
 
@@ -179,42 +187,42 @@ func GetWeatherConditions(lat, lon float64) (*WeatherInfo, error) {
 //   - Showers (80-86)
 //   - Thunderstorms (95-99)
 func weatherCodeToCondition(code int, isDay bool) string {
-	weatherCodes := map[int]struct{ day, night struct{ description string } }{
-		0:  {day: struct{ description string }{description: "Sunny"}, night: struct{ description string }{description: "Clear"}},
-		1:  {day: struct{ description string }{description: "Mainly Sunny"}, night: struct{ description string }{description: "Mainly Clear"}},
-		2:  {day: struct{ description string }{description: "Partly Cloudy"}, night: struct{ description string }{description: "Partly Cloudy"}},
-		3:  {day: struct{ description string }{description: "Cloudy"}, night: struct{ description string }{description: "Cloudy"}},
-		45: {day: struct{ description string }{description: "Foggy"}, night: struct{ description string }{description: "Foggy"}},
-		48: {day: struct{ description string }{description: "Rime Fog"}, night: struct{ description string }{description: "Rime Fog"}},
-		51: {day: struct{ description string }{description: "Light Drizzle"}, night: struct{ description string }{description: "Light Drizzle"}},
-		53: {day: struct{ description string }{description: "Drizzle"}, night: struct{ description string }{description: "Drizzle"}},
-		55: {day: struct{ description string }{description: "Heavy Drizzle"}, night: struct{ description string }{description: "Heavy Drizzle"}},
-		56: {day: struct{ description string }{description: "Light Freezing Drizzle"}, night: struct{ description string }{description: "Light Freezing Drizzle"}},
-		57: {day: struct{ description string }{description: "Freezing Drizzle"}, night: struct{ description string }{description: "Freezing Drizzle"}},
-		61: {day: struct{ description string }{description: "Light Rain"}, night: struct{ description string }{description: "Light Rain"}},
-		63: {day: struct{ description string }{description: "Rain"}, night: struct{ description string }{description: "Rain"}},
-		65: {day: struct{ description string }{description: "Heavy Rain"}, night: struct{ description string }{description: "Heavy Rain"}},
-		66: {day: struct{ description string }{description: "Light Freezing Rain"}, night: struct{ description string }{description: "Light Freezing Rain"}},
-		67: {day: struct{ description string }{description: "Freezing Rain"}, night: struct{ description string }{description: "Freezing Rain"}},
-		71: {day: struct{ description string }{description: "Light Snow"}, night: struct{ description string }{description: "Light Snow"}},
-		73: {day: struct{ description string }{description: "Snow"}, night: struct{ description string }{description: "Snow"}},
-		75: {day: struct{ description string }{description: "Heavy Snow"}, night: struct{ description string }{description: "Heavy Snow"}},
-		77: {day: struct{ description string }{description: "Snow Grains"}, night: struct{ description string }{description: "Snow Grains"}},
-		80: {day: struct{ description string }{description: "Light Showers"}, night: struct{ description string }{description: "Light Showers"}},
-		81: {day: struct{ description string }{description: "Showers"}, night: struct{ description string }{description: "Showers"}},
-		82: {day: struct{ description string }{description: "Heavy Showers"}, night: struct{ description string }{description: "Heavy Showers"}},
-		85: {day: struct{ description string }{description: "Light Snow Showers"}, night: struct{ description string }{description: "Light Snow Showers"}},
-		86: {day: struct{ description string }{description: "Snow Showers"}, night: struct{ description string }{description: "Snow Showers"}},
-		95: {day: struct{ description string }{description: "Thunderstorm"}, night: struct{ description string }{description: "Thunderstorm"}},
-		96: {day: struct{ description string }{description: "Light Thunderstorms With Hail"}, night: struct{ description string }{description: "Light Thunderstorms With Hail"}},
-		99: {day: struct{ description string }{description: "Thunderstorm With Hail"}, night: struct{ description string }{description: "Thunderstorm With Hail"}},
+	weatherCodes := map[int]struct{ day, night string }{
+		0:  {day: "\ue30d", night: "\ue32b"}, // Clear sky
+		1:  {day: "\ue302", night: "\ue37e"}, // Mainly clear
+		2:  {day: "\ue312", night: "\ue379"}, // Partly cloudy
+		3:  {day: "\ue33d", night: "\ue33d"}, // Cloudy
+		45: {day: "\ue313", night: "\ue346"}, // Foggy
+		48: {day: "\ue313", night: "\ue346"}, // Rime fog
+		51: {day: "\ue308", night: "\ue325"}, // Light drizzle
+		53: {day: "\ue308", night: "\ue325"}, // Drizzle
+		55: {day: "\ue318", night: "\ue318"}, // Heavy drizzle
+		56: {day: "\ue3aa", night: "\ue3ac"}, // Light freezing drizzle
+		57: {day: "\ue3aa", night: "\ue3ac"}, // Freezing drizzle
+		61: {day: "\ue308", night: "\ue325"}, // Light rain
+		63: {day: "\ue318", night: "\ue318"}, // Rain
+		65: {day: "\ue318", night: "\ue318"}, // Heavy rain
+		66: {day: "\ue3aa", night: "\ue3ac"}, // Light freezing rain
+		67: {day: "\ue3ad", night: "\ue3ad"}, // Freezing rain
+		71: {day: "\ue31a", night: "\ue327"}, // Light snow
+		73: {day: "\ue30a", night: "\ue30a"}, // Snow
+		75: {day: "\ue30a", night: "\ue30a"}, // Heavy snow
+		77: {day: "\ue30a", night: "\ue30a"}, // Snow grains
+		80: {day: "\ue308", night: "\ue325"}, // Light showers
+		81: {day: "\ue318", night: "\ue318"}, // Showers
+		82: {day: "\ue318", night: "\ue318"}, // Heavy showers
+		85: {day: "\ue31a", night: "\ue327"}, // Light snow showers
+		86: {day: "\ue30a", night: "\ue30a"}, // Snow showers
+		95: {day: "\ue30f", night: "\ue32a"}, // Thunderstorm
+		96: {day: "\ue31d", night: "\ue31d"}, // Thunderstorm with hail
+		99: {day: "\ue31d", night: "\ue31d"}, // Heavy thunderstorm with hail
 	}
 
 	if weather, ok := weatherCodes[code]; ok {
 		if isDay {
-			return weather.day.description
+			return weather.day
 		}
-		return weather.night.description
+		return weather.night
 	}
-	return "Unknown"
+	return "❓"
 }

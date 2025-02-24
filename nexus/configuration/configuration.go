@@ -3,8 +3,10 @@
 package configuration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/spf13/viper"
 )
@@ -16,10 +18,14 @@ const (
 	defaultImagesPath = "nexus-open/images"
 
 	// Configuration defaults and valid values
+	Location         = "Jersey City, NJ"
 	TimeFormat12Hour = "12h"
 	TimeFormat24Hour = "24h"
 	UnitMetric       = "metric"
 	UnitImperial     = "imperial"
+	TextColor        = "#FFFFFF"
+	BackgroundColor  = "#000000"
+	BackgroundImage  = "background.png"
 )
 
 // NexusConfig holds the application configuration
@@ -33,15 +39,25 @@ type NexusConfig struct {
 	// Unit represents the temperature unit (metric/imperial)
 	Unit string `mapstructure:"unit"`
 
-	// BackgroundColor is a hex color string (e.g., "#FFFFFF")
+	// BackgroundColor is a hex color string (e.g., "#000000")
 	BackgroundColor string `mapstructure:"background_color"`
 
-	// TextColor is a hex color string (e.g., "#000000")
+	// BackgroundImage is the filename of the background image
+	BackgroundImage string `mapstructure:"background_image"`
+
+	// TextColor is a hex color string (e.g., "#FFFFFF")
 	TextColor string `mapstructure:"text_color"`
 
 	// ImagePaths contains the list of image filenames
 	ImagePaths []string `mapstructure:"image_paths"`
 }
+
+// Configuration state
+var (
+	config   *NexusConfig
+	configMu sync.RWMutex
+	unit     string // Current unit setting
+)
 
 // GetImagesDir returns the absolute path to the application's images directory.
 // It ensures the directory exists, creating it if necessary.
@@ -57,10 +73,12 @@ func GetImagesDir() (string, error) {
 // createDefaultConfig creates a new configuration file with default values
 func createDefaultConfig(path string) error {
 	defaultConfig := &NexusConfig{
-		TimeFormat:      TimeFormat24Hour,
-		Unit:            UnitMetric,
-		BackgroundColor: "#FFFFFF",
-		TextColor:       "#000000",
+		Location:        Location,
+		TimeFormat:      TimeFormat12Hour,
+		Unit:            UnitImperial,
+		BackgroundColor: BackgroundColor,
+		BackgroundImage: BackgroundImage,
+		TextColor:       TextColor,
 		ImagePaths:      []string{},
 	}
 
@@ -100,10 +118,12 @@ func LoadConfig(path string) (*NexusConfig, error) {
 	viper.SetConfigType("yaml")
 	viper.AutomaticEnv()
 
+	viper.SetDefault("location", Location)
 	viper.SetDefault("time_format", TimeFormat24Hour)
 	viper.SetDefault("unit", UnitMetric)
-	viper.SetDefault("background_color", "#FFFFFF")
-	viper.SetDefault("text_color", "#000000")
+	viper.SetDefault("background_color", BackgroundColor)
+	viper.SetDefault("background_image", BackgroundImage)
+	viper.SetDefault("text_color", TextColor)
 	viper.SetDefault("image_paths", []string{})
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -111,9 +131,12 @@ func LoadConfig(path string) (*NexusConfig, error) {
 	}
 
 	var config NexusConfig
+
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, err
 	}
+
+	fmt.Printf("Loaded configuration from %s\n", path)
 
 	return &config, nil
 }
@@ -142,6 +165,7 @@ func SaveConfig(config *NexusConfig, path string) error {
 		"time_format":      config.TimeFormat,
 		"unit":             config.Unit,
 		"background_color": config.BackgroundColor,
+		"background_image": config.BackgroundImage,
 		"text_color":       config.TextColor,
 		"image_paths":      config.ImagePaths,
 	} {

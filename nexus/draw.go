@@ -1,14 +1,51 @@
+/*
+Package nexus provides functionality for drawing and managing visual elements on a display.
+
+The package handles various drawing operations including time display, system temperatures,
+network statistics, and weather information. It supports animated backgrounds, custom fonts,
+and dynamic color management.
+
+Key features:
+  - Dynamic text color management with named colors and hex code support
+  - Animated background support with GIF processing
+  - Time display with configurable 12/24-hour format and blinking colon
+  - System temperature display for CPU and GPU
+  - Network statistics visualization with automatic unit conversion
+  - Weather information display with configurable units (metric/imperial)
+  - Custom font support with fallback to basic system font
+  - Thread-safe color and time format management using atomic values
+
+The package uses a combination of standard Go image packages and custom drawing routines
+to create a flexible display system. It maintains thread safety through sync.Once and
+atomic operations for shared resources.
+
+Global variables:
+  - d: Text drawing context
+  - face: Current font face
+  - background: Slice of background image frames for animation
+  - getBackgroundOnce: Ensures single background loading
+  - speedSymbol: Unit for wind speed display
+  - degreeSymbol: Unit for temperature display
+  - currentTextColor: Thread-safe storage for text color
+  - currentTimeFormat: Thread-safe storage for time format
+
+The package automatically initializes with white text color and 24-hour time format
+by default. Background images should be properly sized GIF files that match the
+display dimensions.
+*/
 package nexus
 
 import (
+	"bytes"
+	"embed"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/gif"
-	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nexus-open/nexus/instruments"
@@ -18,6 +55,14 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
+type ImageConfig struct {
+	BackgroundImg string
+	BgColor       string
+}
+
+//go:embed images/*
+var images embed.FS
+
 var (
 	d                 *font.Drawer  // Text drawing context
 	face              font.Face     // Font face
@@ -25,23 +70,56 @@ var (
 	getBackgroundOnce sync.Once     // Ensures background is loaded only once
 	speedSymbol       string        // Unit for wind speed
 	degreeSymbol      string        // Unit for temperature
-	timeFormat        string        // Time format (12h or 24h)
+	currentTextColor  atomic.Value  // stores color.RGBA
+	currentTimeFormat atomic.Value  // stores string
 )
 
-type ImageConfig struct {
-	BackgroundImg string
-	BgColor       string
+// init initializes the default text color as white (RGBA: 255,255,255,255)
+// and sets the default time format to "24h". This function is automatically
+// called when the package is imported.
+func init() {
+	currentTextColor.Store(color.RGBA{R: 255, G: 255, B: 255, A: 255}) // Default text color: white
+	currentTimeFormat.Store("12h")                                     // Default time format: 12-hour
 }
 
+// InitImageBuffer creates and returns a new byte slice to be used as an RGBA image buffer.
+// The buffer size is calculated as width * height * 4, where 4 represents the RGBA channels
+// (Red, Green, Blue, Alpha) per pixel. Each channel uses 1 byte.
+//
+// Parameters:
+//   - width: The width of the image in pixels
+//   - height: The height of the image in pixels
+//
+// Returns:
+//   - []byte: A zeroed byte slice with size width * height * 4
 func InitImageBuffer(width, height int) []byte {
 	return make([]byte, width*height*4)
 }
 
+// CreateImageContext creates and returns a new RGBA image context with the specified configuration.
+// It handles background image loading (including animated backgrounds), fallback solid colors,
+// and text rendering setup.
+//
+// Parameters:
+//   - config: ImageConfig containing background image and color settings
+//   - customFace: Optional variadic parameter for custom font face. If not provided or nil,
+//     defaults to basicfont.Face7x13
+//
+// The function performs the following operations:
+//  1. Loads background image (if specified) using a singleton pattern
+//  2. Creates fallback solid color background if image loading fails
+//  3. Handles animated backgrounds by selecting appropriate frame based on current time
+//  4. Sets up font face and text drawing context
+//  5. Configures text color from atomic storage
+//
+// Returns:
+//
+//	*image.RGBA: New image context ready for drawing operations
 func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA {
 	var err error
 
 	getBackgroundOnce.Do(func() {
-		background, err = ConvertBackgroundImage(config.BackgroundImg)
+		background, err = convertBackgroundImage(config.BackgroundImg)
 	})
 
 	if err != nil {
@@ -67,11 +145,14 @@ func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA
 		face = basicfont.Face7x13 // default font
 	}
 
-	face = LoadSystemFont("Hack-Regular.ttf")
+	face = LoadSystemFont("HackNerdFont-Regular.ttf")
+
+	// Always use current text color from atomic storage
+	textColor := currentTextColor.Load().(color.RGBA)
 
 	d = &font.Drawer{
 		Dst:  img,
-		Src:  image.NewUniform(color.RGBA{R: 255, G: 255, B: 255, A: 255}),
+		Src:  image.NewUniform(textColor),
 		Face: face,
 		Dot: fixed.Point26_6{
 			X: fixed.I(width / 2),
@@ -82,24 +163,38 @@ func CreateImageContext(config ImageConfig, customFace ...font.Face) *image.RGBA
 	return img
 }
 
-// SetTextColor sets the drawing color for text using either a named color or hex color code
+// SetTextColor updates the current text color used for drawing operations.
+// It accepts a color string which can be in hex format (e.g. "#FF0000") or a named color.
+// If an empty string is provided, the function returns without changing the current color.
+// The color is parsed and stored in an atomic value for thread-safe access.
+// If a drawer exists, its source color is updated to reflect the new text color.
+// Default color is white (RGBA{255,255,255,255}) if parsing fails.
 func SetTextColor(colorStr string) {
+	if colorStr == "" {
+		return // Don't change color if empty string
+	}
+
 	textColor := parseColor(colorStr, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	currentTextColor.Store(textColor)
+
+	// Update drawer if it exists
 	if d != nil {
 		d.Src = image.NewUniform(textColor)
 	}
-	fmt.Printf("Text color set to: %s\n", colorStr)
 }
 
-// SetTimeFormat updates the time format used for display
+// SetTimeFormat sets the time format string used for time-related formatting operations.
+// The format string must follow Go's time formatting conventions.
+// This function is safe for concurrent use.
 func SetTimeFormat(format string) {
-	timeFormat = format
+	currentTimeFormat.Store(format)
 }
 
 // DrawTime draws the current time on the display with a blinking colon
 // The time is right-aligned and positioned at the top of the screen
 func DrawTime() {
 	currentTime := time.Now()
+	timeFormat := currentTimeFormat.Load().(string)
 	var timeStr string
 
 	if timeFormat == "12h" {
@@ -123,39 +218,62 @@ func DrawTime() {
 	d.DrawString(timeStr)
 }
 
+// DrawSystemTemperatures renders CPU and GPU temperatures with icons
+// at the left side of the display. Each temperature is shown with a
+// corresponding hardware icon and formatted to one decimal place.
 func DrawSystemTemperatures(cpuTemp, gpuTemp float64) {
+	// Draw CPU temperature with icon
 	d.Dot = fixed.Point26_6{
 		X: fixed.I(10),
 		Y: fixed.I(15),
 	}
-	d.DrawString(fmt.Sprintf("CPU: %.1f °C", cpuTemp))
+	d.DrawString(fmt.Sprintf("\uf4bc %.1f °C", cpuTemp))
 
-	// GPU temperature text (left-aligned, bottom)
+	// Draw GPU temperature with icon
 	d.Dot = fixed.Point26_6{
 		X: fixed.I(10),
 		Y: fixed.I(40),
 	}
-	d.DrawString(fmt.Sprintf("GPU: %.1f °C", gpuTemp))
+	d.DrawString(fmt.Sprintf("\ueabe %.1f °C", gpuTemp))
 }
 
+// DrawNetworkStats renders network statistics on the display.
+// It shows the network sent and received rates in a left-aligned format.
+// The sent rate is displayed at y-coordinate 15,
+// while the received rate is shown at y-coordinate 40.
+// Both statistics are positioned at width/2 - 130 pixels from the left.
+//
+// Parameters:
+//   - currentNetwork: instruments.NetworkStats containing the current sent/received bytes
 func DrawNetworkStats(currentNetwork instruments.NetworkStats) {
 	// Network sent text (left-aligned)
-	sentText := formatNetworkRate("Sent", int64(currentNetwork.Sent))
+	sentText := formatNetworkRate("\uf093", int64(currentNetwork.Sent))
+
 	d.Dot = fixed.Point26_6{
-		X: fixed.I(width/2 - 130),
+		X: fixed.I(width / 4),
 		Y: fixed.I(15),
 	}
+
 	d.DrawString(sentText)
 
 	// Network received text (left-aligned)
-	recvText := formatNetworkRate("Recv", int64(currentNetwork.Received))
+	recvText := formatNetworkRate("\uf019", int64(currentNetwork.Received))
+
 	d.Dot = fixed.Point26_6{
-		X: fixed.I(width/2 - 130),
+		X: fixed.I(width / 4),
 		Y: fixed.I(40),
 	}
+
 	d.DrawString(recvText)
 }
 
+// DrawWeather renders the current weather information on the screen.
+// It displays temperature, weather condition, and wind speed in the top right corner
+// using the configured measurement units and font settings.
+// If weatherInfo is nil, the function returns without drawing anything.
+//
+// Parameters:
+//   - weatherInfo: Pointer to WeatherInfo struct containing weather data to display
 func DrawWeather(weatherInfo *instruments.WeatherInfo) {
 	if weatherInfo == nil {
 		return
@@ -163,7 +281,7 @@ func DrawWeather(weatherInfo *instruments.WeatherInfo) {
 
 	setMeasurementUnits(unit)
 
-	weatherText := fmt.Sprintf("Weather: %.1f %s, %s, %s %s", weatherInfo.Temperature, degreeSymbol, weatherInfo.Condition, weatherInfo.WindSpeed, speedSymbol)
+	weatherText := fmt.Sprintf("%s %s %.1f%s %s %s", weatherInfo.Location, weatherInfo.Condition, weatherInfo.Temperature, degreeSymbol, weatherInfo.WindSpeed, speedSymbol)
 	weatherTextWidth := (&font.Drawer{Face: face}).MeasureString(weatherText)
 
 	d.Dot = fixed.Point26_6{
@@ -245,37 +363,54 @@ func parseColor(colorStr string, defaultColor color.RGBA) color.RGBA {
 // Returns a formatted string combining the label and the rate with proper units.
 func formatNetworkRate(label string, rate int64) string {
 	if rate > 1000 {
-		return fmt.Sprintf("%s: %.1f Mbps", label, float64(rate)/1024)
+		return fmt.Sprintf("%s %.1f Mbps", label, float64(rate)/1024)
 	}
-	return fmt.Sprintf("%s: %d Kbps", label, rate)
+	return fmt.Sprintf("%s %d Kbps", label, rate)
 }
 
-// ConvertBackgroundImage converts a PNG image to RGBA format for display
-// The image should be 640x48 pixels
-func ConvertBackgroundImage(imgPath string) ([]*image.RGBA, error) {
-	// Load the image file
-	file, err := os.Open(imgPath)
+// convertBackgroundImage takes a path to an image file and converts it into a slice of RGBA images.
+// For GIF files, it returns all frames as separate RGBA images.
+// For JPEG and PNG files, it returns a single RGBA image in a slice.
+//
+// Parameters:
+//   - imgPath: string representing the path to the image file
+//
+// Returns:
+//   - []*image.RGBA: a slice of RGBA images (multiple frames for GIFs, single frame for JPEG/PNG)
+//   - error: nil if successful, otherwise an error describing what went wrong
+func convertBackgroundImage(fileName string) ([]*image.RGBA, error) {
+	// Get the embedded image file
+	imgFile, err := images.ReadFile("images/" + fileName)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to open image: %v", err)
+		return nil, fmt.Errorf("failed to read embedded image: %v", err)
 	}
-	defer file.Close()
 
-	// Decode the GIF image
-	gifImg, err := gif.DecodeAll(file)
+	// For GIF images, handle multiple frames
+	if strings.HasSuffix(strings.ToLower(fileName), ".gif") {
+		gifImg, err := gif.DecodeAll(bytes.NewReader(imgFile))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode GIF: %v", err)
+		}
+
+		frames := make([]*image.RGBA, len(gifImg.Image))
+		for i, img := range gifImg.Image {
+			bounds := img.Bounds()
+			rgba := image.NewRGBA(bounds)
+			draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+			frames[i] = rgba
+		}
+		return frames, nil
+	}
+
+	// For JPEG and PNG, handle single frame
+	img, _, err := image.Decode(bytes.NewReader(imgFile))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode GIF: %v", err)
+		return nil, fmt.Errorf("failed to decode image: %v", err)
 	}
 
-	// Create slice to hold all frames
-	frames := make([]*image.RGBA, len(gifImg.Image))
-
-	// Convert each frame to RGBA
-	for i, img := range gifImg.Image {
-		bounds := img.Bounds()
-		rgba := image.NewRGBA(bounds)
-		draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
-		frames[i] = rgba
-	}
-
-	return frames, nil
+	bounds := img.Bounds()
+	rgba := image.NewRGBA(bounds)
+	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+	return []*image.RGBA{rgba}, nil
 }

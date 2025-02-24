@@ -66,13 +66,15 @@ func StartDisplayUpdate(
 	networkChan <-chan instruments.NetworkStats,
 	weatherChan <-chan *instruments.WeatherInfo,
 	configUpdate <-chan struct{},
+	weatherUpdate chan<- struct{}, // Add weather update trigger
 ) {
 	go func() {
 		state := struct {
-			cpu     float64
-			gpu     float64
-			network instruments.NetworkStats
-			weather *instruments.WeatherInfo
+			cpu               float64
+			gpu               float64
+			network           instruments.NetworkStats
+			weather           *instruments.WeatherInfo
+			lastWeatherUpdate time.Time
 		}{}
 
 		refreshRate := time.NewTicker(time.Second / screenRefreshRate) // 24 Hz (~0.042s)
@@ -86,11 +88,35 @@ func StartDisplayUpdate(
 			case network := <-networkChan:
 				state.network = network
 			case weather := <-weatherChan:
-				state.weather = weather
+				if weather != nil {
+					state.weather = weather
+					state.lastWeatherUpdate = time.Now()
+					if err := updateDisplay(&state); err != nil {
+						log.Printf("Weather update display failed: %v", err)
+					}
+				}
 			case <-configUpdate:
-				// Force weather update on config change
-				config := GetConfig()
-				state.weather = instruments.GetWeatherData(config.Location, &config.Unit)
+				// Update display settings immediately without blocking
+				if cfg := GetConfig(); cfg != nil {
+					SetTimeFormat(cfg.TimeFormat)
+					SetTextColor(cfg.TextColor)
+					// Trigger weather update
+					select {
+					case weatherUpdate <- struct{}{}:
+					default:
+					}
+					// Force weather update if it's been more than 30 seconds
+					if time.Since(state.lastWeatherUpdate) > 30*time.Second {
+						if weather := instruments.GetWeatherData(cfg.Location, &cfg.Unit); weather != nil {
+							state.weather = weather
+							state.lastWeatherUpdate = time.Now()
+						}
+					}
+					// Immediate display update
+					if err := updateDisplay(&state); err != nil {
+						log.Printf("Config update display failed: %v", err)
+					}
+				}
 			case <-refreshRate.C:
 				if err := updateDisplay(&state); err != nil {
 					log.Printf("Screen update failed: %v", err)
@@ -113,10 +139,11 @@ func StartDisplayUpdate(
 //
 // Returns an error if the screen drawing operation fails, nil otherwise.
 func updateDisplay(state *struct {
-	cpu     float64
-	gpu     float64
-	network instruments.NetworkStats
-	weather *instruments.WeatherInfo
+	cpu               float64
+	gpu               float64
+	network           instruments.NetworkStats
+	weather           *instruments.WeatherInfo
+	lastWeatherUpdate time.Time
 }) error {
 	deviceMutex.Lock()
 
@@ -127,17 +154,17 @@ func updateDisplay(state *struct {
 
 	deviceMutex.Unlock()
 
-	// Get current config for time format
-	currentConfig := GetConfig()
+	cfg := GetConfig()
+	if cfg == nil {
+		return nil
+	}
 
 	config := CreateScreenConfig{
 		cputemp:         state.cpu,
 		gputemp:         state.gpu,
 		network:         state.network,
 		weather:         state.weather,
-		timeFormat:      currentConfig.TimeFormat,
-		textColor:       currentConfig.TextColor,
-		backgroundColor: currentConfig.BackgroundColor,
+		backgroundColor: cfg.BackgroundColor,
 	}
 
 	return drawDisplay(config)
@@ -177,16 +204,26 @@ func drawDisplay(config CreateScreenConfig) error {
 		return nil
 	}
 
-	// Prepare and draw image
+	// Get current config
+	cfg := GetConfig()
+
+	if cfg == nil {
+		return fmt.Errorf("no configuration available")
+	}
+
+	// Create image with current background
 	imageBuffer := InitImageBuffer(width, height)
+
 	img := CreateImageContext(ImageConfig{
-		BackgroundImg: "/home/fictional/Development/nexus-open/nexus/background.gif",
-		BgColor:       config.backgroundColor,
+		BackgroundImg: "background.gif",
+		BgColor:       cfg.BackgroundColor,
 	})
 
-	SetTextColor(config.textColor)
-	SetTimeFormat(config.timeFormat)
+	// Always update text settings before drawing
+	SetTextColor(cfg.TextColor)
+	SetTimeFormat(cfg.TimeFormat)
 
+	// Draw all elements
 	DrawSystemTemperatures(config.cputemp, config.gputemp)
 	DrawNetworkStats(config.network)
 	DrawTime()
@@ -194,7 +231,7 @@ func drawDisplay(config CreateScreenConfig) error {
 
 	copy(imageBuffer, img.Pix)
 
-	// Update display
+	// Send to device
 	if err := sendImageDataInChunks(imageBuffer); err != nil {
 		connected = false
 		return fmt.Errorf("failed to update display: %v", err)
