@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"nexus-open/internal/app"
+	"nexus-open/internal/tray"
 )
 
 var (
@@ -24,6 +25,7 @@ func main() {
 		debug       = flag.Bool("debug", false, "Enable debug logging")
 		configPath  = flag.String("config", "", "Path to configuration file")
 		apiPort     = flag.Int("port", 1985, "API server port")
+		enableTray  = flag.Bool("tray", false, "Enable system tray mode with Flutter UI")
 	)
 	flag.Parse()
 
@@ -72,12 +74,34 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal or error
-	select {
-	case <-ctx.Done():
-		logger.Info("received shutdown signal")
-	case err := <-errCh:
-		logger.Error("application error", "error", err)
+	// If tray mode enabled, start system tray
+	if *enableTray {
+		logger.Info("starting system tray mode")
+		trayManager := tray.New(logger)
+
+		// Run tray in goroutine
+		go func() {
+			trayManager.Run()
+		}()
+
+		// Wait for tray quit, shutdown signal, or error
+		select {
+		case <-trayManager.QuitChannel():
+			logger.Info("quit from system tray")
+			cancel()
+		case <-ctx.Done():
+			logger.Info("received shutdown signal")
+		case err := <-errCh:
+			logger.Error("application error", "error", err)
+		}
+	} else {
+		// Normal mode: wait for shutdown signal or error
+		select {
+		case <-ctx.Done():
+			logger.Info("received shutdown signal")
+		case err := <-errCh:
+			logger.Error("application error", "error", err)
+		}
 	}
 
 	// Graceful shutdown

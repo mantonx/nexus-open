@@ -6,9 +6,9 @@ pkgdesc="Linux controller for Corsair iCUE Nexus display device"
 arch=('x86_64')
 url="https://github.com/yourusername/nexus-open"
 license=('MIT')
-depends=('libusb')
+depends=('libusb' 'libayatana-appindicator')
 optdepends=('flutter: for GUI configuration interface')
-makedepends=('go>=1.23' 'git')
+makedepends=('go>=1.23' 'git' 'libayatana-appindicator')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
 sha256sums=('SKIP')  # Update this with actual checksum after release
 backup=('etc/udev/rules.d/99-corsair-nexus.rules')
