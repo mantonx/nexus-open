@@ -1,59 +1,27 @@
 package main
 
 import (
-	_ "embed"
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"nexus-open/nexus"
 )
 
-// //go:embed icon.ico
-// var iconBytes []byte
-
-// func onReady() {
-// 	systray.SetIcon(iconBytes)
-// 	systray.SetTitle("Nexus Open")
-// 	systray.SetTooltip("Nexus Open Status")
-
-// 	quitOpenNexus := systray.AddMenuItem("Quit", "Quit the app")
-
-// 	go func() {
-// 		<-quitOpenNexus.ClickedCh
-// 		systray.Quit()
-// 	}()
-
-// 	nexus.StartNexus()
-// }
-
-// func onExit() {
-// 	nexus.StopNexus()
-// }
-
 func main() {
-	nexus.StartNexus()
-	// systray.Run(onReady, onExit)
-	// Create an instance of the app structure
-	// app := NewApp()
+	// Set up graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
-	// Start Nexus in a separate goroutine
-	// nexus.StartNexus()
+	// Start the Nexus backend
+	go nexus.StartNexus()
 
-	// // Create application with options
-	// err := wails.Run(&options.App{
-	// 	Title:         "Nexus Open",
-	// 	Width:         1024,
-	// 	Height:        768,
-	// 	DisableResize: true,
-	// 	AssetServer: &assetserver.Options{
-	// 		Assets: assets,
-	// 	},
-	// 	Frameless:        false,
-	// 	BackgroundColour: &options.RGBA{R: 255, G: 255, B: 0, A: 1}, // Yellow
-	// 	OnStartup:        app.startup,
-	// 	Bind: []interface{}{
-	// 		app,
-	// 	},
-	// })
+	// Wait for shutdown signal
+	<-ctx.Done()
+	log.Println("Shutting down gracefully...")
 
-	// if err != nil {
-	// 	println("Error:", err.Error())
-	// }
+	// TODO: Implement proper shutdown in nexus.StopNexus()
+	// nexus.StopNexus()
 }
