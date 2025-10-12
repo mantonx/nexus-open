@@ -180,3 +180,67 @@ func (s *Server) respondSuccess(w http.ResponseWriter, message string, data inte
 	}
 	s.respondJSON(w, response, http.StatusOK)
 }
+
+// handleBrightness handles brightness control (POST only).
+func (s *Server) handleBrightness(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.device == nil {
+		s.respondError(w, "Device not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	var request struct {
+		Brightness int `json:"brightness"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		s.respondError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if request.Brightness < 0 || request.Brightness > 100 {
+		s.respondError(w, "Brightness must be between 0 and 100", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.device.SetBrightness(request.Brightness); err != nil {
+		s.logger.Error("failed to set brightness", "error", err)
+		s.respondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.respondSuccess(w, "Brightness updated", map[string]int{"brightness": request.Brightness})
+}
+
+// handleDeviceInfo handles device information queries (GET only).
+func (s *Server) handleDeviceInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.device == nil {
+		s.respondError(w, "Device not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	firmware, err := s.device.GetFirmwareVersion()
+	if err != nil {
+		s.logger.Error("failed to get firmware version", "error", err)
+		s.respondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	info := map[string]interface{}{
+		"firmware": firmware,
+		"vendorId":  "0x1b1c",
+		"productId": "0x1b8e",
+		"model":     "iCUE Nexus",
+	}
+
+	s.respondSuccess(w, "Device information", info)
+}

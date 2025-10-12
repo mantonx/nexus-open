@@ -169,3 +169,27 @@ func (m *MockDevice) SimulateDisconnect() {
 	defer m.mu.Unlock()
 	m.connected = false
 }
+
+// SetBrightness simulates setting device brightness.
+func (m *MockDevice) SetBrightness(brightness int) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return ErrDeviceDisconnected
+	}
+
+	return nil
+}
+
+// GetFirmwareVersion returns a mock firmware version.
+func (m *MockDevice) GetFirmwareVersion() (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.connected {
+		return "", ErrDeviceDisconnected
+	}
+
+	return "1.0.0-mock", nil
+}

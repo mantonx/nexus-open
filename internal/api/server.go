@@ -11,15 +11,22 @@ import (
 	"nexus-open/internal/config"
 )
 
+// DeviceController provides an interface for controlling device features.
+type DeviceController interface {
+	SetBrightness(brightness int) error
+	GetFirmwareVersion() (string, error)
+}
+
 // Server manages the HTTP API server.
 type Server struct {
 	server *http.Server
 	logger *slog.Logger
 	cfg    *config.Manager
+	device DeviceController
 }
 
 // NewServer creates a new API server instance.
-func NewServer(addr string, cfg *config.Manager, logger *slog.Logger) *Server {
+func NewServer(addr string, cfg *config.Manager, device DeviceController, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -27,6 +34,7 @@ func NewServer(addr string, cfg *config.Manager, logger *slog.Logger) *Server {
 	s := &Server{
 		logger: logger,
 		cfg:    cfg,
+		device: device,
 	}
 
 	// Create router
@@ -74,4 +82,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/images/upload", s.handleImageUpload)
 	mux.HandleFunc("/api/images", s.handleListImages)
 	mux.HandleFunc("/api/images/delete", s.handleDeleteImage)
+
+	// HID feature endpoints
+	mux.HandleFunc("/api/device/brightness", s.handleBrightness)
+	mux.HandleFunc("/api/device/info", s.handleDeviceInfo)
 }

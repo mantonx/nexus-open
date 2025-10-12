@@ -32,6 +32,10 @@ type Device interface {
 	// Health performs a health check on the device connection.
 	// Returns nil if healthy, error otherwise.
 	Health() error
+
+	// HID Feature Report methods (may not be supported by all devices)
+	SetBrightness(brightness int) error
+	GetFirmwareVersion() (string, error)
 }
 
 // TouchEvent represents a touch/button input event from the device.

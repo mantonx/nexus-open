@@ -1,0 +1,46 @@
+#!/bin/bash
+set -e
+
+echo "Setting up Nexus Open..."
+
+# Reload udev rules
+if [ -x "$(command -v udevadm)" ]; then
+    echo "Reloading udev rules..."
+    udevadm control --reload-rules
+    udevadm trigger --subsystem-match=usb --attr-match=idVendor=1b1c --attr-match=idProduct=1b8e
+fi
+
+# Create plugdev group if it doesn't exist
+if ! getent group plugdev > /dev/null 2>&1; then
+    echo "Creating plugdev group..."
+    groupadd -r plugdev
+fi
+
+# Update desktop database
+if [ -x "$(command -v update-desktop-database)" ]; then
+    echo "Updating desktop database..."
+    update-desktop-database -q /usr/share/applications
+fi
+
+# Update icon cache
+if [ -x "$(command -v gtk-update-icon-cache)" ]; then
+    echo "Updating icon cache..."
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
+fi
+
+echo ""
+echo "Nexus Open has been installed successfully!"
+echo ""
+echo "IMPORTANT: To access the USB device without root privileges:"
+echo "  1. Add your user to the plugdev group:"
+echo "     sudo usermod -a -G plugdev \$USER"
+echo "  2. Log out and log back in for the group changes to take effect"
+echo ""
+echo "To start the service:"
+echo "  systemctl --user enable nexus-open"
+echo "  systemctl --user start nexus-open"
+echo ""
+echo "To use the GUI, run: nexus-open"
+echo ""
+
+exit 0

@@ -45,22 +45,26 @@ func (fm *FontManager) LoadFont(name string) (*truetype.Font, error) {
 	var fontData []byte
 	var err error
 
-	// 1. Try embedded fonts first
-	embeddedPath := fmt.Sprintf("assets/fonts/%s.ttf", name)
-	fontData, err = fontFS.ReadFile(embeddedPath)
-	if err == nil {
-		fm.logger.Debug("loaded embedded font", "name", name)
-		return fm.parseAndCache(name, fontData)
+	// 1. Try embedded fonts first (both .ttf and .otf)
+	for _, ext := range []string{".ttf", ".otf"} {
+		embeddedPath := fmt.Sprintf("assets/fonts/%s%s", name, ext)
+		fontData, err = fontFS.ReadFile(embeddedPath)
+		if err == nil {
+			fm.logger.Debug("loaded embedded font", "name", name, "path", embeddedPath)
+			return fm.parseAndCache(name, fontData)
+		}
 	}
 
-	// 2. Try common Linux font paths
+	// 2. Try common Linux font paths (both .ttf and .otf)
 	systemPaths := []string{
 		fmt.Sprintf("/usr/share/fonts/truetype/dejavu/%s.ttf", name),
 		fmt.Sprintf("/usr/share/fonts/TTF/%s.ttf", name),
 		fmt.Sprintf("/usr/share/fonts/truetype/liberation/%s.ttf", name),
 		fmt.Sprintf("/usr/share/fonts/truetype/ubuntu/%s.ttf", name),
 		fmt.Sprintf("/usr/share/fonts/%s.ttf", name),
+		fmt.Sprintf("/usr/share/fonts/%s.otf", name),
 		fmt.Sprintf("/usr/local/share/fonts/%s.ttf", name),
+		fmt.Sprintf("/usr/local/share/fonts/%s.otf", name),
 	}
 
 	for _, path := range systemPaths {
