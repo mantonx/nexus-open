@@ -3,8 +3,13 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
+	"time"
+
+	"nexus-open/internal/config"
+	"nexus-open/internal/device"
 )
 
 // App is the main application container that holds all dependencies.
@@ -18,9 +23,9 @@ type App struct {
 	configPath string
 	apiPort    int
 
-	// Components (to be added)
-	// cfg         *config.Manager
-	// device      device.Device
+	// Components
+	cfg    *config.Manager
+	device device.Device
 	// display     *display.Renderer
 	// apiServer   *api.Server
 	// instruments *instruments.Registry
@@ -49,11 +54,11 @@ func New(opts ...Option) (*App, error) {
 		opt(app)
 	}
 
-	// Initialize will be called when components are ready
-	// if err := app.initialize(); err != nil {
-	// 	cancel()
-	// 	return nil, fmt.Errorf("initialization failed: %w", err)
-	// }
+	// Initialize components
+	if err := app.initialize(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("initialization failed: %w", err)
+	}
 
 	return app, nil
 }
@@ -62,14 +67,10 @@ func New(opts ...Option) (*App, error) {
 func (a *App) Run(ctx context.Context) error {
 	a.logger.Info("application starting")
 
-	// Start components (to be implemented)
-	// if err := a.start(); err != nil {
-	// 	return fmt.Errorf("failed to start: %w", err)
-	// }
-
-	// TODO: Remove this temporary code once real components are integrated
-	// For now, we'll keep the old nexus.StartNexus() working
-	a.logger.Warn("running in legacy mode - refactoring in progress")
+	// Start components
+	if err := a.start(); err != nil {
+		return fmt.Errorf("failed to start: %w", err)
+	}
 
 	// Block until context is canceled or shutdown is called
 	select {
@@ -91,8 +92,8 @@ func (a *App) Shutdown() error {
 		close(a.shutdownCh)
 		a.cancel()
 
-		// Stop components in reverse order (to be implemented)
-		// shutdownErr = a.stop()
+		// Stop components in reverse order
+		shutdownErr = a.stop()
 
 		// Wait for all goroutines to finish
 		a.wg.Wait()
@@ -107,9 +108,25 @@ func (a *App) Shutdown() error {
 func (a *App) initialize() error {
 	a.logger.Debug("initializing application components")
 
-	// TODO: Initialize components
 	// 1. Load configuration
+	var err error
+	a.cfg, err = config.NewManager(a.configPath)
+	if err != nil {
+		return fmt.Errorf("failed to create config manager: %w", err)
+	}
+	a.logger.Info("configuration loaded")
+
 	// 2. Create device connection
+	deviceConfig := device.ConnectionConfig{
+		VendorID:         0x1b1c, // Corsair
+		ProductID:        0x1b8e, // iCUE Nexus
+		ReconnectRetries: 10,
+		ReconnectDelay:   5 * time.Second,
+	}
+	a.device = device.NewNexusDevice(a.logger, deviceConfig)
+	a.logger.Info("device created")
+
+	// TODO: Initialize remaining components
 	// 3. Set up display renderer
 	// 4. Initialize instruments
 	// 5. Start API server
@@ -120,6 +137,12 @@ func (a *App) initialize() error {
 // start begins operation of all components.
 func (a *App) start() error {
 	a.logger.Debug("starting application components")
+
+	// Connect to device
+	if err := a.device.Connect(a.ctx); err != nil {
+		a.logger.Warn("failed to connect to device", "error", err)
+		// Don't fail - device will retry connection
+	}
 
 	// TODO: Start components
 	// 1. Start instrument data collection
@@ -134,11 +157,17 @@ func (a *App) start() error {
 func (a *App) stop() error {
 	a.logger.Debug("stopping application components")
 
-	// TODO: Stop components in reverse order
+	// Stop device connection
+	if a.device != nil {
+		if err := a.device.Disconnect(); err != nil {
+			a.logger.Error("error disconnecting device", "error", err)
+		}
+	}
+
+	// TODO: Stop remaining components in reverse order
 	// 1. Stop API server
 	// 2. Stop display updates
 	// 3. Stop instruments
-	// 4. Close device connection
 
 	return nil
 }
