@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"nexus-open/internal/api"
 	"nexus-open/internal/config"
 	"nexus-open/internal/device"
 )
@@ -24,10 +25,10 @@ type App struct {
 	apiPort    int
 
 	// Components
-	cfg    *config.Manager
-	device device.Device
+	cfg       *config.Manager
+	device    device.Device
+	apiServer *api.Server
 	// display     *display.Renderer
-	// apiServer   *api.Server
 	// instruments *instruments.Registry
 
 	// Lifecycle
@@ -126,10 +127,14 @@ func (a *App) initialize() error {
 	a.device = device.NewNexusDevice(a.logger, deviceConfig)
 	a.logger.Info("device created")
 
+	// 3. Create API server
+	apiAddr := fmt.Sprintf(":%d", a.apiPort)
+	a.apiServer = api.NewServer(apiAddr, a.cfg, a.logger)
+	a.logger.Info("API server created", "addr", apiAddr)
+
 	// TODO: Initialize remaining components
-	// 3. Set up display renderer
-	// 4. Initialize instruments
-	// 5. Start API server
+	// 4. Set up display renderer
+	// 5. Initialize instruments
 
 	return nil
 }
@@ -144,11 +149,19 @@ func (a *App) start() error {
 		// Don't fail - device will retry connection
 	}
 
-	// TODO: Start components
+	// Start API server in background
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		if err := a.apiServer.Start(); err != nil {
+			a.logger.Error("API server error", "error", err)
+		}
+	}()
+
+	// TODO: Start remaining components
 	// 1. Start instrument data collection
 	// 2. Start display update loop
-	// 3. Start API server
-	// 4. Start configuration watcher
+	// 3. Start configuration watcher
 
 	return nil
 }
@@ -156,6 +169,15 @@ func (a *App) start() error {
 // stop halts all running components.
 func (a *App) stop() error {
 	a.logger.Debug("stopping application components")
+
+	// Stop API server first
+	if a.apiServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := a.apiServer.Shutdown(shutdownCtx); err != nil {
+			a.logger.Error("error shutting down API server", "error", err)
+		}
+	}
 
 	// Stop device connection
 	if a.device != nil {
@@ -165,9 +187,8 @@ func (a *App) stop() error {
 	}
 
 	// TODO: Stop remaining components in reverse order
-	// 1. Stop API server
-	// 2. Stop display updates
-	// 3. Stop instruments
+	// 1. Stop display updates
+	// 2. Stop instruments
 
 	return nil
 }
