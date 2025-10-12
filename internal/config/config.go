@@ -23,13 +23,22 @@ type Manager struct {
 
 // Config holds the application configuration.
 type Config struct {
-	Location        string   `mapstructure:"location"`
-	TimeFormat      string   `mapstructure:"time_format"`
-	Unit            string   `mapstructure:"unit"`
-	BackgroundColor string   `mapstructure:"background_color"`
-	BackgroundImage string   `mapstructure:"background_image"`
-	TextColor       string   `mapstructure:"text_color"`
-	ImagePaths      []string `mapstructure:"image_paths"`
+	Location        string       `mapstructure:"location"`
+	TimeFormat      string       `mapstructure:"time_format"`
+	Unit            string       `mapstructure:"unit"`
+	BackgroundColor string       `mapstructure:"background_color"`
+	BackgroundImage string       `mapstructure:"background_image"`
+	TextColor       string       `mapstructure:"text_color"`
+	ImagePaths      []string     `mapstructure:"image_paths"`
+	Display         DisplayConfig `mapstructure:"display"`
+}
+
+// DisplayConfig holds display-specific configuration
+type DisplayConfig struct {
+	FontFamily   string  `mapstructure:"font_family"`
+	FontSize     float64 `mapstructure:"font_size"`
+	TimeFontSize float64 `mapstructure:"time_font_size"`
+	Layout       string  `mapstructure:"layout"` // "compact", "balanced", "detailed"
 }
 
 // Default configuration values.
@@ -40,6 +49,10 @@ const (
 	DefaultBackgroundColor = "#000000"
 	DefaultBackgroundImage = "background.png"
 	DefaultTextColor       = "#FFFFFF"
+	DefaultFontFamily      = "DejaVuSansMono"
+	DefaultFontSize        = 11.0
+	DefaultTimeFontSize    = 14.0
+	DefaultLayout          = "balanced"
 )
 
 // Validation constants.
@@ -108,6 +121,20 @@ func (m *Manager) Load() error {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Apply defaults for missing display config values
+	if cfg.Display.FontFamily == "" {
+		cfg.Display.FontFamily = DefaultFontFamily
+	}
+	if cfg.Display.FontSize == 0 {
+		cfg.Display.FontSize = DefaultFontSize
+	}
+	if cfg.Display.TimeFontSize == 0 {
+		cfg.Display.TimeFontSize = DefaultTimeFontSize
+	}
+	if cfg.Display.Layout == "" {
+		cfg.Display.Layout = DefaultLayout
+	}
+
 	// Validate
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
@@ -172,6 +199,7 @@ func (m *Manager) save() error {
 	viper.Set("background_image", m.cfg.BackgroundImage)
 	viper.Set("text_color", m.cfg.TextColor)
 	viper.Set("image_paths", m.cfg.ImagePaths)
+	viper.Set("display", m.cfg.Display)
 
 	return viper.WriteConfig()
 }
@@ -186,6 +214,12 @@ func (m *Manager) createDefaultConfig() error {
 		BackgroundImage: DefaultBackgroundImage,
 		TextColor:       DefaultTextColor,
 		ImagePaths:      []string{},
+		Display: DisplayConfig{
+			FontFamily:   DefaultFontFamily,
+			FontSize:     DefaultFontSize,
+			TimeFontSize: DefaultTimeFontSize,
+			Layout:       DefaultLayout,
+		},
 	}
 
 	m.cfg = defaultCfg
