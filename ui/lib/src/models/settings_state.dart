@@ -1,59 +1,185 @@
 import 'package:flutter/material.dart';
+import '../services/nexus_api_service.dart';
 
 class SettingsState extends ChangeNotifier {
-  // Display settings
-  String _temperatureUnit = 'Celsius';
-  String _distanceUnit = 'Kilometers';
-  String _timeFormat = '24h';
-  String _dateFormat = 'YYYY-MM-DD';
+  final NexusApiService _apiService;
 
-  // Appearance settings
-  Color _textColor = Colors.white;
-  Color _backgroundColor = Colors.black;
-  bool _showBackground = true;
+  // Loading and error states
+  bool _isLoading = false;
+  bool _isConnected = false;
+  String? _errorMessage;
+
+  // Configuration
+  NexusConfig? _config;
+
+  SettingsState({NexusApiService? apiService})
+      : _apiService = apiService ?? NexusApiService() {
+    _initialize();
+  }
 
   // Getters
-  String get temperatureUnit => _temperatureUnit;
-  String get distanceUnit => _distanceUnit;
-  String get timeFormat => _timeFormat;
-  String get dateFormat => _dateFormat;
-  Color get textColor => _textColor;
-  Color get backgroundColor => _backgroundColor;
-  bool get showBackground => _showBackground;
+  bool get isLoading => _isLoading;
+  bool get isConnected => _isConnected;
+  String? get errorMessage => _errorMessage;
+  NexusConfig? get config => _config;
 
-  // Setters
-  void setTemperatureUnit(String value) {
-    _temperatureUnit = value;
+  String get location => _config?.location ?? '';
+  String get timeFormat => _config?.timeFormat ?? '24h';
+  String get unit => _config?.unit ?? 'imperial';
+  String get backgroundColor => _config?.backgroundColor ?? '#000000';
+  String get backgroundImage => _config?.backgroundImage ?? 'background.png';
+  String get textColor => _config?.textColor ?? '#FFFFFF';
+  List<String> get imagePaths => _config?.imagePaths ?? [];
+
+  // Color getters
+  Color get backgroundColorValue => _hexToColor(backgroundColor);
+  Color get textColorValue => _hexToColor(textColor);
+
+  /// Initialize by loading config from backend
+  Future<void> _initialize() async {
+    await loadFromBackend();
+  }
+
+  /// Load configuration from backend
+  Future<void> loadFromBackend() async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      // Check health first
+      final healthy = await _apiService.checkHealth();
+      _isConnected = healthy;
+
+      if (!healthy) {
+        throw ApiException('Backend is not responding');
+      }
+
+      // Load configuration
+      _config = await _apiService.getConfig();
+      notifyListeners();
+    } catch (e) {
+      _setError('Failed to load configuration: $e');
+      _isConnected = false;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Save configuration to backend
+  Future<void> saveToBackend() async {
+    if (_config == null) {
+      _setError('No configuration to save');
+      return;
+    }
+
+    _setLoading(true);
+    _clearError();
+
+    try {
+      await _apiService.updateConfig(_config!);
+      notifyListeners();
+    } catch (e) {
+      _setError('Failed to save configuration: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  /// Update configuration locally
+  void updateConfig({
+    String? location,
+    String? timeFormat,
+    String? unit,
+    String? backgroundColor,
+    String? backgroundImage,
+    String? textColor,
+    List<String>? imagePaths,
+  }) {
+    if (_config == null) return;
+
+    _config = _config!.copyWith(
+      location: location,
+      timeFormat: timeFormat,
+      unit: unit,
+      backgroundColor: backgroundColor,
+      backgroundImage: backgroundImage,
+      textColor: textColor,
+      imagePaths: imagePaths,
+    );
     notifyListeners();
   }
 
-  void setDistanceUnit(String value) {
-    _distanceUnit = value;
-    notifyListeners();
+  /// Set location
+  void setLocation(String value) {
+    updateConfig(location: value);
   }
 
+  /// Set time format
   void setTimeFormat(String value) {
-    _timeFormat = value;
+    updateConfig(timeFormat: value);
+  }
+
+  /// Set unit (metric/imperial)
+  void setUnit(String value) {
+    updateConfig(unit: value);
+  }
+
+  /// Set background color
+  void setBackgroundColor(String hexColor) {
+    updateConfig(backgroundColor: hexColor);
+  }
+
+  /// Set text color
+  void setTextColor(String hexColor) {
+    updateConfig(textColor: hexColor);
+  }
+
+  /// Set background image
+  void setBackgroundImage(String imageName) {
+    updateConfig(backgroundImage: imageName);
+  }
+
+  /// Add image path
+  void addImagePath(String path) {
+    final newPaths = List<String>.from(imagePaths)..add(path);
+    updateConfig(imagePaths: newPaths);
+  }
+
+  /// Remove image path
+  void removeImagePath(String path) {
+    final newPaths = List<String>.from(imagePaths)..remove(path);
+    updateConfig(imagePaths: newPaths);
+  }
+
+  /// Retry connection
+  Future<void> retryConnection() async {
+    await loadFromBackend();
+  }
+
+  // Helper methods
+  void _setLoading(bool value) {
+    _isLoading = value;
     notifyListeners();
   }
 
-  void setDateFormat(String value) {
-    _dateFormat = value;
+  void _setError(String message) {
+    _errorMessage = message;
     notifyListeners();
   }
 
-  void setTextColor(Color value) {
-    _textColor = value;
+  void _clearError() {
+    _errorMessage = null;
     notifyListeners();
   }
 
-  void setBackgroundColor(Color value) {
-    _backgroundColor = value;
-    notifyListeners();
+  Color _hexToColor(String hexColor) {
+    final hex = hexColor.replaceAll('#', '');
+    return Color(int.parse('FF$hex', radix: 16));
   }
 
-  void setShowBackground(bool value) {
-    _showBackground = value;
-    notifyListeners();
+  @override
+  void dispose() {
+    _apiService.dispose();
+    super.dispose();
   }
 }
