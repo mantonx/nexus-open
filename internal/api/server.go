@@ -19,10 +19,12 @@ type DeviceController interface {
 
 // Server manages the HTTP API server.
 type Server struct {
-	server *http.Server
-	logger *slog.Logger
-	cfg    *config.Manager
-	device DeviceController
+	server       *http.Server
+	logger       *slog.Logger
+	cfg          *config.Manager
+	device       DeviceController
+	windowState  string // "shown" or "hidden"
+	windowStateCh chan string
 }
 
 // NewServer creates a new API server instance.
@@ -32,9 +34,11 @@ func NewServer(addr string, cfg *config.Manager, device DeviceController, logger
 	}
 
 	s := &Server{
-		logger: logger,
-		cfg:    cfg,
-		device: device,
+		logger:        logger,
+		cfg:           cfg,
+		device:        device,
+		windowState:   "shown",
+		windowStateCh: make(chan string, 10),
 	}
 
 	// Create router
@@ -86,4 +90,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// HID feature endpoints
 	mux.HandleFunc("/api/device/brightness", s.handleBrightness)
 	mux.HandleFunc("/api/device/info", s.handleDeviceInfo)
+
+	// Window control endpoints
+	mux.HandleFunc("/api/window/state", s.handleWindowState)
+	mux.HandleFunc("/api/window/show", s.handleWindowShow)
+	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
 }

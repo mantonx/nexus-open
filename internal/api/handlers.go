@@ -244,3 +244,50 @@ func (s *Server) handleDeviceInfo(w http.ResponseWriter, r *http.Request) {
 
 	s.respondSuccess(w, "Device information", info)
 }
+
+// Window control handlers
+
+// handleWindowState returns the current window state.
+func (s *Server) handleWindowState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	response := map[string]string{
+		"state": s.windowState,
+	}
+	s.respondJSON(w, response, http.StatusOK)
+}
+
+// handleWindowShow sets window state to "show".
+func (s *Server) handleWindowShow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.windowState = "shown"
+	select {
+	case s.windowStateCh <- "show":
+	default:
+	}
+
+	s.respondSuccess(w, "Window show command sent", map[string]string{"state": "shown"})
+}
+
+// handleWindowHide sets window state to "hide".
+func (s *Server) handleWindowHide(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.windowState = "hidden"
+	select {
+	case s.windowStateCh <- "hide":
+	default:
+	}
+
+	s.respondSuccess(w, "Window hide command sent", map[string]string{"state": "hidden"})
+}

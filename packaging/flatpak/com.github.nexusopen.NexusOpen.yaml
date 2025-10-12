@@ -39,6 +39,20 @@ modules:
       - /lib/pkgconfig
       - '*.la'
 
+  - name: libayatana-appindicator
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DENABLE_BINDINGS_MONO=NO
+      - -DENABLE_BINDINGS_VALA=NO
+    sources:
+      - type: archive
+        url: https://github.com/AyatanaIndicators/libayatana-appindicator/archive/0.5.93.tar.gz
+        sha256: b6e98799f9b54b04d9e59c94f628e2e4c9c8f6f54e6b7621c79aa0ad312c0586
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - '*.la'
+
   - name: nexus-open
     buildsystem: simple
     build-options:

@@ -3,7 +3,7 @@ Version: 1.0.0
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libusb-1.0-0 (>= 2:1.0.21)
+Depends: libusb-1.0-0 (>= 2:1.0.21), libayatana-appindicator3-1
 Recommends: flutter
 Maintainer: Nexus Open Team <contact@example.com>
 Homepage: https://github.com/yourusername/nexus-open
