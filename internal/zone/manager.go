@@ -30,6 +30,12 @@ type Manager struct {
 	// Compositor for current page
 	compositor *Compositor
 
+	// Transition state
+	transition     *TransitionState
+	transitionMu   sync.RWMutex
+	lastFrame      *image.RGBA
+	lastFrameMu    sync.Mutex
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -66,6 +72,7 @@ func NewManager(ctx context.Context, logger *slog.Logger, configPath string) (*M
 		zones:       make(map[string]*Zone),
 		renderers:   make(map[string]*Renderer),
 		payloads:    make(map[string]*module.Payload),
+		transition:  NewTransitionState(),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -224,6 +231,15 @@ func (m *Manager) UpdatePayload(zoneID string, payload module.Payload) error {
 
 // RenderFrame renders the current frame (all zones composited)
 func (m *Manager) RenderFrame() (*image.RGBA, error) {
+	// Check if transition is active
+	m.transitionMu.RLock()
+	if m.transition.Active && !m.transition.IsComplete() {
+		frame := m.transition.Render()
+		m.transitionMu.RUnlock()
+		return frame, nil
+	}
+	m.transitionMu.RUnlock()
+
 	m.payloadsMu.RLock()
 	defer m.payloadsMu.RUnlock()
 
@@ -274,41 +290,96 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 		return nil, fmt.Errorf("failed to composite frame: %w", err)
 	}
 
+	// Store frame for potential transitions
+	m.lastFrameMu.Lock()
+	m.lastFrame = frame
+	m.lastFrameMu.Unlock()
+
 	return frame, nil
 }
 
-// SwitchPage switches to a different page
+// SwitchPage switches to a different page with optional transition
 func (m *Manager) SwitchPage(pageIndex int) error {
+	return m.SwitchPageWithTransition(pageIndex, TransitionSlideLeft, 1)
+}
+
+// SwitchPageWithTransition switches to a different page with a specified transition
+func (m *Manager) SwitchPageWithTransition(pageIndex int, transitionType TransitionType, direction int) error {
 	if pageIndex < 0 || pageIndex >= len(m.config.Pages) {
 		return fmt.Errorf("invalid page index: %d (have %d pages)", pageIndex, len(m.config.Pages))
 	}
 
+	if pageIndex == m.currentPage {
+		return nil // Already on this page
+	}
+
+	// Capture current frame for transition
+	m.lastFrameMu.Lock()
+	oldFrame := m.lastFrame
+	m.lastFrameMu.Unlock()
+
+	// Store old page index
+	oldPage := m.currentPage
+
+	// Switch to new page
 	m.currentPage = pageIndex
 
 	if err := m.initializePage(); err != nil {
+		m.currentPage = oldPage // Revert on error
 		return fmt.Errorf("failed to initialize page: %w", err)
+	}
+
+	// Render new page frame (without transition)
+	m.payloadsMu.RLock()
+	zoneImages := make(map[string]*image.RGBA)
+	for zoneID, zone := range m.zones {
+		payload, ok := m.payloads[zoneID]
+		if !ok {
+			payload = &module.Payload{
+				Primary:   "—",
+				Severity:  module.SeverityOK,
+				Timestamp: time.Now(),
+			}
+		}
+
+		img, _ := zone.Renderer.Render(*payload)
+		zoneImages[zoneID] = img
+	}
+	m.payloadsMu.RUnlock()
+
+	newFrame, err := m.compositor.Composite(zoneImages)
+	if err != nil {
+		return fmt.Errorf("failed to composite new frame: %w", err)
+	}
+
+	// Start transition if we have both frames
+	if oldFrame != nil && transitionType != TransitionNone {
+		m.transitionMu.Lock()
+		m.transition.Start(transitionType, oldFrame, newFrame, direction)
+		m.transitionMu.Unlock()
 	}
 
 	m.logger.Info("switched to page",
 		"index", pageIndex,
-		"name", m.config.Pages[pageIndex].Name)
+		"name", m.config.Pages[pageIndex].Name,
+		"transition", transitionType)
 
 	return nil
 }
 
-// NextPage switches to the next page (wraps around)
+// NextPage switches to the next page (wraps around) with slide left transition
 func (m *Manager) NextPage() error {
 	nextPage := (m.currentPage + 1) % len(m.config.Pages)
-	return m.SwitchPage(nextPage)
+	return m.SwitchPageWithTransition(nextPage, TransitionSlideLeft, 1)
 }
 
-// PrevPage switches to the previous page (wraps around)
+// PrevPage switches to the previous page (wraps around) with slide right transition
 func (m *Manager) PrevPage() error {
 	prevPage := m.currentPage - 1
 	if prevPage < 0 {
 		prevPage = len(m.config.Pages) - 1
 	}
-	return m.SwitchPage(prevPage)
+	return m.SwitchPageWithTransition(prevPage, TransitionSlideRight, -1)
 }
 
 // Reload reloads the configuration from disk
