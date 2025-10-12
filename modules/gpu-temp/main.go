@@ -38,7 +38,7 @@ func NewGPUTempModule() *GPUTempModule {
 func (m *GPUTempModule) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "GPU Temperature",
-		Version:     "2.0.0",
+		Version:     "1.0.0",
 		Author:      "Nexus Team",
 		Description: "Monitors GPU temperature (NVIDIA, AMD, Intel)",
 		Icon:        "microchip",
