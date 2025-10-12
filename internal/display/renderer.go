@@ -21,10 +21,14 @@ import (
 
 // NexusRenderer implements the display rendering for the Nexus device
 type NexusRenderer struct {
-	logger      *slog.Logger
-	cfg         *config.Manager
-	device      device.Device
-	fontManager *FontManager
+	logger        *slog.Logger
+	cfg           *config.Manager
+	device        device.Device
+	fontManager   *FontManager
+	iconSet       *IconSet
+	iconRenderer  *IconRenderer
+	layoutManager *LayoutManager
+	layoutRenderer *LayoutRenderer
 
 	// Display properties
 	width  int
@@ -45,11 +49,16 @@ type NexusRenderer struct {
 
 // NewNexusRenderer creates a new display renderer
 func NewNexusRenderer(logger *slog.Logger, cfg *config.Manager, dev device.Device) *NexusRenderer {
+	iconSet := NewIconSet()
+	layoutManager := NewLayoutManager()
+
 	return &NexusRenderer{
 		logger:          logger,
 		cfg:             cfg,
 		device:          dev,
 		fontManager:     NewFontManager(logger),
+		iconSet:         iconSet,
+		layoutManager:   layoutManager,
 		width:           Width,
 		height:          Height,
 		textColor:       color.White,
@@ -83,9 +92,42 @@ func (r *NexusRenderer) Initialize() error {
 		// Keep fallback bitmap fonts
 	}
 
+	// Load Font Awesome for icons at two sizes
+	iconFont, err := r.fontManager.GetFace("FontAwesome-Solid", 10.0)
+	weatherIconFont, weatherErr := r.fontManager.GetFace("FontAwesome-Solid", 14.0) // Larger for weather
+
+	if err != nil {
+		r.logger.Warn("failed to load Font Awesome, using text font for icons", "error", err)
+		iconFont = r.font // Fallback to regular font
+	} else {
+		r.logger.Info("Font Awesome loaded for system icons", "size", 10.0)
+	}
+
+	if weatherErr != nil {
+		r.logger.Warn("failed to load Font Awesome for weather, using text font", "error", weatherErr)
+		weatherIconFont = r.timeFont // Fallback to larger text font
+	} else {
+		r.logger.Info("Font Awesome loaded for weather icons", "size", 14.0)
+	}
+
+	// Initialize icon renderer with Font Awesome at both sizes
+	r.iconRenderer = NewIconRenderer(r.iconSet, iconFont, weatherIconFont, r.textColor)
+
+	// Initialize layout renderer
+	r.layoutRenderer = NewLayoutRenderer(r)
+
+	// Set layout from config
+	if cfg.Display.Layout != "" {
+		if !r.layoutManager.SetLayout(LayoutType(cfg.Display.Layout)) {
+			r.logger.Warn("invalid layout in config, using default", "layout", cfg.Display.Layout)
+		}
+	}
+
 	// TODO: Load background images
 
-	r.logger.Info("renderer initialized", "font", r.loadedFontName)
+	r.logger.Info("renderer initialized",
+		"font", r.loadedFontName,
+		"layout", r.layoutManager.GetLayout().Name())
 	return nil
 }
 
@@ -145,16 +187,56 @@ func (r *NexusRenderer) Render(ctx context.Context, data instruments.SystemData)
 	// Draw background
 	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{r.backgroundColor}, image.Point{}, draw.Src)
 
-	// Get config for time format
+	// Get config
 	cfg := r.cfg.Get()
 
-	// Draw elements
-	r.drawTime(canvas, cfg.TimeFormat)
-	r.drawTemperatures(canvas, data.Temperature)
-	r.drawNetwork(canvas, data.Network)
-	r.drawWeather(canvas, data.Weather, cfg.Unit)
+	// Prepare layout data
+	layoutData := LayoutData{
+		Time:        r.formatTime(cfg.TimeFormat),
+		TimeFormat:  cfg.TimeFormat,
+		CPUTemp:     data.Temperature.CPU,
+		GPUTemp:     data.Temperature.GPU,
+		NetworkDown: data.Network.DownloadSpeed,
+		NetworkUp:   data.Network.UploadSpeed,
+		Weather:     data.Weather,
+		Unit:        cfg.Unit,
+	}
+
+	// Render using current layout
+	currentLayout := r.layoutManager.GetLayout()
+	currentLayout.Render(canvas, layoutData, r.layoutRenderer)
 
 	return canvas, nil
+}
+
+// formatTime formats the current time based on config
+func (r *NexusRenderer) formatTime(timeFormat string) string {
+	now := time.Now()
+
+	if timeFormat == "12h" {
+		hour := now.Hour() % 12
+		if hour == 0 {
+			hour = 12
+		}
+		ampm := "AM"
+		if now.Hour() >= 12 {
+			ampm = "PM"
+		}
+
+		// Blinking colon effect
+		colon := ":"
+		if r.blinkState {
+			colon = " "
+		}
+		return fmt.Sprintf("%d%s%02d %s", hour, colon, now.Minute(), ampm)
+	}
+
+	// 24h format
+	colon := ":"
+	if r.blinkState {
+		colon = " "
+	}
+	return fmt.Sprintf("%02d%s%02d", now.Hour(), colon, now.Minute())
 }
 
 // drawTime renders the current time
@@ -193,13 +275,19 @@ func (r *NexusRenderer) drawTime(canvas *image.RGBA, timeFormat string) {
 // drawTemperatures renders CPU and GPU temperatures
 func (r *NexusRenderer) drawTemperatures(canvas *image.RGBA, temps instruments.TemperatureData) {
 	if temps.CPU > 0 {
-		cpuText := fmt.Sprintf("CPU %.0f°C", temps.CPU)
-		r.drawText(canvas, cpuText, 10, 15)
+		// Draw CPU icon
+		r.iconRenderer.DrawIcon(canvas, r.iconSet.SystemCPU, 10, 15)
+		// Draw temperature text
+		cpuText := fmt.Sprintf("%.0f°C", temps.CPU)
+		r.drawText(canvas, cpuText, 25, 15)
 	}
 
 	if temps.GPU > 0 {
-		gpuText := fmt.Sprintf("GPU %.0f°C", temps.GPU)
-		r.drawText(canvas, gpuText, 10, 35)
+		// Draw GPU icon
+		r.iconRenderer.DrawIcon(canvas, r.iconSet.SystemGPU, 10, 35)
+		// Draw temperature text
+		gpuText := fmt.Sprintf("%.0f°C", temps.GPU)
+		r.drawText(canvas, gpuText, 25, 35)
 	}
 }
 
@@ -210,22 +298,26 @@ func (r *NexusRenderer) drawNetwork(canvas *image.RGBA, net instruments.NetworkD
 		downMbps := net.DownloadSpeed / (1024 * 1024)
 		upMbps := net.UploadSpeed / (1024 * 1024)
 
+		// Download speed with icon
+		r.iconRenderer.DrawIcon(canvas, r.iconSet.SystemNetworkDown, 520, 15)
 		if downMbps >= 1.0 {
-			netText := fmt.Sprintf("↓ %.1f MB/s", downMbps)
-			r.drawText(canvas, netText, 450, 15)
+			netText := fmt.Sprintf("%.1f MB/s", downMbps)
+			r.drawText(canvas, netText, 535, 15)
 		} else {
 			downKbps := net.DownloadSpeed / 1024
-			netText := fmt.Sprintf("↓ %.0f KB/s", downKbps)
-			r.drawText(canvas, netText, 450, 15)
+			netText := fmt.Sprintf("%.0f KB/s", downKbps)
+			r.drawText(canvas, netText, 535, 15)
 		}
 
+		// Upload speed with icon
+		r.iconRenderer.DrawIcon(canvas, r.iconSet.SystemNetworkUp, 520, 35)
 		if upMbps >= 1.0 {
-			netText := fmt.Sprintf("↑ %.1f MB/s", upMbps)
-			r.drawText(canvas, netText, 450, 35)
+			netText := fmt.Sprintf("%.1f MB/s", upMbps)
+			r.drawText(canvas, netText, 535, 35)
 		} else {
 			upKbps := net.UploadSpeed / 1024
-			netText := fmt.Sprintf("↑ %.0f KB/s", upKbps)
-			r.drawText(canvas, netText, 450, 35)
+			netText := fmt.Sprintf("%.0f KB/s", upKbps)
+			r.drawText(canvas, netText, 535, 35)
 		}
 	}
 }
@@ -236,9 +328,9 @@ func (r *NexusRenderer) drawWeather(canvas *image.RGBA, weather *instruments.Wea
 		return
 	}
 
-	// Draw weather icon (use the icon string from weather data)
+	// Draw weather icon - using larger font for better visibility
 	if weather.Icon != "" {
-		r.drawText(canvas, weather.Icon, 280, 35)
+		r.drawTextWithFont(canvas, weather.Icon, 280, 35, r.timeFont)
 	}
 
 	// Draw temperature with appropriate symbol
@@ -248,7 +340,7 @@ func (r *NexusRenderer) drawWeather(canvas *image.RGBA, weather *instruments.Wea
 	}
 
 	tempText := fmt.Sprintf("%.0f%s", weather.Temperature, tempSymbol)
-	r.drawText(canvas, tempText, 320, 35)
+	r.drawText(canvas, tempText, 310, 35)
 }
 
 // drawText draws text at the specified position using the normal font

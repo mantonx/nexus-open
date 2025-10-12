@@ -1,0 +1,87 @@
+app-id: com.github.nexusopen.NexusOpen
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.golang
+command: nexus-open
+
+finish-args:
+  # USB device access (iCUE Nexus)
+  - --device=all
+  # Network access for weather API
+  - --share=network
+  # Access to config directory
+  - --filesystem=xdg-config/nexus-open:create
+  # System monitoring access
+  - --filesystem=/sys:ro
+  - --filesystem=/proc:ro
+  # Wayland/X11 support (for tray icon/notifications if added)
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Session bus for desktop integration
+  - --socket=session-bus
+  # Allow talking to systemd
+  - --system-talk-name=org.freedesktop.systemd1
+
+modules:
+  - name: libusb
+    buildsystem: autotools
+    config-opts:
+      - --disable-static
+      - --disable-udev
+    sources:
+      - type: archive
+        url: https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27.tar.bz2
+        sha256: ffaa41d741a8a3bee244ac8e54a72ea05bf2879663c098c82fc5757853441575
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - '*.la'
+
+  - name: nexus-open
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/golang/bin
+      env:
+        GOBIN: /app/bin
+        GOROOT: /usr/lib/sdk/golang
+        CGO_ENABLED: '1'
+    build-commands:
+      # Build the Go application
+      - |
+        . /usr/lib/sdk/golang/enable.sh
+        export CGO_LDFLAGS="-L/app/lib"
+        export CGO_CFLAGS="-I/app/include"
+        go build -v -o nexus-open \
+          -ldflags "-X main.version=1.0.0" \
+          ./cmd/nexus-open
+      # Install binary
+      - install -Dm755 nexus-open /app/bin/nexus-open
+      # Install desktop file
+      - install -Dm644 packaging/desktop/nexus-open.desktop /app/share/applications/com.github.nexusopen.NexusOpen.desktop
+      # Install icon (placeholder - update when icons are created)
+      # - install -Dm644 assets/icon-256.png /app/share/icons/hicolor/256x256/apps/com.github.nexusopen.NexusOpen.png
+      # Install metainfo
+      - install -Dm644 packaging/flatpak/com.github.nexusopen.NexusOpen.metainfo.xml /app/share/metainfo/com.github.nexusopen.NexusOpen.metainfo.xml
+      # Install udev rules (bundled but user needs to manually install to system)
+      - install -Dm644 packaging/udev/99-corsair-nexus.rules /app/share/nexus-open/99-corsair-nexus.rules
+    sources:
+      - type: git
+        url: https://github.com/yourusername/nexus-open.git
+        tag: v1.0.0
+        # For local testing, use:
+        # - type: dir
+        #   path: ../..
+
+  # Optional: Include Flutter UI as a separate module if desired
+  # - name: nexus-open-ui
+  #   buildsystem: simple
+  #   build-commands:
+  #     - flutter build linux --release
+  #     - cp -r build/linux/x64/release/bundle /app/lib/nexus-open-ui
+  #   sources:
+  #     - type: git
+  #       url: https://github.com/yourusername/nexus-open.git
+  #       tag: v1.0.0
+  #       path: ui

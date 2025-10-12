@@ -31,6 +31,11 @@ class SettingsState extends ChangeNotifier {
   String get textColor => _config?.textColor ?? '#FFFFFF';
   List<String> get imagePaths => _config?.imagePaths ?? [];
 
+  // Additional unit getters
+  String get temperatureUnit => unit == 'metric' ? 'Celsius' : 'Fahrenheit';
+  String get distanceUnit => unit == 'metric' ? 'Kilometers' : 'Miles';
+  String get dateFormat => 'MM/DD/YYYY'; // Default date format
+
   // Color getters
   Color get backgroundColorValue => _hexToColor(backgroundColor);
   Color get textColorValue => _hexToColor(textColor);
@@ -124,14 +129,45 @@ class SettingsState extends ChangeNotifier {
     updateConfig(unit: value);
   }
 
-  /// Set background color
-  void setBackgroundColor(String hexColor) {
-    updateConfig(backgroundColor: hexColor);
+  /// Set temperature unit
+  void setTemperatureUnit(String value) {
+    // Convert temperature unit to metric/imperial
+    final unit = value == 'Celsius' ? 'metric' : 'imperial';
+    updateConfig(unit: unit);
   }
 
-  /// Set text color
-  void setTextColor(String hexColor) {
-    updateConfig(textColor: hexColor);
+  /// Set distance unit
+  void setDistanceUnit(String value) {
+    // Convert distance unit to metric/imperial
+    final unit = value == 'Kilometers' ? 'metric' : 'imperial';
+    updateConfig(unit: unit);
+  }
+
+  /// Set date format
+  void setDateFormat(String value) {
+    // Date format is currently not stored in config, but we need the method for the UI
+    // In a future version, we could add this to the config
+    notifyListeners();
+  }
+
+  /// Set background color (accepts both Color and String)
+  void setBackgroundColor(dynamic color) {
+    if (color is Color) {
+      final hexColor = '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+      updateConfig(backgroundColor: hexColor);
+    } else if (color is String) {
+      updateConfig(backgroundColor: color);
+    }
+  }
+
+  /// Set text color (accepts both Color and String)
+  void setTextColor(dynamic color) {
+    if (color is Color) {
+      final hexColor = '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+      updateConfig(textColor: hexColor);
+    } else if (color is String) {
+      updateConfig(textColor: color);
+    }
   }
 
   /// Set background image

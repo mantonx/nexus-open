@@ -1,0 +1,20 @@
+Package: nexus-open
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: libusb-1.0-0 (>= 2:1.0.21)
+Recommends: flutter
+Maintainer: Nexus Open Team <contact@example.com>
+Homepage: https://github.com/yourusername/nexus-open
+Description: Linux controller for Corsair iCUE Nexus display
+ Nexus Open provides a native Linux desktop application to control
+ and configure your Corsair iCUE Nexus (640x48 pixel display).
+ .
+ Features:
+  - Real-time system monitoring (CPU/GPU temperatures, network stats)
+  - Weather display with location-based updates
+  - Custom backgrounds and color schemes
+  - Touch input support
+  - REST API for programmatic control
+  - Flutter-based configuration UI

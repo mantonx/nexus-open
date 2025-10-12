@@ -1,7 +1,9 @@
 package device
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -21,6 +23,12 @@ type NexusDevice struct {
 	device    *gousb.Device
 	intf      *gousb.Interface
 	connected bool
+
+	// HID feature support
+	hidFeatures *HIDFeatureDevice
+
+	// Touch input support
+	touchReader *TouchReader
 
 	// Reconnection state
 	reconnecting bool
@@ -115,6 +123,18 @@ func (n *NexusDevice) Connect(ctx context.Context) error {
 	n.intf = intf
 	n.connected = true
 
+	// Create HID features controller using the same USB device
+	// This uses USB control transfers, so no separate connection needed
+	n.hidFeatures = NewHIDFeatureDevice(n.device, n.logger)
+
+	// Initialize touch reader with interrupt endpoint 1 (IN)
+	if touchEp, err := intf.InEndpoint(1); err == nil {
+		n.touchReader = NewTouchReader(touchEp, n.logger)
+		n.logger.Debug("touch input initialized", "endpoint", 1)
+	} else {
+		n.logger.Warn("touch endpoint not available", "error", err)
+	}
+
 	n.logger.Info("device connected",
 		"vendor_id", n.config.VendorID,
 		"product_id", n.config.ProductID,
@@ -148,6 +168,9 @@ func (n *NexusDevice) disconnect() error {
 	if !n.connected {
 		return nil
 	}
+
+	// HID features share the same device, so no separate close needed
+	n.hidFeatures = nil
 
 	if n.intf != nil {
 		n.intf.Close()
@@ -206,6 +229,11 @@ func (n *NexusDevice) sendImageDataInChunks(imageData []byte) error {
 	buffer[0] = 2
 	buffer[1] = 5
 	buffer[2] = 31
+	buffer[5] = 0
+	buffer[7] = 3
+
+	// Use buffered writer like the old code
+	writer := bufio.NewWriterSize(ep, ChunkSize)
 
 	// Send data in chunks
 	for i := 0; i <= NumChunks-1; i++ {
@@ -224,6 +252,10 @@ func (n *NexusDevice) sendImageDataInChunks(imageData []byte) error {
 		// Copy pixel data (BGR format with alpha)
 		for j := 0; j < 255 && offset < DisplayWidth*DisplayHeight; j++ {
 			pixelIdx := offset * 4
+			// Bounds check to prevent reading past the imageData array
+			if pixelIdx+3 >= len(imageData) {
+				break
+			}
 			buffer[8+j*4] = imageData[pixelIdx+2]   // B
 			buffer[8+j*4+1] = imageData[pixelIdx+1] // G
 			buffer[8+j*4+2] = imageData[pixelIdx]   // R
@@ -231,14 +263,19 @@ func (n *NexusDevice) sendImageDataInChunks(imageData []byte) error {
 			offset++
 		}
 
-		// Write chunk
-		_, err := ep.Write(buffer)
+		// Write chunk using buffered writer
+		_, err := writer.Write(buffer)
 		if err != nil {
 			n.mu.Lock()
 			n.connected = false
 			n.mu.Unlock()
 			return NewDeviceError("write", ErrSendFailed)
 		}
+	}
+
+	// Flush buffered data
+	if err := writer.Flush(); err != nil {
+		return NewDeviceError("flush", err)
 	}
 
 	return nil
@@ -253,9 +290,15 @@ func (n *NexusDevice) ReadTouch(ctx context.Context) ([]TouchEvent, error) {
 		return nil, ErrDeviceDisconnected
 	}
 
-	// TODO: Implement actual touch reading
-	// This will be migrated from nexus/touch.go
-	return []TouchEvent{}, nil
+	if n.touchReader == nil {
+		return []TouchEvent{}, nil // Touch not available
+	}
+
+	// Create context with short timeout for non-blocking reads
+	touchCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+
+	return n.touchReader.Read(touchCtx)
 }
 
 // Health checks if the device connection is healthy.
@@ -325,4 +368,21 @@ func (n *NexusDevice) attemptReconnect() {
 	}
 
 	n.logger.Error("reconnection failed after all attempts")
+}
+
+// SetBrightness sets the display brightness (0-100).
+// Requires HID feature support to be available.
+func (n *NexusDevice) SetBrightness(brightness int) error {
+	if n.hidFeatures == nil {
+		return errors.New("HID features not available")
+	}
+	return n.hidFeatures.SetBrightness(brightness)
+}
+
+// GetFirmwareVersion queries and returns the device firmware version.
+func (n *NexusDevice) GetFirmwareVersion() (string, error) {
+	if n.hidFeatures == nil {
+		return "", errors.New("HID features not available")
+	}
+	return n.hidFeatures.GetFirmwareVersion()
 }

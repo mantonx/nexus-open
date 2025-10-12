@@ -38,7 +38,7 @@ type DisplayConfig struct {
 	FontFamily   string  `mapstructure:"font_family"`
 	FontSize     float64 `mapstructure:"font_size"`
 	TimeFontSize float64 `mapstructure:"time_font_size"`
-	Layout       string  `mapstructure:"layout"` // "compact", "balanced", "detailed"
+	Layout       string  `mapstructure:"layout"` // "dashboard", "minimalist", "compact", "balanced"
 }
 
 // Default configuration values.
@@ -52,7 +52,7 @@ const (
 	DefaultFontFamily      = "DejaVuSansMono"
 	DefaultFontSize        = 11.0
 	DefaultTimeFontSize    = 14.0
-	DefaultLayout          = "balanced"
+	DefaultLayout          = "dashboard"
 )
 
 // Validation constants.

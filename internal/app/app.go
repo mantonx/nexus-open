@@ -11,6 +11,8 @@ import (
 	"nexus-open/internal/api"
 	"nexus-open/internal/config"
 	"nexus-open/internal/device"
+	"nexus-open/internal/display"
+	"nexus-open/internal/instruments"
 )
 
 // App is the main application container that holds all dependencies.
@@ -25,11 +27,11 @@ type App struct {
 	apiPort    int
 
 	// Components
-	cfg       *config.Manager
-	device    device.Device
-	apiServer *api.Server
-	// display     *display.Renderer
-	// instruments *instruments.Registry
+	cfg         *config.Manager
+	device      device.Device
+	apiServer   *api.Server
+	instruments *instruments.Registry
+	display     *display.Manager
 
 	// Lifecycle
 	shutdownOnce sync.Once
@@ -129,12 +131,22 @@ func (a *App) initialize() error {
 
 	// 3. Create API server
 	apiAddr := fmt.Sprintf(":%d", a.apiPort)
-	a.apiServer = api.NewServer(apiAddr, a.cfg, a.logger)
+	a.apiServer = api.NewServer(apiAddr, a.cfg, a.device, a.logger)
 	a.logger.Info("API server created", "addr", apiAddr)
 
-	// TODO: Initialize remaining components
-	// 4. Set up display renderer
-	// 5. Initialize instruments
+	// 4. Initialize instruments registry
+	a.instruments = instruments.NewRegistry(a.logger, a.cfg)
+	if err := a.instruments.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize instruments: %w", err)
+	}
+	a.logger.Info("instruments initialized")
+
+	// 5. Set up display manager
+	a.display = display.NewManager(a.logger, a.cfg, a.device, a.instruments)
+	if err := a.display.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize display: %w", err)
+	}
+	a.logger.Info("display initialized")
 
 	return nil
 }
@@ -149,6 +161,18 @@ func (a *App) start() error {
 		// Don't fail - device will retry connection
 	}
 
+	// Start instruments data collection
+	if err := a.instruments.Start(a.ctx); err != nil {
+		return fmt.Errorf("failed to start instruments: %w", err)
+	}
+	a.logger.Info("instruments started")
+
+	// Start display update loop
+	if err := a.display.Start(a.ctx); err != nil {
+		return fmt.Errorf("failed to start display: %w", err)
+	}
+	a.logger.Info("display started")
+
 	// Start API server in background
 	a.wg.Add(1)
 	go func() {
@@ -157,11 +181,7 @@ func (a *App) start() error {
 			a.logger.Error("API server error", "error", err)
 		}
 	}()
-
-	// TODO: Start remaining components
-	// 1. Start instrument data collection
-	// 2. Start display update loop
-	// 3. Start configuration watcher
+	a.logger.Info("API server started")
 
 	return nil
 }
@@ -170,7 +190,21 @@ func (a *App) start() error {
 func (a *App) stop() error {
 	a.logger.Debug("stopping application components")
 
-	// Stop API server first
+	// Stop display updates first
+	if a.display != nil {
+		if err := a.display.Stop(); err != nil {
+			a.logger.Error("error stopping display", "error", err)
+		}
+	}
+
+	// Stop instruments
+	if a.instruments != nil {
+		if err := a.instruments.Stop(); err != nil {
+			a.logger.Error("error stopping instruments", "error", err)
+		}
+	}
+
+	// Stop API server
 	if a.apiServer != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -179,16 +213,12 @@ func (a *App) stop() error {
 		}
 	}
 
-	// Stop device connection
+	// Stop device connection last
 	if a.device != nil {
 		if err := a.device.Disconnect(); err != nil {
 			a.logger.Error("error disconnecting device", "error", err)
 		}
 	}
-
-	// TODO: Stop remaining components in reverse order
-	// 1. Stop display updates
-	// 2. Stop instruments
 
 	return nil
 }
