@@ -31,9 +31,10 @@ type TouchData struct {
 
 // TouchReader handles reading and processing touch input from the device.
 type TouchReader struct {
-	endpoint *gousb.InEndpoint
-	logger   *slog.Logger
-	lastData *TouchData
+	endpoint  *gousb.InEndpoint
+	logger    *slog.Logger
+	lastData  *TouchData
+	startData *TouchData // Track where touch started
 }
 
 // NewTouchReader creates a new touch input reader.
@@ -81,6 +82,17 @@ func (t *TouchReader) Read(ctx context.Context) ([]TouchEvent, error) {
 	x := int(buffer[6]) | (int(buffer[7]) << 8) // Little-endian
 	pressed := touchState != 0
 
+	// Log raw touch data when there's activity
+	if pressed || (t.lastData != nil && t.lastData.Pressed) {
+		t.logger.Info("touch data",
+			"pressed", pressed,
+			"x", x,
+			"touchState", touchState,
+			"raw", fmt.Sprintf("%02x %02x %02x %02x %02x %02x %02x %02x",
+				buffer[0], buffer[1], buffer[2], buffer[3],
+				buffer[4], buffer[5], buffer[6], buffer[7]))
+	}
+
 	currentData := &TouchData{
 		X:       x,
 		Y:       0, // Y coordinate not used in this device
@@ -88,33 +100,46 @@ func (t *TouchReader) Read(ctx context.Context) ([]TouchEvent, error) {
 		Time:    time.Now(),
 	}
 
-	// Detect gestures if we have previous data
+	// Detect gestures
 	events := []TouchEvent{}
 
 	if t.lastData != nil {
-		if gesture := t.detectGesture(t.lastData, currentData); gesture != GestureNone {
-			// Map old TouchEvent structure (button-based) to gestures
-			// For now, we use button IDs to represent gestures
-			var button int
-			switch gesture {
-			case GestureTap:
-				button = 0 // Center tap
-			case GestureSwipeLeft:
-				button = 1 // Swipe left
-			case GestureSwipeRight:
-				button = 2 // Swipe right
+		// Track touch start
+		if currentData.Pressed && !t.lastData.Pressed {
+			// Touch just started
+			t.startData = currentData
+			t.logger.Debug("touch started", "x", x)
+		}
+
+		// Detect gesture on release
+		if !currentData.Pressed && t.lastData.Pressed && t.startData != nil {
+			// Touch just released - check for gesture
+			gesture := t.detectGesture(t.startData, currentData)
+			if gesture != GestureNone {
+				var button int
+				switch gesture {
+				case GestureTap:
+					button = 0
+				case GestureSwipeLeft:
+					button = 1
+				case GestureSwipeRight:
+					button = 2
+				}
+
+				events = append(events, TouchEvent{
+					Button:   button,
+					Pressed:  true,
+					Duration: currentData.Time.Sub(t.startData.Time),
+				})
+
+				t.logger.Debug("touch gesture detected",
+					"gesture", gesture,
+					"start_x", t.startData.X,
+					"end_x", x,
+					"dx", x-t.startData.X,
+					"duration_ms", currentData.Time.Sub(t.startData.Time).Milliseconds())
 			}
-
-			events = append(events, TouchEvent{
-				Button:   button,
-				Pressed:  true,
-				Duration: currentData.Time.Sub(t.lastData.Time),
-			})
-
-			t.logger.Debug("touch gesture detected",
-				"gesture", gesture,
-				"x", x,
-				"duration_ms", currentData.Time.Sub(t.lastData.Time).Milliseconds())
+			t.startData = nil
 		}
 	}
 
