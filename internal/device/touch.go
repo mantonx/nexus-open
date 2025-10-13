@@ -72,9 +72,20 @@ func (t *TouchReader) Read(ctx context.Context) ([]TouchEvent, error) {
 		return []TouchEvent{}, nil // Not enough data
 	}
 
+	// Log what we're actually receiving
+	if buffer[0] != 0 || buffer[1] != 0 || buffer[2] != 0 {
+		t.logger.Info("RAW USB DATA",
+			"bytes", n,
+			"header", fmt.Sprintf("%02x %02x %02x", buffer[0], buffer[1], buffer[2]),
+			"full", fmt.Sprintf("%02x %02x %02x %02x %02x %02x %02x %02x",
+				buffer[0], buffer[1], buffer[2], buffer[3],
+				buffer[4], buffer[5], buffer[6], buffer[7]))
+	}
+
 	// Validate protocol header: [0x01, 0x02, 0x21]
 	if buffer[0] != 0x01 || buffer[1] != 0x02 || buffer[2] != 0x21 {
-		return []TouchEvent{}, nil // Invalid touch data
+		// Not a touch packet, silent skip
+		return []TouchEvent{}, nil
 	}
 
 	// Parse touch data
@@ -82,16 +93,14 @@ func (t *TouchReader) Read(ctx context.Context) ([]TouchEvent, error) {
 	x := int(buffer[6]) | (int(buffer[7]) << 8) // Little-endian
 	pressed := touchState != 0
 
-	// Log raw touch data when there's activity
-	if pressed || (t.lastData != nil && t.lastData.Pressed) {
-		t.logger.Info("touch data",
-			"pressed", pressed,
-			"x", x,
-			"touchState", touchState,
-			"raw", fmt.Sprintf("%02x %02x %02x %02x %02x %02x %02x %02x",
-				buffer[0], buffer[1], buffer[2], buffer[3],
-				buffer[4], buffer[5], buffer[6], buffer[7]))
-	}
+	// ALWAYS log when we get valid touch packets (for debugging)
+	t.logger.Info("TOUCH PACKET",
+		"pressed", pressed,
+		"touchState", touchState,
+		"x", x,
+		"raw", fmt.Sprintf("%02x %02x %02x %02x %02x %02x %02x %02x",
+			buffer[0], buffer[1], buffer[2], buffer[3],
+			buffer[4], buffer[5], buffer[6], buffer[7]))
 
 	currentData := &TouchData{
 		X:       x,
