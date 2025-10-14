@@ -29,6 +29,9 @@ func NewRegistry(logger *slog.Logger) *Registry {
 	r.registerBuiltin("clock", func() module.Module {
 		return builtin.NewClock()
 	})
+	r.registerBuiltin("clock24", func() module.Module {
+		return builtin.NewClockWithFormat(builtin.ClockFormat24Hour)
+	})
 	r.registerBuiltin("placeholder", func() module.Module {
 		return builtin.NewPlaceholder("Loading...")
 	})
