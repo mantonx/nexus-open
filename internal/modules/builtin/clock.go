@@ -9,12 +9,34 @@ import (
 
 // ClockModule displays current time and date with blinking colon
 type ClockModule struct {
-	showColon bool // Toggles every call for blinking effect
+	showColon bool
+	format    ClockFormat
 }
+
+// ClockFormat describes the time format for the clock module.
+type ClockFormat int
+
+const (
+	ClockFormat12Hour ClockFormat = iota
+	ClockFormat24Hour
+)
 
 // NewClock creates a new clock module
 func NewClock() *ClockModule {
-	return &ClockModule{showColon: true}
+	return NewClockWithFormat(ClockFormat12Hour)
+}
+
+// NewClockWithFormat creates a clock module with the requested format.
+func NewClockWithFormat(format ClockFormat) *ClockModule {
+	if format != ClockFormat24Hour {
+		format = ClockFormat12Hour
+	}
+	return &ClockModule{showColon: true, format: format}
+}
+
+// NewClock24 returns a 24-hour clock module.
+func NewClock24() *ClockModule {
+	return NewClockWithFormat(ClockFormat24Hour)
 }
 
 // Describe returns module metadata
@@ -25,7 +47,7 @@ func (m *ClockModule) Describe() (module.Descriptor, error) {
 		Author:      "Nexus Team",
 		Description: "Displays current time and date with blinking colon",
 		Icon:        "clock",
-		RefreshMs:   500, // Update every 500ms for blink effect
+		RefreshMs:   1000, // Default 1s refresh to match typical digital clocks
 	}, nil
 }
 
@@ -36,19 +58,29 @@ func (m *ClockModule) Sample() (module.Payload, error) {
 	// Toggle colon visibility for blinking effect
 	m.showColon = !m.showColon
 
-	var timeStr string
-	if m.showColon {
-		timeStr = now.Format("15:04") // "15:04" with colon
-	} else {
-		timeStr = now.Format("15 04") // "15 04" without colon (space instead)
-	}
+	timeStr := m.formatTime(now, m.showColon)
 
 	return module.Payload{
 		Primary:   timeStr,
 		Secondary: now.Format("Mon, Jan 02"), // Day, Month Date
 		Severity:  module.SeverityOK,
-		TTL:       500 * time.Millisecond,
+		TTL:       2 * time.Second, // Allow comfortable slack vs refresh to avoid stale flashes
 		Icon:      "clock",
 		Timestamp: now,
 	}, nil
+}
+
+func (m *ClockModule) formatTime(t time.Time, showColon bool) string {
+	switch m.format {
+	case ClockFormat24Hour:
+		if showColon {
+			return t.Format("15:04")
+		}
+		return t.Format("15 04")
+	default:
+		if showColon {
+			return t.Format("3:04 PM")
+		}
+		return t.Format("3 04 PM")
+	}
 }
