@@ -1,8 +1,8 @@
-package configuration
+// Package assets provides utilities for managing application assets like images.
+package assets
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"image"
 	"image/draw"
@@ -28,15 +28,18 @@ var allowedExtensions = map[string]bool{
 
 const (
 	targetWidth  = 640
-	targetHeight = 48 // Changed from 480 to match display dimensions
+	targetHeight = 48 // Display dimensions for Nexus
 )
 
-// GenerateUniqueFileName creates a unique filename with original extension
-func GenerateUniqueFileName(originalName string) string {
-	ext := filepath.Ext(originalName)
-	name := strings.TrimSuffix(originalName, ext) // Remove extension
-	hash := sha256.Sum256([]byte(name))
-	return fmt.Sprintf("%x%s", hash[:8], ext)
+// GetImagesDir returns the absolute path to the application's images directory.
+// It ensures the directory exists, creating it if necessary.
+func GetImagesDir() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	imagesPath := filepath.Join(configDir, "nexus-open", "images")
+	return imagesPath, os.MkdirAll(imagesPath, 0755)
 }
 
 // SaveImage saves and resizes an uploaded image to the images directory

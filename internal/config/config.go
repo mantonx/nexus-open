@@ -23,13 +23,13 @@ type Manager struct {
 
 // Config holds the application configuration.
 type Config struct {
-	Location        string       `mapstructure:"location"`
-	TimeFormat      string       `mapstructure:"time_format"`
-	Unit            string       `mapstructure:"unit"`
-	BackgroundColor string       `mapstructure:"background_color"`
-	BackgroundImage string       `mapstructure:"background_image"`
-	TextColor       string       `mapstructure:"text_color"`
-	ImagePaths      []string     `mapstructure:"image_paths"`
+	Location        string        `mapstructure:"location"`
+	TimeFormat      string        `mapstructure:"time_format"`
+	Unit            string        `mapstructure:"unit"`
+	BackgroundColor string        `mapstructure:"background_color"`
+	BackgroundImage string        `mapstructure:"background_image"`
+	TextColor       string        `mapstructure:"text_color"`
+	ImagePaths      []string      `mapstructure:"image_paths"`
 	Display         DisplayConfig `mapstructure:"display"`
 }
 
@@ -49,7 +49,7 @@ const (
 	DefaultBackgroundColor = "#000000"
 	DefaultBackgroundImage = "background.png"
 	DefaultTextColor       = "#FFFFFF"
-	DefaultFontFamily      = "DejaVuSansMono"
+	DefaultFontFamily      = "GoRegular"
 	DefaultFontSize        = 11.0
 	DefaultTimeFontSize    = 14.0
 	DefaultLayout          = "dashboard"

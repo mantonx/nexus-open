@@ -3,17 +3,30 @@ package touch
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
-	"nexus-open/internal/device"
 	"nexus-open/internal/zone"
+)
+
+// DeviceReader is an interface for reading touch events from a device.
+// This allows the handler to work with any device implementation without
+// importing the device package (breaking circular dependency).
+type DeviceReader interface {
+	IsConnected() bool
+	ReadTouch(ctx context.Context) ([]Event, error)
+}
+
+// Common errors
+var (
+	ErrDeviceDisconnected = errors.New("device disconnected")
 )
 
 // Handler processes touch events and dispatches them to zone-aware actions.
 type Handler struct {
 	logger      *slog.Logger
-	device      device.Device
+	device      DeviceReader
 	zoneManager *zone.Manager
 
 	// Gesture state
@@ -23,16 +36,18 @@ type Handler struct {
 	// Configuration
 	swipeEnabled bool
 	tapEnabled   bool
+	swipeConfig  SwipeConfig
 }
 
 // NewHandler creates a new touch handler.
-func NewHandler(logger *slog.Logger, dev device.Device, zm *zone.Manager) *Handler {
+func NewHandler(logger *slog.Logger, dev DeviceReader, zm *zone.Manager) *Handler {
 	return &Handler{
 		logger:       logger,
 		device:       dev,
 		zoneManager:  zm,
 		swipeEnabled: true,
 		tapEnabled:   true,
+		swipeConfig:  DefaultSwipeConfig(),
 	}
 }
 
@@ -57,7 +72,7 @@ func (h *Handler) processLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := h.processEvents(ctx); err != nil {
-				if err == device.ErrDeviceDisconnected {
+				if err == ErrDeviceDisconnected {
 					h.logger.Warn("device disconnected, stopping touch processing")
 					return
 				}
@@ -87,21 +102,29 @@ func (h *Handler) processEvents(ctx context.Context) error {
 }
 
 // handleEvent processes a single touch event.
-func (h *Handler) handleEvent(event device.TouchEvent) {
+func (h *Handler) handleEvent(event Event) {
 	h.lastTouch = time.Now()
 
+	// Handle live swipe tracking
+	if event.SwipeActive {
+		// Live swipe in progress - update transition progress
+		h.handleLiveSwipe(event)
+		return
+	}
+
+	// Handle completed gestures
 	switch event.Button {
 	case 0: // Tap gesture
 		if h.tapEnabled {
 			h.handleTap()
 		}
-	case 1: // Swipe left
+	case 1: // Swipe left (completed)
 		if h.swipeEnabled {
-			h.handleSwipeLeft()
+			h.handleSwipeComplete(event, true) // true = left
 		}
-	case 2: // Swipe right
+	case 2: // Swipe right (completed)
 		if h.swipeEnabled {
-			h.handleSwipeRight()
+			h.handleSwipeComplete(event, false) // false = right
 		}
 	default:
 		h.logger.Debug("unknown touch event button", "button", event.Button)
@@ -124,34 +147,67 @@ func (h *Handler) handleTap() {
 	h.logger.Info("tap detected - zone-specific action would go here")
 }
 
-// handleSwipeLeft processes a left swipe gesture.
-func (h *Handler) handleSwipeLeft() {
-	h.logger.Debug("swipe left detected")
+// handleLiveSwipe processes live swipe progress events.
+func (h *Handler) handleLiveSwipe(event Event) {
+	isLeft := event.Button == 1
 
-	// Swipe left = next page
-	if err := h.zoneManager.NextPage(); err != nil {
-		h.logger.Error("failed to switch to next page", "error", err)
+	h.logger.Debug("🪄 SWIPE LIVE",
+		"progress_pct", int(event.SwipeProgress*100),
+		"pixels", event.SwipePixels,
+		"direction", map[bool]string{true: "left", false: "right"}[isLeft],
+		"timestamp_ms", event.Timestamp.UnixMilli())
+
+	// Update the zone manager with live swipe progress
+	if err := h.zoneManager.UpdateLiveSwipe(event.SwipeProgress, isLeft); err != nil {
+		h.logger.Debug("failed to update live swipe", "error", err)
 		return
 	}
-
-	h.logger.Info("switched to next page",
-		"page", h.zoneManager.GetCurrentPage(),
-		"name", h.zoneManager.GetConfig().Pages[h.zoneManager.GetCurrentPage()].Name)
 }
 
-// handleSwipeRight processes a right swipe gesture.
-func (h *Handler) handleSwipeRight() {
-	h.logger.Debug("swipe right detected")
+// handleSwipeComplete processes a completed swipe gesture.
+func (h *Handler) handleSwipeComplete(event Event, isLeft bool) {
+	progress := event.SwipeProgress
+	velocity := event.Velocity
+	directionLabel := map[bool]string{true: "LEFT", false: "RIGHT"}[isLeft]
 
-	// Swipe right = previous page
-	if err := h.zoneManager.PrevPage(); err != nil {
-		h.logger.Error("failed to switch to previous page", "error", err)
-		return
+	h.logger.Debug("🛬 SWIPE RELEASE",
+		"direction", directionLabel,
+		"progress_pct", int(progress*100),
+		"velocity_px_s", int(velocity),
+		"pixels", event.SwipePixels,
+		"duration_ms", event.Duration.Milliseconds(),
+		"timestamp_ms", event.Timestamp.UnixMilli())
+
+	// Use multi-heuristic decision algorithm to determine commit vs cancel
+	shouldCommit, reason := h.swipeConfig.shouldCommitSwipe(progress, velocity)
+
+	if shouldCommit {
+		// Commit the swipe - finalize the live transition smoothly with momentum
+		h.logger.Info("✅ SWIPE COMMIT",
+			"direction", directionLabel,
+			"progress", int(progress*100),
+			"velocity_px_s", int(velocity),
+			"pixels", event.SwipePixels,
+			"reason", reason)
+
+		// Finalize the live swipe with momentum-based duration
+		// This handles the page change internally and smoothly completes the animation
+		if err := h.zoneManager.FinalizeLiveSwipe(progress, velocity, isLeft); err != nil {
+			h.logger.Error("❌ FinalizeLiveSwipe() failed", "error", err)
+			return
+		}
+	} else {
+		// Cancel the swipe - snap back to current page
+		h.logger.Info("↩️ SWIPE CANCEL",
+			"progress", int(progress*100),
+			"velocity_px_s", int(velocity),
+			"pixels", event.SwipePixels,
+			"reason", reason)
+
+		if err := h.zoneManager.CancelLiveSwipe(); err != nil {
+			h.logger.Error("failed to cancel swipe", "error", err)
+		}
 	}
-
-	h.logger.Info("switched to previous page",
-		"page", h.zoneManager.GetCurrentPage(),
-		"name", h.zoneManager.GetConfig().Pages[h.zoneManager.GetCurrentPage()].Name)
 }
 
 // SetSwipeEnabled enables or disables swipe gesture recognition.

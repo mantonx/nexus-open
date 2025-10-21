@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"nexus-open/internal/assets"
 	"nexus-open/internal/config"
-	"nexus-open/nexus/configuration"
 )
 
 // ErrorResponse represents an API error response.
@@ -100,7 +100,7 @@ func (s *Server) handleImageUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Save image
-	if err := configuration.SaveImage(header.Filename, file); err != nil {
+	if err := assets.SaveImage(header.Filename, file); err != nil {
 		s.logger.Error("failed to save image", "error", err, "filename", header.Filename)
 		s.respondError(w, "Failed to save image", http.StatusInternalServerError)
 		return
@@ -119,7 +119,7 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	images, err := configuration.GetImages()
+	images, err := assets.GetImages()
 	if err != nil {
 		s.logger.Error("failed to list images", "error", err)
 		s.respondError(w, "Failed to list images", http.StatusInternalServerError)
@@ -142,7 +142,7 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := configuration.DeleteImage(filename); err != nil {
+	if err := assets.DeleteImage(filename); err != nil {
 		s.logger.Error("failed to delete image", "error", err, "filename", filename)
 		s.respondError(w, "Failed to delete image", http.StatusInternalServerError)
 		return

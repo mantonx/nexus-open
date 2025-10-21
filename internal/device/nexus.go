@@ -1,60 +1,38 @@
+// Package device provides Nexus device implementation using HID API.
 package device
 
 import (
-	"bufio"
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/google/gousb"
+	"nexus-open/internal/touch"
+
+	"github.com/karalabe/hid"
 )
 
-// NexusDevice implements Device interface for Corsair iCUE Nexus.
+// NexusDevice implements the Device interface using HID API
+// This provides access to touch input, brightness, and animations
 type NexusDevice struct {
-	mu     sync.RWMutex
 	logger *slog.Logger
-
 	config ConnectionConfig
 
-	// USB resources
-	ctx       *gousb.Context
-	device    *gousb.Device
-	intf      *gousb.Interface
-	connected bool
+	// HID device
+	device      *hid.Device
+	deviceInfo  *hid.DeviceInfo
+	mu          sync.RWMutex
+	connected   bool
+	touchReader *touch.HIDTouchReader
 
-	// HID feature support
-	hidFeatures *HIDFeatureDevice
-
-	// Touch input support
-	touchReader *TouchReader
-
-	// Reconnection state
-	reconnecting bool
+	// Reconnection
+	reconnecting  bool
 	stopReconnect chan struct{}
 }
 
-// NewNexusDevice creates a new Nexus device instance.
+// NewNexusDevice creates a new HID-based Nexus device
 func NewNexusDevice(logger *slog.Logger, config ConnectionConfig) *NexusDevice {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	// Set defaults if not provided
-	if config.VendorID == 0 {
-		config.VendorID = 0x1b1c // Corsair
-	}
-	if config.ProductID == 0 {
-		config.ProductID = 0x1b8e // iCUE Nexus
-	}
-	if config.ReconnectRetries == 0 {
-		config.ReconnectRetries = 10
-	}
-	if config.ReconnectDelay == 0 {
-		config.ReconnectDelay = 5 * time.Second
-	}
-
 	return &NexusDevice{
 		logger:        logger,
 		config:        config,
@@ -62,83 +40,48 @@ func NewNexusDevice(logger *slog.Logger, config ConnectionConfig) *NexusDevice {
 	}
 }
 
-// Connect establishes a connection to the Nexus device.
+// Connect establishes HID connection to the device
 func (n *NexusDevice) Connect(ctx context.Context) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if n.connected {
-		return nil // Already connected
-	}
-
-	// Initialize USB context if needed
-	if n.ctx == nil {
-		n.ctx = gousb.NewContext()
-	}
-
-	// Find and open device
-	devices, err := n.ctx.OpenDevices(func(desc *gousb.DeviceDesc) bool {
-		return desc.Vendor == gousb.ID(n.config.VendorID) &&
-			desc.Product == gousb.ID(n.config.ProductID)
-	})
-	if err != nil {
-		return NewDeviceError("open_devices", err)
-	}
-
+	// Enumerate HID devices to find iCUE Nexus
+	devices := hid.Enumerate(n.config.VendorID, n.config.ProductID)
 	if len(devices) == 0 {
-		return NewDeviceError("find_device", ErrDeviceNotFound)
+		return ErrDeviceNotFound
 	}
 
-	// Use first matching device
-	n.device = devices[0]
-
-	// Close any extra devices
-	for i := 1; i < len(devices); i++ {
-		devices[i].Close()
+	// Log all interfaces found
+	n.logger.Info("HID interfaces found", "count", len(devices))
+	for i, dev := range devices {
+		n.logger.Info("HID interface",
+			"index", i,
+			"path", dev.Path,
+			"interface", dev.Interface,
+			"usage_page", fmt.Sprintf("0x%04x", dev.UsagePage),
+			"usage", fmt.Sprintf("0x%04x", dev.Usage))
 	}
 
-	// Set auto detach kernel driver
-	if err := n.device.SetAutoDetach(true); err != nil {
-		n.device.Close()
-		n.device = nil
-		return NewDeviceError("auto_detach", err)
-	}
+	// Use the first matching device
+	n.deviceInfo = &devices[0]
 
-	// Get device configuration
-	config, err := n.device.Config(1)
+	// Open the device
+	device, err := n.deviceInfo.Open()
 	if err != nil {
-		n.device.Close()
-		n.device = nil
-		return NewDeviceError("get_config", ErrConfigFailed)
+		return fmt.Errorf("failed to open HID device: %w", err)
 	}
 
-	// Claim interface
-	intf, err := config.Interface(0, 0)
-	if err != nil {
-		n.device.Close()
-		n.device = nil
-		return NewDeviceError("claim_interface", ErrInterfaceFailed)
-	}
-
-	n.intf = intf
+	n.device = device
 	n.connected = true
 
-	// Create HID features controller using the same USB device
-	// This uses USB control transfers, so no separate connection needed
-	n.hidFeatures = NewHIDFeatureDevice(n.device, n.logger)
+	// Initialize touch reader
+	n.touchReader = touch.NewHIDTouchReader(device, n.logger)
 
-	// Initialize touch reader with interrupt endpoint 1 (IN)
-	if touchEp, err := intf.InEndpoint(1); err == nil {
-		n.touchReader = NewTouchReader(touchEp, n.logger)
-		n.logger.Debug("touch input initialized", "endpoint", 1)
-	} else {
-		n.logger.Warn("touch endpoint not available", "error", err)
-	}
-
-	n.logger.Info("device connected",
+	n.logger.Info("HID device connected",
 		"vendor_id", n.config.VendorID,
 		"product_id", n.config.ProductID,
-	)
+		"manufacturer", n.deviceInfo.Manufacturer,
+		"product", n.deviceInfo.Product)
 
 	// Start reconnection monitoring
 	if !n.reconnecting {
@@ -149,7 +92,7 @@ func (n *NexusDevice) Connect(ctx context.Context) error {
 	return nil
 }
 
-// Disconnect closes the device connection.
+// Disconnect closes the HID device connection
 func (n *NexusDevice) Disconnect() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -160,166 +103,186 @@ func (n *NexusDevice) Disconnect() error {
 		n.reconnecting = false
 	}
 
-	return n.disconnect()
-}
-
-// disconnect closes resources without locking (internal use).
-func (n *NexusDevice) disconnect() error {
-	if !n.connected {
-		return nil
-	}
-
-	// HID features share the same device, so no separate close needed
-	n.hidFeatures = nil
-
-	if n.intf != nil {
-		n.intf.Close()
-		n.intf = nil
-	}
-
 	if n.device != nil {
-		n.device.Close()
+		if err := n.device.Close(); err != nil {
+			n.logger.Warn("error closing HID device", "error", err)
+		}
 		n.device = nil
 	}
 
 	n.connected = false
+	n.logger.Info("HID device disconnected")
 
-	n.logger.Info("device disconnected")
 	return nil
 }
 
-// IsConnected returns the current connection status.
+// IsConnected returns whether the device is connected
 func (n *NexusDevice) IsConnected() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.connected
 }
 
-// SendFrame sends a frame of image data to the device.
+// SendFrame sends a frame to the device using HID writes
 func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
 	n.mu.RLock()
-	defer n.mu.RUnlock()
-
 	if !n.connected || n.device == nil {
+		n.mu.RUnlock()
 		return ErrDeviceDisconnected
 	}
+	device := n.device
+	n.mu.RUnlock()
 
+	// Validate frame size (640x48x4 = 122,880 bytes RGBA)
 	if len(data) != FrameSize {
-		return ErrInvalidFrame
+		return fmt.Errorf("%w: expected %d bytes, got %d", ErrInvalidFrame, FrameSize, len(data))
 	}
 
-	// This will be implemented with the actual USB protocol
-	// For now, placeholder to maintain interface
-	return n.sendImageDataInChunks(data)
-}
+	// Send frame in chunks using HID protocol
+	// Using NexusTool's protocol: 0x40 with variable payload length
+	const chunkSize = 1024
+	const headerSize = 8
+	const maxPayload = chunkSize - headerSize
 
-// sendImageDataInChunks sends frame data in chunks via USB.
-func (n *NexusDevice) sendImageDataInChunks(imageData []byte) error {
-	if n.intf == nil {
-		return ErrDeviceDisconnected
-	}
+	totalChunks := (len(data) + maxPayload - 1) / maxPayload
 
-	// Get output endpoint
-	ep, err := n.intf.OutEndpoint(2)
-	if err != nil {
-		return NewDeviceError("get_endpoint", err)
-	}
+	for chunkNum := 0; chunkNum < totalChunks; chunkNum++ {
+		start := chunkNum * maxPayload
+		end := start + maxPayload
+		if end > len(data) {
+			end = len(data)
+		}
 
-	buffer := make([]byte, ChunkSize)
-	buffer[0] = 2
-	buffer[1] = 5
-	buffer[2] = 31
-	buffer[5] = 0
-	buffer[7] = 3
+		payloadLen := end - start
+		isLast := chunkNum == totalChunks-1
 
-	// Use buffered writer like the old code
-	writer := bufio.NewWriterSize(ep, ChunkSize)
-
-	// Send data in chunks
-	for i := 0; i <= NumChunks-1; i++ {
-		buffer[4] = byte(i)
-
-		if i != NumChunks-1 {
-			buffer[3] = 0
-			buffer[6] = 248
+		// Build chunk packet
+		packet := make([]byte, chunkSize)
+		packet[0] = 0x02 // Endpoint 2
+		packet[1] = 0x05 // Command: Send Image
+		packet[2] = 0x40 // Protocol variant (NexusTool uses this)
+		if isLast {
+			packet[3] = 0x01 // Last chunk flag
 		} else {
-			buffer[3] = 1
-			buffer[6] = 192
+			packet[3] = 0x00
 		}
+		packet[4] = byte(chunkNum & 0xFF)        // Chunk number low
+		packet[5] = byte((chunkNum >> 8) & 0xFF) // Chunk number high
+		packet[6] = byte(payloadLen & 0xFF)      // Payload length low
+		packet[7] = byte((payloadLen >> 8) & 0xFF) // Payload length high
 
-		offset := i * 254
-
-		// Copy pixel data (BGR format with alpha)
-		for j := 0; j < 255 && offset < DisplayWidth*DisplayHeight; j++ {
-			pixelIdx := offset * 4
-			// Bounds check to prevent reading past the imageData array
-			if pixelIdx+3 >= len(imageData) {
-				break
+		// Copy payload (convert RGBA to BGRA for device)
+		for i := 0; i < payloadLen; i += 4 {
+			if start+i+3 < len(data) {
+				// Swap R and B for BGR format
+				packet[headerSize+i] = data[start+i+2]     // B
+				packet[headerSize+i+1] = data[start+i+1]   // G
+				packet[headerSize+i+2] = data[start+i]     // R
+				packet[headerSize+i+3] = data[start+i+3]   // A
 			}
-			buffer[8+j*4] = imageData[pixelIdx+2]   // B
-			buffer[8+j*4+1] = imageData[pixelIdx+1] // G
-			buffer[8+j*4+2] = imageData[pixelIdx]   // R
-			buffer[8+j*4+3] = 255                   // A
-			offset++
 		}
 
-		// Write chunk using buffered writer
-		_, err := writer.Write(buffer)
+		// Write via HID
+		_, err := device.Write(packet)
 		if err != nil {
-			n.mu.Lock()
-			n.connected = false
-			n.mu.Unlock()
-			return NewDeviceError("write", ErrSendFailed)
+			n.logger.Error("HID write failed", "chunk", chunkNum, "error", err)
+			return fmt.Errorf("failed to write chunk %d: %w", chunkNum, err)
 		}
-	}
-
-	// Flush buffered data
-	if err := writer.Flush(); err != nil {
-		return NewDeviceError("flush", err)
 	}
 
 	return nil
 }
 
-// ReadTouch reads touch events from the device.
-func (n *NexusDevice) ReadTouch(ctx context.Context) ([]TouchEvent, error) {
+// ReadTouch reads touch events from the HID device
+func (n *NexusDevice) ReadTouch(ctx context.Context) ([]touch.Event, error) {
 	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	if !n.connected {
-		return nil, ErrDeviceDisconnected
+	if !n.connected || n.touchReader == nil {
+		n.mu.RUnlock()
+		return []touch.Event{}, ErrDeviceDisconnected
 	}
+	reader := n.touchReader
+	n.mu.RUnlock()
 
-	if n.touchReader == nil {
-		return []TouchEvent{}, nil // Touch not available
-	}
-
-	// Create context with short timeout for non-blocking reads
-	touchCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-	defer cancel()
-
-	return n.touchReader.Read(touchCtx)
+	return reader.Read(ctx)
 }
 
-// Health checks if the device connection is healthy.
+// Health checks the device connection health
 func (n *NexusDevice) Health() error {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	if n.device == nil {
-		return NewDeviceError("health_check", ErrDeviceDisconnected)
-	}
-
-	if n.intf == nil {
-		return NewDeviceError("health_check", ErrInterfaceFailed)
+	if !n.connected {
+		return ErrDeviceDisconnected
 	}
 
 	return nil
 }
 
-// monitorConnection monitors connection and attempts reconnection.
+// SetBrightness sets the display brightness (0-100)
+func (n *NexusDevice) SetBrightness(brightness int) error {
+	n.mu.RLock()
+	if !n.connected || n.device == nil {
+		n.mu.RUnlock()
+		return ErrDeviceDisconnected
+	}
+	device := n.device
+	n.mu.RUnlock()
+
+	if brightness < 0 || brightness > 100 {
+		return fmt.Errorf("brightness must be 0-100, got %d", brightness)
+	}
+
+	// Use simple NexusTool protocol: [3, 1, brightness]
+	report := []byte{3, 1, byte(brightness)}
+
+	_, err := device.Write(report) // HID uses Write for feature reports too
+	if err != nil {
+		return fmt.Errorf("failed to set brightness: %w", err)
+	}
+
+	n.logger.Debug("brightness set", "value", brightness)
+	return nil
+}
+
+// GetFirmwareVersion queries the device firmware version
+func (n *NexusDevice) GetFirmwareVersion() (string, error) {
+	n.mu.RLock()
+	if !n.connected || n.device == nil {
+		n.mu.RUnlock()
+		return "", ErrDeviceDisconnected
+	}
+	device := n.device
+	n.mu.RUnlock()
+
+	// Read Feature Report 5 (64 bytes)
+	report := make([]byte, 64)
+	report[0] = 5 // Report ID
+
+	bytesRead, err := device.Read(report)
+	if err != nil {
+		return "", fmt.Errorf("failed to read feature report: %w", err)
+	}
+
+	// Firmware string starts at byte 6, null-terminated
+	if bytesRead < 7 {
+		return "", fmt.Errorf("feature report too short: %d bytes", bytesRead)
+	}
+
+	// Find null terminator
+	end := 6
+	for end < bytesRead && report[end] != 0 {
+		end++
+	}
+
+	firmware := string(report[6:end])
+	n.logger.Debug("firmware version", "version", firmware)
+
+	return firmware, nil
+}
+
+// monitorConnection monitors for device disconnection and attempts reconnection
 func (n *NexusDevice) monitorConnection() {
-	ticker := time.NewTicker(n.config.ReconnectDelay)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -327,62 +290,18 @@ func (n *NexusDevice) monitorConnection() {
 		case <-n.stopReconnect:
 			return
 		case <-ticker.C:
-			n.mu.RLock()
-			connected := n.connected
-			n.mu.RUnlock()
+			if err := n.Health(); err != nil {
+				n.logger.Warn("device health check failed, attempting reconnect", "error", err)
 
-			if !connected {
-				n.attemptReconnect()
-			} else {
-				// Check health
-				if err := n.Health(); err != nil {
-					n.logger.Warn("device health check failed", "error", err)
-					n.mu.Lock()
-					n.disconnect()
-					n.mu.Unlock()
+				// Attempt reconnection
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if err := n.Connect(ctx); err != nil {
+					n.logger.Error("reconnection failed", "error", err)
+				} else {
+					n.logger.Info("device reconnected successfully")
 				}
+				cancel()
 			}
 		}
 	}
-}
-
-// attemptReconnect tries to reconnect to the device.
-func (n *NexusDevice) attemptReconnect() {
-	ctx := context.Background()
-
-	for i := 0; i < n.config.ReconnectRetries; i++ {
-		n.logger.Info("attempting reconnection",
-			"attempt", i+1,
-			"max_retries", n.config.ReconnectRetries,
-		)
-
-		if err := n.Connect(ctx); err == nil {
-			n.logger.Info("reconnection successful")
-			return
-		}
-
-		if i < n.config.ReconnectRetries-1 {
-			backoff := time.Duration(1<<uint(i)) * time.Second
-			time.Sleep(backoff)
-		}
-	}
-
-	n.logger.Error("reconnection failed after all attempts")
-}
-
-// SetBrightness sets the display brightness (0-100).
-// Requires HID feature support to be available.
-func (n *NexusDevice) SetBrightness(brightness int) error {
-	if n.hidFeatures == nil {
-		return errors.New("HID features not available")
-	}
-	return n.hidFeatures.SetBrightness(brightness)
-}
-
-// GetFirmwareVersion queries and returns the device firmware version.
-func (n *NexusDevice) GetFirmwareVersion() (string, error) {
-	if n.hidFeatures == nil {
-		return "", errors.New("HID features not available")
-	}
-	return n.hidFeatures.GetFirmwareVersion()
 }

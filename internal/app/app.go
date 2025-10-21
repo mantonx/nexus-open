@@ -11,8 +11,9 @@ import (
 	"nexus-open/internal/api"
 	"nexus-open/internal/config"
 	"nexus-open/internal/device"
-	"nexus-open/internal/display"
 	"nexus-open/internal/instruments"
+	"nexus-open/internal/touch"
+	"nexus-open/internal/zone"
 )
 
 // App is the main application container that holds all dependencies.
@@ -27,11 +28,13 @@ type App struct {
 	apiPort    int
 
 	// Components
-	cfg         *config.Manager
-	device      device.Device
-	apiServer   *api.Server
-	instruments *instruments.Registry
-	display     *display.Manager
+	cfg          *config.Manager
+	device       device.Device
+	apiServer    *api.Server
+	instruments  *instruments.Registry
+	zoneManager  *zone.Manager
+	zoneSampler  *zone.Sampler
+	touchHandler *touch.Handler
 
 	// Lifecycle
 	shutdownOnce sync.Once
@@ -134,19 +137,33 @@ func (a *App) initialize() error {
 	a.apiServer = api.NewServer(apiAddr, a.cfg, a.device, a.logger)
 	a.logger.Info("API server created", "addr", apiAddr)
 
-	// 4. Initialize instruments registry
+	// 4. Initialize instruments registry (legacy - kept for API compatibility)
 	a.instruments = instruments.NewRegistry(a.logger, a.cfg)
 	if err := a.instruments.Initialize(); err != nil {
 		return fmt.Errorf("failed to initialize instruments: %w", err)
 	}
 	a.logger.Info("instruments initialized")
 
-	// 5. Set up display manager
-	a.display = display.NewManager(a.logger, a.cfg, a.device, a.instruments)
-	if err := a.display.Initialize(); err != nil {
-		return fmt.Errorf("failed to initialize display: %w", err)
+	// 5. Create zone manager
+	layoutPath := "configs/layouts/multi-page.yaml"
+	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, layoutPath)
+	if err != nil {
+		return fmt.Errorf("failed to create zone manager: %w", err)
 	}
-	a.logger.Info("display initialized")
+	a.logger.Info("zone manager initialized",
+		"pages", len(a.zoneManager.GetConfig().Pages),
+		"current_page", a.zoneManager.GetConfig().Pages[0].Name)
+
+	// 6. Create module sampler
+	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager)
+	a.logger.Info("zone sampler created")
+
+	// Register page change callback to restart sampler on page switch
+	a.zoneManager.SetOnPageChange(a.zoneSampler.RestartForPage)
+
+	// 7. Create touch handler
+	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
+	a.logger.Info("touch handler created")
 
 	return nil
 }
@@ -161,17 +178,28 @@ func (a *App) start() error {
 		// Don't fail - device will retry connection
 	}
 
-	// Start instruments data collection
+	// Start instruments data collection (legacy - kept for API)
 	if err := a.instruments.Start(a.ctx); err != nil {
 		return fmt.Errorf("failed to start instruments: %w", err)
 	}
 	a.logger.Info("instruments started")
 
-	// Start display update loop
-	if err := a.display.Start(a.ctx); err != nil {
-		return fmt.Errorf("failed to start display: %w", err)
+	// Start module sampler
+	if err := a.zoneSampler.Start(); err != nil {
+		return fmt.Errorf("failed to start zone sampler: %w", err)
 	}
-	a.logger.Info("display started")
+	a.logger.Info("zone sampler started")
+
+	// Start touch handler
+	if err := a.touchHandler.Start(a.ctx); err != nil {
+		return fmt.Errorf("failed to start touch handler: %w", err)
+	}
+	a.logger.Info("touch handler started")
+
+	// Start zone rendering loop
+	a.wg.Add(1)
+	go a.renderLoop()
+	a.logger.Info("zone rendering started")
 
 	// Start API server in background
 	a.wg.Add(1)
@@ -186,18 +214,51 @@ func (a *App) start() error {
 	return nil
 }
 
+// renderLoop continuously renders frames and sends them to the device
+func (a *App) renderLoop() {
+	defer a.wg.Done()
+
+	const targetFPS = 30
+	frameDuration := time.Second / targetFPS
+	ticker := time.NewTicker(frameDuration)
+	defer ticker.Stop()
+
+	a.logger.Info("render loop started", "fps", targetFPS)
+
+	for {
+		select {
+		case <-a.ctx.Done():
+			a.logger.Info("render loop stopped")
+			return
+
+		case <-ticker.C:
+			// Render frame using zone manager
+			frame, err := a.zoneManager.RenderFrame()
+			if err != nil {
+				a.logger.Error("failed to render frame", "error", err)
+				continue
+			}
+
+			// Send to device if connected
+			if a.device.IsConnected() {
+				if err := a.device.SendFrame(a.ctx, frame.Pix); err != nil {
+					a.logger.Debug("failed to send frame", "error", err)
+				}
+			}
+		}
+	}
+}
+
 // stop halts all running components.
 func (a *App) stop() error {
 	a.logger.Debug("stopping application components")
 
-	// Stop display updates first
-	if a.display != nil {
-		if err := a.display.Stop(); err != nil {
-			a.logger.Error("error stopping display", "error", err)
-		}
+	// Stop zone sampler
+	if a.zoneSampler != nil {
+		a.zoneSampler.Stop()
 	}
 
-	// Stop instruments
+	// Stop instruments (legacy)
 	if a.instruments != nil {
 		if err := a.instruments.Stop(); err != nil {
 			a.logger.Error("error stopping instruments", "error", err)

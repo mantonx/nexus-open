@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,8 +22,8 @@ import (
 const (
 	openMeteoBaseURL   = "https://api.open-meteo.com/v1/forecast?temperature_unit=%s&wind_speed_unit=%s&latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code,wind_speed_10m,is_day"
 	nominatimSearchURL = "https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1"
-	defaultLat         = 40.7128  // New York, NY
-	defaultLon         = -74.0060 // New York, NY
+	defaultLat         = 40.7282  // Jersey City, NJ
+	defaultLon         = -74.0776 // Jersey City, NJ
 	cacheTimeout       = 5 * time.Minute
 )
 
@@ -65,11 +66,14 @@ func NewWeatherModule() *WeatherModule {
 	homeDir, _ := os.UserHomeDir()
 	configPath := filepath.Join(homeDir, ".config", "nexus-open", "config.yaml")
 
-	return &WeatherModule{
+	wm := &WeatherModule{
 		configPath:  configPath,
 		coordsCache: make(map[string]coords),
-		unit:        "imperial", // default
+		location:    "Jersey City, NJ",
+		unit:        "imperial", // default (°F)
 	}
+	go wm.watchConfigChanges()
+	return wm
 }
 
 // Describe returns module metadata
@@ -137,12 +141,15 @@ func (m *WeatherModule) formatPayload(data *WeatherData) module.Payload {
 		tempStr = fmt.Sprintf("%.0f°C", data.Temperature)
 	}
 
+	fmt.Printf("weather payload primary=%q secondary runes=%v icon=%q\n",
+		tempStr, []rune(data.Location), data.Icon)
+
 	return module.Payload{
 		Primary:   tempStr,
-		Secondary: fmt.Sprintf("%s %s", data.Location, data.Icon),
+		Secondary: strings.TrimSpace(data.Location),
 		Severity:  module.SeverityOK,
 		TTL:       5 * time.Minute,
-		Icon:      "cloud",
+		Icon:      data.Icon,
 		Timestamp: time.Now(),
 	}
 }
@@ -164,11 +171,16 @@ func (m *WeatherModule) loadConfig() {
 	}
 
 	m.mu.Lock()
+	oldLocation := m.location
+	oldUnit := m.unit
 	if config.Location != "" {
 		m.location = config.Location
 	}
 	if config.Unit != "" {
 		m.unit = config.Unit
+	}
+	if m.location != oldLocation || m.unit != oldUnit {
+		m.cachedData = nil
 	}
 	m.mu.Unlock()
 }
@@ -304,34 +316,34 @@ func (m *WeatherModule) getCityCoordinates(location string) (float64, float64, e
 // weatherCodeToIcon converts WMO weather code to icon character
 func weatherCodeToIcon(code int, isDay bool) string {
 	weatherIcons := map[int]struct{ day, night string }{
-		0:  {day: "☀", night: "☾"},
-		1:  {day: "☀", night: "☾"},
-		2:  {day: "⛅", night: "☁"},
-		3:  {day: "☁", night: "☁"},
-		45: {day: "🌫", night: "🌫"},
-		48: {day: "🌫", night: "🌫"},
-		51: {day: "🌦", night: "🌧"},
-		53: {day: "🌦", night: "🌧"},
-		55: {day: "🌧", night: "🌧"},
-		56: {day: "🌧", night: "🌧"},
-		57: {day: "🌧", night: "🌧"},
-		61: {day: "🌦", night: "🌧"},
-		63: {day: "🌧", night: "🌧"},
-		65: {day: "🌧", night: "🌧"},
-		66: {day: "🌧", night: "🌧"},
-		67: {day: "🌧", night: "🌧"},
-		71: {day: "🌨", night: "🌨"},
-		73: {day: "❄", night: "❄"},
-		75: {day: "❄", night: "❄"},
-		77: {day: "❄", night: "❄"},
-		80: {day: "🌦", night: "🌧"},
-		81: {day: "🌧", night: "🌧"},
-		82: {day: "🌧", night: "🌧"},
-		85: {day: "🌨", night: "🌨"},
-		86: {day: "❄", night: "❄"},
-		95: {day: "⛈", night: "⛈"},
-		96: {day: "⛈", night: "⛈"},
-		99: {day: "⛈", night: "⛈"},
+		0:  {day: "\uf185", night: "\uf186"}, // sun / moon
+		1:  {day: "\uf185", night: "\uf186"},
+		2:  {day: "\uf6c4", night: "\uf6c3"}, // cloud-sun / cloud-moon
+		3:  {day: "\uf0c2", night: "\uf0c2"}, // cloud
+		45: {day: "\uf75f", night: "\uf75f"}, // smog
+		48: {day: "\uf75f", night: "\uf75f"},
+		51: {day: "\uf73d", night: "\uf73d"}, // cloud-rain
+		53: {day: "\uf73d", night: "\uf73d"},
+		55: {day: "\uf73d", night: "\uf73d"},
+		56: {day: "\uf73d", night: "\uf73d"},
+		57: {day: "\uf73d", night: "\uf73d"},
+		61: {day: "\uf73d", night: "\uf73d"},
+		63: {day: "\uf73d", night: "\uf73d"},
+		65: {day: "\uf73d", night: "\uf73d"},
+		66: {day: "\uf73d", night: "\uf73d"},
+		67: {day: "\uf73d", night: "\uf73d"},
+		71: {day: "\uf2dc", night: "\uf2dc"}, // snowflake
+		73: {day: "\uf2dc", night: "\uf2dc"},
+		75: {day: "\uf2dc", night: "\uf2dc"},
+		77: {day: "\uf2dc", night: "\uf2dc"},
+		80: {day: "\uf73d", night: "\uf73d"},
+		81: {day: "\uf73d", night: "\uf73d"},
+		82: {day: "\uf73d", night: "\uf73d"},
+		85: {day: "\uf2dc", night: "\uf2dc"},
+		86: {day: "\uf2dc", night: "\uf2dc"},
+		95: {day: "\uf76c", night: "\uf76c"}, // thunderstorm
+		96: {day: "\uf76c", night: "\uf76c"},
+		99: {day: "\uf76c", night: "\uf76c"},
 	}
 
 	if weather, ok := weatherIcons[code]; ok {
@@ -340,7 +352,7 @@ func weatherCodeToIcon(code int, isDay bool) string {
 		}
 		return weather.night
 	}
-	return "❓"
+	return "\uf0c2" // default cloud
 }
 
 // weatherCodeToCondition converts WMO weather code to text description

@@ -16,18 +16,19 @@ import (
 
 	"nexus-open/internal/config"
 	"nexus-open/internal/device"
+	"nexus-open/internal/fonts"
 	"nexus-open/internal/instruments"
 )
 
 // NexusRenderer implements the display rendering for the Nexus device
 type NexusRenderer struct {
-	logger        *slog.Logger
-	cfg           *config.Manager
-	device        device.Device
-	fontManager   *FontManager
-	iconSet       *IconSet
-	iconRenderer  *IconRenderer
-	layoutManager *LayoutManager
+	logger         *slog.Logger
+	cfg            *config.Manager
+	device         device.Device
+	fontManager    *fonts.Manager
+	iconSet        *IconSet
+	iconRenderer   *IconRenderer
+	layoutManager  *LayoutManager
 	layoutRenderer *LayoutRenderer
 
 	// Display properties
@@ -39,9 +40,9 @@ type NexusRenderer struct {
 	background      *image.RGBA
 	textColor       color.Color
 	backgroundColor color.Color
-	font            font.Face     // Normal text font
-	timeFont        font.Face     // Larger font for time
-	loadedFontName  string        // Name of loaded font
+	font            font.Face // Normal text font
+	timeFont        font.Face // Larger font for time
+	loadedFontName  string    // Name of loaded font
 
 	// Animation state
 	blinkState bool
@@ -56,7 +57,7 @@ func NewNexusRenderer(logger *slog.Logger, cfg *config.Manager, dev device.Devic
 		logger:          logger,
 		cfg:             cfg,
 		device:          dev,
-		fontManager:     NewFontManager(logger),
+		fontManager:     fonts.NewManager(logger),
 		iconSet:         iconSet,
 		layoutManager:   layoutManager,
 		width:           Width,
