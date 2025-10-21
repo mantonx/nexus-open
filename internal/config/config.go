@@ -22,23 +22,50 @@ type Manager struct {
 }
 
 // Config holds the application configuration.
+// openapi:schema Config
 type Config struct {
-	Location        string        `mapstructure:"location"`
-	TimeFormat      string        `mapstructure:"time_format"`
-	Unit            string        `mapstructure:"unit"`
-	BackgroundColor string        `mapstructure:"background_color"`
-	BackgroundImage string        `mapstructure:"background_image"`
-	TextColor       string        `mapstructure:"text_color"`
-	ImagePaths      []string      `mapstructure:"image_paths"`
-	Display         DisplayConfig `mapstructure:"display"`
+	// openapi:description Location for weather and timezone (city, state or coordinates)
+	// openapi:example Jersey City, NJ
+	Location string `mapstructure:"location" json:"location"`
+	// openapi:description Time format (12h or 24h)
+	// openapi:enum 12h 24h
+	// openapi:example 12h
+	TimeFormat string `mapstructure:"time_format" json:"time_format"`
+	// openapi:description Unit system (metric or imperial)
+	// openapi:enum metric imperial
+	// openapi:example imperial
+	Unit string `mapstructure:"unit" json:"unit"`
+	// openapi:description Background color in hex format
+	// openapi:example #000000
+	BackgroundColor string `mapstructure:"background_color" json:"background_color"`
+	// openapi:description Background image filename
+	// openapi:example background.png
+	BackgroundImage string `mapstructure:"background_image" json:"background_image"`
+	// openapi:description Text color in hex format
+	// openapi:example #FFFFFF
+	TextColor string `mapstructure:"text_color" json:"text_color"`
+	// openapi:description List of custom image paths
+	ImagePaths []string `mapstructure:"image_paths" json:"image_paths"`
+	// openapi:description Display-specific configuration
+	Display DisplayConfig `mapstructure:"display" json:"display"`
 }
 
 // DisplayConfig holds display-specific configuration
+// openapi:schema DisplayConfig
 type DisplayConfig struct {
-	FontFamily   string  `mapstructure:"font_family"`
-	FontSize     float64 `mapstructure:"font_size"`
-	TimeFontSize float64 `mapstructure:"time_font_size"`
-	Layout       string  `mapstructure:"layout"` // "dashboard", "minimalist", "compact", "balanced"
+	// openapi:description Font family name
+	// openapi:example GoRegular
+	FontFamily string `mapstructure:"font_family" json:"font_family"`
+	// openapi:description Base font size in points
+	// openapi:example 11.0
+	FontSize float64 `mapstructure:"font_size" json:"font_size"`
+	// openapi:description Time display font size in points
+	// openapi:example 14.0
+	TimeFontSize float64 `mapstructure:"time_font_size" json:"time_font_size"`
+	// openapi:description Layout style (dashboard, minimalist, compact, balanced)
+	// openapi:enum dashboard minimalist compact balanced
+	// openapi:example dashboard
+	Layout string `mapstructure:"layout" json:"layout"`
 }
 
 // Default configuration values.

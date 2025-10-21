@@ -6,6 +6,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Kill any existing instances
 killall nexus-open ui 2>/dev/null
 
+# Generate OpenAPI 3.0 spec from annotations
+echo "Generating OpenAPI 3.0 spec from code annotations..."
+if [ -f "$HOME/go/bin/go-openapi" ]; then
+    cd "$SCRIPT_DIR"
+    "$HOME/go/bin/go-openapi" -dir cmd/nexus-open,internal/api,internal/config -output api/openapi.yaml
+    # Fix server URL (go-openapi defaults to 8080)
+    sed -i 's|http://localhost:8080|http://localhost:1985|g' api/openapi.yaml
+    echo "✓ OpenAPI spec generated at api/openapi.yaml"
+else
+    echo "⚠ go-openapi not found, skipping spec generation"
+fi
+
 # Generate Flutter API client from OpenAPI 3.0 spec (optional, requires openapi-generator)
 if [ -x "$SCRIPT_DIR/scripts/generate-flutter-api.sh" ]; then
     "$SCRIPT_DIR/scripts/generate-flutter-api.sh"
