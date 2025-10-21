@@ -3,7 +3,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = []
+  args_bin = ["-debug"]
   bin = "./tmp/nexus-open"
   cmd = "go build -o ./tmp/nexus-open ./cmd/nexus-open"
   delay = 1000
@@ -21,7 +21,12 @@ tmp_dir = "tmp"
   poll = false
   poll_interval = 0
   post_cmd = []
-  pre_cmd = []
+  pre_cmd = [
+    "go build -o ./modules/weather/weather ./modules/weather",
+    "go build -o ./modules/cpu-temp/cpu-temp ./modules/cpu-temp",
+    "go build -o ./modules/gpu-temp/gpu-temp ./modules/gpu-temp",
+    "go build -o ./modules/network/network ./modules/network"
+  ]
   rerun = false
   rerun_delay = 500
   send_interrupt = true

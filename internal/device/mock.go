@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"nexus-open/internal/touch"
 )
 
 // MockDevice is a mock implementation of Device for testing.
@@ -14,7 +16,7 @@ type MockDevice struct {
 	shouldFailNext string // Which operation should fail next
 	framesSent     int
 	lastFrame      []byte
-	touchEvents    []TouchEvent
+	touchEvents    []touch.Event
 
 	// Callbacks for testing
 	OnConnect    func(ctx context.Context) error
@@ -26,7 +28,7 @@ type MockDevice struct {
 func NewMockDevice() *MockDevice {
 	return &MockDevice{
 		connected:   false,
-		touchEvents: make([]TouchEvent, 0),
+		touchEvents: make([]touch.Event, 0),
 	}
 }
 
@@ -98,7 +100,7 @@ func (m *MockDevice) SendFrame(ctx context.Context, data []byte) error {
 }
 
 // ReadTouch returns mock touch events.
-func (m *MockDevice) ReadTouch(ctx context.Context) ([]TouchEvent, error) {
+func (m *MockDevice) ReadTouch(ctx context.Context) ([]touch.Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -107,7 +109,7 @@ func (m *MockDevice) ReadTouch(ctx context.Context) ([]TouchEvent, error) {
 	}
 
 	events := m.touchEvents
-	m.touchEvents = make([]TouchEvent, 0)
+	m.touchEvents = make([]touch.Event, 0)
 	return events, nil
 }
 
@@ -130,7 +132,7 @@ func (m *MockDevice) SimulateTouch(button int, pressed bool, duration time.Durat
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.touchEvents = append(m.touchEvents, TouchEvent{
+	m.touchEvents = append(m.touchEvents, touch.Event{
 		Button:   button,
 		Pressed:  pressed,
 		Duration: duration,

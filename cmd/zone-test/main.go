@@ -52,7 +52,7 @@ func main() {
 		"pages", len(zoneManager.GetConfig().Pages),
 		"current_page", zoneManager.GetConfig().Pages[0].Name)
 
-	// Create device
+	// Create HID device (full feature support including touch!)
 	deviceConfig := device.ConnectionConfig{
 		VendorID:         0x1b1c, // Corsair
 		ProductID:        0x1b8e, // iCUE Nexus

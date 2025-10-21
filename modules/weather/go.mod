@@ -5,6 +5,7 @@ go 1.25.2
 replace nexus-open => ../..
 
 require (
+	github.com/fsnotify/fsnotify v1.8.0
 	github.com/hashicorp/go-plugin v1.7.0
 	gopkg.in/yaml.v3 v3.0.1
 	nexus-open v0.0.0-00010101000000-000000000000

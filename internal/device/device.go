@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"nexus-open/internal/touch"
 )
 
 // Device represents a Nexus display device with USB communication capabilities.
@@ -27,7 +29,7 @@ type Device interface {
 
 	// ReadTouch reads touch input events from the device (non-blocking).
 	// Returns empty slice if no events are available.
-	ReadTouch(ctx context.Context) ([]TouchEvent, error)
+	ReadTouch(ctx context.Context) ([]touch.Event, error)
 
 	// Health performs a health check on the device connection.
 	// Returns nil if healthy, error otherwise.
@@ -36,13 +38,6 @@ type Device interface {
 	// HID Feature Report methods (may not be supported by all devices)
 	SetBrightness(brightness int) error
 	GetFirmwareVersion() (string, error)
-}
-
-// TouchEvent represents a touch/button input event from the device.
-type TouchEvent struct {
-	Button   int           // Button identifier (0-4 for 5 buttons)
-	Pressed  bool          // true if pressed, false if released
-	Duration time.Duration // How long the button was held
 }
 
 // ConnectionConfig holds configuration for device connection.

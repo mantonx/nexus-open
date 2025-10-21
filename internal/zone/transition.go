@@ -19,20 +19,27 @@ const (
 
 // TransitionState tracks the current state of a page transition.
 type TransitionState struct {
-	Active      bool
-	Type        TransitionType
-	StartTime   time.Time
-	Duration    time.Duration
-	OldFrame    *image.RGBA // Previous page frame
-	NewFrame    *image.RGBA // New page frame
-	Direction   int         // 1 for forward, -1 for backward
+	Active          bool
+	Type            TransitionType
+	StartTime       time.Time
+	Duration        time.Duration
+	OldFrame        *image.RGBA // Previous page frame
+	NewFrame        *image.RGBA // New page frame
+	Direction       int         // 1 for forward, -1 for backward
+	manual          bool
+	manualProgress  float64
+	manualAnimating bool
+	manualFrom      float64
+	manualTo        float64
+	manualDuration  time.Duration
+	manualStart     time.Time
 }
 
 // NewTransitionState creates a new transition state.
 func NewTransitionState() *TransitionState {
 	return &TransitionState{
 		Active:   false,
-		Duration: 300 * time.Millisecond, // Default 300ms transition
+		Duration: 100 * time.Millisecond, // Very snappy 100ms transitions
 	}
 }
 
@@ -44,12 +51,133 @@ func (ts *TransitionState) Start(transType TransitionType, oldFrame, newFrame *i
 	ts.OldFrame = oldFrame
 	ts.NewFrame = newFrame
 	ts.Direction = direction
+	ts.manual = false
+	ts.manualProgress = 0
+	ts.manualAnimating = false
+}
+
+// StartManual begins a transition that will be driven by explicit progress updates.
+func (ts *TransitionState) StartManual(transType TransitionType, oldFrame, newFrame *image.RGBA, direction int) {
+	ts.Start(transType, oldFrame, newFrame, direction)
+	ts.manual = true
+	ts.manualProgress = 0
+	ts.manualAnimating = false
+}
+
+// SetManualProgress updates the progress for a manually controlled transition.
+func (ts *TransitionState) SetManualProgress(progress float64) {
+	if !ts.Active {
+		return
+	}
+	if progress < 0 {
+		progress = 0
+	} else if progress > 1 {
+		progress = 1
+	}
+	ts.manual = true
+	ts.manualAnimating = false
+	ts.manualProgress = progress
+	if progress >= 1 {
+		ts.manual = false
+		ts.Active = false
+	}
+}
+
+// FinalizeManual disables manual control and maps the current progress onto a timed transition.
+func (ts *TransitionState) FinalizeManual(duration time.Duration) {
+	if !ts.Active {
+		return
+	}
+	ts.AnimateManualTo(1, duration)
+}
+
+// IsManual returns true if the transition is currently under manual control.
+func (ts *TransitionState) IsManual() bool {
+	return ts.manual
+}
+
+// ManualProgress returns the current manual progress (0-1).
+func (ts *TransitionState) ManualProgress() float64 {
+	if !ts.manual {
+		return ts.GetProgress()
+	}
+	return ts.manualProgress
+}
+
+// AnimateManualTo animates manual progress towards a target over the specified duration.
+func (ts *TransitionState) AnimateManualTo(target float64, duration time.Duration) {
+	if !ts.Active {
+		return
+	}
+	if target < 0 {
+		target = 0
+	} else if target > 1 {
+		target = 1
+	}
+
+	ts.manual = true
+	ts.manualAnimating = false
+
+	if duration <= 0 {
+		ts.manualProgress = target
+		if target <= 0 || target >= 1 {
+			ts.manual = false
+			ts.Active = false
+			if target >= 1 {
+				ts.OldFrame = ts.NewFrame
+			} else {
+				ts.NewFrame = ts.OldFrame
+			}
+		}
+		return
+	}
+
+	ts.manualAnimating = true
+	ts.manualFrom = ts.manualProgress
+	ts.manualTo = target
+	ts.manualDuration = duration
+	ts.manualStart = time.Now()
 }
 
 // GetProgress returns the transition progress (0.0 to 1.0).
 func (ts *TransitionState) GetProgress() float64 {
 	if !ts.Active {
 		return 1.0
+	}
+
+	if ts.manual {
+		if ts.manualAnimating {
+			if ts.manualDuration <= 0 {
+				ts.manualProgress = ts.manualTo
+				ts.manualAnimating = false
+			} else {
+				frac := float64(time.Since(ts.manualStart)) / float64(ts.manualDuration)
+				if frac >= 1 {
+					ts.manualProgress = ts.manualTo
+					ts.manualAnimating = false
+				} else {
+					eased := easeOutCubic(frac)
+					ts.manualProgress = ts.manualFrom + (ts.manualTo-ts.manualFrom)*eased
+				}
+			}
+		}
+
+		if !ts.manualAnimating {
+			if ts.manualProgress >= 1 {
+				ts.manual = false
+				ts.Active = false
+				ts.OldFrame = ts.NewFrame
+				return 1
+			}
+			if ts.manualProgress <= 0 {
+				ts.manual = false
+				ts.Active = false
+				ts.NewFrame = ts.OldFrame
+				return 0
+			}
+		}
+
+		return ts.manualProgress
 	}
 
 	elapsed := time.Since(ts.StartTime)
@@ -78,14 +206,16 @@ func (ts *TransitionState) Render() *image.RGBA {
 	}
 
 	progress := ts.GetProgress()
+	// Apply ease-out for snappy start, smooth finish
+	easedProgress := easeOutCubic(progress)
 
 	switch ts.Type {
 	case TransitionFade:
-		return ts.renderFade(progress)
+		return ts.renderFade(easedProgress)
 	case TransitionSlideLeft:
-		return ts.renderSlide(progress, -1)
+		return ts.renderSlide(easedProgress, -1)
 	case TransitionSlideRight:
-		return ts.renderSlide(progress, 1)
+		return ts.renderSlide(easedProgress, 1)
 	default:
 		return ts.NewFrame
 	}
@@ -155,6 +285,12 @@ func (ts *TransitionState) renderSlide(progress float64, direction int) *image.R
 	}
 
 	return result
+}
+
+// easeOutCubic applies an ease-out easing function for snappy transitions.
+// Starts fast and decelerates towards the end.
+func easeOutCubic(t float64) float64 {
+	return 1 - (1-t)*(1-t)*(1-t)
 }
 
 // easeInOutCubic applies an easing function to progress for smoother transitions.
