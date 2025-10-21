@@ -161,7 +161,12 @@ func (a *App) initialize() error {
 	// Register page change callback to restart sampler on page switch
 	a.zoneManager.SetOnPageChange(a.zoneSampler.RestartForPage)
 
-	// 7. Create touch handler
+	// 7. Register zone sampler as config broadcaster with API server
+	// This allows API config updates to notify all modules
+	a.apiServer.SetConfigBroadcaster(a.zoneSampler)
+	a.logger.Info("config broadcaster registered with API server")
+
+	// 8. Create touch handler
 	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
 	a.logger.Info("touch handler created")
 

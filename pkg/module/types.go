@@ -103,3 +103,35 @@ type Module interface {
 	// Sample returns current data payload
 	Sample() (Payload, error)
 }
+
+// ConfigNotifier is an optional interface modules can implement
+// to receive real-time configuration change notifications.
+//
+// When implemented, the host will call OnConfigChanged whenever
+// the global configuration is updated via the API, allowing modules
+// to react to config changes without polling or file watching.
+type ConfigNotifier interface {
+	// OnConfigChanged is called when the global configuration is updated.
+	// The module should inspect the config map and update its state if relevant.
+	//
+	// Args:
+	//   config: Full configuration as key-value map (e.g., location, unit, time_format)
+	//
+	// Returns:
+	//   error if the module failed to process the config change
+	OnConfigChanged(config map[string]interface{}) error
+}
+
+// SupportsConfigNotification checks if a module implements ConfigNotifier.
+// This allows the host to conditionally broadcast config changes only to
+// modules that can handle them.
+//
+// Example:
+//
+//	if notifier, ok := module.SupportsConfigNotification(m); ok {
+//	    notifier.OnConfigChanged(configMap)
+//	}
+func SupportsConfigNotification(m Module) (ConfigNotifier, bool) {
+	notifier, ok := m.(ConfigNotifier)
+	return notifier, ok
+}

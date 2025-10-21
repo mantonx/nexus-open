@@ -48,6 +48,13 @@ func (c *RPCClient) Sample() (Payload, error) {
 	return resp, err
 }
 
+// OnConfigChanged calls the remote OnConfigChanged method if the plugin supports it
+func (c *RPCClient) OnConfigChanged(config map[string]interface{}) error {
+	var resp interface{}
+	err := c.client.Call("Plugin.OnConfigChanged", config, &resp)
+	return err
+}
+
 // RPCServer is the server-side implementation that serves the plugin
 type RPCServer struct {
 	Impl Module
@@ -65,6 +72,17 @@ func (s *RPCServer) Sample(args interface{}, resp *Payload) error {
 	payload, err := s.Impl.Sample()
 	*resp = payload
 	return err
+}
+
+// OnConfigChanged implements the OnConfigChanged RPC
+// If the module implements ConfigNotifier, it will be called.
+// If not, this is a no-op (returns nil error).
+func (s *RPCServer) OnConfigChanged(config map[string]interface{}, resp *interface{}) error {
+	if notifier, ok := SupportsConfigNotification(s.Impl); ok {
+		return notifier.OnConfigChanged(config)
+	}
+	// Module doesn't support config notifications - that's okay
+	return nil
 }
 
 func init() {

@@ -18,13 +18,19 @@ type DeviceController interface {
 	GetFirmwareVersion() (string, error)
 }
 
+// ConfigBroadcaster provides an interface for broadcasting config changes to modules.
+type ConfigBroadcaster interface {
+	BroadcastConfigChange(config map[string]interface{})
+}
+
 // Server manages the HTTP API server.
 type Server struct {
-	server       *http.Server
-	logger       *slog.Logger
-	cfg          *config.Manager
-	device       DeviceController
-	windowState  string // "shown" or "hidden"
+	server        *http.Server
+	logger        *slog.Logger
+	cfg           *config.Manager
+	device        DeviceController
+	broadcaster   ConfigBroadcaster // Optional: broadcasts config changes to modules
+	windowState   string            // "shown" or "hidden"
 	windowStateCh chan string
 }
 
@@ -78,6 +84,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// SetConfigBroadcaster sets the broadcaster for config change notifications.
+// This allows the API server to notify modules when configuration changes.
+func (s *Server) SetConfigBroadcaster(broadcaster ConfigBroadcaster) {
+	s.broadcaster = broadcaster
+	s.logger.Debug("config broadcaster registered")
 }
 
 // registerRoutes sets up all API endpoints.

@@ -110,6 +110,27 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Broadcast config change to all modules (if broadcaster is set)
+	if s.broadcaster != nil {
+		// Convert config to map for broadcasting
+		configMap := map[string]interface{}{
+			"location":         newConfig.Location,
+			"time_format":      newConfig.TimeFormat,
+			"unit":             newConfig.Unit,
+			"background_color": newConfig.BackgroundColor,
+			"background_image": newConfig.BackgroundImage,
+			"text_color":       newConfig.TextColor,
+			"display": map[string]interface{}{
+				"font_family":    newConfig.Display.FontFamily,
+				"font_size":      newConfig.Display.FontSize,
+				"time_font_size": newConfig.Display.TimeFontSize,
+				"layout":         newConfig.Display.Layout,
+			},
+		}
+		s.broadcaster.BroadcastConfigChange(configMap)
+		s.logger.Info("config change broadcasted to modules")
+	}
+
 	s.respondSuccess(w, "Configuration updated successfully", nil)
 }
 

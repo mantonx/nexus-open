@@ -302,3 +302,42 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 
 	return nil
 }
+
+// BroadcastConfigChange notifies all modules about a configuration change.
+// Only modules implementing the ConfigNotifier interface will receive the notification.
+func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	s.logger.Info("broadcasting config change to modules", "module_count", len(s.modules))
+
+	notified := 0
+	skipped := 0
+
+	// Notify all loaded modules
+	for zoneID, mod := range s.modules {
+		if notifier, ok := module.SupportsConfigNotification(mod); ok {
+			if err := notifier.OnConfigChanged(config); err != nil {
+				s.logger.Error("module config notification failed",
+					"zone_id", zoneID,
+					"module", s.moduleSpec[zoneID],
+					"error", err)
+			} else {
+				s.logger.Debug("module config notified",
+					"zone_id", zoneID,
+					"module", s.moduleSpec[zoneID])
+				notified++
+			}
+		} else {
+			s.logger.Debug("module does not support config notifications",
+				"zone_id", zoneID,
+				"module", s.moduleSpec[zoneID])
+			skipped++
+		}
+	}
+
+	s.logger.Info("config broadcast complete",
+		"notified", notified,
+		"skipped", skipped,
+		"total", len(s.modules))
+}
