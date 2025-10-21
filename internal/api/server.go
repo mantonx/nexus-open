@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"time"
 
+	httpSwagger "github.com/swaggo/http-swagger"
 	"nexus-open/internal/config"
+
+	_ "nexus-open/api" // Import generated docs
 )
 
 // DeviceController provides an interface for controlling device features.
@@ -81,6 +84,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // registerRoutes sets up all API endpoints.
 func (s *Server) registerRoutes(mux *http.ServeMux) {
+	// API endpoints
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/images/upload", s.handleImageUpload)
@@ -95,4 +99,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/window/state", s.handleWindowState)
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
+
+	// Swagger UI and OpenAPI spec
+	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 }

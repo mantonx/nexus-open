@@ -41,3 +41,11 @@ frontend/dist
 *.log
 *.tmp
 *.bak
+
+# Generated OpenAPI files
+api/docs.go
+api/swagger.json
+api/swagger.yaml
+
+# Generated Flutter API client
+ui/lib/generated/api/
