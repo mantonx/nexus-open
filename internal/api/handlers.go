@@ -9,25 +9,36 @@ import (
 )
 
 // ErrorResponse represents an API error response.
+// openapi:schema ErrorResponse
 type ErrorResponse struct {
-	Error   string `json:"error"`
+	// openapi:description The error type/category
+	// openapi:example Bad Request
+	Error string `json:"error"`
+	// openapi:description Detailed error message
+	// openapi:example Invalid brightness value provided
 	Message string `json:"message,omitempty"`
 }
 
 // SuccessResponse represents a successful API response.
+// openapi:schema SuccessResponse
 type SuccessResponse struct {
-	Status  string      `json:"status"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
+	// openapi:description Status of the operation
+	// openapi:example success
+	Status string `json:"status"`
+	// openapi:description Human-readable success message
+	// openapi:example Configuration updated successfully
+	Message string `json:"message,omitempty"`
+	// openapi:description Additional response data
+	Data interface{} `json:"data,omitempty"`
 }
 
 // handleHealth returns server health status.
-// @Summary Health check
-// @Description Returns the health status of the API server
-// @Tags system
-// @Produce json
-// @Success 200 {object} map[string]interface{} "Health status"
-// @Router /api/health [get]
+// openapi:operation GET /api/health getHealth
+// openapi:summary Health check endpoint
+// openapi:description Returns the health status of the API server including version information
+// openapi:tag Device
+// openapi:produces application/json
+// openapi:response 200 SuccessResponse --- Health status retrieved successfully
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -55,29 +66,29 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetConfig returns the current configuration.
-// @Summary Get configuration
-// @Description Returns the current application configuration
-// @Tags config
-// @Produce json
-// @Success 200 {object} config.Config
-// @Failure 500 {object} ErrorResponse
-// @Router /api/config [get]
+// openapi:operation GET /api/config getConfig
+// openapi:summary Get current configuration
+// openapi:description Returns the current application configuration including display settings, location, and modules
+// openapi:tag Config
+// openapi:produces application/json
+// openapi:response 200 Config --- Configuration retrieved successfully
+// openapi:response 500 ErrorResponse --- Internal server error
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Get()
 	s.respondJSON(w, cfg, http.StatusOK)
 }
 
 // handleUpdateConfig updates the configuration.
-// @Summary Update configuration
-// @Description Updates the application configuration
-// @Tags config
-// @Accept json
-// @Produce json
-// @Param config body config.Config true "Configuration object"
-// @Success 200 {object} SuccessResponse
-// @Failure 400 {object} ErrorResponse "Invalid configuration"
-// @Failure 500 {object} ErrorResponse "Failed to save configuration"
-// @Router /api/config [post]
+// openapi:operation POST /api/config updateConfig
+// openapi:summary Update configuration
+// openapi:description Updates the application configuration with new settings
+// openapi:tag Config
+// openapi:consumes application/json
+// openapi:produces application/json
+// openapi:param config body Config true --- Configuration object to update
+// openapi:response 200 SuccessResponse --- Configuration updated successfully
+// openapi:response 400 ErrorResponse --- Invalid configuration provided
+// openapi:response 500 ErrorResponse --- Failed to save configuration
 func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	var newConfig config.Config
 
@@ -204,17 +215,25 @@ func (s *Server) respondSuccess(w http.ResponseWriter, message string, data inte
 	s.respondJSON(w, response, http.StatusOK)
 }
 
+// BrightnessRequest represents a request to set device brightness.
+// openapi:schema BrightnessRequest
+type BrightnessRequest struct {
+	// openapi:description Brightness level (0-100)
+	// openapi:example 75
+	Brightness int `json:"brightness"`
+}
+
 // handleBrightness handles brightness control (POST only).
-// @Summary Set display brightness
-// @Description Sets the brightness of the device display (0-100)
-// @Tags device
-// @Accept json
-// @Produce json
-// @Param brightness body object{brightness=int} true "Brightness level (0-100)"
-// @Success 200 {object} SuccessResponse
-// @Failure 400 {object} ErrorResponse "Invalid brightness value"
-// @Failure 503 {object} ErrorResponse "Device not available"
-// @Router /api/device/brightness [post]
+// openapi:operation POST /api/device/brightness setBrightness
+// openapi:summary Set display brightness
+// openapi:description Sets the brightness of the iCUE Nexus device display (0-100)
+// openapi:tag Device
+// openapi:consumes application/json
+// openapi:produces application/json
+// openapi:param brightness body BrightnessRequest true --- Brightness level to set
+// openapi:response 200 SuccessResponse --- Brightness updated successfully
+// openapi:response 400 ErrorResponse --- Invalid brightness value
+// openapi:response 503 ErrorResponse --- Device not available
 func (s *Server) handleBrightness(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -250,13 +269,13 @@ func (s *Server) handleBrightness(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeviceInfo handles device information queries (GET only).
-// @Summary Get device information
-// @Description Returns information about the connected iCUE Nexus device
-// @Tags device
-// @Produce json
-// @Success 200 {object} SuccessResponse
-// @Failure 503 {object} ErrorResponse "Device not available"
-// @Router /api/device/info [get]
+// openapi:operation GET /api/device/info getDeviceInfo
+// openapi:summary Get device information
+// openapi:description Returns information about the connected iCUE Nexus device including firmware version and hardware details
+// openapi:tag Device
+// openapi:produces application/json
+// openapi:response 200 SuccessResponse --- Device information retrieved successfully
+// openapi:response 503 ErrorResponse --- Device not available
 func (s *Server) handleDeviceInfo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -288,12 +307,6 @@ func (s *Server) handleDeviceInfo(w http.ResponseWriter, r *http.Request) {
 // Window control handlers
 
 // handleWindowState returns the current window state.
-// @Summary Get window state
-// @Description Returns the current state of the settings window (shown/hidden)
-// @Tags window
-// @Produce json
-// @Success 200 {object} map[string]string
-// @Router /api/window/state [get]
 func (s *Server) handleWindowState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -307,12 +320,6 @@ func (s *Server) handleWindowState(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWindowShow sets window state to "show".
-// @Summary Show settings window
-// @Description Sends a command to show the settings window
-// @Tags window
-// @Produce json
-// @Success 200 {object} SuccessResponse
-// @Router /api/window/show [post]
 func (s *Server) handleWindowShow(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -329,12 +336,6 @@ func (s *Server) handleWindowShow(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWindowHide sets window state to "hide".
-// @Summary Hide settings window
-// @Description Sends a command to hide the settings window
-// @Tags window
-// @Produce json
-// @Success 200 {object} SuccessResponse
-// @Router /api/window/hide [post]
 func (s *Server) handleWindowHide(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)

@@ -1,3 +1,16 @@
+// Package main provides the Nexus Open application entry point.
+// openapi:meta info title Nexus Open API
+// openapi:meta info description start
+// REST API for Nexus Open - an open-source iCUE Nexus companion app.
+// Provides endpoints for device control, configuration management, and zone/module interactions.
+// openapi:meta info description end
+// openapi:meta info version 2.0.0
+// openapi:meta servers http://localhost:1985
+// openapi:meta tag Device --- Device control and status
+// openapi:meta tag Config --- Configuration management
+// openapi:meta tag Zone --- Zone and module management
+// openapi:meta tag Animation --- Animation control
+// openapi:meta contact https://github.com/mantonx/nexus-next Nexus Team
 package main
 
 import (
