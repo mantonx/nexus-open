@@ -1,3 +1,14 @@
+// @title Nexus Open API
+// @version 2.0
+// @description API for Nexus Open - iCUE Nexus companion app
+// @contact.name Nexus Team
+// @contact.url https://github.com/mantonx/nexus-next
+// @license.name MIT
+
+// @host localhost:1985
+// @BasePath /
+
+// @schemes http
 package main
 
 import (

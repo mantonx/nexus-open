@@ -21,12 +21,7 @@ tmp_dir = "tmp"
   poll = false
   poll_interval = 0
   post_cmd = []
-  pre_cmd = [
-    "go build -o ./modules/weather/weather ./modules/weather",
-    "go build -o ./modules/cpu-temp/cpu-temp ./modules/cpu-temp",
-    "go build -o ./modules/gpu-temp/gpu-temp ./modules/gpu-temp",
-    "go build -o ./modules/network/network ./modules/network"
-  ]
+  pre_cmd = []
   rerun = false
   rerun_delay = 500
   send_interrupt = true
