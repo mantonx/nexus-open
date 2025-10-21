@@ -13,12 +13,12 @@ if ! command -v openapi-generator &> /dev/null; then
     exit 0
 fi
 
-# Generate Dart client
+# Generate Dart client from OpenAPI 3.0 spec
 openapi-generator generate \
-    -i api/swagger.json \
+    -i api/openapi.yaml \
     -g dart-dio \
     -o ui/lib/generated/api \
     --additional-properties=pubName=nexus_api,pubAuthor="Nexus Team",dateLibrary=core
 
-echo "Flutter API client generated successfully!"
+echo "✓ Flutter API client generated successfully from OpenAPI 3.0 spec!"
 echo "Import in Dart: import 'package:nexus_api/nexus_api.dart';"

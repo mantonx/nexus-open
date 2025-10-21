@@ -1,0 +1,215 @@
+basePath: /
+definitions:
+  api.ErrorResponse:
+    properties:
+      error:
+        type: string
+      message:
+        type: string
+    type: object
+  api.SuccessResponse:
+    properties:
+      data: {}
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  config.Config:
+    properties:
+      backgroundColor:
+        type: string
+      backgroundImage:
+        type: string
+      display:
+        $ref: '#/definitions/config.DisplayConfig'
+      imagePaths:
+        items:
+          type: string
+        type: array
+      location:
+        type: string
+      textColor:
+        type: string
+      timeFormat:
+        type: string
+      unit:
+        type: string
+    type: object
+  config.DisplayConfig:
+    properties:
+      fontFamily:
+        type: string
+      fontSize:
+        type: number
+      layout:
+        description: '"dashboard", "minimalist", "compact", "balanced"'
+        type: string
+      timeFontSize:
+        type: number
+    type: object
+host: localhost:1985
+info:
+  contact:
+    name: Nexus Team
+    url: https://github.com/mantonx/nexus-next
+  description: API for Nexus Open - iCUE Nexus companion app
+  license:
+    name: MIT
+  title: Nexus Open API
+  version: "2.0"
+paths:
+  /api/config:
+    get:
+      description: Returns the current application configuration
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/config.Config'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get configuration
+      tags:
+      - config
+    post:
+      consumes:
+      - application/json
+      description: Updates the application configuration
+      parameters:
+      - description: Configuration object
+        in: body
+        name: config
+        required: true
+        schema:
+          $ref: '#/definitions/config.Config'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.SuccessResponse'
+        "400":
+          description: Invalid configuration
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Failed to save configuration
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Update configuration
+      tags:
+      - config
+  /api/device/brightness:
+    post:
+      consumes:
+      - application/json
+      description: Sets the brightness of the device display (0-100)
+      parameters:
+      - description: Brightness level (0-100)
+        in: body
+        name: brightness
+        required: true
+        schema:
+          properties:
+            brightness:
+              type: integer
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.SuccessResponse'
+        "400":
+          description: Invalid brightness value
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "503":
+          description: Device not available
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Set display brightness
+      tags:
+      - device
+  /api/device/info:
+    get:
+      description: Returns information about the connected iCUE Nexus device
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.SuccessResponse'
+        "503":
+          description: Device not available
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get device information
+      tags:
+      - device
+  /api/health:
+    get:
+      description: Returns the health status of the API server
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Health status
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /api/window/hide:
+    post:
+      description: Sends a command to hide the settings window
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.SuccessResponse'
+      summary: Hide settings window
+      tags:
+      - window
+  /api/window/show:
+    post:
+      description: Sends a command to show the settings window
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.SuccessResponse'
+      summary: Show settings window
+      tags:
+      - window
+  /api/window/state:
+    get:
+      description: Returns the current state of the settings window (shown/hidden)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get window state
+      tags:
+      - window
+schemes:
+- http
+swagger: "2.0"
