@@ -72,7 +72,8 @@ func NewWeatherModule() *WeatherModule {
 		location:    "Jersey City, NJ",
 		unit:        "imperial", // default (°F)
 	}
-	go wm.watchConfigChanges()
+	// Load initial config from file
+	wm.loadConfig()
 	return wm
 }
 
@@ -130,6 +131,36 @@ func (m *WeatherModule) Sample() (module.Payload, error) {
 	m.mu.Unlock()
 
 	return m.formatPayload(data), nil
+}
+
+// OnConfigChanged implements module.ConfigNotifier interface.
+// This method is called by the host when configuration changes via the API,
+// allowing the weather module to react instantly without file watching.
+func (m *WeatherModule) OnConfigChanged(config map[string]interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	oldLocation := m.location
+	oldUnit := m.unit
+
+	// Extract location from config
+	if location, ok := config["location"].(string); ok && location != "" {
+		m.location = location
+	}
+
+	// Extract unit from config
+	if unit, ok := config["unit"].(string); ok && unit != "" {
+		m.unit = unit
+	}
+
+	// Clear cache if location or unit changed
+	if m.location != oldLocation || m.unit != oldUnit {
+		m.cachedData = nil
+		fmt.Printf("weather: config updated - location=%q unit=%q (cache cleared)\n",
+			m.location, m.unit)
+	}
+
+	return nil
 }
 
 // formatPayload converts WeatherData to module.Payload
