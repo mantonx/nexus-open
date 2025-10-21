@@ -6,23 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Kill any existing instances
 killall nexus-open ui 2>/dev/null
 
-# Generate OpenAPI spec
-echo "Generating OpenAPI spec..."
-if command -v swag &> /dev/null || [ -f "$HOME/go/bin/swag" ]; then
-    SWAG_BIN=""
-    if command -v swag &> /dev/null; then
-        SWAG_BIN="swag"
-    else
-        SWAG_BIN="$HOME/go/bin/swag"
-    fi
-    cd "$SCRIPT_DIR"
-    $SWAG_BIN init -g cmd/nexus-open/main.go -o api/ -q
-    echo "✓ OpenAPI spec generated"
-else
-    echo "⚠ Warning: swag not found, skipping OpenAPI generation"
-fi
-
-# Generate Flutter API client (optional, requires openapi-generator)
+# Generate Flutter API client from OpenAPI 3.0 spec (optional, requires openapi-generator)
 if [ -x "$SCRIPT_DIR/scripts/generate-flutter-api.sh" ]; then
     "$SCRIPT_DIR/scripts/generate-flutter-api.sh"
 fi

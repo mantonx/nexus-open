@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
-	httpSwagger "github.com/swaggo/http-swagger"
 	"nexus-open/internal/config"
-
-	_ "nexus-open/api" // Import generated docs
 )
 
 // DeviceController provides an interface for controlling device features.
@@ -100,6 +98,64 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
 
-	// Swagger UI and OpenAPI spec
-	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+	// OpenAPI 3.0 spec endpoints
+	mux.HandleFunc("/openapi.yaml", s.handleOpenAPISpec)
+	mux.HandleFunc("/openapi.json", s.handleOpenAPISpecJSON)
+	mux.HandleFunc("/docs", s.handleSwaggerUI)
+}
+
+// handleOpenAPISpec serves the OpenAPI 3.0 YAML spec
+func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	specPath := "api/openapi.yaml"
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		s.logger.Error("failed to read OpenAPI spec", "error", err)
+		http.Error(w, "OpenAPI spec not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Write(data)
+}
+
+// handleOpenAPISpecJSON serves the OpenAPI 3.0 JSON spec
+func (s *Server) handleOpenAPISpecJSON(w http.ResponseWriter, r *http.Request) {
+	// For now, we only have YAML, but we could convert it
+	// Or serve the JSON version if we generate it
+	http.Redirect(w, r, "/openapi.yaml", http.StatusTemporaryRedirect)
+}
+
+// handleSwaggerUI serves the Swagger UI for the OpenAPI spec
+func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Nexus Open API Documentation</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = function() {
+            window.ui = SwaggerUIBundle({
+                url: "/openapi.yaml",
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout"
+            });
+        };
+    </script>
+</body>
+</html>`
+	w.Header().Set("Content-Type", "text/html")
+	w.Write([]byte(html))
 }
