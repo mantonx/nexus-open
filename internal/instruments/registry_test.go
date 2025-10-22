@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-open/internal/config"
+	"nexus-open/internal/settings"
 )
 
 func TestRegistry_Lifecycle(t *testing.T) {

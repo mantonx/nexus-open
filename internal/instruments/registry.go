@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"nexus-open/internal/config"
+	"nexus-open/internal/settings"
 )
 
 // Registry manages a collection of instruments and provides aggregated data

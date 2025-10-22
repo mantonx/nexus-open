@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-open/internal/config"
+	"nexus-open/internal/settings"
 	"nexus-open/internal/device"
 	"nexus-open/internal/instruments"
 )

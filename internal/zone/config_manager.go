@@ -1,6 +1,6 @@
-// Package zoneconfig manages per-zone module configuration.
+// Package zone manages per-zone module configuration.
 // Supports hybrid approach: module defaults + optional zone overrides.
-package zoneconfig
+package zone
 
 import (
 	"fmt"
@@ -11,23 +11,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config represents the zone configuration file structure.
-type Config struct {
+// ModuleConfig represents the zone configuration file structure.
+type ModuleConfig struct {
 	// ModuleDefaults are shared configs for all zones using a module
 	ModuleDefaults map[string]map[string]interface{} `yaml:"module_defaults,omitempty"`
 	// ZoneOverrides are per-zone configs that override module defaults
 	ZoneOverrides map[string]map[string]interface{} `yaml:"zone_overrides,omitempty"`
 }
 
-// Manager manages zone-specific module configurations.
-type Manager struct {
+// ConfigManager manages zone-specific module configurations.
+type ConfigManager struct {
 	path   string
-	config *Config
+	config *ModuleConfig
 	mu     sync.RWMutex
 }
 
-// NewManager creates a new zone config manager.
-func NewManager(path string) (*Manager, error) {
+// NewConfigManager creates a new zone config manager.
+func NewConfigManager(path string) (*ConfigManager, error) {
 	if path == "" {
 		// Use default path
 		configDir, err := os.UserConfigDir()
@@ -37,9 +37,9 @@ func NewManager(path string) (*Manager, error) {
 		path = filepath.Join(configDir, "nexus-open", "zone-configs.yaml")
 	}
 
-	m := &Manager{
+	m := &ConfigManager{
 		path: path,
-		config: &Config{
+		config: &ModuleConfig{
 			ModuleDefaults: make(map[string]map[string]interface{}),
 			ZoneOverrides:  make(map[string]map[string]interface{}),
 		},
@@ -57,7 +57,7 @@ func NewManager(path string) (*Manager, error) {
 
 // Get returns the effective config for a zone.
 // Resolution order: zone override → module default → nil
-func (m *Manager) Get(zoneID, modulePath string) map[string]interface{} {
+func (m *ConfigManager) Get(zoneID, modulePath string) map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -76,7 +76,7 @@ func (m *Manager) Get(zoneID, modulePath string) map[string]interface{} {
 }
 
 // GetModuleDefault returns the default config for a module.
-func (m *Manager) GetModuleDefault(modulePath string) map[string]interface{} {
+func (m *ConfigManager) GetModuleDefault(modulePath string) map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -87,7 +87,7 @@ func (m *Manager) GetModuleDefault(modulePath string) map[string]interface{} {
 }
 
 // GetZoneOverride returns the zone-specific override (if any).
-func (m *Manager) GetZoneOverride(zoneID string) map[string]interface{} {
+func (m *ConfigManager) GetZoneOverride(zoneID string) map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -98,7 +98,7 @@ func (m *Manager) GetZoneOverride(zoneID string) map[string]interface{} {
 }
 
 // SetModuleDefault sets the default config for a module.
-func (m *Manager) SetModuleDefault(modulePath string, config map[string]interface{}) error {
+func (m *ConfigManager) SetModuleDefault(modulePath string, config map[string]interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -111,7 +111,7 @@ func (m *Manager) SetModuleDefault(modulePath string, config map[string]interfac
 }
 
 // SetZoneOverride sets a zone-specific config override.
-func (m *Manager) SetZoneOverride(zoneID string, config map[string]interface{}) error {
+func (m *ConfigManager) SetZoneOverride(zoneID string, config map[string]interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -124,7 +124,7 @@ func (m *Manager) SetZoneOverride(zoneID string, config map[string]interface{}) 
 }
 
 // DeleteZoneOverride removes a zone-specific override.
-func (m *Manager) DeleteZoneOverride(zoneID string) error {
+func (m *ConfigManager) DeleteZoneOverride(zoneID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -133,13 +133,13 @@ func (m *Manager) DeleteZoneOverride(zoneID string) error {
 }
 
 // load reads the config from disk.
-func (m *Manager) load() error {
+func (m *ConfigManager) load() error {
 	data, err := os.ReadFile(m.path)
 	if err != nil {
 		return fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config Config
+	var config ModuleConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
@@ -157,7 +157,7 @@ func (m *Manager) load() error {
 }
 
 // save writes the config to disk (caller must hold lock).
-func (m *Manager) save() error {
+func (m *ConfigManager) save() error {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(m.path), 0755); err != nil {
 		return fmt.Errorf("failed to create config dir: %w", err)

@@ -9,7 +9,7 @@ import (
 	"os"
 	"testing"
 
-	"nexus-open/internal/config"
+	"nexus-open/internal/settings"
 	"nexus-open/internal/device"
 )
 

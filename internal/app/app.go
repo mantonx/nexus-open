@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"nexus-open/internal/api"
-	"nexus-open/internal/config"
 	"nexus-open/internal/device"
 	"nexus-open/internal/instruments"
+	settings "nexus-open/internal/settings"
 	"nexus-open/internal/touch"
 	"nexus-open/internal/zone"
-	"nexus-open/internal/zoneconfig"
 )
 
 // App is the main application container that holds all dependencies.
@@ -29,10 +28,10 @@ type App struct {
 	apiPort    int
 
 	// Components
-	cfg          *config.Manager
+	cfg          *settings.Manager
 	device       device.Device
 	apiServer    *api.Server
-	zoneCfg      *zoneconfig.Manager
+	zoneCfg      *zone.ConfigManager
 	instruments  *instruments.Registry
 	zoneManager  *zone.Manager
 	zoneSampler  *zone.Sampler
@@ -118,14 +117,14 @@ func (a *App) initialize() error {
 
 	// 1. Load configuration
 	var err error
-	a.cfg, err = config.NewManager(a.configPath)
+	a.cfg, err = settings.NewManager(a.configPath)
 	if err != nil {
 		return fmt.Errorf("failed to create config manager: %w", err)
 	}
 	a.logger.Info("configuration loaded")
 
 	// 2. Load zone configuration manager
-	a.zoneCfg, err = zoneconfig.NewManager("")
+	a.zoneCfg, err = zone.NewConfigManager("")
 	if err != nil {
 		return fmt.Errorf("failed to create zone config manager: %w", err)
 	}
