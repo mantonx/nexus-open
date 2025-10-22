@@ -22,6 +22,8 @@ type NetworkModule struct {
 	firstRead  bool
 	format     string // "bytes" (KB/s, MB/s) or "bits" (Kbps, Mbps)
 	formatMu   sync.RWMutex
+	graphType  module.GraphType // Graph visualization type
+	graphMu    sync.RWMutex
 }
 
 // NewNetworkModule creates a new network module
@@ -30,7 +32,8 @@ func NewNetworkModule() *NetworkModule {
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
 		firstRead:  true,
-		format:     "bytes", // default to KB/s, MB/s
+		format:     "bytes",                     // default to KB/s, MB/s
+		graphType:  module.GraphTypeSparkline, // default to sparkline
 	}
 }
 
@@ -81,11 +84,17 @@ func (m *NetworkModule) Sample() (module.Payload, error) {
 		upStr = formatSpeed(upSpeed)
 	}
 
+	// Get current graph type
+	m.graphMu.RLock()
+	currentGraphType := m.graphType
+	m.graphMu.RUnlock()
+
 	return module.Payload{
 		Primary:   fmt.Sprintf("↓%s ↑%s", downStr, upStr),
 		Secondary: "Network",
 		Severity:  module.SeverityOK,
 		Spark:     spark,
+		GraphType: currentGraphType,
 		TTL:       2 * time.Second,
 		Icon:      "network-wired",
 		Timestamp: time.Now(),
@@ -216,14 +225,12 @@ func (m *NetworkModule) getSparkline() []float32 {
 
 // OnConfigChanged implements module.ConfigNotifier interface.
 // The network module uses the "network_format" config to switch between
-// bytes (KB/s, MB/s) and bits (Kbps, Mbps) display formats.
+// bytes (KB/s, MB/s) and bits (Kbps, Mbps) display formats,
+// and "graph_type" to change visualization style.
 func (m *NetworkModule) OnConfigChanged(config map[string]interface{}) error {
+	// Update network format
 	m.formatMu.Lock()
-	defer m.formatMu.Unlock()
-
 	oldFormat := m.format
-
-	// Check for network_format config ("bytes" or "bits")
 	if format, ok := config["network_format"].(string); ok && format != "" {
 		if format == "bytes" || format == "bits" {
 			m.format = format
@@ -235,6 +242,21 @@ func (m *NetworkModule) OnConfigChanged(config map[string]interface{}) error {
 			}
 		}
 	}
+	m.formatMu.Unlock()
+
+	// Update graph type
+	m.graphMu.Lock()
+	oldGraphType := m.graphType
+	if graphType, ok := config["graph_type"].(string); ok && graphType != "" {
+		gt := module.GraphType(graphType)
+		if gt == module.GraphTypeSparkline || gt == module.GraphTypeBar || gt == module.GraphTypeArea {
+			m.graphType = gt
+			if m.graphType != oldGraphType {
+				fmt.Printf("network: graph_type changed from %q to %q\n", oldGraphType, m.graphType)
+			}
+		}
+	}
+	m.graphMu.Unlock()
 
 	return nil
 }

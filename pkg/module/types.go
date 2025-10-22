@@ -31,6 +31,10 @@ type Payload struct {
 	// Rendered as small bars/line at bottom of zone
 	Spark []float32 `json:"spark,omitempty"`
 
+	// GraphType - How to render sparkline data: "sparkline", "bar", "area"
+	// Defaults to "sparkline" if empty
+	GraphType GraphType `json:"graph_type,omitempty"`
+
 	// Severity - Visual severity indicator: "ok", "warn", "crit"
 	// Affects primary text color
 	Severity Severity `json:"severity,omitempty"`
@@ -57,6 +61,15 @@ const (
 	SeverityOK   Severity = "ok"   // Normal operation (accent color)
 	SeverityWarn Severity = "warn" // Warning threshold (yellow/orange)
 	SeverityCrit Severity = "crit" // Critical state (red)
+)
+
+// GraphType specifies how sparkline data should be rendered
+type GraphType string
+
+const (
+	GraphTypeSparkline GraphType = "sparkline" // Line graph (default)
+	GraphTypeBar       GraphType = "bar"       // Vertical bars
+	GraphTypeArea      GraphType = "area"      // Filled area under line
 )
 
 // Validate checks if the payload meets requirements

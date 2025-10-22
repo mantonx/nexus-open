@@ -26,6 +26,8 @@ type GPUTempModule struct {
 	vendorMu   sync.Mutex // Protect vendor detection
 	unit       string     // "metric" (Celsius) or "imperial" (Fahrenheit)
 	unitMu     sync.RWMutex
+	graphType  module.GraphType // Graph visualization type
+	graphMu    sync.RWMutex
 }
 
 // NewGPUTempModule creates a new GPU temperature module
@@ -33,6 +35,7 @@ func NewGPUTempModule() *GPUTempModule {
 	return &GPUTempModule{
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
+		graphType:  module.GraphTypeSparkline, // default to sparkline
 		unit:       "metric", // default to Celsius
 	}
 }
@@ -85,11 +88,17 @@ func (m *GPUTempModule) Sample() (module.Payload, error) {
 		tempStr = fmt.Sprintf("%.0f°C", temp)
 	}
 
+	// Get current graph type
+	m.graphMu.RLock()
+	currentGraphType := m.graphType
+	m.graphMu.RUnlock()
+
 	return module.Payload{
 		Primary:   tempStr,
 		Secondary: "GPU Temp",
 		Severity:  severity,
 		Spark:     spark,
+		GraphType: currentGraphType,
 		TTL:       2 * time.Second,
 		Icon:      "microchip",
 		Timestamp: time.Now(),
@@ -357,14 +366,12 @@ func (m *GPUTempModule) getSeverity(temp float64) module.Severity {
 }
 
 // OnConfigChanged implements module.ConfigNotifier interface.
-// The GPU temp module uses the "unit" config to switch between Celsius and Fahrenheit.
+// The GPU temp module uses the "unit" config to switch between Celsius and Fahrenheit,
+// and "graph_type" to change visualization style.
 func (m *GPUTempModule) OnConfigChanged(config map[string]interface{}) error {
+	// Update unit
 	m.unitMu.Lock()
-	defer m.unitMu.Unlock()
-
 	oldUnit := m.unit
-
-	// Check for unit config ("metric" or "imperial")
 	if unit, ok := config["unit"].(string); ok && unit != "" {
 		if unit == "metric" || unit == "imperial" {
 			m.unit = unit
@@ -373,6 +380,21 @@ func (m *GPUTempModule) OnConfigChanged(config map[string]interface{}) error {
 			}
 		}
 	}
+	m.unitMu.Unlock()
+
+	// Update graph type
+	m.graphMu.Lock()
+	oldGraphType := m.graphType
+	if graphType, ok := config["graph_type"].(string); ok && graphType != "" {
+		gt := module.GraphType(graphType)
+		if gt == module.GraphTypeSparkline || gt == module.GraphTypeBar || gt == module.GraphTypeArea {
+			m.graphType = gt
+			if m.graphType != oldGraphType {
+				fmt.Printf("gpu-temp: graph_type changed from %q to %q\n", oldGraphType, m.graphType)
+			}
+		}
+	}
+	m.graphMu.Unlock()
 
 	return nil
 }
