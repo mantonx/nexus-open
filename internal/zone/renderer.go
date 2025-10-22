@@ -231,15 +231,18 @@ func (r *Renderer) drawSparkline(img *image.RGBA, data []float32, col color.RGBA
 		return
 	}
 
-	const sparkHeight = 8
+	const sparkHeight = 16
 	const paddingH = 4
 	const paddingV = 2
 
 	availableWidth := r.width - (2 * paddingH)
 	yBase := r.height - paddingV
 
-	// Semi-transparent accent color
-	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 200}
+	// More opaque for better visibility
+	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 255}
+
+	// Draw thicker line (2 pixels)
+	lineThickness := 2
 
 	// Draw line connecting points
 	for i := 0; i < len(data)-1; i++ {
@@ -268,8 +271,10 @@ func (r *Renderer) drawSparkline(img *image.RGBA, data []float32, col color.RGBA
 		y1 := yBase - int(float32(sparkHeight)*val1)
 		y2 := yBase - int(float32(sparkHeight)*val2)
 
-		// Draw line segment using Bresenham's algorithm (simple version)
-		r.drawLine2D(img, x1, y1, x2, y2, sparkColor)
+		// Draw thick line by drawing multiple parallel lines
+		for offset := -lineThickness/2; offset <= lineThickness/2; offset++ {
+			r.drawLine2D(img, x1, y1+offset, x2, y2+offset, sparkColor)
+		}
 	}
 }
 
@@ -321,7 +326,7 @@ func (r *Renderer) drawBarGraph(img *image.RGBA, data []float32, col color.RGBA)
 		return
 	}
 
-	const sparkHeight = 8
+	const sparkHeight = 16
 	const paddingH = 4
 	const paddingV = 2
 
@@ -335,8 +340,8 @@ func (r *Renderer) drawBarGraph(img *image.RGBA, data []float32, col color.RGBA)
 	// Draw bars from bottom
 	yBase := r.height - paddingV
 
-	// Semi-transparent accent color
-	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 150}
+	// More opaque for better visibility
+	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 220}
 
 	for i, value := range data {
 		if value < 0 {
@@ -364,17 +369,17 @@ func (r *Renderer) drawAreaGraph(img *image.RGBA, data []float32, col color.RGBA
 		return
 	}
 
-	const sparkHeight = 8
+	const sparkHeight = 16
 	const paddingH = 4
 	const paddingV = 2
 
 	availableWidth := r.width - (2 * paddingH)
 	yBase := r.height - paddingV
 
-	// Semi-transparent accent color for fill
-	fillColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 100}
-	// More opaque color for the line
-	lineColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 200}
+	// More opaque fill for better visibility
+	fillColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 150}
+	// Fully opaque line for definition
+	lineColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 255}
 
 	// Draw filled area and top line
 	for i := 0; i < len(data); i++ {
