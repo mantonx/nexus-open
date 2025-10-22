@@ -20,6 +20,8 @@ type NetworkModule struct {
 	lastStats  net.IOCountersStat
 	lastTime   time.Time
 	firstRead  bool
+	format     string // "bytes" (KB/s, MB/s) or "bits" (Kbps, Mbps)
+	formatMu   sync.RWMutex
 }
 
 // NewNetworkModule creates a new network module
@@ -28,6 +30,7 @@ func NewNetworkModule() *NetworkModule {
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
 		firstRead:  true,
+		format:     "bytes", // default to KB/s, MB/s
 	}
 }
 
@@ -63,9 +66,20 @@ func (m *NetworkModule) Sample() (module.Payload, error) {
 	// Get sparkline
 	spark := m.getSparkline()
 
-	// Format speeds
-	downStr := formatSpeed(downSpeed)
-	upStr := formatSpeed(upSpeed)
+	// Get current format
+	m.formatMu.RLock()
+	currentFormat := m.format
+	m.formatMu.RUnlock()
+
+	// Format speeds based on configuration
+	var downStr, upStr string
+	if currentFormat == "bits" {
+		downStr = formatSpeedBits(downSpeed)
+		upStr = formatSpeedBits(upSpeed)
+	} else {
+		downStr = formatSpeed(downSpeed)
+		upStr = formatSpeed(upSpeed)
+	}
 
 	return module.Payload{
 		Primary:   fmt.Sprintf("↓%s ↑%s", downStr, upStr),
@@ -122,7 +136,7 @@ func (m *NetworkModule) getNetworkSpeed() (float64, float64, error) {
 	return downloadSpeed, uploadSpeed, nil
 }
 
-// formatSpeed formats bytes/sec into human-readable string
+// formatSpeed formats bytes/sec into human-readable string (KB/s, MB/s, etc.)
 func formatSpeed(bytesPerSec float64) string {
 	const (
 		KB = 1024
@@ -139,6 +153,29 @@ func formatSpeed(bytesPerSec float64) string {
 		return fmt.Sprintf("%.1f KB/s", bytesPerSec/KB)
 	default:
 		return fmt.Sprintf("%.0f B/s", bytesPerSec)
+	}
+}
+
+// formatSpeedBits formats bytes/sec into bits/sec (Kbps, Mbps, etc.)
+func formatSpeedBits(bytesPerSec float64) string {
+	// Convert bytes to bits (1 byte = 8 bits)
+	bitsPerSec := bytesPerSec * 8
+
+	const (
+		Kbps = 1000
+		Mbps = 1000 * Kbps
+		Gbps = 1000 * Mbps
+	)
+
+	switch {
+	case bitsPerSec >= Gbps:
+		return fmt.Sprintf("%.1f Gbps", bitsPerSec/Gbps)
+	case bitsPerSec >= Mbps:
+		return fmt.Sprintf("%.1f Mbps", bitsPerSec/Mbps)
+	case bitsPerSec >= Kbps:
+		return fmt.Sprintf("%.1f Kbps", bitsPerSec/Kbps)
+	default:
+		return fmt.Sprintf("%.0f bps", bitsPerSec)
 	}
 }
 
@@ -175,6 +212,31 @@ func (m *NetworkModule) getSparkline() []float32 {
 	spark := make([]float32, len(m.history))
 	copy(spark, m.history)
 	return spark
+}
+
+// OnConfigChanged implements module.ConfigNotifier interface.
+// The network module uses the "network_format" config to switch between
+// bytes (KB/s, MB/s) and bits (Kbps, Mbps) display formats.
+func (m *NetworkModule) OnConfigChanged(config map[string]interface{}) error {
+	m.formatMu.Lock()
+	defer m.formatMu.Unlock()
+
+	oldFormat := m.format
+
+	// Check for network_format config ("bytes" or "bits")
+	if format, ok := config["network_format"].(string); ok && format != "" {
+		if format == "bytes" || format == "bits" {
+			m.format = format
+			if m.format != oldFormat {
+				// Reset history so sparkline scales correctly after format change.
+				m.historyMu.Lock()
+				m.history = m.history[:0]
+				m.historyMu.Unlock()
+			}
+		}
+	}
+
+	return nil
 }
 
 func main() {

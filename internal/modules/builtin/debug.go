@@ -44,3 +44,10 @@ func (m *DebugModule) Sample() (module.Payload, error) {
 		Timestamp: time.Now(),
 	}, nil
 }
+
+// OnConfigChanged implements module.ConfigNotifier interface.
+// Debug module doesn't use configuration, so this is a no-op.
+func (m *DebugModule) OnConfigChanged(config map[string]interface{}) error {
+	// Debug module doesn't need configuration
+	return nil
+}

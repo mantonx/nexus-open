@@ -58,10 +58,8 @@ func (r *Registry) Initialize() error {
 	r.instruments[r.network.Name()] = r.network
 	r.instruments[r.weather.Name()] = r.weather
 
-	// Configure weather from config
-	currentCfg := r.cfg.Get()
-	r.weather.SetLocation(currentCfg.Location)
-	r.weather.SetUnit(currentCfg.Unit)
+	// Note: Weather configuration is now handled per-zone via zone config system
+	// Each zone running the weather module will have its own config (location, unit)
 
 	r.logger.Info("instruments initialized", "count", len(r.instruments))
 	return nil
@@ -176,11 +174,10 @@ func (r *Registry) watchConfig() {
 		case <-r.ctx.Done():
 			return
 		case cfg := <-ch:
-			r.logger.Debug("config changed, updating instruments")
-
-			// Update weather location and unit
-			r.weather.SetLocation(cfg.Location)
-			r.weather.SetUnit(cfg.Unit)
+			r.logger.Debug("config changed")
+			// UI config changes (colors, fonts) don't affect instruments
+			// Module-specific configs (location, unit) are handled per-zone
+			_ = cfg // Suppress unused warning
 		}
 	}
 }

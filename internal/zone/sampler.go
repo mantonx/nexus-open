@@ -10,6 +10,7 @@ import (
 
 	"nexus-open/internal/modules/builtin"
 	"nexus-open/internal/plugin"
+	"nexus-open/internal/zoneconfig"
 	"nexus-open/pkg/module"
 )
 
@@ -18,6 +19,7 @@ type Sampler struct {
 	logger            *slog.Logger
 	manager           *Manager
 	pluginHost        *plugin.Host
+	zoneCfg           *zoneconfig.Manager
 	modules           map[string]module.Module // zoneID -> module instance
 	builtins          map[string]module.Module // Built-in modules by name
 	cancelFuncs       map[string]context.CancelFunc
@@ -29,15 +31,17 @@ type Sampler struct {
 	firstSampleLogged map[string]bool
 	moduleSpec        map[string]string
 	firstSampleMu     sync.Mutex
+	triggerChannels   map[string]chan struct{} // zoneID -> trigger channel for immediate sampling
 }
 
 // NewSampler creates a new module sampler
-func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager) *Sampler {
+func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zoneCfg *zoneconfig.Manager) *Sampler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	s := &Sampler{
 		logger:            logger,
 		manager:           manager,
+		zoneCfg:           zoneCfg,
 		pluginHost:        plugin.NewHost(logger),
 		modules:           make(map[string]module.Module),
 		builtins:          make(map[string]module.Module),
@@ -47,6 +51,7 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager) *Sam
 		zoneStartTimes:    make(map[string]time.Time),
 		firstSampleLogged: make(map[string]bool),
 		moduleSpec:        make(map[string]string),
+		triggerChannels:   make(map[string]chan struct{}),
 	}
 
 	// Register built-in modules
@@ -122,9 +127,32 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	s.firstSampleLogged[zoneConfig.ID] = false
 	s.moduleSpec[zoneConfig.ID] = moduleSpec
 
+	// Send zone config to module (if available and module supports it)
+	if s.zoneCfg != nil {
+		if config := s.zoneCfg.Get(zoneConfig.ID, moduleSpec); config != nil {
+			if notifier, ok := module.SupportsConfigNotification(mod); ok {
+				if err := notifier.OnConfigChanged(config); err != nil {
+					s.logger.Warn("failed to apply initial zone config",
+						"zone_id", zoneConfig.ID,
+						"error", err)
+				} else {
+					s.logger.Info("applied initial zone config",
+						"zone_id", zoneConfig.ID,
+						"config", config)
+				}
+			}
+		}
+	}
+
+	// Create trigger channel for immediate sampling
+	s.triggerChannels[zoneConfig.ID] = make(chan struct{}, 1)
+
 	// Start sampling goroutine
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.cancelFuncs[zoneConfig.ID] = cancel
+
+	// Apply initial configuration if available
+	s.applyInitialZoneConfig(zoneConfig.ID, moduleSpec, mod)
 
 	s.wg.Add(1)
 	go s.sampleLoop(ctx, zoneConfig.ID, mod, time.Duration(zoneConfig.RefreshMs)*time.Millisecond)
@@ -144,12 +172,21 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod module.Modu
 	// Sample immediately
 	s.sampleOnce(ctx, zoneID, mod)
 
+	// Get the trigger channel for this zone
+	s.mu.RLock()
+	triggerCh := s.triggerChannels[zoneID]
+	s.mu.RUnlock()
+
 	for {
 		select {
 		case <-ctx.Done():
 			s.logger.Debug("sample loop stopped", "zone_id", zoneID)
 			return
 		case <-ticker.C:
+			s.sampleOnce(ctx, zoneID, mod)
+		case <-triggerCh:
+			// Immediate sample triggered (e.g., by config change)
+			s.logger.Debug("immediate sample triggered", "zone_id", zoneID)
 			s.sampleOnce(ctx, zoneID, mod)
 		}
 	}
@@ -303,6 +340,36 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 	return nil
 }
 
+// applyInitialZoneConfig notifies a module of its current configuration before sampling starts.
+func (s *Sampler) applyInitialZoneConfig(zoneID, moduleSpec string, mod module.Module) {
+	if s.zoneCfg == nil {
+		return
+	}
+
+	notifier, ok := module.SupportsConfigNotification(mod)
+	if !ok {
+		return
+	}
+
+	config := s.zoneCfg.Get(zoneID, moduleSpec)
+	if len(config) == 0 {
+		return
+	}
+
+	if err := notifier.OnConfigChanged(config); err != nil {
+		s.logger.Warn("failed to apply initial zone config",
+			"zone_id", zoneID,
+			"module", moduleSpec,
+			"error", err)
+		return
+	}
+
+	s.logger.Info("applied initial zone config",
+		"zone_id", zoneID,
+		"module", moduleSpec,
+		"config", config)
+}
+
 // BroadcastConfigChange notifies all modules about a configuration change.
 // Only modules implementing the ConfigNotifier interface will receive the notification.
 func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
@@ -313,6 +380,7 @@ func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
 
 	notified := 0
 	skipped := 0
+	var zonesToResample []string
 
 	// Notify all loaded modules
 	for zoneID, mod := range s.modules {
@@ -327,6 +395,7 @@ func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
 					"zone_id", zoneID,
 					"module", s.moduleSpec[zoneID])
 				notified++
+				zonesToResample = append(zonesToResample, zoneID)
 			}
 		} else {
 			s.logger.Debug("module does not support config notifications",
@@ -340,4 +409,62 @@ func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
 		"notified", notified,
 		"skipped", skipped,
 		"total", len(s.modules))
+
+	// Trigger immediate resampling for modules that were notified
+	for _, zoneID := range zonesToResample {
+		if triggerCh, ok := s.triggerChannels[zoneID]; ok {
+			// Non-blocking send (channel has buffer of 1)
+			select {
+			case triggerCh <- struct{}{}:
+				s.logger.Debug("triggered immediate resample", "zone_id", zoneID)
+			default:
+				// Channel already has a pending trigger, skip
+			}
+		}
+	}
+}
+
+// BroadcastZoneConfigChange broadcasts a config change to a specific zone's module.
+// Returns an error if the zone doesn't exist or doesn't support config notifications.
+func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]interface{}) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Find the module for this zone
+	mod, exists := s.modules[zoneID]
+	if !exists {
+		return fmt.Errorf("zone %q not found", zoneID)
+	}
+
+	// Check if module supports config notifications
+	notifier, ok := module.SupportsConfigNotification(mod)
+	if !ok {
+		return fmt.Errorf("module for zone %q does not support config notifications", zoneID)
+	}
+
+	// Send config to module
+	if err := notifier.OnConfigChanged(config); err != nil {
+		s.logger.Error("zone config notification failed",
+			"zone_id", zoneID,
+			"module", s.moduleSpec[zoneID],
+			"error", err)
+		return fmt.Errorf("config notification failed: %w", err)
+	}
+
+	s.logger.Info("zone config updated",
+		"zone_id", zoneID,
+		"module", s.moduleSpec[zoneID],
+		"config", config)
+
+	// Trigger immediate resampling
+	if triggerCh, ok := s.triggerChannels[zoneID]; ok {
+		select {
+		case triggerCh <- struct{}{}:
+			s.logger.Debug("triggered immediate resample", "zone_id", zoneID)
+		default:
+			// Channel already has a pending trigger, skip
+		}
+	}
+
+	return nil
 }

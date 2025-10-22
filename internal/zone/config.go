@@ -23,15 +23,15 @@ type Page struct {
 
 // ZoneConfig represents configuration for a single zone
 type ZoneConfig struct {
-	ID          string        `yaml:"id" json:"id"`                       // Unique zone identifier
-	Width       int           `yaml:"width" json:"width"`                 // Zone width in pixels
-	X           int           `yaml:"x,omitempty" json:"x,omitempty"`     // X offset (auto-computed if 0)
-	Module      string        `yaml:"module" json:"module"`               // Module endpoint (builtin:name or exec:path)
-	RefreshMs   int           `yaml:"refresh_ms" json:"refresh_ms"`       // Sampling interval
-	Align       Alignment     `yaml:"align,omitempty" json:"align,omitempty"` // Text alignment
-	ThemeOverride *Theme      `yaml:"theme_override,omitempty" json:"theme_override,omitempty"` // Per-zone theme
-	Choices     []string      `yaml:"choices,omitempty" json:"choices,omitempty"` // Module choices for cycling
-	OnTap       TapAction     `yaml:"on_tap,omitempty" json:"on_tap,omitempty"` // Tap action
+	ID           string     `yaml:"id" json:"id"`                       // Unique zone identifier
+	Width        int        `yaml:"width" json:"width"`                 // Zone width in pixels
+	X            int        `yaml:"x,omitempty" json:"x,omitempty"`     // X offset (auto-computed if 0)
+	Module       string     `yaml:"module" json:"module"`               // Module endpoint (builtin:name or exec:path)
+	RefreshMs    int        `yaml:"refresh_ms" json:"refresh_ms"`       // Sampling interval
+	Align        Alignment  `yaml:"align,omitempty" json:"align,omitempty"` // Text alignment
+	ThemeOverride *Theme    `yaml:"theme_override,omitempty" json:"theme_override,omitempty"` // Per-zone theme
+	Choices      []string   `yaml:"choices,omitempty" json:"choices,omitempty"` // Module choices for cycling
+	OnTap        TapAction  `yaml:"on_tap,omitempty" json:"on_tap,omitempty"` // Tap action
 }
 
 // Theme represents visual styling

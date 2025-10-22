@@ -22,6 +22,8 @@ type CPUTempModule struct {
 	history    []float32  // Sparkline data (last 60 samples)
 	historyMu  sync.Mutex // Protect history
 	maxHistory int        // Maximum history length
+	unit       string     // "metric" (Celsius) or "imperial" (Fahrenheit)
+	unitMu     sync.RWMutex
 }
 
 // NewCPUTempModule creates a new CPU temperature module
@@ -29,6 +31,7 @@ func NewCPUTempModule() *CPUTempModule {
 	return &CPUTempModule{
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
+		unit:       "metric", // default to Celsius
 	}
 }
 
@@ -64,11 +67,24 @@ func (m *CPUTempModule) Sample() (module.Payload, error) {
 	// Get sparkline (normalized to 0-100°C range)
 	spark := m.getSparkline()
 
-	// Determine severity
+	// Determine severity (always based on Celsius thresholds)
 	severity := m.getSeverity(temp)
 
+	// Get current unit and format temperature
+	m.unitMu.RLock()
+	currentUnit := m.unit
+	m.unitMu.RUnlock()
+
+	var tempStr string
+	if currentUnit == "imperial" {
+		fahrenheit := (temp * 9 / 5) + 32
+		tempStr = fmt.Sprintf("%.0f°F", fahrenheit)
+	} else {
+		tempStr = fmt.Sprintf("%.0f°C", temp)
+	}
+
 	return module.Payload{
-		Primary:   fmt.Sprintf("%.0f°C", temp),
+		Primary:   tempStr,
 		Secondary: "CPU Temp",
 		Severity:  severity,
 		Spark:     spark,
@@ -215,6 +231,27 @@ func (m *CPUTempModule) getSeverity(temp float64) module.Severity {
 	default:
 		return module.SeverityOK // OK: <75°C
 	}
+}
+
+// OnConfigChanged implements module.ConfigNotifier interface.
+// The CPU temp module uses the "unit" config to switch between Celsius and Fahrenheit.
+func (m *CPUTempModule) OnConfigChanged(config map[string]interface{}) error {
+	m.unitMu.Lock()
+	defer m.unitMu.Unlock()
+
+	oldUnit := m.unit
+
+	// Check for unit config ("metric" or "imperial")
+	if unit, ok := config["unit"].(string); ok && unit != "" {
+		if unit == "metric" || unit == "imperial" {
+			m.unit = unit
+			if m.unit != oldUnit {
+				fmt.Printf("cpu-temp: unit changed from %q to %q\n", oldUnit, m.unit)
+			}
+		}
+	}
+
+	return nil
 }
 
 func main() {

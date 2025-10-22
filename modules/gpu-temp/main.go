@@ -24,6 +24,8 @@ type GPUTempModule struct {
 	maxHistory int        // Maximum history length
 	vendor     string     // Detected GPU vendor (nvidia/amd/intel)
 	vendorMu   sync.Mutex // Protect vendor detection
+	unit       string     // "metric" (Celsius) or "imperial" (Fahrenheit)
+	unitMu     sync.RWMutex
 }
 
 // NewGPUTempModule creates a new GPU temperature module
@@ -31,6 +33,7 @@ func NewGPUTempModule() *GPUTempModule {
 	return &GPUTempModule{
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
+		unit:       "metric", // default to Celsius
 	}
 }
 
@@ -66,11 +69,24 @@ func (m *GPUTempModule) Sample() (module.Payload, error) {
 	// Get sparkline (normalized to 0-100°C range)
 	spark := m.getSparkline()
 
-	// Determine severity
+	// Determine severity (always based on Celsius thresholds)
 	severity := m.getSeverity(temp)
 
+	// Get current unit and format temperature
+	m.unitMu.RLock()
+	currentUnit := m.unit
+	m.unitMu.RUnlock()
+
+	var tempStr string
+	if currentUnit == "imperial" {
+		fahrenheit := (temp * 9 / 5) + 32
+		tempStr = fmt.Sprintf("%.0f°F", fahrenheit)
+	} else {
+		tempStr = fmt.Sprintf("%.0f°C", temp)
+	}
+
 	return module.Payload{
-		Primary:   fmt.Sprintf("%.0f°C", temp),
+		Primary:   tempStr,
 		Secondary: "GPU Temp",
 		Severity:  severity,
 		Spark:     spark,
@@ -338,6 +354,27 @@ func (m *GPUTempModule) getSeverity(temp float64) module.Severity {
 	default:
 		return module.SeverityOK // OK: <75°C
 	}
+}
+
+// OnConfigChanged implements module.ConfigNotifier interface.
+// The GPU temp module uses the "unit" config to switch between Celsius and Fahrenheit.
+func (m *GPUTempModule) OnConfigChanged(config map[string]interface{}) error {
+	m.unitMu.Lock()
+	defer m.unitMu.Unlock()
+
+	oldUnit := m.unit
+
+	// Check for unit config ("metric" or "imperial")
+	if unit, ok := config["unit"].(string); ok && unit != "" {
+		if unit == "metric" || unit == "imperial" {
+			m.unit = unit
+			if m.unit != oldUnit {
+				fmt.Printf("gpu-temp: unit changed from %q to %q\n", oldUnit, m.unit)
+			}
+		}
+	}
+
+	return nil
 }
 
 func main() {
