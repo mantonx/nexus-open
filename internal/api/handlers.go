@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"nexus-open/internal/assets"
-	"nexus-open/internal/config"
+	"nexus-open/internal/settings"
 )
 
 // ErrorResponse represents an API error response.

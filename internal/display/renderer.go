@@ -14,7 +14,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 
-	"nexus-open/internal/config"
+	"nexus-open/internal/settings"
 	"nexus-open/internal/device"
 	"nexus-open/internal/fonts"
 	"nexus-open/internal/instruments"

@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"nexus-open/internal/config"
-	"nexus-open/internal/zoneconfig"
+	settings "nexus-open/internal/settings"
+	"nexus-open/internal/zone"
 )
 
 // DeviceController provides an interface for controlling device features.
@@ -28,8 +28,8 @@ type ZoneConfigNotifier interface {
 type Server struct {
 	server        *http.Server
 	logger        *slog.Logger
-	cfg           *config.Manager
-	zoneCfg       *zoneconfig.Manager
+	cfg           *settings.Manager
+	zoneCfg       *zone.ConfigManager
 	device        DeviceController
 	zoneNotifier  ZoneConfigNotifier // Notifies zones of config changes
 	windowState   string             // "shown" or "hidden"
@@ -37,7 +37,7 @@ type Server struct {
 }
 
 // NewServer creates a new API server instance.
-func NewServer(addr string, cfg *config.Manager, device DeviceController, logger *slog.Logger) *Server {
+func NewServer(addr string, cfg *settings.Manager, device DeviceController, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -89,7 +89,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // SetZoneConfigManager sets the zone config manager.
-func (s *Server) SetZoneConfigManager(zoneCfg *zoneconfig.Manager) {
+func (s *Server) SetZoneConfigManager(zoneCfg *zone.ConfigManager) {
 	s.zoneCfg = zoneCfg
 	s.logger.Debug("zone config manager registered")
 }

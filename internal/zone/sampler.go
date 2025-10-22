@@ -10,7 +10,6 @@ import (
 
 	"nexus-open/internal/modules/builtin"
 	"nexus-open/internal/plugin"
-	"nexus-open/internal/zoneconfig"
 	"nexus-open/pkg/module"
 )
 
@@ -19,7 +18,7 @@ type Sampler struct {
 	logger            *slog.Logger
 	manager           *Manager
 	pluginHost        *plugin.Host
-	zoneCfg           *zoneconfig.Manager
+	zoneCfg           *ConfigManager
 	modules           map[string]module.Module // zoneID -> module instance
 	builtins          map[string]module.Module // Built-in modules by name
 	cancelFuncs       map[string]context.CancelFunc
@@ -35,7 +34,7 @@ type Sampler struct {
 }
 
 // NewSampler creates a new module sampler
-func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zoneCfg *zoneconfig.Manager) *Sampler {
+func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zoneCfg *ConfigManager) *Sampler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	s := &Sampler{
