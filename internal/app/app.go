@@ -10,7 +10,6 @@ import (
 
 	"nexus-open/internal/api"
 	"nexus-open/internal/device"
-	"nexus-open/internal/instruments"
 	settings "nexus-open/internal/settings"
 	"nexus-open/internal/touch"
 	"nexus-open/internal/zone"
@@ -32,7 +31,6 @@ type App struct {
 	device       device.Device
 	apiServer    *api.Server
 	zoneCfg      *zone.ConfigManager
-	instruments  *instruments.Registry
 	zoneManager  *zone.Manager
 	zoneSampler  *zone.Sampler
 	touchHandler *touch.Handler
@@ -149,14 +147,7 @@ func (a *App) initialize() error {
 	a.apiServer.SetZoneConfigManager(a.zoneCfg)
 	a.logger.Info("zone config manager registered with API server")
 
-	// 5. Initialize instruments registry (legacy - kept for API compatibility)
-	a.instruments = instruments.NewRegistry(a.logger, a.cfg)
-	if err := a.instruments.Initialize(); err != nil {
-		return fmt.Errorf("failed to initialize instruments: %w", err)
-	}
-	a.logger.Info("instruments initialized")
-
-	// 6. Create zone manager
+	// 5. Create zone manager
 	layoutPath := "configs/layouts/multi-page.yaml"
 	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, layoutPath)
 	if err != nil {
@@ -166,7 +157,7 @@ func (a *App) initialize() error {
 		"pages", len(a.zoneManager.GetConfig().Pages),
 		"current_page", a.zoneManager.GetConfig().Pages[0].Name)
 
-	// 7. Create module sampler
+	// 6. Create module sampler
 	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager, a.zoneCfg)
 	a.logger.Info("zone sampler created")
 
@@ -177,7 +168,7 @@ func (a *App) initialize() error {
 	a.apiServer.SetZoneConfigNotifier(a.zoneSampler)
 	a.logger.Info("zone config notifier registered with API server")
 
-	// 8. Create touch handler
+	// 7. Create touch handler
 	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
 	a.logger.Info("touch handler created")
 
@@ -193,12 +184,6 @@ func (a *App) start() error {
 		a.logger.Warn("failed to connect to device", "error", err)
 		// Don't fail - device will retry connection
 	}
-
-	// Start instruments data collection (legacy - kept for API)
-	if err := a.instruments.Start(a.ctx); err != nil {
-		return fmt.Errorf("failed to start instruments: %w", err)
-	}
-	a.logger.Info("instruments started")
 
 	// Start module sampler
 	if err := a.zoneSampler.Start(); err != nil {
@@ -272,13 +257,6 @@ func (a *App) stop() error {
 	// Stop zone sampler
 	if a.zoneSampler != nil {
 		a.zoneSampler.Stop()
-	}
-
-	// Stop instruments (legacy)
-	if a.instruments != nil {
-		if err := a.instruments.Stop(); err != nil {
-			a.logger.Error("error stopping instruments", "error", err)
-		}
 	}
 
 	// Stop API server
