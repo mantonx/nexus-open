@@ -96,9 +96,9 @@ func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
 		r.drawLine(img, payload.Secondary, "", mutedColor, paddingH, paddingV+26, r.secondaryFace)
 	}
 
-	// Render sparkline (bottom-aligned)
+	// Render sparkline/graph (bottom-aligned)
 	if len(payload.Spark) > 0 {
-		r.drawSparkline(img, payload.Spark, primaryColor)
+		r.drawGraph(img, payload.Spark, payload.GraphType, primaryColor)
 	}
 
 	// Render progress bar (bottom-aligned)
@@ -204,8 +204,119 @@ func (r *Renderer) drawRawText(img *image.RGBA, text string, col color.RGBA, x, 
 	drawer.DrawString(text)
 }
 
-// drawSparkline renders a sparkline chart at the bottom of the zone
+// drawGraph renders a graph at the bottom of the zone based on the specified type
+func (r *Renderer) drawGraph(img *image.RGBA, data []float32, graphType module.GraphType, col color.RGBA) {
+	if len(data) == 0 {
+		return
+	}
+
+	// Default to sparkline if not specified
+	if graphType == "" {
+		graphType = module.GraphTypeSparkline
+	}
+
+	switch graphType {
+	case module.GraphTypeBar:
+		r.drawBarGraph(img, data, col)
+	case module.GraphTypeArea:
+		r.drawAreaGraph(img, data, col)
+	default: // module.GraphTypeSparkline
+		r.drawSparkline(img, data, col)
+	}
+}
+
+// drawSparkline renders a line graph at the bottom of the zone
 func (r *Renderer) drawSparkline(img *image.RGBA, data []float32, col color.RGBA) {
+	if len(data) == 0 {
+		return
+	}
+
+	const sparkHeight = 8
+	const paddingH = 4
+	const paddingV = 2
+
+	availableWidth := r.width - (2 * paddingH)
+	yBase := r.height - paddingV
+
+	// Semi-transparent accent color
+	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 200}
+
+	// Draw line connecting points
+	for i := 0; i < len(data)-1; i++ {
+		val1 := data[i]
+		val2 := data[i+1]
+
+		// Clamp values
+		if val1 < 0 {
+			val1 = 0
+		}
+		if val1 > 1 {
+			val1 = 1
+		}
+		if val2 < 0 {
+			val2 = 0
+		}
+		if val2 > 1 {
+			val2 = 1
+		}
+
+		// Calculate x positions
+		x1 := paddingH + (i * availableWidth / len(data))
+		x2 := paddingH + ((i + 1) * availableWidth / len(data))
+
+		// Calculate y positions (inverted, higher value = lower y)
+		y1 := yBase - int(float32(sparkHeight)*val1)
+		y2 := yBase - int(float32(sparkHeight)*val2)
+
+		// Draw line segment using Bresenham's algorithm (simple version)
+		r.drawLine2D(img, x1, y1, x2, y2, sparkColor)
+	}
+}
+
+// drawLine2D draws a line between two points (Bresenham's algorithm)
+func (r *Renderer) drawLine2D(img *image.RGBA, x1, y1, x2, y2 int, col color.RGBA) {
+	dx := abs(x2 - x1)
+	dy := abs(y2 - y1)
+	sx := -1
+	if x1 < x2 {
+		sx = 1
+	}
+	sy := -1
+	if y1 < y2 {
+		sy = 1
+	}
+	err := dx - dy
+
+	for {
+		if x1 >= 0 && x1 < r.width && y1 >= 0 && y1 < r.height {
+			img.Set(x1, y1, col)
+		}
+
+		if x1 == x2 && y1 == y2 {
+			break
+		}
+
+		e2 := 2 * err
+		if e2 > -dy {
+			err -= dy
+			x1 += sx
+		}
+		if e2 < dx {
+			err += dx
+			y1 += sy
+		}
+	}
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// drawBarGraph renders vertical bars at the bottom of the zone
+func (r *Renderer) drawBarGraph(img *image.RGBA, data []float32, col color.RGBA) {
 	if len(data) == 0 {
 		return
 	}
@@ -222,7 +333,7 @@ func (r *Renderer) drawSparkline(img *image.RGBA, data []float32, col color.RGBA
 	}
 
 	// Draw bars from bottom
-	y1 := r.height - paddingV
+	yBase := r.height - paddingV
 
 	// Semi-transparent accent color
 	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 150}
@@ -239,11 +350,80 @@ func (r *Renderer) drawSparkline(img *image.RGBA, data []float32, col color.RGBA
 		x := paddingH + (i * barWidth)
 
 		// Draw bar
-		for py := y1 - barHeight; py < y1; py++ {
+		for py := yBase - barHeight; py < yBase; py++ {
 			for px := x; px < x+barWidth-1 && px < r.width-paddingH; px++ {
 				img.Set(px, py, sparkColor)
 			}
 		}
+	}
+}
+
+// drawAreaGraph renders a filled area graph at the bottom of the zone
+func (r *Renderer) drawAreaGraph(img *image.RGBA, data []float32, col color.RGBA) {
+	if len(data) == 0 {
+		return
+	}
+
+	const sparkHeight = 8
+	const paddingH = 4
+	const paddingV = 2
+
+	availableWidth := r.width - (2 * paddingH)
+	yBase := r.height - paddingV
+
+	// Semi-transparent accent color for fill
+	fillColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 100}
+	// More opaque color for the line
+	lineColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 200}
+
+	// Draw filled area and top line
+	for i := 0; i < len(data); i++ {
+		value := data[i]
+
+		// Clamp values
+		if value < 0 {
+			value = 0
+		}
+		if value > 1 {
+			value = 1
+		}
+
+		x := paddingH + (i * availableWidth / len(data))
+		y := yBase - int(float32(sparkHeight)*value)
+
+		// Fill column from bottom to value height
+		for py := y; py < yBase; py++ {
+			if x >= 0 && x < r.width && py >= 0 && py < r.height {
+				img.Set(x, py, fillColor)
+			}
+		}
+	}
+
+	// Draw top line connecting points (on top of fill for definition)
+	for i := 0; i < len(data)-1; i++ {
+		val1 := data[i]
+		val2 := data[i+1]
+
+		// Clamp values
+		if val1 < 0 {
+			val1 = 0
+		}
+		if val1 > 1 {
+			val1 = 1
+		}
+		if val2 < 0 {
+			val2 = 0
+		}
+		if val2 > 1 {
+			val2 = 1
+		}
+
+		x1 := paddingH + (i * availableWidth / len(data))
+		x2 := paddingH + ((i + 1) * availableWidth / len(data))
+		y1 := yBase - int(float32(sparkHeight)*val1)
+		y2 := yBase - int(float32(sparkHeight)*val2)
+
+		r.drawLine2D(img, x1, y1, x2, y2, lineColor)
 	}
 }
 
