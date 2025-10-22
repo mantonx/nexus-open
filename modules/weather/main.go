@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/go-plugin"
-	"gopkg.in/yaml.v3"
 
 	"nexus-open/pkg/module"
 )
@@ -27,12 +24,6 @@ const (
 	cacheTimeout       = 5 * time.Minute
 )
 
-// Config represents the weather configuration
-type Config struct {
-	Location string `yaml:"location"`
-	Unit     string `yaml:"unit"`
-}
-
 // WeatherModule monitors weather conditions
 type WeatherModule struct {
 	mu          sync.RWMutex
@@ -40,7 +31,6 @@ type WeatherModule struct {
 	cachedData  *WeatherData
 	location    string
 	unit        string // "metric" or "imperial"
-	configPath  string
 	coordsCache map[string]coords
 	coordsMu    sync.Mutex
 }
@@ -63,17 +53,11 @@ type WeatherData struct {
 
 // NewWeatherModule creates a new weather module
 func NewWeatherModule() *WeatherModule {
-	homeDir, _ := os.UserHomeDir()
-	configPath := filepath.Join(homeDir, ".config", "nexus-open", "config.yaml")
-
 	wm := &WeatherModule{
-		configPath:  configPath,
 		coordsCache: make(map[string]coords),
 		location:    "Jersey City, NJ",
 		unit:        "imperial", // default (°F)
 	}
-	// Load initial config from file
-	wm.loadConfig()
 	return wm
 }
 
@@ -91,9 +75,6 @@ func (m *WeatherModule) Describe() (module.Descriptor, error) {
 
 // Sample returns current weather data
 func (m *WeatherModule) Sample() (module.Payload, error) {
-	// Load config
-	m.loadConfig()
-
 	// Check cache
 	m.mu.RLock()
 	if m.cachedData != nil && time.Since(m.lastUpdate) < cacheTimeout {
@@ -138,8 +119,6 @@ func (m *WeatherModule) Sample() (module.Payload, error) {
 // allowing the weather module to react instantly without file watching.
 func (m *WeatherModule) OnConfigChanged(config map[string]interface{}) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	oldLocation := m.location
 	oldUnit := m.unit
 
@@ -153,11 +132,37 @@ func (m *WeatherModule) OnConfigChanged(config map[string]interface{}) error {
 		m.unit = unit
 	}
 
-	// Clear cache if location or unit changed
-	if m.location != oldLocation || m.unit != oldUnit {
-		m.cachedData = nil
-		fmt.Printf("weather: config updated - location=%q unit=%q (cache cleared)\n",
-			m.location, m.unit)
+	newLocation := m.location
+	newUnit := m.unit
+	m.mu.Unlock()
+
+	// If location or unit changed, fetch fresh data immediately
+	if newLocation != oldLocation || newUnit != oldUnit {
+		fmt.Printf("weather: config updated - location=%q unit=%q (fetching immediately)\n",
+			newLocation, newUnit)
+
+		// Fetch weather data synchronously (fetchWeather doesn't hold locks)
+		data, err := m.fetchWeather()
+		if err != nil {
+			fmt.Printf("weather: failed to fetch after config change: %v\n", err)
+			// Clear cache anyway so next Sample() will retry
+			m.mu.Lock()
+			m.cachedData = nil
+			m.lastUpdate = time.Time{}
+			m.mu.Unlock()
+			return nil
+		}
+
+		// Update cache with new data
+		m.mu.Lock()
+		m.cachedData = data
+		m.lastUpdate = time.Now()
+		m.mu.Unlock()
+
+		fmt.Printf("weather: immediately updated to %s, %s%.1f\n",
+			data.Location,
+			map[bool]string{true: "°F", false: "°C"}[data.Unit == "imperial"],
+			data.Temperature)
 	}
 
 	return nil
@@ -183,37 +188,6 @@ func (m *WeatherModule) formatPayload(data *WeatherData) module.Payload {
 		Icon:      data.Icon,
 		Timestamp: time.Now(),
 	}
-}
-
-// loadConfig loads weather configuration from config file
-func (m *WeatherModule) loadConfig() {
-	data, err := os.ReadFile(m.configPath)
-	if err != nil {
-		return
-	}
-
-	var config struct {
-		Location string `yaml:"location"`
-		Unit     string `yaml:"unit"`
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return
-	}
-
-	m.mu.Lock()
-	oldLocation := m.location
-	oldUnit := m.unit
-	if config.Location != "" {
-		m.location = config.Location
-	}
-	if config.Unit != "" {
-		m.unit = config.Unit
-	}
-	if m.location != oldLocation || m.unit != oldUnit {
-		m.cachedData = nil
-	}
-	m.mu.Unlock()
 }
 
 // fetchWeather fetches current weather data

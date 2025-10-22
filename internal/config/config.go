@@ -21,20 +21,10 @@ type Manager struct {
 	watchers []chan<- Config
 }
 
-// Config holds the application configuration.
+// Config holds the application configuration (UI settings only).
+// Module-specific configs are managed per-zone via zone config system.
 // openapi:schema Config
 type Config struct {
-	// openapi:description Location for weather and timezone (city, state or coordinates)
-	// openapi:example Jersey City, NJ
-	Location string `mapstructure:"location" json:"location"`
-	// openapi:description Time format (12h or 24h)
-	// openapi:enum 12h 24h
-	// openapi:example 12h
-	TimeFormat string `mapstructure:"time_format" json:"time_format"`
-	// openapi:description Unit system (metric or imperial)
-	// openapi:enum metric imperial
-	// openapi:example imperial
-	Unit string `mapstructure:"unit" json:"unit"`
 	// openapi:description Background color in hex format
 	// openapi:example #000000
 	BackgroundColor string `mapstructure:"background_color" json:"background_color"`
@@ -68,11 +58,8 @@ type DisplayConfig struct {
 	Layout string `mapstructure:"layout" json:"layout"`
 }
 
-// Default configuration values.
+// Default configuration values (UI settings only).
 const (
-	DefaultLocation        = "Jersey City, NJ"
-	DefaultTimeFormat      = "12h"
-	DefaultUnit            = "imperial"
 	DefaultBackgroundColor = "#000000"
 	DefaultBackgroundImage = "background.png"
 	DefaultTextColor       = "#FFFFFF"
@@ -82,19 +69,8 @@ const (
 	DefaultLayout          = "dashboard"
 )
 
-// Validation constants.
-const (
-	TimeFormat12Hour = "12h"
-	TimeFormat24Hour = "24h"
-	UnitMetric       = "metric"
-	UnitImperial     = "imperial"
-)
-
 var (
-	ErrInvalidTimeFormat = errors.New("invalid time format: must be 12h or 24h")
-	ErrInvalidUnit       = errors.New("invalid unit: must be metric or imperial")
-	ErrInvalidColor      = errors.New("invalid color: must be hex color (e.g. #FFFFFF)")
-	ErrInvalidLocation   = errors.New("invalid location: cannot be empty")
+	ErrInvalidColor = errors.New("invalid color: must be hex color (e.g. #FFFFFF)")
 )
 
 var hexColorRegex = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
@@ -218,10 +194,7 @@ func (m *Manager) save() error {
 	viper.SetConfigFile(m.path)
 	viper.SetConfigType("yaml")
 
-	// Set values
-	viper.Set("location", m.cfg.Location)
-	viper.Set("time_format", m.cfg.TimeFormat)
-	viper.Set("unit", m.cfg.Unit)
+	// Set values (UI settings only)
 	viper.Set("background_color", m.cfg.BackgroundColor)
 	viper.Set("background_image", m.cfg.BackgroundImage)
 	viper.Set("text_color", m.cfg.TextColor)
@@ -234,9 +207,6 @@ func (m *Manager) save() error {
 // createDefaultConfig creates a new configuration file with defaults.
 func (m *Manager) createDefaultConfig() error {
 	defaultCfg := &Config{
-		Location:        DefaultLocation,
-		TimeFormat:      DefaultTimeFormat,
-		Unit:            DefaultUnit,
 		BackgroundColor: DefaultBackgroundColor,
 		BackgroundImage: DefaultBackgroundImage,
 		TextColor:       DefaultTextColor,
@@ -266,27 +236,12 @@ func (m *Manager) notifyWatchers(cfg Config) {
 
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
-	// Validate time format
-	if c.TimeFormat != TimeFormat12Hour && c.TimeFormat != TimeFormat24Hour {
-		return ErrInvalidTimeFormat
-	}
-
-	// Validate unit
-	if c.Unit != UnitMetric && c.Unit != UnitImperial {
-		return ErrInvalidUnit
-	}
-
 	// Validate colors
 	if !isValidHexColor(c.TextColor) {
 		return fmt.Errorf("%w: text_color=%s", ErrInvalidColor, c.TextColor)
 	}
 	if !isValidHexColor(c.BackgroundColor) {
 		return fmt.Errorf("%w: background_color=%s", ErrInvalidColor, c.BackgroundColor)
-	}
-
-	// Validate location
-	if c.Location == "" {
-		return ErrInvalidLocation
 	}
 
 	return nil

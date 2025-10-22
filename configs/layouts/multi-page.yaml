@@ -25,19 +25,19 @@ pages:
   # Page 1: System Monitoring
   - name: "System"
     zones:
-      - id: weather
+      - id: system.weather
         width: 160
         module: exec:./modules/weather/weather
         refresh_ms: 300000  # 5 minutes
         align: left
 
-      - id: cpu
+      - id: system.cpu
         width: 160
         module: exec:./modules/cpu-temp/cpu-temp
         refresh_ms: 2000
         align: center
 
-      - id: gpu
+      - id: system.gpu
         width: 160
         module: exec:./modules/gpu-temp/gpu-temp
         refresh_ms: 2000
@@ -45,7 +45,7 @@ pages:
         theme_override:
           accent: "#FF6B6B"
 
-      - id: network
+      - id: system.network
         width: 160
         module: exec:./modules/network/network
         refresh_ms: 2000
@@ -54,7 +54,7 @@ pages:
   # Page 2: Performance Focus
   - name: "Performance"
     zones:
-      - id: cpu-main
+      - id: performance.cpu
         width: 240
         module: exec:./modules/cpu-temp/cpu-temp
         refresh_ms: 1000
@@ -62,7 +62,7 @@ pages:
         theme_override:
           accent: "#00FF88"
 
-      - id: gpu-main
+      - id: performance.gpu
         width: 240
         module: exec:./modules/gpu-temp/gpu-temp
         refresh_ms: 1000
@@ -70,7 +70,7 @@ pages:
         theme_override:
           accent: "#FF6B6B"
 
-      - id: network-main
+      - id: performance.network
         width: 160
         module: exec:./modules/network/network
         refresh_ms: 1000
@@ -79,7 +79,7 @@ pages:
   # Page 3: Minimal Clock
   - name: "Clock"
     zones:
-      - id: clock
+      - id: clock.time
         width: 640
         module: builtin:clock
         refresh_ms: 1000

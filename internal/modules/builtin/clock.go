@@ -84,3 +84,18 @@ func (m *ClockModule) formatTime(t time.Time, showColon bool) string {
 		return t.Format("3 04 PM")
 	}
 }
+
+// OnConfigChanged implements module.ConfigNotifier interface.
+// Clock module supports configuring the time format (12h or 24h).
+func (m *ClockModule) OnConfigChanged(config map[string]interface{}) error {
+	// Check for clock_format configuration
+	if format, ok := config["clock_format"].(string); ok {
+		switch format {
+		case "24h", "24hour", "24":
+			m.format = ClockFormat24Hour
+		case "12h", "12hour", "12":
+			m.format = ClockFormat12Hour
+		}
+	}
+	return nil
+}

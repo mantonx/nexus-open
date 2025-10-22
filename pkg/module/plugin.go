@@ -89,4 +89,5 @@ func init() {
 	// Register types for gob encoding
 	gob.Register(Descriptor{})
 	gob.Register(Payload{})
+	gob.Register(map[string]interface{}{})
 }

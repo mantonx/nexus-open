@@ -41,3 +41,10 @@ func (m *PlaceholderModule) Sample() (module.Payload, error) {
 		Timestamp: time.Now(),
 	}, nil
 }
+
+// OnConfigChanged implements module.ConfigNotifier interface.
+// Placeholder module doesn't use configuration, so this is a no-op.
+func (m *PlaceholderModule) OnConfigChanged(config map[string]interface{}) error {
+	// Placeholder module doesn't need configuration
+	return nil
+}

@@ -14,6 +14,7 @@ import (
 	"nexus-open/internal/instruments"
 	"nexus-open/internal/touch"
 	"nexus-open/internal/zone"
+	"nexus-open/internal/zoneconfig"
 )
 
 // App is the main application container that holds all dependencies.
@@ -31,6 +32,7 @@ type App struct {
 	cfg          *config.Manager
 	device       device.Device
 	apiServer    *api.Server
+	zoneCfg      *zoneconfig.Manager
 	instruments  *instruments.Registry
 	zoneManager  *zone.Manager
 	zoneSampler  *zone.Sampler
@@ -122,7 +124,14 @@ func (a *App) initialize() error {
 	}
 	a.logger.Info("configuration loaded")
 
-	// 2. Create device connection
+	// 2. Load zone configuration manager
+	a.zoneCfg, err = zoneconfig.NewManager("")
+	if err != nil {
+		return fmt.Errorf("failed to create zone config manager: %w", err)
+	}
+	a.logger.Info("zone config manager initialized")
+
+	// 3. Create device connection
 	deviceConfig := device.ConnectionConfig{
 		VendorID:         0x1b1c, // Corsair
 		ProductID:        0x1b8e, // iCUE Nexus
@@ -132,19 +141,23 @@ func (a *App) initialize() error {
 	a.device = device.NewNexusDevice(a.logger, deviceConfig)
 	a.logger.Info("device created")
 
-	// 3. Create API server
+	// 4. Create API server
 	apiAddr := fmt.Sprintf(":%d", a.apiPort)
 	a.apiServer = api.NewServer(apiAddr, a.cfg, a.device, a.logger)
 	a.logger.Info("API server created", "addr", apiAddr)
 
-	// 4. Initialize instruments registry (legacy - kept for API compatibility)
+	// Register zone config manager with API server so endpoints can read/write configs.
+	a.apiServer.SetZoneConfigManager(a.zoneCfg)
+	a.logger.Info("zone config manager registered with API server")
+
+	// 5. Initialize instruments registry (legacy - kept for API compatibility)
 	a.instruments = instruments.NewRegistry(a.logger, a.cfg)
 	if err := a.instruments.Initialize(); err != nil {
 		return fmt.Errorf("failed to initialize instruments: %w", err)
 	}
 	a.logger.Info("instruments initialized")
 
-	// 5. Create zone manager
+	// 6. Create zone manager
 	layoutPath := "configs/layouts/multi-page.yaml"
 	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, layoutPath)
 	if err != nil {
@@ -154,17 +167,16 @@ func (a *App) initialize() error {
 		"pages", len(a.zoneManager.GetConfig().Pages),
 		"current_page", a.zoneManager.GetConfig().Pages[0].Name)
 
-	// 6. Create module sampler
-	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager)
+	// 7. Create module sampler
+	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager, a.zoneCfg)
 	a.logger.Info("zone sampler created")
 
 	// Register page change callback to restart sampler on page switch
 	a.zoneManager.SetOnPageChange(a.zoneSampler.RestartForPage)
 
-	// 7. Register zone sampler as config broadcaster with API server
-	// This allows API config updates to notify all modules
-	a.apiServer.SetConfigBroadcaster(a.zoneSampler)
-	a.logger.Info("config broadcaster registered with API server")
+	// Register zone sampler as per-zone config notifier so API updates affect live modules.
+	a.apiServer.SetZoneConfigNotifier(a.zoneSampler)
+	a.logger.Info("zone config notifier registered with API server")
 
 	// 8. Create touch handler
 	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
