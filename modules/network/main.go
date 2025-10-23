@@ -90,14 +90,17 @@ func (m *NetworkModule) Sample() (module.Payload, error) {
 	m.graphMu.RUnlock()
 
 	return module.Payload{
-		Primary:   fmt.Sprintf("↓%s ↑%s", downStr, upStr),
-		Secondary: "Network",
-		Severity:  module.SeverityOK,
-		Spark:     spark,
-		GraphType: currentGraphType,
-		TTL:       2 * time.Second,
-		Icon:      "network-wired",
-		Timestamp: time.Now(),
+		Primary:        fmt.Sprintf("↓ %s\n↑ %s", downStr, upStr),
+		Secondary:      "Network",
+		Severity:       module.SeverityOK,
+		Spark:          spark,
+		GraphType:      currentGraphType,
+		TTL:            3 * time.Second,           // Slightly longer than refresh to prevent "module slow" warnings
+		Icon:           "network-wired",
+		LineSpacing:    20,                        // Extra spacing for stacked network speeds
+		LabelPosition:  module.LabelPositionRight, // Position label to the right
+		NormalizeGraph: true,                      // Normalize to show relative bandwidth changes
+		Timestamp:      time.Now(),
 	}, nil
 }
 
@@ -145,7 +148,7 @@ func (m *NetworkModule) getNetworkSpeed() (float64, float64, error) {
 	return downloadSpeed, uploadSpeed, nil
 }
 
-// formatSpeed formats bytes/sec into human-readable string (KB/s, MB/s, etc.)
+// formatSpeed formats bytes/sec into human-readable string (K/s, M/s, etc.)
 func formatSpeed(bytesPerSec float64) string {
 	const (
 		KB = 1024
@@ -155,17 +158,17 @@ func formatSpeed(bytesPerSec float64) string {
 
 	switch {
 	case bytesPerSec >= GB:
-		return fmt.Sprintf("%.1f GB/s", bytesPerSec/GB)
+		return fmt.Sprintf("%.1fG/s", bytesPerSec/GB)
 	case bytesPerSec >= MB:
-		return fmt.Sprintf("%.1f MB/s", bytesPerSec/MB)
+		return fmt.Sprintf("%.1fM/s", bytesPerSec/MB)
 	case bytesPerSec >= KB:
-		return fmt.Sprintf("%.1f KB/s", bytesPerSec/KB)
+		return fmt.Sprintf("%.0fK/s", bytesPerSec/KB)
 	default:
-		return fmt.Sprintf("%.0f B/s", bytesPerSec)
+		return fmt.Sprintf("%.0fB/s", bytesPerSec)
 	}
 }
 
-// formatSpeedBits formats bytes/sec into bits/sec (Kbps, Mbps, etc.)
+// formatSpeedBits formats bytes/sec into bits/sec (Kb, Mb, etc.)
 func formatSpeedBits(bytesPerSec float64) string {
 	// Convert bytes to bits (1 byte = 8 bits)
 	bitsPerSec := bytesPerSec * 8
@@ -178,13 +181,13 @@ func formatSpeedBits(bytesPerSec float64) string {
 
 	switch {
 	case bitsPerSec >= Gbps:
-		return fmt.Sprintf("%.1f Gbps", bitsPerSec/Gbps)
+		return fmt.Sprintf("%.1fGb", bitsPerSec/Gbps)
 	case bitsPerSec >= Mbps:
-		return fmt.Sprintf("%.1f Mbps", bitsPerSec/Mbps)
+		return fmt.Sprintf("%.1fMb", bitsPerSec/Mbps)
 	case bitsPerSec >= Kbps:
-		return fmt.Sprintf("%.1f Kbps", bitsPerSec/Kbps)
+		return fmt.Sprintf("%.0fKb", bitsPerSec/Kbps)
 	default:
-		return fmt.Sprintf("%.0f bps", bitsPerSec)
+		return fmt.Sprintf("%.0fb", bitsPerSec)
 	}
 }
 

@@ -52,6 +52,28 @@ type Payload struct {
 
 	// Timestamp - When this payload was generated
 	Timestamp time.Time `json:"timestamp,omitempty"`
+
+	// LineSpacing - Spacing between lines for multi-line Primary text (in pixels)
+	// Defaults to 24 if not specified. Use higher values (e.g., 28-30) for more breathing room
+	LineSpacing int `json:"line_spacing,omitempty"`
+
+	// LabelPosition - Where to position the secondary label relative to primary
+	// Defaults to "below" if not specified. Options: "below", "right"
+	LabelPosition LabelPosition `json:"label_position,omitempty"`
+
+	// LabelOffsetX - Horizontal offset for label positioning (in pixels)
+	// Positive moves right, negative moves left. Applied after base positioning.
+	LabelOffsetX int `json:"label_offset_x,omitempty"`
+
+	// LabelOffsetY - Vertical offset for label positioning (in pixels)
+	// Positive moves down, negative moves up. Applied after base positioning.
+	LabelOffsetY int `json:"label_offset_y,omitempty"`
+
+	// NormalizeGraph - If true, graph data is normalized to fill from baseline
+	// Set to true for graphs where relative changes matter (network bandwidth)
+	// Set to false for graphs where absolute values matter (temperatures)
+	// Defaults to false (no normalization, show absolute 0-1 values)
+	NormalizeGraph bool `json:"normalize_graph,omitempty"`
 }
 
 // Severity levels for visual indication
@@ -70,6 +92,15 @@ const (
 	GraphTypeSparkline GraphType = "sparkline" // Line graph (default)
 	GraphTypeBar       GraphType = "bar"       // Vertical bars
 	GraphTypeArea      GraphType = "area"      // Filled area under line
+	GraphTypeLine      GraphType = "line"      // Thick gradient line with glow
+)
+
+// LabelPosition specifies where the secondary label should be positioned
+type LabelPosition string
+
+const (
+	LabelPositionBelow LabelPosition = "below" // Below primary text (default)
+	LabelPositionRight LabelPosition = "right" // To the right of primary text
 )
 
 // Validate checks if the payload meets requirements
