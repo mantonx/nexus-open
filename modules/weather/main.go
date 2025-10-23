@@ -177,12 +177,16 @@ func (m *WeatherModule) formatPayload(data *WeatherData) module.Payload {
 		tempStr = fmt.Sprintf("%.0f°C", data.Temperature)
 	}
 
-	fmt.Printf("weather payload primary=%q secondary runes=%v icon=%q\n",
-		tempStr, []rune(data.Location), data.Icon)
+	// Combine weather description with location for clean, compact display
+	// Format: "Clear • Jersey City" or "Partly Cloudy • San Francisco"
+	secondary := fmt.Sprintf("%s • %s", strings.TrimSpace(data.Description), data.Location)
+
+	fmt.Printf("weather payload primary=%q secondary=%q icon=%q\n",
+		tempStr, secondary, data.Icon)
 
 	return module.Payload{
 		Primary:   tempStr,
-		Secondary: strings.TrimSpace(data.Location),
+		Secondary: secondary,
 		Severity:  module.SeverityOK,
 		TTL:       5 * time.Minute,
 		Icon:      data.Icon,
