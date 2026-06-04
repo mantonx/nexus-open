@@ -139,24 +139,45 @@ class _ModulesTabState extends State<ModulesTab> {
               : null,
         ),
         const SizedBox(height: AppSpacing.md),
-        // 2×2 grid of module cards
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: AppSpacing.sm,
-          mainAxisSpacing: AppSpacing.sm,
-          childAspectRatio: 1.2,
+        // Two-column layout with intrinsic height — cards grow when expanded
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final mod in _knownModules)
-              _ModuleCard(
-                mod: mod,
-                config: _configs[mod.zoneId] ?? {},
-                error: _errors[mod.zoneId],
-                zoneStatus: _statuses[mod.zoneId],
-                enabled: ws.isConnected,
-                onChanged: (k, v) => _updateKey(mod.zoneId, k, v),
+            Expanded(
+              child: Column(
+                children: [
+                  for (final mod in _knownModules.asMap().entries
+                      .where((e) => e.key.isEven)
+                      .map((e) => e.value))
+                    _ModuleCard(
+                      mod: mod,
+                      config: _configs[mod.zoneId] ?? {},
+                      error: _errors[mod.zoneId],
+                      zoneStatus: _statuses[mod.zoneId],
+                      enabled: ws.isConnected,
+                      onChanged: (k, v) => _updateKey(mod.zoneId, k, v),
+                    ),
+                ],
               ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                children: [
+                  for (final mod in _knownModules.asMap().entries
+                      .where((e) => e.key.isOdd)
+                      .map((e) => e.value))
+                    _ModuleCard(
+                      mod: mod,
+                      config: _configs[mod.zoneId] ?? {},
+                      error: _errors[mod.zoneId],
+                      zoneStatus: _statuses[mod.zoneId],
+                      enabled: ws.isConnected,
+                      onChanged: (k, v) => _updateKey(mod.zoneId, k, v),
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
       ],
@@ -253,7 +274,7 @@ class _ModuleCardState extends State<_ModuleCard> {
 
           // Expand indicator
           if (widget.mod.keys.isNotEmpty) ...[
-            const Spacer(),
+            const SizedBox(height: AppSpacing.sm),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [

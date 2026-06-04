@@ -24,6 +24,7 @@ cd "$UI_DIR"
 DISPLAY="${DISPLAY:-:1}" flutter drive \
   --driver=test_driver/integration_test.dart \
   --target=integration_test/screenshot_tour_test.dart \
+  --dart-define=FORCE_ONBOARDING=true \
   -d linux 2>&1 | while IFS= read -r line; do
     echo "$line"
     echo "$line" >> "$DRIVE_LOG"
