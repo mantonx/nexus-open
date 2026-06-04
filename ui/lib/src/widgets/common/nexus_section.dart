@@ -37,6 +37,7 @@ class NexusSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return NexusCard(
       accentBorder: accentBorder,
@@ -84,7 +85,7 @@ class NexusSection extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
-          Divider(height: 1, thickness: 1, color: AppColors.darkBorder),
+          Divider(height: 1, thickness: 1, color: cs.outline),
           SizedBox(height: titleSpacing),
           child,
         ],

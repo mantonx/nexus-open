@@ -150,10 +150,10 @@ class _SettingsPageState extends State<SettingsPage> {
             if (!ws.isConnected)
               Container(
                 decoration: BoxDecoration(
-                  color: AppColors.darkElevated,
+                  color: cs.surfaceContainerHigh,
                   border: Border(
                     left:   BorderSide(color: cs.warning, width: 3),
-                    bottom: BorderSide(color: AppColors.darkBorder, width: 1),
+                    bottom: BorderSide(color: cs.outline, width: 1),
                   ),
                 ),
                 padding: const EdgeInsets.symmetric(
@@ -271,7 +271,7 @@ class _NexusRail extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.railBackground,
         border: Border(
-          right: BorderSide(color: AppColors.darkBorder, width: 1),
+          right: BorderSide(color: cs.outline, width: 1),
         ),
       ),
       child: Column(

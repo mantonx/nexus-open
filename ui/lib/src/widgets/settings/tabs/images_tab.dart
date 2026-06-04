@@ -274,6 +274,7 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -284,7 +285,7 @@ class _EmptyState extends StatelessWidget {
             height: 64,
             decoration: BoxDecoration(
               border: Border.all(
-                color: AppColors.darkBorder,
+                color: cs.outline,
                 width: 1.5,
               ),
               borderRadius: AppRadius.smBr,
