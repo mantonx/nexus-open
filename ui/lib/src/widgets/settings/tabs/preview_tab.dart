@@ -262,7 +262,12 @@ class _SettingRow extends StatelessWidget {
   }
 }
 
-// ── Device bezel preview ─────────────────────────────────────────────────────
+// ── Hardware display preview ──────────────────────────────────────────────────
+// Replicates the Corsair iCUE Nexus physical appearance:
+//   - Black textured plastic housing (6.07" × 1.38" × 0.63")
+//   - Glossy surround larger than the active display (display is recessed)
+//   - Mounting slots on both ends
+//   - No status LEDs; USB cable exits from rear
 
 class _DevicePreview extends StatelessWidget {
   const _DevicePreview({
@@ -273,71 +278,233 @@ class _DevicePreview extends StatelessWidget {
   final Color textColor;
   final Color backgroundColor;
 
+  // All housing colours are fixed — never follow app theme
+  static const _housing        = Color(0xFF0E0E10); // matte black plastic
+  static const _housingHighlight = Color(0xFF242428); // top edge catch-light
+  static const _glossySurround = Color(0xFF0A0A0C); // glossy panel around display
+  static const _mountingSlot   = Color(0xFF1A1A1E); // side bracket slots
+  static const _displayBorder  = Color(0xFF1C1C20); // display frame edge
+
   @override
   Widget build(BuildContext context) {
+    // Scale to fit card width while maintaining ~4.4:1 housing aspect ratio
     return Center(
       child: Column(
         children: [
-          // Outer bezel — mimics the physical iCUE Nexus housing
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF0A0A0C),
-              borderRadius: AppRadius.smBr,
-              border: Border.all(
-                color: AppColors.dataAccent.withOpacity(0.35),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.dataAccent.withOpacity(0.12),
-                  blurRadius: 16,
-                  spreadRadius: 1,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              // Housing is ~4.4:1; display is inset with ~14% padding each side
+              return Container(
+                width: w,
+                decoration: BoxDecoration(
+                  // Textured plastic housing — gradient for slight convexity
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF1A1A1C), // top — lighter (catch light)
+                      Color(0xFF0E0E10), // middle — true matte black
+                      Color(0xFF121214), // bottom — slight ambient bounce
+                    ],
+                    stops: [0.0, 0.4, 1.0],
+                  ),
+                  borderRadius: const BorderRadius.all(Radius.circular(4)),
+                  border: Border.all(color: _housingHighlight, width: 0.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.75),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.4),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.6),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                child: Padding(
+                  // Vertical padding much more generous than horizontal —
+                  // physical bezel is taller than it is wide around display
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 0,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      // Left mounting slot
+                      _MountingEnd(slot: _mountingSlot),
+
+                      // Glossy surround + recessed display
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: _glossySurround,
+                            // Glossy panel has a subtle sheen — linear gradient
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Colors.white.withOpacity(0.05),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
+                          child: Container(
+                            // Active display area — recessed into glossy panel
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                  color: _displayBorder, width: 1),
+                              borderRadius: BorderRadius.circular(1),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.9),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(1),
+                              child: Stack(
+                                children: [
+                                  // Display content
+                                  Container(
+                                    height: 48,
+                                    color: backgroundColor,
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      '14:30  25°C  New York',
+                                      style: TextStyle(
+                                        color: textColor,
+                                        fontFamily: 'monospace',
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                  // Scanline texture — LCD pixel grid
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: _ScanlinePainter(),
+                                    ),
+                                  ),
+                                  // Glossy screen reflection — top-left streak
+                                  Positioned.fill(
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.centerRight,
+                                          colors: [
+                                            Colors.white.withOpacity(0.06),
+                                            Colors.transparent,
+                                          ],
+                                          stops: const [0.0, 0.4],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Right mounting slot
+                      _MountingEnd(slot: _mountingSlot),
+                    ],
+                  ),
                 ),
-              ],
-            ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 6,
-            ),
-            child: Container(
-              // 640×48 aspect ratio, constrained to fit the card
-              height: 48,
-              constraints: const BoxConstraints(maxWidth: 640),
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: backgroundColor,
-                borderRadius: BorderRadius.circular(2),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                '14:30  25°C  New York',
-                style: TextStyle(
-                  color: textColor,
-                  fontFamily: 'monospace',
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1,
-                ),
-              ),
-            ),
+              );
+            },
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            '640 × 48 px',
+            'Corsair iCUE Nexus  ·  640 × 48',
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: AppColors.textMuted,
-              letterSpacing: 0.8,
+              letterSpacing: 0.6,
             ),
           ),
         ],
       ),
     );
   }
+}
+
+// Mounting bracket slot detail — narrow vertical strip at each end
+class _MountingEnd extends StatelessWidget {
+  const _MountingEnd({required this.slot});
+  final Color slot;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 14,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Top slot
+          Container(
+            width: 4,
+            height: 14,
+            decoration: BoxDecoration(
+              color: slot,
+              borderRadius: BorderRadius.circular(2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.6),
+                  blurRadius: 2,
+                  offset: const Offset(1, 1),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Bottom slot
+          Container(
+            width: 4,
+            height: 14,
+            decoration: BoxDecoration(
+              color: slot,
+              borderRadius: BorderRadius.circular(2),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.6),
+                  blurRadius: 2,
+                  offset: const Offset(1, 1),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Horizontal scanlines — simulates the LCD pixel row texture
+class _ScanlinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black.withOpacity(0.07)
+      ..strokeWidth = 0.5;
+    for (double y = 0; y < size.height; y += 2) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ScanlinePainter _) => false;
 }
 
 // ── Colour row ────────────────────────────────────────────────────────────────

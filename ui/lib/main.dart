@@ -9,6 +9,12 @@ import 'src/theme/app_theme.dart';
 import 'src/widgets/onboarding/onboarding_overlay.dart';
 import 'src/widgets/settings/settings_page.dart';
 
+// Set --dart-define=FORCE_ONBOARDING=true to show onboarding unconditionally.
+// Used by the screenshot tour to capture onboarding screens without resetting
+// the backend's firstRun flag.
+const bool _forceOnboarding =
+    bool.fromEnvironment('FORCE_ONBOARDING', defaultValue: false);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 

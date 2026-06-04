@@ -10,7 +10,9 @@ void main() {
 
   testWidgets('screenshot tour — full app coverage', (tester) async {
     app.main();
-    await tester.pump(const Duration(seconds: 3));
+    // The WS service polls continuously so pumpAndSettle never settles.
+    // Use a fixed pump with a generous duration instead.
+    await tester.pump(const Duration(seconds: 2));
 
     // ── Onboarding ────────────────────────────────────────────────────────────
     // Force first-run state by checking if onboarding is visible
@@ -41,10 +43,17 @@ void main() {
       if (openBtn.evaluate().isNotEmpty) {
         await tester.tap(openBtn);
       }
-      await tester.pump(const Duration(milliseconds: 500));
+      // Wait for settings page to render
+      await tester.pump(const Duration(milliseconds: 1200));
     }
 
     // ── Settings tabs ─────────────────────────────────────────────────────────
+    // Pump until the rail nav items are visible — confirms settings page loaded
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+      if (find.byTooltip('Display & Colors').evaluate().isNotEmpty) break;
+    }
+
     final tabs = [
       ('Display & Colors', 'tab_display'),
       ('Location',         'tab_location'),
@@ -72,25 +81,28 @@ void main() {
 
       // ── Module card expand ────────────────────────────────────────────────
       if (name == 'tab_modules') {
-        final configureBtn = find.text('Configure').first;
-        if (configureBtn.evaluate().isNotEmpty) {
-          await tester.tap(configureBtn);
+        final configureBtns = find.text('Configure');
+        if (configureBtns.evaluate().isNotEmpty) {
+          await tester.tap(configureBtns.first);
           await tester.pump(const Duration(milliseconds: 400));
           await _screenshot(tester, 'tab_modules_expanded');
-          // Collapse it again
-          await tester.tap(find.text('Collapse').first);
-          await tester.pump(const Duration(milliseconds: 200));
+          final collapseBtns = find.text('Collapse');
+          if (collapseBtns.evaluate().isNotEmpty) {
+            await tester.tap(collapseBtns.first);
+            await tester.pump(const Duration(milliseconds: 200));
+          }
         }
       }
 
       // ── Colour picker dialog ──────────────────────────────────────────────
       if (name == 'tab_display') {
-        final textColourRow = find.text('Text colour');
-        if (textColourRow.evaluate().isNotEmpty) {
-          // Tap the colour swatch (it's to the right of the label)
-          await tester.tap(find.byType(InkWell).first);
+        // The swatch has a Semantics label containing "Text colour swatch"
+        final swatchFinder = find.bySemanticsLabel(
+          RegExp(r'Text colour swatch'),
+        );
+        if (swatchFinder.evaluate().isNotEmpty) {
+          await tester.tap(swatchFinder.first);
           await tester.pump(const Duration(milliseconds: 400));
-          // Only screenshot if a dialog opened
           if (find.byType(AlertDialog).evaluate().isNotEmpty) {
             await _screenshot(tester, 'dialog_colour_picker');
             await tester.tap(find.text('Cancel'));
