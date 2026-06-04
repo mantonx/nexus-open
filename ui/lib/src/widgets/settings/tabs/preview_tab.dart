@@ -105,6 +105,7 @@ class _PreviewTabState extends State<PreviewTab> {
         NexusSection(
           title: 'Brightness',
           description: 'Physical display brightness (0–100).',
+          titleSpacing: AppSpacing.sm,
           trailing: connected
               ? null
               : NexusStatusBadge(
@@ -146,6 +147,7 @@ class _PreviewTabState extends State<PreviewTab> {
         NexusSection(
           title: 'Units',
           description: 'Measurement units for temperature and distance.',
+          titleSpacing: AppSpacing.sm,
           child: Column(
             children: [
               _SettingRow(
@@ -182,6 +184,7 @@ class _PreviewTabState extends State<PreviewTab> {
         NexusSection(
           title: 'Date & Time',
           description: 'How dates and times appear on the display.',
+          titleSpacing: AppSpacing.sm,
           child: Column(
             children: [
               _SettingRow(
