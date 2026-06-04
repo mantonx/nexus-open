@@ -9,6 +9,10 @@ class SettingsState extends ChangeNotifier {
   bool _isConnected = false;
   String? _errorMessage;
 
+  // Theme preference (not persisted to backend — local only for now)
+  ThemeMode _themeMode = ThemeMode.system;
+  bool _isFirstRun = false;
+
   // Configuration
   NexusConfig? _config;
 
@@ -22,6 +26,23 @@ class SettingsState extends ChangeNotifier {
   bool get isConnected => _isConnected;
   String? get errorMessage => _errorMessage;
   NexusConfig? get config => _config;
+  ThemeMode get themeMode => _themeMode;
+  bool get isFirstRun => _isFirstRun;
+
+  void setThemeMode(ThemeMode mode) {
+    _themeMode = mode;
+    notifyListeners();
+  }
+
+  void setConnected(bool value) {
+    _isConnected = value;
+    notifyListeners();
+  }
+
+  void dismissFirstRun() {
+    _isFirstRun = false;
+    notifyListeners();
+  }
 
   String get location => _config?.location ?? '';
   String get timeFormat => _config?.timeFormat ?? '24h';
@@ -34,7 +55,7 @@ class SettingsState extends ChangeNotifier {
   // Additional unit getters
   String get temperatureUnit => unit == 'metric' ? 'Celsius' : 'Fahrenheit';
   String get distanceUnit => unit == 'metric' ? 'Kilometers' : 'Miles';
-  String get dateFormat => 'MM/DD/YYYY'; // Default date format
+  String get dateFormat => _config?.display.dateFormat ?? 'MM/DD/YYYY';
 
   // Color getters
   Color get backgroundColorValue => _hexToColor(backgroundColor);
@@ -52,10 +73,11 @@ class SettingsState extends ChangeNotifier {
 
     try {
       // Check health first
-      final healthy = await _apiService.checkHealth();
-      _isConnected = healthy;
+      final health = await _apiService.checkHealth();
+      _isConnected = health.healthy;
+      _isFirstRun = health.firstRun;
 
-      if (!healthy) {
+      if (!health.healthy) {
         throw ApiException('Backend is not responding');
       }
 
@@ -90,7 +112,8 @@ class SettingsState extends ChangeNotifier {
     }
   }
 
-  /// Update configuration locally
+  /// Update configuration locally.
+  /// Only the fields you pass are changed; others keep their current value.
   void updateConfig({
     String? location,
     String? timeFormat,
@@ -99,17 +122,24 @@ class SettingsState extends ChangeNotifier {
     String? backgroundImage,
     String? textColor,
     List<String>? imagePaths,
+    String? dateFormat,
   }) {
     if (_config == null) return;
 
+    // dateFormat lives in the nested display sub-object
+    final display = dateFormat != null
+        ? _config!.display.copyWith(dateFormat: dateFormat)
+        : _config!.display;
+
     _config = _config!.copyWith(
-      location: location,
-      timeFormat: timeFormat,
-      unit: unit,
-      backgroundColor: backgroundColor,
-      backgroundImage: backgroundImage,
-      textColor: textColor,
-      imagePaths: imagePaths,
+      location: location ?? _config!.location,
+      timeFormat: timeFormat ?? _config!.timeFormat,
+      unit: unit ?? _config!.unit,
+      backgroundColor: backgroundColor ?? _config!.backgroundColor,
+      backgroundImage: backgroundImage ?? _config!.backgroundImage,
+      textColor: textColor ?? _config!.textColor,
+      imagePaths: imagePaths ?? _config!.imagePaths,
+      display: display,
     );
     notifyListeners();
   }
@@ -145,9 +175,7 @@ class SettingsState extends ChangeNotifier {
 
   /// Set date format
   void setDateFormat(String value) {
-    // Date format is currently not stored in config, but we need the method for the UI
-    // In a future version, we could add this to the config
-    notifyListeners();
+    updateConfig(dateFormat: value);
   }
 
   /// Set background color (accepts both Color and String)
