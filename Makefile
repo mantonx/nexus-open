@@ -26,6 +26,9 @@ GO_BUILD := CGO_ENABLED=1 go build
 help:
 	@echo "Nexus Open - Build System"
 	@echo ""
+	@echo "UI Testing:"
+	@echo "  make screenshot-tour - Navigate all tabs and capture screenshots"
+	@echo ""
 	@echo "Development:"
 	@echo "  make build         - Build Go backend only (with debug info)"
 	@echo "  make build-ui      - Build Flutter UI only"
@@ -107,6 +110,11 @@ run: build
 run-tray: build-all
 	@echo "Running $(APP_NAME) with system tray and UI..."
 	@$(BIN_DIR)/$(APP_NAME) --tray
+
+# Navigate all UI tabs and capture screenshots via Dart VM service.
+# Requires: Go backend running (make run) and DISPLAY set.
+screenshot-tour:
+	@./scripts/ui-tour.sh
 
 # Development mode with live reload (requires github.com/air-verse/air)
 dev:
