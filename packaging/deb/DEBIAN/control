@@ -5,8 +5,8 @@ Priority: optional
 Architecture: amd64
 Depends: libusb-1.0-0 (>= 2:1.0.21), libayatana-appindicator3-1
 Recommends: flutter
-Maintainer: Nexus Open Team <contact@example.com>
-Homepage: https://github.com/yourusername/nexus-open
+Maintainer: Matt <matthew.panton@gmail.com>
+Homepage: https://github.com/mantonx/nexus-next
 Description: Linux controller for Corsair iCUE Nexus display
  Nexus Open provides a native Linux desktop application to control
  and configure your Corsair iCUE Nexus (640x48 pixel display).

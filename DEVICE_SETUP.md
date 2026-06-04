@@ -1,131 +1,168 @@
-# Corsair iCUE Nexus Device Setup
+# Corsair iCUE Nexus — Device Setup
 
-## Current Issue
+This guide covers USB permission setup for all major Linux distributions so that
+Nexus Open can access the device without `sudo`.
 
-The UI redesign implementation is complete and working correctly, but the application cannot access the Corsair iCUE Nexus display hardware due to HID device permissions.
+---
 
-**Error:** `failed to connect to device: failed to open any HID interface`
+## Quick Setup (All Distros)
 
-**Root Cause:** The `/dev/hidraw*` devices are owned by root with 600 permissions, preventing non-root users from accessing them.
+Run the included setup script — it detects your distro and writes the rules to
+the correct location:
 
-## Solution Options
+```bash
+sudo ./scripts/setup-udev.sh
+```
 
-### Option 1: Setup udev Rules (Recommended)
+Then either unplug and replug the device, or run:
 
-This grants permanent access to the device without requiring sudo for each run.
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
 
-**Steps:**
+---
 
-1. Run the setup script (will prompt for sudo password):
+## Ubuntu / Debian / Linux Mint
+
+1. Install the udev rules:
    ```bash
-   ./scripts/setup-udev.sh
-   ```
-
-2. Verify the rule was created:
-   ```bash
-   cat /etc/udev/rules.d/99-nexus.rules
-   ```
-
-3. Check device permissions (should show `crw-rw-rw-` after setup):
-   ```bash
-   ls -l /dev/hidraw*
-   ```
-
-4. If permissions haven't changed, trigger udev manually:
-   ```bash
+   sudo cp packaging/udev/99-corsair-nexus.rules /etc/udev/rules.d/
+   sudo udevadm control --reload-rules
    sudo udevadm trigger
    ```
 
-5. Run the application normally:
+2. Add your user to `plugdev`:
    ```bash
-   ./bin/nexus-open
+   sudo usermod -a -G plugdev $USER
    ```
 
-### Option 2: Run with sudo (Quick Test)
+3. Log out and back in. The group change takes effect at the next login.
 
-For quick testing without setting up permanent permissions:
+> **Note:** `TAG+="uaccess"` in the rules file means desktop session users
+> on systemd-logind systems (most distros) get access automatically without
+> manual group assignment. The `plugdev` step is a belt-and-suspenders fallback.
+
+---
+
+## Arch Linux
+
+1. Install the udev rules to the package-managed path:
+   ```bash
+   sudo cp packaging/udev/99-corsair-nexus.rules /usr/lib/udev/rules.d/
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
+   ```
+   > Use `/usr/lib/udev/rules.d/` on Arch, not `/etc/udev/rules.d/` — rules in
+   > `/usr/lib/` are managed by the package manager; `/etc/` overrides are for
+   > local customisation only.
+
+2. Add your user to `plugdev` (create the group if it doesn't exist):
+   ```bash
+   sudo groupadd -r plugdev 2>/dev/null || true
+   sudo usermod -a -G plugdev $USER
+   ```
+
+3. Log out and back in.
+
+4. Verify the device is accessible:
+   ```bash
+   ls -l /dev/hidraw* | grep -i "1b1c\|hidraw"
+   # Should show group-readable entries
+   ```
+
+If you installed via the AUR package, the rules are placed automatically during
+`post_install`. Run `sudo udevadm control --reload-rules && sudo udevadm trigger`
+after the first install.
+
+---
+
+## Fedora / RHEL / CentOS / openSUSE
+
+On Fedora and Red Hat-based systems, use the `input` group instead of `plugdev`
+(which does not exist by default):
+
+1. Install the udev rules:
+   ```bash
+   sudo cp packaging/udev/99-corsair-nexus.rules /etc/udev/rules.d/
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
+   ```
+
+2. Add your user to `input`:
+   ```bash
+   sudo usermod -a -G input $USER
+   ```
+
+3. Log out and back in.
+
+**SELinux note:** If SELinux is enforcing (default on Fedora/RHEL), the
+`TAG+="uaccess"` tag in the rules grants access to the active desktop session
+user via logind automatically. Manual group assignment is usually not required
+in a normal desktop session.
+
+If you still get permission errors with SELinux enforcing, check AVC denials:
 
 ```bash
-sudo ./bin/nexus-open
+sudo ausearch -m avc -ts recent | grep hidraw
 ```
 
-**Note:** This requires entering your password each time.
+---
 
-### Option 3: Add User to dialout/input Group
+## Verifying Access
 
-Some systems grant HID access via group membership:
+After setup, confirm the device is accessible without `sudo`:
 
 ```bash
-sudo usermod -aG dialout $USER
-sudo usermod -aG input $USER
+# Find the Nexus hidraw node
+for d in /dev/hidraw*; do
+    udevadm info "$d" 2>/dev/null | grep -q "1b1c" && echo "$d"
+done
 ```
 
-Log out and back in for group changes to take effect.
+Then run the app:
 
-## Verifying the Setup
+```bash
+./bin/nexus-open
+```
 
-Once you have access to the device, you should see:
+You should see `level=INFO msg="HID device connected"` in the log. If you still
+see `failed to open any HID interface`, check the actionable message in
+`GET /api/device/info` — it will tell you whether the error is permissions,
+device not found, or device busy.
 
-1. **Application starts without errors:**
-   ```
-   Starting Nexus Open
-   Loaded layout: Multi-Page Dashboard
-   Font loaded: 24pt primary
-   Font loaded: 16pt multi-line
-   Font loaded: 9pt secondary
-   Device connected successfully
-   ```
-
-2. **Display updates on your Corsair iCUE Nexus:**
-   - Large 24pt numbers for single-line metrics (CPU temp, GPU temp, etc.)
-   - Stacked 16pt text for network stats (download/upload on separate lines)
-   - Small 9pt labels for secondary info
-   - Atmospheric background graphs with 15% opacity fill, 40% line opacity
-
-## UI Redesign Features
-
-The following Phase 1 features are now implemented:
-
-- ✅ Modern font hierarchy (24pt/16pt/9pt instead of 14pt/10pt)
-- ✅ Improved color contrast (muted text now #B8BDC2)
-- ✅ Atmospheric background graphs (15% fill, 40% line opacity)
-- ✅ Smart multi-line font sizing (auto-detects and uses 16pt for stacked content)
-- ✅ Zone background lift (#141414 vs #101010 main background)
-- ✅ Network module displays in stacked format without text overlap
+---
 
 ## Troubleshooting
 
-**Q: I ran setup-udev.sh but still getting permission errors**
+### Permission denied after running setup-udev.sh
 
-A: Try unplugging and replugging the USB device, or run:
+Unplug and replug the USB cable — udev rules apply to newly-connected devices.
+Running `sudo udevadm trigger` re-applies rules to already-connected devices but
+occasionally misses hidraw nodes. A replug is the reliable fix.
+
+### Which `/dev/hidraw*` node is the Nexus?
+
 ```bash
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-**Q: Which /dev/hidraw device is the Nexus?**
-
-A: Run this to identify it:
-```bash
-for device in /dev/hidraw*; do
-    echo "=== $device ==="
-    udevadm info $device | grep -E "ID_VENDOR_ID|ID_MODEL_ID|ID_PRODUCT"
+for d in /dev/hidraw*; do
+    echo "=== $d ==="
+    udevadm info "$d" | grep -E "ID_VENDOR_ID|ID_MODEL_ID"
 done
 ```
 
 Look for `ID_VENDOR_ID=1b1c` and `ID_MODEL_ID=1b8e`.
 
-**Q: The display shows old UI (14pt fonts)**
+### Multiple HID interfaces listed in the log
 
-A: The code is using the new fonts, but you may need to rebuild:
-```bash
-go build -o bin/nexus-open ./cmd/nexus-open
-./bin/nexus-open
-```
+This is normal. The Nexus exposes several HID interfaces; the driver tries each
+in turn and uses the first one that opens successfully.
+
+---
 
 ## Device Information
 
-- **Vendor:** Corsair (1b1c)
-- **Product:** iCUE Nexus (1b8e)
-- **Display:** 640x48px ultra-wide touchscreen
-- **Interface:** USB HID
+| Field     | Value                            |
+|-----------|----------------------------------|
+| Vendor    | Corsair (1b1c)                   |
+| Product   | iCUE Nexus (1b8e)                |
+| Display   | 640×48 px ultra-wide touchscreen |
+| Interface | USB HID                          |

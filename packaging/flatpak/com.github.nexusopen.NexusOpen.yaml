@@ -74,15 +74,19 @@ modules:
       - install -Dm755 nexus-open /app/bin/nexus-open
       # Install desktop file
       - install -Dm644 packaging/desktop/nexus-open.desktop /app/share/applications/com.github.nexusopen.NexusOpen.desktop
-      # Install icon (placeholder - update when icons are created)
-      # - install -Dm644 assets/icon-256.png /app/share/icons/hicolor/256x256/apps/com.github.nexusopen.NexusOpen.png
+      # Install icon (requires packaging/icons/256.png — build icon set first)
+      - |
+        if [ -f packaging/icons/256.png ]; then
+          install -Dm644 packaging/icons/256.png \
+            /app/share/icons/hicolor/256x256/apps/com.github.nexusopen.NexusOpen.png
+        fi
       # Install metainfo
       - install -Dm644 packaging/flatpak/com.github.nexusopen.NexusOpen.metainfo.xml /app/share/metainfo/com.github.nexusopen.NexusOpen.metainfo.xml
       # Install udev rules (bundled but user needs to manually install to system)
       - install -Dm644 packaging/udev/99-corsair-nexus.rules /app/share/nexus-open/99-corsair-nexus.rules
     sources:
       - type: git
-        url: https://github.com/yourusername/nexus-open.git
+        url: https://github.com/mantonx/nexus-next.git
         tag: v1.0.0
         # For local testing, use:
         # - type: dir
@@ -96,6 +100,6 @@ modules:
   #     - cp -r build/linux/x64/release/bundle /app/lib/nexus-open-ui
   #   sources:
   #     - type: git
-  #       url: https://github.com/yourusername/nexus-open.git
+  #       url: https://github.com/mantonx/nexus-next.git
   #       tag: v1.0.0
   #       path: ui

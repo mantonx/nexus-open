@@ -58,6 +58,7 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
+	nhooyr.io/websocket v1.8.17 // indirect
 )
 
 // replace github.com/wailsapp/wails/v2 v2.10 => /home/fictional/go/pkg/mod

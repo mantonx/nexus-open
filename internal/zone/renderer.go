@@ -880,7 +880,6 @@ func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphTyp
 	availableWidth := r.width - (2 * paddingH)
 	yBase := r.height - paddingV
 
-	// DEBUG: Log graph positioning with image bounds
 	r.logger.Debug("graph position", "type", graphType, "width", r.width, "height", r.height, "img_bounds", img.Bounds(), "graphHeight", graphHeight, "paddingV", paddingV, "yBase", yBase, "normalize", normalize)
 
 	// Get opacity values - prioritize per-module values, then theme, then defaults

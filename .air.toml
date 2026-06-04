@@ -3,7 +3,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  args_bin = ["-debug"]
+  args_bin = []
   bin = "./tmp/nexus-open"
   cmd = "go build -o ./tmp/nexus-open ./cmd/nexus-open"
   delay = 1000

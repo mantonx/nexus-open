@@ -3,8 +3,10 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,8 +42,38 @@ func NewNexusDevice(logger *slog.Logger, config ConnectionConfig) *NexusDevice {
 	}
 }
 
-// Connect establishes HID connection to the device
+// Connect establishes HID connection to the device.
+// On startup it retries up to 3 times (2s apart) to handle devices briefly
+// held by a previous process (e.g. a stale lock after a crash).
 func (n *NexusDevice) Connect(ctx context.Context) error {
+	const maxAttempts = 3
+	const retryDelay = 2 * time.Second
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			n.logger.Info("retrying device connect", "attempt", attempt, "max", maxAttempts)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(retryDelay):
+			}
+		}
+		lastErr = n.connectOnce(ctx)
+		if lastErr == nil {
+			return nil
+		}
+		// Don't retry for errors that retrying won't fix
+		if errors.Is(lastErr, ErrDeviceNotFound) || errors.Is(lastErr, ErrPermissionDenied) {
+			return lastErr
+		}
+		n.logger.Warn("device connect attempt failed", "attempt", attempt, "error", lastErr)
+	}
+	return lastErr
+}
+
+// connectOnce performs a single connection attempt (no retry).
+func (n *NexusDevice) connectOnce(ctx context.Context) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -72,8 +104,9 @@ func (n *NexusDevice) Connect(ctx context.Context) error {
 
 		dev, err := devices[i].Open()
 		if err != nil {
-			n.logger.Debug("failed to open interface", "index", i, "error", err)
-			lastErr = err
+			classified := classifyOpenError(err)
+			n.logger.Debug("failed to open interface", "index", i, "error", classified)
+			lastErr = classified
 			continue
 		}
 
@@ -297,9 +330,30 @@ func (n *NexusDevice) GetFirmwareVersion() (string, error) {
 		end++
 	}
 
-	firmware := string(report[6:end])
-	n.logger.Debug("firmware version", "version", firmware)
+	raw := report[6:end]
 
+	// Check if bytes are printable ASCII before treating as a string
+	printable := true
+	for _, b := range raw {
+		if b < 0x20 || b > 0x7e {
+			printable = false
+			break
+		}
+	}
+
+	var firmware string
+	if printable && len(raw) > 0 {
+		firmware = string(raw)
+	} else {
+		// Format raw bytes as hex pairs (e.g. "01.01")
+		parts := make([]string, len(raw))
+		for i, b := range raw {
+			parts[i] = fmt.Sprintf("%02x", b)
+		}
+		firmware = strings.Join(parts, ".")
+	}
+
+	n.logger.Debug("firmware version", "version", firmware)
 	return firmware, nil
 }
 
