@@ -2,9 +2,6 @@
 name: ui-tour
 description: Run the Flutter UI screenshot tour for Nexus Open. Navigates all four settings tabs via flutter drive and captures each one via the Dart VM service. Use when you want to see the current state of the UI, review visual changes, or take before/after screenshots before implementing design improvements.
 user-invocable: true
-allowed-tools:
-  - Bash
-  - Read
 ---
 
 # /ui-tour — Nexus Open UI Screenshot Tour
@@ -51,17 +48,30 @@ make screenshot-tour
 
 Old screenshots are cleared automatically at the start of each run.
 
-Screenshots are saved to `ui/screenshots/`:
-- `tab_display.png` — Display tab (top of page)
-- `tab_display_scrolled.png` — Display tab (Brightness, Units, Date & Time)
-- `tab_location.png`
-- `tab_location_scrolled.png`
-- `tab_modules.png`
-- `tab_modules_scrolled.png`
-- `tab_images.png`
-- `tab_images_scrolled.png`
+Screenshots are saved to `ui/screenshots/`. Coverage:
 
-Scrolled variants are only saved if the tab has content below the fold.
+| File | What it shows |
+|------|---------------|
+| `onboarding_welcome.png` | First-run welcome step |
+| `onboarding_connect.png` | USB connect step |
+| `onboarding_location.png` | Location setup step |
+| `onboarding_done.png` | Completion step |
+| `tab_display.png` | Display tab — colours + preview |
+| `tab_display_scrolled.png` | Display tab — brightness, units, date |
+| `tab_location.png` | Location tab |
+| `tab_location_scrolled.png` | Location tab scrolled |
+| `tab_modules.png` | Modules tab |
+| `tab_modules_scrolled.png` | Modules tab scrolled |
+| `tab_modules_expanded.png` | Module card with Configure expanded |
+| `tab_images.png` | Images tab |
+| `dialog_colour_picker.png` | Colour picker dialog |
+| `light_tab_display.png` | Display tab in light mode |
+| `light_tab_location.png` | Location tab in light mode |
+| `light_tab_modules.png` | Modules tab in light mode |
+| `light_tab_images.png` | Images tab in light mode |
+
+Onboarding screenshots only appear on first run (when `isFirstRun` is true).
+Scrolled variants only appear for tabs with a `ListView`.
 
 ## Viewing Screenshots
 

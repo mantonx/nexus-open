@@ -93,9 +93,13 @@ class NexusDropdownField<T> extends StatelessWidget {
       items: items,
       onChanged: enabled ? onChanged : null,
       style: theme.textTheme.bodyLarge,
+      isDense: true,
       decoration: InputDecoration(
         labelText: label,
-        // Inherits from InputDecorationTheme
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
       ),
       dropdownColor: theme.colorScheme.surfaceContainerHigh,
       borderRadius: AppRadius.smBr,

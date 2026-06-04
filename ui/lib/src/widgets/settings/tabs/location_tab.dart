@@ -118,11 +118,28 @@ class _LocationTabState extends State<LocationTab> {
                   textFieldConfiguration: TextFieldConfiguration(
                     controller: _cityController,
                     focusNode: _searchFocusNode,
+                    style: theme.textTheme.bodyLarge,
                     decoration: InputDecoration(
                       labelText: 'City or address',
                       hintText: 'Search for a city…',
-                      suffixIcon: _isSearching &&
-                              _cityController.text.isNotEmpty
+                      // Match NexusFormField / InputDecorationTheme styling
+                      filled: true,
+                      fillColor: AppColors.darkElevated,
+                      contentPadding: AppSpacing.paddingHMdVSm,
+                      border: OutlineInputBorder(
+                        borderRadius: AppRadius.smBr,
+                        borderSide: BorderSide(color: AppColors.darkBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: AppRadius.smBr,
+                        borderSide: BorderSide(color: AppColors.darkBorder),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: AppRadius.smBr,
+                        borderSide: const BorderSide(
+                            color: AppColors.accent, width: 2),
+                      ),
+                      suffixIcon: _isSearching && _cityController.text.isNotEmpty
                           ? Padding(
                               padding: AppSpacing.paddingXs,
                               child: CircularProgressIndicator(
