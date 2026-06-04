@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'src/models/settings_state.dart';
-import 'src/services/window_controller.dart';
+import 'src/services/ws_service.dart';
 import 'src/theme/app_theme.dart';
+import 'src/widgets/onboarding/onboarding_overlay.dart';
 import 'src/widgets/settings/settings_page.dart';
 
 void main() async {
@@ -27,8 +30,11 @@ void main() async {
   });
 
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => SettingsState(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => SettingsState()),
+        ChangeNotifierProvider(create: (_) => WsService()),
+      ],
       child: const OpenNextApp(),
     ),
   );
@@ -42,27 +48,43 @@ class OpenNextApp extends StatefulWidget {
 }
 
 class _OpenNextAppState extends State<OpenNextApp> {
-  late WindowController _windowController;
+  StreamSubscription? _wsSub;
 
   @override
-  void initState() {
-    super.initState();
-    _windowController = WindowController();
-    _windowController.startListening();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _wsSub?.cancel();
+    _wsSub = context.read<WsService>().events.listen(_onWsEvent);
+  }
+
+  void _onWsEvent(WsEvent event) {
+    if (event is WsWindowStateEvent) {
+      if (event.state == 'shown') {
+        windowManager.show();
+        windowManager.focus();
+      } else if (event.state == 'hidden') {
+        windowManager.hide();
+      }
+    }
   }
 
   @override
   void dispose() {
-    _windowController.dispose();
+    _wsSub?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final settings = context.watch<SettingsState>();
     return MaterialApp(
       title: 'Open Next',
-      theme: AppTheme.theme,
-      home: const SettingsPage(),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: settings.themeMode,
+      home: settings.isFirstRun
+          ? const OnboardingOverlay()
+          : const SettingsPage(),
     );
   }
 }
