@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"path/filepath"
 
 	"github.com/mantonx/nexus-next/internal/assets"
+	"github.com/mantonx/nexus-next/internal/device"
 	"github.com/mantonx/nexus-next/internal/settings"
 )
 
@@ -46,8 +49,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"status":  "ok",
-		"version": "1.0.0",
+		"status":     "ok",
+		"version":    "1.0.0",
+		"first_run":  s.cfg.IsFirstRun,
 	}
 
 	s.respondJSON(w, response, http.StatusOK)
@@ -164,6 +168,29 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.respondJSON(w, images, http.StatusOK)
+}
+
+// handleServeImage serves a single image file by filename.
+func (s *Server) handleServeImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Path is /api/images/<filename>
+	filename := r.PathValue("filename")
+	if filename == "" {
+		s.respondError(w, "Filename required", http.StatusBadRequest)
+		return
+	}
+
+	imagesDir, err := assets.GetImagesDir()
+	if err != nil {
+		s.respondError(w, "Images directory unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	http.ServeFile(w, r, filepath.Join(imagesDir, filename))
 }
 
 // handleDeleteImage deletes an uploaded image.
@@ -298,10 +325,24 @@ func (s *Server) handleDeviceInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := map[string]interface{}{
-		"firmware": firmware,
+		"firmware":  firmware,
 		"vendorId":  "0x1b1c",
 		"productId": "0x1b8e",
 		"model":     "iCUE Nexus",
+	}
+
+	// Surface the last connect error as a human-readable action hint.
+	if s.lastConnectErr != nil {
+		switch {
+		case errors.Is(s.lastConnectErr, device.ErrPermissionDenied):
+			info["connect_error"] = "USB permission denied. Run: sudo usermod -a -G plugdev $USER then log out and back in."
+		case errors.Is(s.lastConnectErr, device.ErrDeviceBusy):
+			info["connect_error"] = "Device is in use by another application. Close iCUE or other Nexus software."
+		case errors.Is(s.lastConnectErr, device.ErrDeviceNotFound):
+			info["connect_error"] = "iCUE Nexus not found. Is it plugged in?"
+		default:
+			info["connect_error"] = s.lastConnectErr.Error()
+		}
 	}
 
 	s.respondSuccess(w, "Device information", info)
@@ -334,6 +375,7 @@ func (s *Server) handleWindowShow(w http.ResponseWriter, r *http.Request) {
 	case s.windowStateCh <- "show":
 	default:
 	}
+	s.broadcastWindowState("shown")
 
 	s.respondSuccess(w, "Window show command sent", map[string]string{"state": "shown"})
 }
@@ -350,6 +392,7 @@ func (s *Server) handleWindowHide(w http.ResponseWriter, r *http.Request) {
 	case s.windowStateCh <- "hide":
 	default:
 	}
+	s.broadcastWindowState("hidden")
 
 	s.respondSuccess(w, "Window hide command sent", map[string]string{"state": "hidden"})
 }

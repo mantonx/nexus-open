@@ -57,7 +57,7 @@ apps:
 parts:
   nexus-open:
     plugin: go
-    source: https://github.com/yourusername/nexus-open.git
+    source: https://github.com/mantonx/nexus-next.git
     source-tag: v1.0.0
     # For local testing, use:
     # source: .

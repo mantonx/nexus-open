@@ -24,16 +24,25 @@ type ZoneConfigNotifier interface {
 	BroadcastZoneConfigChange(zoneID string, config map[string]interface{}) error
 }
 
+// ZoneStatusProvider returns per-zone health status from the sampler.
+type ZoneStatusProvider interface {
+	GetZoneStatus(zoneID string) zone.ZoneStatus
+	AllZoneStatuses() map[string]zone.ZoneStatus
+}
+
 // Server manages the HTTP API server.
 type Server struct {
-	server        *http.Server
-	logger        *slog.Logger
-	cfg           *settings.Manager
-	zoneCfg       *zone.ConfigManager
-	device        DeviceController
-	zoneNotifier  ZoneConfigNotifier // Notifies zones of config changes
-	windowState   string             // "shown" or "hidden"
-	windowStateCh chan string
+	server          *http.Server
+	logger          *slog.Logger
+	cfg             *settings.Manager
+	zoneCfg         *zone.ConfigManager
+	device          DeviceController
+	zoneNotifier    ZoneConfigNotifier   // Notifies zones of config changes
+	zoneStatus      ZoneStatusProvider   // Reports module error state
+	windowState     string               // "shown" or "hidden"
+	windowStateCh   chan string
+	hub             *hub
+	lastConnectErr  error // last device connect error, shown in /api/device/info
 }
 
 // NewServer creates a new API server instance.
@@ -48,6 +57,7 @@ func NewServer(addr string, cfg *settings.Manager, device DeviceController, logg
 		device:        device,
 		windowState:   "shown",
 		windowStateCh: make(chan string, 10),
+		hub:           newHub(logger),
 	}
 
 	// Create router
@@ -100,22 +110,43 @@ func (s *Server) SetZoneConfigNotifier(notifier ZoneConfigNotifier) {
 	s.logger.Debug("zone config notifier registered")
 }
 
+// Hub returns the WebSocket hub so callers can broadcast messages (e.g. frames).
+func (s *Server) Hub() *hub {
+	return s.hub
+}
+
+// SetLastConnectError stores the most recent device connect error so it can be
+// surfaced in API responses (e.g. GET /api/device/info).
+func (s *Server) SetLastConnectError(err error) {
+	s.lastConnectErr = err
+}
+
+// SetZoneStatusProvider wires in the sampler so zone status can be queried.
+func (s *Server) SetZoneStatusProvider(p ZoneStatusProvider) {
+	s.zoneStatus = p
+}
+
 // registerRoutes sets up all API endpoints.
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// API endpoints
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/images/upload", s.handleImageUpload)
-	mux.HandleFunc("/api/images", s.handleListImages)
 	mux.HandleFunc("/api/images/delete", s.handleDeleteImage)
+	mux.HandleFunc("/api/images/{filename}", s.handleServeImage)
+	mux.HandleFunc("/api/images", s.handleListImages)
 
 	// Zone and module config endpoints
 	mux.HandleFunc("/api/modules/", s.handleModuleConfig)
 	mux.HandleFunc("/api/zones/", s.handleZones)
+	mux.HandleFunc("/api/zones/{id}/status", s.handleZoneStatus)
 
 	// HID feature endpoints
 	mux.HandleFunc("/api/device/brightness", s.handleBrightness)
 	mux.HandleFunc("/api/device/info", s.handleDeviceInfo)
+
+	// WebSocket endpoint — live frame + state push
+	mux.HandleFunc("/api/ws", s.handleWS)
 
 	// Window control endpoints
 	mux.HandleFunc("/api/window/state", s.handleWindowState)

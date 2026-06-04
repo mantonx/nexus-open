@@ -5,6 +5,10 @@ import (
 	"image/color"
 	"image/draw"
 	"log/slog"
+
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/math/fixed"
 )
 
 const (
@@ -83,20 +87,26 @@ func RenderPlaceholder(width, height int, text string, bgColor, fgColor color.RG
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
 
-	// Draw centered text
-	// For now, just draw a simple indicator
-	// TODO: Use proper text rendering
-	centerX := width / 2
-	centerY := height / 2
-
-	// Draw a small indicator
-	for y := centerY - 2; y < centerY+2; y++ {
-		for x := centerX - 4; x < centerX+4; x++ {
-			if x >= 0 && x < width && y >= 0 && y < height {
-				img.Set(x, y, fgColor)
-			}
-		}
+	if text == "" {
+		return img
 	}
+
+	face := basicfont.Face7x13
+	textWidth := len(text) * 7
+	x := (width - textWidth) / 2
+	if x < 2 {
+		x = 2
+	}
+	// Baseline: vertically center within the zone (face ascent is 11px above baseline)
+	y := (height + face.Metrics().Ascent.Ceil()) / 2
+
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(fgColor),
+		Face: face,
+		Dot:  fixed.P(x, y),
+	}
+	d.DrawString(text)
 
 	return img
 }

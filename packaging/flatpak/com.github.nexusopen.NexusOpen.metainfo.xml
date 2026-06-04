@@ -25,9 +25,9 @@
 
   <launchable type="desktop-id">com.github.nexusopen.NexusOpen.desktop</launchable>
 
-  <url type="homepage">https://github.com/yourusername/nexus-open</url>
-  <url type="bugtracker">https://github.com/yourusername/nexus-open/issues</url>
-  <url type="help">https://github.com/yourusername/nexus-open/blob/main/docs/INSTALLATION.md</url>
+  <url type="homepage">https://github.com/mantonx/nexus-next</url>
+  <url type="bugtracker">https://github.com/mantonx/nexus-next/issues</url>
+  <url type="help">https://github.com/mantonx/nexus-next/blob/main/docs/INSTALLATION.md</url>
 
   <developer_name>Nexus Open Team</developer_name>
 
@@ -50,7 +50,7 @@
     <screenshot type="default">
       <caption>Main configuration interface</caption>
       <!-- Add actual screenshots when available -->
-      <image>https://raw.githubusercontent.com/yourusername/nexus-open/main/docs/screenshots/main.png</image>
+      <image>https://raw.githubusercontent.com/mantonx/nexus-next/main/docs/screenshots/main.png</image>
     </screenshot>
   </screenshots>
 
@@ -77,7 +77,7 @@
   </provides>
 
   <custom>
-    <value key="Flathub::manifest">https://github.com/yourusername/nexus-open/blob/main/packaging/flatpak/com.github.nexusopen.NexusOpen.yaml</value>
+    <value key="Flathub::manifest">https://github.com/mantonx/nexus-next/blob/main/packaging/flatpak/com.github.nexusopen.NexusOpen.yaml</value>
   </custom>
 
   <keywords>

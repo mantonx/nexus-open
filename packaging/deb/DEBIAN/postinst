@@ -8,6 +8,7 @@ if [ -x "$(command -v udevadm)" ]; then
     echo "Reloading udev rules..."
     udevadm control --reload-rules
     udevadm trigger --subsystem-match=usb --attr-match=idVendor=1b1c --attr-match=idProduct=1b8e
+    udevadm trigger --subsystem-match=hidraw
 fi
 
 # Create plugdev group if it doesn't exist

@@ -15,10 +15,11 @@ import (
 
 // Manager handles configuration loading, validation, and watching.
 type Manager struct {
-	mu       sync.RWMutex
-	cfg      *Config
-	path     string
-	watchers []chan<- Config
+	mu         sync.RWMutex
+	cfg        *Config
+	path       string
+	watchers   []chan<- Config
+	IsFirstRun bool // true when config was created fresh on this launch
 }
 
 // Config holds the application configuration (UI settings only).
@@ -56,6 +57,9 @@ type DisplayConfig struct {
 	// openapi:enum dashboard minimalist compact balanced
 	// openapi:example dashboard
 	Layout string `mapstructure:"layout" json:"layout"`
+	// openapi:description Date format string (e.g. MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD)
+	// openapi:example MM/DD/YYYY
+	DateFormat string `mapstructure:"date_format" json:"date_format"`
 }
 
 // Default configuration values (UI settings only).
@@ -67,6 +71,7 @@ const (
 	DefaultFontSize        = 11.0
 	DefaultTimeFontSize    = 14.0
 	DefaultLayout          = "dashboard"
+	DefaultDateFormat      = "MM/DD/YYYY"
 )
 
 var (
@@ -104,11 +109,12 @@ func (m *Manager) Load() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Create default config if file doesn't exist
+	// Create default config if file doesn't exist — mark as first run
 	if _, err := os.Stat(m.path); os.IsNotExist(err) {
 		if err := m.createDefaultConfig(); err != nil {
 			return err
 		}
+		m.IsFirstRun = true
 	}
 
 	// Load configuration
@@ -136,6 +142,9 @@ func (m *Manager) Load() error {
 	}
 	if cfg.Display.Layout == "" {
 		cfg.Display.Layout = DefaultLayout
+	}
+	if cfg.Display.DateFormat == "" {
+		cfg.Display.DateFormat = DefaultDateFormat
 	}
 
 	// Validate

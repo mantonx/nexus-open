@@ -72,7 +72,7 @@ sudo snap restart nexus-open
 
 ### Debian/Ubuntu (DEB Package)
 
-Download the latest `.deb` package from the [releases page](https://github.com/yourusername/nexus-open/releases):
+Download the latest `.deb` package from the [releases page](https://github.com/mantonx/nexus-next/releases):
 
 ```bash
 # Install the package
@@ -124,13 +124,13 @@ AppImages work on most Linux distributions without installation:
 
 ```bash
 # Download the AppImage
-wget https://github.com/yourusername/nexus-open/releases/download/v1.0.0/nexus-open-1.0.0-x86_64.AppImage
+wget https://github.com/mantonx/nexus-next/releases/download/v1.0.0/nexus-open-1.0.0-x86_64.AppImage
 
 # Make it executable
 chmod +x nexus-open-1.0.0-x86_64.AppImage
 
 # Set up USB permissions (one-time setup)
-sudo wget https://raw.githubusercontent.com/yourusername/nexus-open/main/packaging/udev/99-corsair-nexus.rules \
+sudo wget https://raw.githubusercontent.com/mantonx/nexus-next/main/packaging/udev/99-corsair-nexus.rules \
     -O /etc/udev/rules.d/99-corsair-nexus.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger
@@ -173,7 +173,7 @@ sudo dnf install golang libusb-devel git
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/nexus-open.git
+git clone https://github.com/mantonx/nexus-next.git
 cd nexus-open
 
 # Build the Go backend
@@ -458,7 +458,7 @@ sudo udevadm control --reload-rules
 ## Getting Help
 
 - **Documentation:** See the [docs/](../docs/) directory
-- **Issues:** [GitHub Issues](https://github.com/yourusername/nexus-open/issues)
+- **Issues:** [GitHub Issues](https://github.com/mantonx/nexus-next/issues)
 - **Project Plan:** See [PROJECT_PLAN.md](../PROJECT_PLAN.md) for development details
 
 ## Next Steps

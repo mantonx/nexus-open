@@ -360,4 +360,4 @@ Once you've tested and it's working:
 - Check logs: `journalctl --user -u nexus-open.service -f`
 - Run with debug: `./nexus-open -debug`
 - See full installation guide: [docs/INSTALLATION.md](INSTALLATION.md)
-- Report issues: [GitHub Issues](https://github.com/yourusername/nexus-open/issues)
+- Report issues: [GitHub Issues](https://github.com/mantonx/nexus-next/issues)
