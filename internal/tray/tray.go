@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/getlantern/systray"
 )
@@ -20,6 +22,7 @@ var iconData []byte
 // Manager handles system tray integration and Flutter UI lifecycle
 type Manager struct {
 	logger      *slog.Logger
+	apiAddr     string // e.g. "localhost:1985"
 	flutterCmd  *exec.Cmd
 	showCh      chan struct{}
 	hideCh      chan struct{}
@@ -28,11 +31,13 @@ type Manager struct {
 	cancel      context.CancelFunc
 }
 
-// New creates a new tray manager
-func New(logger *slog.Logger) *Manager {
+// New creates a new tray manager. apiAddr is the host:port of the API server
+// (e.g. "localhost:1985") so tray commands reach the correct port.
+func New(logger *slog.Logger, apiAddr string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		logger:  logger,
+		apiAddr: apiAddr,
 		showCh:  make(chan struct{}, 1),
 		hideCh:  make(chan struct{}, 1),
 		quitCh:  make(chan struct{}, 1),
@@ -60,13 +65,29 @@ func (m *Manager) onReady() {
 
 	m.logger.Info("system tray initialized")
 
-	// Start Flutter UI
+	// Start Flutter UI and wait until it is ready before accepting tray events.
+	flutterReady := make(chan struct{})
 	if err := m.startFlutter(); err != nil {
 		m.logger.Error("failed to start Flutter UI", "error", err)
+		mShow.Disable()
+		mHide.Disable()
+		systray.SetTooltip("Nexus Open — UI failed to start")
+		close(flutterReady)
+	} else {
+		go func() {
+			if err := m.waitForFlutter(5 * time.Second); err != nil {
+				m.logger.Warn("Flutter UI did not become ready in time", "error", err)
+				mShow.Disable()
+				mHide.Disable()
+				systray.SetTooltip("Nexus Open — UI not responding")
+			}
+			close(flutterReady)
+		}()
 	}
 
-	// Handle menu clicks
+	// Handle menu clicks — Show/Hide only fire after Flutter is ready.
 	go func() {
+		<-flutterReady
 		for {
 			select {
 			case <-m.ctx.Done():
@@ -164,7 +185,8 @@ func (m *Manager) findFlutterExecutable() (string, error) {
 // showWindow shows the Flutter window
 func (m *Manager) showWindow() {
 	// Call API to tell Flutter to show window
-	resp, err := http.Post("http://localhost:1985/api/window/show", "application/json", bytes.NewReader([]byte("{}")))
+	url := "http://" + m.apiAddr + "/api/window/show"
+	resp, err := http.Post(url, "application/json", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		m.logger.Error("failed to send show window command", "error", err)
 		return
@@ -181,8 +203,8 @@ func (m *Manager) showWindow() {
 
 // hideWindow hides the Flutter window
 func (m *Manager) hideWindow() {
-	// Call API to tell Flutter to hide window
-	resp, err := http.Post("http://localhost:1985/api/window/hide", "application/json", bytes.NewReader([]byte("{}")))
+	url := "http://" + m.apiAddr + "/api/window/hide"
+	resp, err := http.Post(url, "application/json", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		m.logger.Error("failed to send hide window command", "error", err)
 		return
@@ -209,4 +231,26 @@ func (m *Manager) quit() {
 // QuitChannel returns the quit channel
 func (m *Manager) QuitChannel() <-chan struct{} {
 	return m.quitCh
+}
+
+// waitForFlutter polls GET /api/window/state until the Flutter UI responds or
+// the timeout elapses. This prevents Show/Hide tray clicks from silently
+// failing in the first few seconds after launch.
+func (m *Manager) waitForFlutter(timeout time.Duration) error {
+	url := "http://" + m.apiAddr + "/api/window/state"
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				m.logger.Info("Flutter UI is ready")
+				return nil
+			}
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("Flutter UI did not respond within %s", timeout)
 }

@@ -2,8 +2,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"image/png"
 	"log/slog"
 	"os"
 	"sync"
@@ -183,6 +186,9 @@ func (a *App) initialize() error {
 	a.apiServer.SetZoneConfigNotifier(a.zoneSampler)
 	a.logger.Info("zone config notifier registered with API server")
 
+	// Register zone sampler as status provider so /api/zones/:id/status works.
+	a.apiServer.SetZoneStatusProvider(a.zoneSampler)
+
 	// 7. Create touch handler
 	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
 	a.logger.Info("touch handler created")
@@ -194,10 +200,10 @@ func (a *App) initialize() error {
 func (a *App) start() error {
 	a.logger.Debug("starting application components")
 
-	// Connect to device
+	// Connect to device — store the error so the API can surface an actionable message.
 	if err := a.device.Connect(a.ctx); err != nil {
 		a.logger.Warn("failed to connect to device", "error", err)
-		// Don't fail - device will retry connection
+		a.apiServer.SetLastConnectError(err)
 	}
 
 	// Start module sampler
@@ -230,7 +236,8 @@ func (a *App) start() error {
 	return nil
 }
 
-// renderLoop continuously renders frames and sends them to the device
+// renderLoop continuously renders frames and sends them to the device.
+// Every 3rd frame (~10 FPS) is also broadcast to WebSocket clients as a base64 PNG.
 func (a *App) renderLoop() {
 	defer a.wg.Done()
 
@@ -241,6 +248,9 @@ func (a *App) renderLoop() {
 
 	a.logger.Info("render loop started", "fps", targetFPS)
 
+	var frameCount int
+	wsHub := a.apiServer.Hub()
+
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -248,7 +258,6 @@ func (a *App) renderLoop() {
 			return
 
 		case <-ticker.C:
-			// Render frame using zone manager
 			frame, err := a.zoneManager.RenderFrame()
 			if err != nil {
 				a.logger.Error("failed to render frame", "error", err)
@@ -259,6 +268,16 @@ func (a *App) renderLoop() {
 			if a.device.IsConnected() {
 				if err := a.device.SendFrame(a.ctx, frame.Pix); err != nil {
 					a.logger.Debug("failed to send frame", "error", err)
+				}
+			}
+
+			// Broadcast to WebSocket clients at ~10 FPS (every 3rd tick)
+			frameCount++
+			if frameCount%3 == 0 {
+				var buf bytes.Buffer
+				if err := png.Encode(&buf, frame); err == nil {
+					encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+					wsHub.Broadcast(api.WSMessage{Type: "frame", Data: encoded})
 				}
 			}
 		}

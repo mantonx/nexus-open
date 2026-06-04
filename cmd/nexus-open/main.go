@@ -48,9 +48,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Set up logging
+	// Set up logging — NEXUS_DEBUG=1 enables debug level without editing config files
 	logLevel := slog.LevelInfo
-	if *debug {
+	if *debug || os.Getenv("NEXUS_DEBUG") == "1" {
 		logLevel = slog.LevelDebug
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -90,7 +90,8 @@ func main() {
 	// If tray mode enabled, start system tray
 	if *enableTray {
 		logger.Info("starting system tray mode")
-		trayManager := tray.New(logger)
+		apiAddr := fmt.Sprintf("localhost:%d", *apiPort)
+		trayManager := tray.New(logger, apiAddr)
 
 		// Run tray in goroutine
 		go func() {

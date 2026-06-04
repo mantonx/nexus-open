@@ -347,6 +347,20 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	return frame, nil
 }
 
+// GetLastFrame returns a copy of the most recently rendered frame, or nil if no frame
+// has been rendered yet. The copy is safe to read after the call returns.
+func (m *Manager) GetLastFrame() *image.RGBA {
+	m.lastFrameMu.Lock()
+	defer m.lastFrameMu.Unlock()
+	if m.lastFrame == nil {
+		return nil
+	}
+	cp := *m.lastFrame
+	cp.Pix = make([]byte, len(m.lastFrame.Pix))
+	copy(cp.Pix, m.lastFrame.Pix)
+	return &cp
+}
+
 // renderImmediateFrameForCurrentPage renders the current page ignoring transition state.
 // Used for pre-rendering or when we need an up-to-date frame while a transition is in progress.
 func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {

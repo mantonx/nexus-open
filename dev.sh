@@ -66,6 +66,9 @@ echo "Starting Flutter UI..."
 "$SCRIPT_DIR/ui/build/linux/x64/debug/bundle/ui" &
 UI_PID=$!
 
+# Ensure both processes are killed on exit, Ctrl+C, or SIGTERM
+trap 'kill $UI_PID 2>/dev/null; kill $AIR_PID 2>/dev/null; wait' EXIT SIGINT SIGTERM
+
 echo ""
 echo "Development environment started!"
 echo "  - Go backend (air): PID $AIR_PID"

@@ -1,10 +1,10 @@
-# Maintainer: Nexus Open Team <contact@example.com>
+# Maintainer: Nexus Open Team <matthew.panton@gmail.com>
 pkgname=nexus-open
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="Linux controller for Corsair iCUE Nexus display device"
 arch=('x86_64')
-url="https://github.com/yourusername/nexus-open"
+url="https://github.com/mantonx/nexus-next"
 license=('MIT')
 depends=('libusb' 'libayatana-appindicator')
 optdepends=('flutter: for GUI configuration interface')

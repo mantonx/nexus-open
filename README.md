@@ -247,9 +247,60 @@ MIT License - see LICENSE file for details
 - **USB Library:** github.com/google/gousb
 - **UI Framework:** Flutter
 
+## Troubleshooting
+
+### Device not found
+
+The app shows "Device not found" or "Disconnected" immediately on launch.
+
+- Make sure the iCUE Nexus is plugged in via USB.
+- Run `lsusb | grep 1b1c` — the device should appear as `1b1c:1b8e`.
+- If it doesn't appear, try a different USB port or cable.
+
+### USB permission denied
+
+The app connects but immediately fails with a permission error, or you see `hidapi: failed to open` in logs.
+
+- Add your user to the `plugdev` group and log out/in:
+
+  ```sh
+  sudo usermod -a -G plugdev $USER
+  ```
+
+- Reload udev rules:
+
+  ```sh
+  sudo udevadm control --reload-rules && sudo udevadm trigger
+  ```
+- On **Arch Linux**, udev rules go to `/usr/lib/udev/rules.d/` when installed via package. Run `sudo setup-udev.sh` for a manual install.
+- On **Fedora/RHEL**, use the `input` group instead of `plugdev`: `sudo usermod -a -G input $USER`.
+
+### Backend won't start (port 1985 in use)
+
+Another process is using port 1985.
+
+- Find and stop it: `ss -tlnp | grep 1985`
+- Or run on a different port: `nexus-open --port 1986`
+
+### Flutter UI won't connect
+
+The settings window opens but shows "Backend not responding".
+
+- Make sure the Go backend is running: `pgrep nexus-open`
+- If using a custom port, the UI always connects to `localhost:1985`. Run the backend on the default port or wait for the WebSocket support (Week 2).
+
+### Module shows blank
+
+A zone displays nothing or a placeholder instead of data.
+
+- Confirm the plugin binary is built and present next to the `nexus-open` binary.
+- From the project root: `make modules` (or `cd modules/<name> && go build -o <name>`).
+- Check logs for `plugin error` or `module timeout` lines.
+
 ## Support
 
 - **Installation:** [docs/INSTALLATION.md](docs/INSTALLATION.md)
+- **Device setup:** [DEVICE_SETUP.md](DEVICE_SETUP.md)
 - **Issues:** [GitHub Issues](https://github.com/mantonx/nexus-next/issues)
 - **API Documentation:** See REST API endpoints section above
 - **Development:** [PROJECT_PLAN.md](PROJECT_PLAN.md)

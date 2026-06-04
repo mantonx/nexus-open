@@ -67,7 +67,7 @@ cp PROJECT_PLAN.md "${BUILD_DIR}/usr/share/doc/nexus-open/" 2>/dev/null || true
 cat > "${BUILD_DIR}/usr/share/doc/nexus-open/copyright" << EOF
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: nexus-open
-Source: https://github.com/yourusername/nexus-open
+Source: https://github.com/mantonx/nexus-next
 
 Files: *
 Copyright: $(date +%Y) Nexus Open Team

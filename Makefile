@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help build build-debug build-release build-ui build-all test test-race coverage clean clean-ui install uninstall run run-tray dev deb appimage all
+.PHONY: help build build-debug build-release build-ui build-all test test-race coverage clean clean-ui install uninstall run run-tray dev deb appimage rpm generate-api models all
 
 # Configuration
 APP_NAME := nexus-open
@@ -43,6 +43,9 @@ help:
 	@echo "Packaging:"
 	@echo "  make deb           - Build DEB package"
 	@echo "  make appimage      - Build AppImage"
+	@echo "  make rpm           - Build RPM package"
+	@echo "  make generate-api  - Regenerate api/openapi.yaml from annotations"
+	@echo "  make models        - Generate freezed/json_serializable Dart models"
 	@echo "  make all           - Build all packages"
 	@echo ""
 	@echo "Maintenance:"
@@ -146,8 +149,32 @@ appimage: $(DIST_DIR)
 	@echo "Building AppImage..."
 	@bash scripts/build-appimage.sh
 
+# Build RPM package
+rpm: $(DIST_DIR)
+	@echo "Building RPM package..."
+	@bash scripts/build-rpm.sh
+
+# Regenerate OpenAPI spec from source annotations
+generate-api:
+	@echo "Regenerating OpenAPI spec..."
+	@if command -v go-openapi > /dev/null || [ -f ~/go/bin/go-openapi ]; then \
+		GO_OPENAPI=$$(command -v go-openapi 2>/dev/null || echo ~/go/bin/go-openapi); \
+		$$GO_OPENAPI -dir cmd/nexus-open,internal/api,internal/settings -output api/openapi.yaml; \
+		sed -i 's|http://localhost:8080|http://localhost:1985|g' api/openapi.yaml; \
+		echo "✓ Spec written to api/openapi.yaml"; \
+	else \
+		echo "Error: go-openapi not found. Install with: go install github.com/go-openapi/cmd/go-openapi@latest"; \
+		exit 1; \
+	fi
+
+# Generate freezed/json_serializable Dart models from api_models.dart
+models:
+	@echo "Generating Dart models..."
+	@cd $(UI_DIR) && dart run build_runner build --delete-conflicting-outputs
+	@echo "✓ Models generated"
+
 # Build all packages
-all: deb appimage
+all: deb appimage rpm
 	@echo "✓ All packages built successfully!"
 	@ls -lh $(DIST_DIR)/
 
