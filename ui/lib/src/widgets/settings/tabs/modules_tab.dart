@@ -131,22 +131,12 @@ class _ModulesTabState extends State<ModulesTab> {
     return ListView(
       padding: AppSpacing.paddingMd,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Modules', style: theme.textTheme.headlineSmall),
-                  Text('Changes apply live — no save needed.',
-                      style: theme.textTheme.bodySmall),
-                ],
-              ),
-            ),
-            if (!ws.isConnected)
-              NexusStatusBadge(
-                  status: NexusStatus.warning, label: 'Not connected'),
-          ],
+        _TabHeader(
+          title: 'Modules',
+          description: 'Changes apply live — no save needed.',
+          trailing: !ws.isConnected
+              ? NexusStatusBadge(status: NexusStatus.warning, label: 'Not connected')
+              : null,
         ),
         const SizedBox(height: AppSpacing.md),
         // 2×2 grid of module cards
@@ -336,6 +326,60 @@ class _ConfigKey {
   final _ControlType type;
   final List<String>? options;
   const _ConfigKey(this.id, this.label, this.type, {this.options});
+}
+
+// ── Tab page header — consistent with NexusSection label treatment ────────────
+
+class _TabHeader extends StatelessWidget {
+  const _TabHeader({
+    required this.title,
+    required this.description,
+    this.trailing,
+  });
+
+  final String title;
+  final String description;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 2,
+          height: 14,
+          margin: const EdgeInsets.only(right: AppSpacing.sm),
+          decoration: BoxDecoration(
+            color: AppColors.accent,
+            borderRadius: AppRadius.pillBr,
+          ),
+        ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title.toUpperCase(),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  letterSpacing: 1.1,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(description, style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+        if (trailing != null) ...[
+          const SizedBox(width: AppSpacing.sm),
+          trailing!,
+        ],
+      ],
+    );
+  }
 }
 
 class _ModuleDef {
