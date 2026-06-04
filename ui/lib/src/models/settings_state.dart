@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/nexus_api_service.dart';
+
+const _kThemeKey = 'nexus_theme_mode';
 
 class SettingsState extends ChangeNotifier {
   final NexusApiService _apiService;
@@ -9,8 +12,8 @@ class SettingsState extends ChangeNotifier {
   bool _isConnected = false;
   String? _errorMessage;
 
-  // Theme preference (not persisted to backend — local only for now)
-  ThemeMode _themeMode = ThemeMode.system;
+  // Theme preference — persisted locally via shared_preferences
+  ThemeMode _themeMode = ThemeMode.dark;
   bool _isFirstRun = false;
 
   // Configuration
@@ -29,9 +32,11 @@ class SettingsState extends ChangeNotifier {
   ThemeMode get themeMode => _themeMode;
   bool get isFirstRun => _isFirstRun;
 
-  void setThemeMode(ThemeMode mode) {
+  Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kThemeKey, mode.name);
   }
 
   void setConnected(bool value) {
@@ -63,6 +68,14 @@ class SettingsState extends ChangeNotifier {
 
   /// Initialize by loading config from backend
   Future<void> _initialize() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_kThemeKey);
+    if (saved != null) {
+      _themeMode = ThemeMode.values.firstWhere(
+        (m) => m.name == saved,
+        orElse: () => ThemeMode.dark,
+      );
+    }
     await loadFromBackend();
   }
 
