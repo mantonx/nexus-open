@@ -9,7 +9,7 @@ allowed-tools:
 
 # /ui-tour — Nexus Open UI Screenshot Tour
 
-Captures a screenshot of every settings tab in the running Flutter app.
+Captures screenshots of every settings tab in the running Flutter app — including a scrolled view of any tab with content below the fold. Old screenshots are cleared automatically before each run.
 
 ## How It Works
 
@@ -49,11 +49,19 @@ make screenshot-tour
 ./scripts/ui-tour.sh
 ```
 
+Old screenshots are cleared automatically at the start of each run.
+
 Screenshots are saved to `ui/screenshots/`:
-- `tab_display.png`
+- `tab_display.png` — Display tab (top of page)
+- `tab_display_scrolled.png` — Display tab (Brightness, Units, Date & Time)
 - `tab_location.png`
+- `tab_location_scrolled.png`
 - `tab_modules.png`
+- `tab_modules_scrolled.png`
 - `tab_images.png`
+- `tab_images_scrolled.png`
+
+Scrolled variants are only saved if the tab has content below the fold.
 
 ## Viewing Screenshots
 
@@ -96,11 +104,12 @@ When this skill is invoked:
    ```
    Wait for "screenshot(s) saved" in the output.
 
-3. Read and display all four screenshots:
-   - `ui/screenshots/tab_display.png`
-   - `ui/screenshots/tab_location.png`
-   - `ui/screenshots/tab_modules.png`
-   - `ui/screenshots/tab_images.png`
+3. Read and display all saved screenshots:
+   ```bash
+   ls ui/screenshots/
+   ```
+   Read each one — they may include `_scrolled` variants for tabs with
+   below-the-fold content.
 
 4. Summarise what you observe: visual quality, layout issues, anything
    that looks broken or could be improved.
