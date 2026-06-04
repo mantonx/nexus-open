@@ -1,8 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import '../models/api_models.dart';
 
-/// API service for communicating with the Nexus Open backend
+export '../models/api_models.dart' show NexusConfig, DeviceInfo, ApiError;
+
+/// API service for communicating with the Nexus Open backend.
+/// Uses [NexusConfig] and [DeviceInfo] from api_models.dart (freezed).
 class NexusApiService {
   static const String baseUrl = 'http://localhost:1985';
   static const Duration timeout = Duration(seconds: 10);
@@ -11,15 +15,22 @@ class NexusApiService {
 
   NexusApiService({http.Client? client}) : _client = client ?? http.Client();
 
-  /// Check if the backend is healthy
-  Future<bool> checkHealth() async {
+  /// Check if the backend is healthy. Returns (isHealthy, isFirstRun).
+  Future<({bool healthy, bool firstRun})> checkHealth() async {
     try {
       final response = await _client
           .get(Uri.parse('$baseUrl/api/health'))
           .timeout(timeout);
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        final body = json.decode(response.body) as Map<String, dynamic>;
+        return (
+          healthy: true,
+          firstRun: body['first_run'] as bool? ?? false,
+        );
+      }
+      return (healthy: false, firstRun: false);
     } catch (e) {
-      return false;
+      return (healthy: false, firstRun: false);
     }
   }
 
@@ -30,13 +41,11 @@ class NexusApiService {
         .timeout(timeout);
 
     if (response.statusCode == 200) {
-      return NexusConfig.fromJson(json.decode(response.body));
-    } else {
-      throw ApiException(
-        'Failed to load configuration',
-        statusCode: response.statusCode,
-      );
+      return NexusConfig.fromJson(
+          json.decode(response.body) as Map<String, dynamic>);
     }
+    throw ApiException('Failed to load configuration',
+        statusCode: response.statusCode);
   }
 
   /// Update configuration
@@ -50,9 +59,9 @@ class NexusApiService {
         .timeout(timeout);
 
     if (response.statusCode != 200) {
-      final error = json.decode(response.body);
+      final body = json.decode(response.body) as Map<String, dynamic>;
       throw ApiException(
-        error['message'] ?? 'Failed to update configuration',
+        body['message'] as String? ?? 'Failed to update configuration',
         statusCode: response.statusCode,
       );
     }
@@ -64,23 +73,18 @@ class NexusApiService {
       'POST',
       Uri.parse('$baseUrl/api/images/upload'),
     );
-
-    request.files.add(
-      await http.MultipartFile.fromPath('image', imageFile.path),
-    );
+    request.files
+        .add(await http.MultipartFile.fromPath('image', imageFile.path));
 
     final streamedResponse = await request.send().timeout(timeout);
     final response = await http.Response.fromStream(streamedResponse);
 
     if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      return data['data']['filename'] ?? imageFile.path.split('/').last;
-    } else {
-      throw ApiException(
-        'Failed to upload image',
-        statusCode: response.statusCode,
-      );
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      return (data['data'] as Map?)?['filename'] as String? ??
+          imageFile.path.split('/').last;
     }
+    throw ApiException('Failed to upload image', statusCode: response.statusCode);
   }
 
   /// List all images
@@ -90,14 +94,11 @@ class NexusApiService {
         .timeout(timeout);
 
     if (response.statusCode == 200) {
-      final List<dynamic> images = json.decode(response.body);
-      return images.map((e) => e.toString()).toList();
-    } else {
-      throw ApiException(
-        'Failed to list images',
-        statusCode: response.statusCode,
-      );
+      return (json.decode(response.body) as List<dynamic>)
+          .map((e) => e.toString())
+          .toList();
     }
+    throw ApiException('Failed to list images', statusCode: response.statusCode);
   }
 
   /// Delete an image
@@ -111,85 +112,92 @@ class NexusApiService {
         .timeout(timeout);
 
     if (response.statusCode != 200) {
-      throw ApiException(
-        'Failed to delete image',
-        statusCode: response.statusCode,
-      );
+      throw ApiException('Failed to delete image',
+          statusCode: response.statusCode);
     }
   }
 
-  /// Close the HTTP client
-  void dispose() {
-    _client.close();
-  }
-}
+  /// Get device info (model, firmware, connect_error)
+  Future<DeviceInfo> getDeviceInfo() async {
+    final response = await _client
+        .get(Uri.parse('$baseUrl/api/device/info'))
+        .timeout(timeout);
 
-/// Configuration model matching the Go backend
-class NexusConfig {
-  final String location;
-  final String timeFormat; // "12h" or "24h"
-  final String unit; // "metric" or "imperial"
-  final String backgroundColor; // hex color
-  final String backgroundImage;
-  final String textColor; // hex color
-  final List<String> imagePaths;
-
-  NexusConfig({
-    required this.location,
-    required this.timeFormat,
-    required this.unit,
-    required this.backgroundColor,
-    required this.backgroundImage,
-    required this.textColor,
-    required this.imagePaths,
-  });
-
-  factory NexusConfig.fromJson(Map<String, dynamic> json) {
-    return NexusConfig(
-      location: json['location'] ?? '',
-      timeFormat: json['time_format'] ?? '24h',
-      unit: json['unit'] ?? 'imperial',
-      backgroundColor: json['background_color'] ?? '#000000',
-      backgroundImage: json['background_image'] ?? 'background.png',
-      textColor: json['text_color'] ?? '#FFFFFF',
-      imagePaths: (json['image_paths'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          [],
-    );
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      final data = (body['data'] ?? body) as Map<String, dynamic>;
+      return DeviceInfo.fromJson(data);
+    }
+    throw ApiException('Failed to get device info',
+        statusCode: response.statusCode);
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'location': location,
-      'time_format': timeFormat,
-      'unit': unit,
-      'background_color': backgroundColor,
-      'background_image': backgroundImage,
-      'text_color': textColor,
-      'image_paths': imagePaths,
-    };
+  /// Set display brightness (0–100)
+  Future<void> setBrightness(int value) async {
+    final response = await _client
+        .post(
+          Uri.parse('$baseUrl/api/device/brightness'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(BrightnessRequest(brightness: value).toJson()),
+        )
+        .timeout(timeout);
+
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to set brightness',
+          statusCode: response.statusCode);
+    }
   }
 
-  NexusConfig copyWith({
-    String? location,
-    String? timeFormat,
-    String? unit,
-    String? backgroundColor,
-    String? backgroundImage,
-    String? textColor,
-    List<String>? imagePaths,
-  }) {
-    return NexusConfig(
-      location: location ?? this.location,
-      timeFormat: timeFormat ?? this.timeFormat,
-      unit: unit ?? this.unit,
-      backgroundColor: backgroundColor ?? this.backgroundColor,
-      backgroundImage: backgroundImage ?? this.backgroundImage,
-      textColor: textColor ?? this.textColor,
-      imagePaths: imagePaths ?? this.imagePaths,
-    );
+  /// Get zone status (ok / error / timeout / loading)
+  Future<Map<String, String>> getZoneStatus(String zoneId) async {
+    final response = await _client
+        .get(Uri.parse('$baseUrl/api/zones/$zoneId/status'))
+        .timeout(timeout);
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      return {
+        'status': body['status'] as String? ?? 'loading',
+        'error': body['error'] as String? ?? '',
+      };
+    }
+    return {'status': 'loading', 'error': ''};
   }
+
+  /// Get config for a specific module zone
+  Future<Map<String, dynamic>> getModuleConfig(String zoneId) async {
+    final response = await _client
+        .get(Uri.parse('$baseUrl/api/modules/$zoneId/config'))
+        .timeout(timeout);
+
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      if (body.containsKey('data')) {
+        return Map<String, dynamic>.from(body['data'] as Map);
+      }
+      return body;
+    }
+    throw ApiException('Failed to load module config',
+        statusCode: response.statusCode);
+  }
+
+  /// Update config for a specific module zone
+  Future<void> updateModuleConfig(
+      String zoneId, Map<String, dynamic> config) async {
+    final response = await _client
+        .post(
+          Uri.parse('$baseUrl/api/modules/$zoneId/config'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(config),
+        )
+        .timeout(timeout);
+
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to update module config',
+          statusCode: response.statusCode);
+    }
+  }
+
+  void dispose() => _client.close();
 }
 
 /// Exception thrown by API calls
@@ -200,10 +208,7 @@ class ApiException implements Exception {
   ApiException(this.message, {this.statusCode});
 
   @override
-  String toString() {
-    if (statusCode != null) {
-      return 'ApiException ($statusCode): $message';
-    }
-    return 'ApiException: $message';
-  }
+  String toString() => statusCode != null
+      ? 'ApiException ($statusCode): $message'
+      : 'ApiException: $message';
 }

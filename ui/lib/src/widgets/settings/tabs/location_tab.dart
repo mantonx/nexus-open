@@ -4,13 +4,20 @@ import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../../maps/world_map.dart';
+import '../../common/common.dart';
 import '../../../services/location_service.dart';
 import '../../../models/place.dart';
+import '../../../theme/app_tokens.dart';
 
 class LocationTab extends StatefulWidget {
   final Function(String) onLocationSelected;
+  final String initialLocation;
 
-  const LocationTab({super.key, required this.onLocationSelected});
+  const LocationTab({
+    super.key,
+    required this.onLocationSelected,
+    this.initialLocation = '',
+  });
 
   @override
   State<LocationTab> createState() => _LocationTabState();
@@ -18,8 +25,9 @@ class LocationTab extends StatefulWidget {
 
 class _LocationTabState extends State<LocationTab> {
   final _formKey = GlobalKey<FormState>();
-  final _cityController = TextEditingController(text: 'Jersey City, NJ');
+  late final TextEditingController _cityController;
   final _mapController = MapController();
+  final _searchFocusNode = FocusNode();
   static const double _defaultZoom = 4.0;
   static const double _selectedZoom = 12.0;
   Place? _selectedPlace;
@@ -28,12 +36,20 @@ class _LocationTabState extends State<LocationTab> {
   @override
   void initState() {
     super.initState();
-    _searchLocation(_cityController.text);
+    _cityController = TextEditingController(text: widget.initialLocation);
+    if (widget.initialLocation.isNotEmpty) {
+      _searchLocation(widget.initialLocation);
+    }
+    // Auto-focus the search field when this tab opens (11.2)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _cityController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -86,97 +102,107 @@ class _LocationTabState extends State<LocationTab> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = Theme.of(context).colorScheme;
+
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: AppSpacing.paddingMd,
       children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Location Settings',
-                    style: Theme.of(context).textTheme.titleLarge,
+        NexusSection(
+          title: 'Location',
+          description: 'Used for the weather module.',
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TypeAheadFormField<Place>(
+                  textFieldConfiguration: TextFieldConfiguration(
+                    controller: _cityController,
+                    focusNode: _searchFocusNode,
+                    decoration: InputDecoration(
+                      labelText: 'City or address',
+                      hintText: 'Search for a city…',
+                      suffixIcon: _isSearching &&
+                              _cityController.text.isNotEmpty
+                          ? Padding(
+                              padding: AppSpacing.paddingXs,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: AppColors.accent),
+                            )
+                          : null,
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  TypeAheadFormField<Place>(
-                    textFieldConfiguration: TextFieldConfiguration(
-                      controller: _cityController,
-                      decoration: InputDecoration(
-                        labelText: 'Location',
-                        helperText: 'Enter city name or address',
-                        border: const OutlineInputBorder(),
-                        suffixIcon: _isSearching &&
-                                _cityController.text.isNotEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.all(8.0),
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : null,
+                  suggestionsCallback: (pattern) async {
+                    if (pattern.isEmpty) {
+                      setState(() => _isSearching = false);
+                      return [];
+                    }
+                    return LocationService.searchPlaces(pattern);
+                  },
+                  itemBuilder: (context, Place place) => ListTile(
+                    title: Text(LocationService.getDisplayString(place)),
+                    subtitle: Text(place.type,
+                        style: theme.textTheme.bodySmall),
+                  ),
+                  onSuggestionSelected: _updateMapLocation,
+                  noItemsFoundBuilder: (_) => Padding(
+                    padding: AppSpacing.paddingMd,
+                    child: Text('No locations found',
+                        style: theme.textTheme.bodySmall),
+                  ),
+                ),
+                if (_selectedPlace != null) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    children: [
+                      Icon(Icons.check_circle_outline,
+                          size: AppIconSize.sm, color: cs.success),
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          LocationService.getDisplayString(_selectedPlace!),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: cs.success),
+                        ),
                       ),
-                    ),
-                    suggestionsCallback: (pattern) async {
-                      if (pattern.isEmpty) {
-                        setState(() => _isSearching = false);
-                        return [];
-                      }
-                      return LocationService.searchPlaces(pattern);
-                    },
-                    itemBuilder: (context, Place place) {
-                      return ListTile(
-                        title: Text(LocationService.getDisplayString(
-                            place)), // Use formatted display string
-                        subtitle: Text('${place.type}'),
-                      );
-                    },
-                    onSuggestionSelected: _updateMapLocation,
-                    noItemsFoundBuilder: (context) => const Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: Text('No locations found'),
-                    ),
+                    ],
                   ),
-                  if (_selectedPlace != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Found: ${LocationService.getDisplayString(_selectedPlace!)}', // Use formatted display string
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    height: 400,
-                    child: Column(
-                      children: [
-                        Expanded(
+                ],
+                const SizedBox(height: AppSpacing.md),
+                // Map — use available height rather than fixed 400px
+                SizedBox(
+                  height: 340,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: AppRadius.smBr,
                           child: WorldMap(
                             latitude: _selectedPlace?.latitude ?? 51.5074,
                             longitude: _selectedPlace?.longitude ?? -0.1278,
                             width: MediaQuery.of(context).size.width - 64,
-                            mapColor: Theme.of(context).colorScheme.onSurface,
-                            indicatorColor:
-                                Theme.of(context).colorScheme.primary,
+                            mapColor: cs.onSurface,
+                            indicatorColor: AppColors.accent,
                             zoom: _selectedPlace != null
                                 ? _selectedZoom
                                 : _defaultZoom,
                             controller: _mapController,
                           ),
                         ),
-                        const Padding(
-                          padding: EdgeInsets.all(8.0),
-                          child: Text(
-                            '© OpenStreetMap contributors',
-                            style: TextStyle(fontSize: 12),
-                          ),
+                      ),
+                      Padding(
+                        padding: AppSpacing.paddingVSm,
+                        child: Text(
+                          '© OpenStreetMap contributors',
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: cs.onSurfaceVariant),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
