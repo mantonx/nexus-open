@@ -122,17 +122,17 @@ class _LocationTabState extends State<LocationTab> {
                     decoration: InputDecoration(
                       labelText: 'City or address',
                       hintText: 'Search for a city…',
-                      // Match NexusFormField / InputDecorationTheme styling
+                      // Mirror the app's InputDecorationTheme exactly
                       filled: true,
-                      fillColor: AppColors.darkElevated,
+                      fillColor: cs.surfaceContainerHigh,
                       contentPadding: AppSpacing.paddingHMdVSm,
                       border: OutlineInputBorder(
                         borderRadius: AppRadius.smBr,
-                        borderSide: BorderSide(color: AppColors.darkBorder),
+                        borderSide: BorderSide(color: cs.outline),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: AppRadius.smBr,
-                        borderSide: BorderSide(color: AppColors.darkBorder),
+                        borderSide: BorderSide(color: cs.outline),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: AppRadius.smBr,

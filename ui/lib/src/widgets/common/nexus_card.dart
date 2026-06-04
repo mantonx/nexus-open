@@ -63,20 +63,21 @@ class NexusCard extends StatelessWidget {
     // Two-layer approach: outer for shadow, inner for border+clip.
     // Individual BorderSide colors require no borderRadius — so we use a
     // uniform border and paint the top highlight as a separate 1px overlay.
+    final isDark = cs.brightness == Brightness.dark;
     Widget card = Container(
       margin: margin ?? const EdgeInsets.only(bottom: AppSpacing.sm),
       decoration: BoxDecoration(
         borderRadius: AppRadius.lgBr,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.35),
-            blurRadius: 8,
+            color: Colors.black.withOpacity(isDark ? 0.35 : 0.10),
+            blurRadius: isDark ? 8 : 6,
             offset: const Offset(0, 2),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+            color: Colors.black.withOpacity(isDark ? 0.12 : 0.06),
+            blurRadius: isDark ? 24 : 16,
+            offset: const Offset(0, 6),
           ),
         ],
       ),

@@ -106,10 +106,9 @@ void main() {
     if (lightModeBtn.evaluate().isNotEmpty) {
       await tester.tap(lightModeBtn);
       await tester.pump(const Duration(milliseconds: 400));
-      await _screenshot(tester, 'light_tab_display');
 
-      // Tour the remaining tabs in light mode
-      for (final (tooltip, name) in tabs.skip(1)) {
+      // Tour all tabs in light mode, starting from Display
+      for (final (tooltip, name) in tabs) {
         final navItem = find.byTooltip(tooltip);
         if (navItem.evaluate().isNotEmpty) {
           await tester.tap(navItem);
