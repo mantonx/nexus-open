@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:pub.dev)",
+      "WebFetch(domain:openapi-generator.tech)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:archlinux.org)",
+      "Bash(dart run *)",
+      "Bash(dart --version)",
+      "Bash(NEXUS_MOCK_DEVICE=1 /tmp/nexus-open-run --port 19860)",
+      "Bash(dpkg -l xvfb scrot)",
+      "Bash(DISPLAY=:1 import -window root /tmp/nexus-screenshot.png)",
+      "Bash(DISPLAY=:1 scrot /tmp/nexus-screenshot.png)",
+      "Bash(DISPLAY=:1 import -window root -silent /tmp/nexus-screenshot.png)",
+      "Bash(DISPLAY=:1 import /tmp/nexus-screenshot.png)",
+      "Skill(commit-commands:commit)",
+      "Skill(commit-commands:commit:*)",
+      "Bash(read f *)",
+      "Bash(NEXUS_MOCK_DEVICE=1 /tmp/nexus-open-run --port 1985)",
+      "Bash(DISPLAY=:1 scrot /tmp/nexus-ui-current.png)",
+      "Bash(DISPLAY=:1 gnome-screenshot -f /tmp/nexus-ui-current.png)",
+      "Bash(DISPLAY=:1 import -window root /tmp/nexus-ui-current.png)",
+      "Bash(DISPLAY=:1 xwd -root -silent -out /tmp/nexus-xwd.xwd)",
+      "Bash(convert /tmp/nexus-xwd.xwd /tmp/nexus-ui-current.png)",
+      "Bash(grim /tmp/nexus-ui-current.png)",
+      "Bash(spectacle --background --nonotify --output /tmp/nexus-ui-current.png)",
+      "Bash(spectacle --background --nonotify --output /tmp/nexus-window.png --activewindow)"
+    ]
+  }
+}
