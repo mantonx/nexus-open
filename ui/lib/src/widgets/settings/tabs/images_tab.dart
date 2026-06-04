@@ -258,22 +258,58 @@ class _ImageTile extends StatelessWidget {
 class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.photo_library_outlined,
-              size: AppIconSize.hero, color: cs.onSurfaceVariant),
+          // Hardware-adjacent icon: a miniature display outline with a + glyph
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: AppColors.darkBorder,
+                width: 1.5,
+              ),
+              borderRadius: AppRadius.smBr,
+            ),
+            child: Center(
+              child: Container(
+                width: 40,
+                height: 10,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: AppColors.accent.withOpacity(0.4),
+                    width: 1,
+                  ),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                child: Center(
+                  child: Icon(
+                    Icons.add,
+                    size: 8,
+                    color: AppColors.accent.withOpacity(0.5),
+                  ),
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: AppSpacing.md),
-          Text('No images yet',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(color: cs.onSurfaceVariant)),
+          Text(
+            'No images yet',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
           const SizedBox(height: AppSpacing.xs),
-          Text('Upload images to use as display backgrounds.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: cs.onSurfaceVariant)),
+          Text(
+            'PNG, JPG or GIF — shown behind zone content\non the 640×48 display.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppColors.textMuted,
+            ),
+          ),
         ],
       ),
     );

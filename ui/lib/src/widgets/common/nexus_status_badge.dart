@@ -83,7 +83,13 @@ class NexusStatusBadge extends StatelessWidget {
     return Container(
       width: AppIconSize.xs,
       height: AppIconSize.xs,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: status == NexusStatus.ok
+            ? [BoxShadow(color: color.withOpacity(0.6), blurRadius: 6)]
+            : null,
+      ),
     );
   }
 
