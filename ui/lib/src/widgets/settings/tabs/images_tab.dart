@@ -85,13 +85,30 @@ class _ImagesTabState extends State<ImagesTab> {
         children: [
           // Header
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              Container(
+                width: 2,
+                height: 14,
+                margin: const EdgeInsets.only(right: AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: AppRadius.pillBr,
+                ),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Background Images',
-                        style: theme.textTheme.headlineSmall),
+                    Text(
+                      'BACKGROUND IMAGES',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
                     Text('PNG, JPG, GIF — shown behind zone content.',
                         style: theme.textTheme.bodySmall),
                   ],
@@ -107,9 +124,7 @@ class _ImagesTabState extends State<ImagesTab> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.add_photo_alternate, size: 18),
-                onPressed: _uploading
-                    ? null
-                    : () => _pickAndUploadImage(state),
+                onPressed: _uploading ? null : () => _pickAndUploadImage(state),
               ),
             ],
           ),
