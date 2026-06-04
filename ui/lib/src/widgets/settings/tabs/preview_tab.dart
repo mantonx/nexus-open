@@ -81,7 +81,7 @@ class PreviewTab extends StatelessWidget {
                     title: const Text('Text Color'),
                     trailing: InkWell(
                       onTap: () => _openColorPicker(
-                        settings.textColor,
+                        settings.textColorValue,
                         (color) => settings.setTextColor(color),
                         context,
                       ),
@@ -89,7 +89,7 @@ class PreviewTab extends StatelessWidget {
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: settings.textColor,
+                          color: settings.textColorValue,
                           border: Border.all(color: Colors.grey),
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -100,7 +100,7 @@ class PreviewTab extends StatelessWidget {
                     title: const Text('Background Color'),
                     trailing: InkWell(
                       onTap: () => _openColorPicker(
-                        settings.backgroundColor,
+                        settings.backgroundColorValue,
                         (color) => settings.setBackgroundColor(color),
                         context,
                       ),
@@ -108,7 +108,7 @@ class PreviewTab extends StatelessWidget {
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: settings.backgroundColor,
+                          color: settings.backgroundColorValue,
                           border: Border.all(color: Colors.grey),
                           borderRadius: BorderRadius.circular(8),
                         ),
@@ -148,7 +148,7 @@ class PreviewTab extends StatelessWidget {
                       width: 640,
                       height: 48,
                       decoration: BoxDecoration(
-                        color: settings.backgroundColor,
+                        color: settings.backgroundColorValue,
                         border: Border.all(
                           color: Colors.grey.shade800,
                           width: 2,
@@ -160,7 +160,7 @@ class PreviewTab extends StatelessWidget {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: settings.textColor.withOpacity(0.15),
+                            color: settings.textColorValue.withOpacity(0.15),
                             blurRadius: 5,
                             spreadRadius: 1,
                           ),
@@ -197,12 +197,12 @@ class PreviewTab extends StatelessWidget {
     return Text(
       text,
       style: TextStyle(
-        color: settings.textColor,
+        color: settings.textColorValue,
         fontSize: 16,
         fontFamily: 'monospace',
         shadows: [
           Shadow(
-            color: settings.textColor.withOpacity(0.5),
+            color: settings.textColorValue.withOpacity(0.5),
             blurRadius: 2,
             offset: const Offset(0, 0),
           ),

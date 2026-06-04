@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+
+echo "Removing Nexus Open..."
+
+# Stop the service if it's running
+if systemctl --user is-active --quiet nexus-open 2>/dev/null; then
+    echo "Stopping nexus-open service..."
+    systemctl --user stop nexus-open || true
+fi
+
+# Disable the service
+if systemctl --user is-enabled --quiet nexus-open 2>/dev/null; then
+    echo "Disabling nexus-open service..."
+    systemctl --user disable nexus-open || true
+fi
+
+exit 0

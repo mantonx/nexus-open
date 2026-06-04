@@ -1,0 +1,46 @@
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  args_bin = ["-debug"]
+  bin = "./tmp/nexus-open"
+  cmd = "go build -o ./tmp/nexus-open ./cmd/nexus-open"
+  delay = 1000
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "ui", "build", "bin", "docs", "packaging", "scripts"]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = false
+  follow_symlink = false
+  full_bin = ""
+  include_dir = ["modules", "cmd", "internal", "pkg"]
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  include_file = []
+  kill_delay = "0s"
+  log = "build-errors.log"
+  poll = false
+  poll_interval = 0
+  post_cmd = []
+  pre_cmd = ["cd modules/cpu-temp && go build -o cpu-temp", "cd modules/gpu-temp && go build -o gpu-temp", "cd modules/network && go build -o network", "cd modules/weather && go build -o weather", "cd modules/hello && go build -o hello"]
+  rerun = false
+  rerun_delay = 500
+  send_interrupt = true
+  stop_on_error = false
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  main_only = false
+  time = false
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

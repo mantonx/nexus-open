@@ -1,0 +1,89 @@
+# Multi-Page Layout Example
+# Demonstrates swipeable pages with different zone configurations
+
+name: "Multi-Page Dashboard"
+version: "1.0"
+
+# Global theme
+theme:
+  bg: "#101010"
+  fg: "#EAEAEA"
+  muted: "#B8BDC2"
+  accent: "#00C8FF"
+  gutter_px: 2
+  font_size_primary: 24
+  font_size_secondary: 9
+
+# Navigation settings
+navigation:
+  swipe_enabled: true
+  auto_rotate: false
+  auto_rotate_interval_s: 10
+
+# Pages (swipeable layouts)
+pages:
+  # Page 1: System Monitoring
+  - name: "System"
+    zones:
+      - id: system.weather
+        width: 160
+        module: exec:./modules/weather/weather
+        refresh_ms: 300000  # 5 minutes
+        align: left
+
+      - id: system.cpu
+        width: 160
+        module: exec:./modules/cpu-temp/cpu-temp
+        refresh_ms: 2000
+        align: center
+
+      - id: system.gpu
+        width: 160
+        module: exec:./modules/gpu-temp/gpu-temp
+        refresh_ms: 2000
+        align: center
+        theme_override:
+          accent: "#FF6B6B"
+
+      - id: system.network
+        width: 160
+        module: exec:./modules/network/network
+        refresh_ms: 2000
+        align: right
+
+  # Page 2: Performance Focus
+  - name: "Performance"
+    zones:
+      - id: performance.cpu
+        width: 240
+        module: exec:./modules/cpu-temp/cpu-temp
+        refresh_ms: 1000
+        align: center
+        theme_override:
+          accent: "#00FF88"
+
+      - id: performance.gpu
+        width: 240
+        module: exec:./modules/gpu-temp/gpu-temp
+        refresh_ms: 1000
+        align: center
+        theme_override:
+          accent: "#FF6B6B"
+
+      - id: performance.network
+        width: 160
+        module: exec:./modules/network/network
+        refresh_ms: 1000
+        align: right
+
+  # Page 3: Minimal Clock
+  - name: "Clock"
+    zones:
+      - id: clock.time
+        width: 640
+        module: builtin:clock
+        refresh_ms: 1000
+        align: center
+        theme_override:
+          font_size_primary: 20
+          accent: "#FFD700"

@@ -1,0 +1,119 @@
+name: nexus-open
+base: core22
+version: '1.0.0'
+summary: Linux controller for Corsair iCUE Nexus display
+description: |
+  Nexus Open provides a native Linux desktop application to control and configure
+  your Corsair iCUE Nexus (640x48 pixel display). Display system metrics, weather
+  information, and custom backgrounds on your device.
+
+  Features:
+  - Real-time CPU/GPU temperature and network statistics
+  - Location-based weather display with configurable units
+  - Custom backgrounds and color schemes
+  - REST API for programmatic control
+  - Headless mode for background operation
+  - Flutter-based configuration interface
+
+  Note: This snap requires access to raw USB devices. After installation, connect
+  the raw-usb interface:
+    sudo snap connect nexus-open:raw-usb
+
+grade: stable
+confinement: strict
+
+# Architecture support
+architectures:
+  - build-on: amd64
+
+# Application definition
+apps:
+  nexus-open:
+    command: bin/nexus-open
+    daemon: simple
+    restart-condition: on-failure
+    plugs:
+      - network              # For weather API
+      - network-bind         # For REST API server
+      - raw-usb              # For iCUE Nexus USB device
+      - hardware-observe     # For CPU/GPU temperature
+      - network-observe      # For network statistics
+      - system-observe       # For system monitoring
+    environment:
+      HOME: $SNAP_USER_COMMON
+
+  # Optional: CLI interface for debugging
+  cli:
+    command: bin/nexus-open
+    plugs:
+      - network
+      - network-bind
+      - raw-usb
+      - hardware-observe
+      - network-observe
+      - system-observe
+
+# Build configuration
+parts:
+  nexus-open:
+    plugin: go
+    source: https://github.com/yourusername/nexus-open.git
+    source-tag: v1.0.0
+    # For local testing, use:
+    # source: .
+    # source-type: local
+
+    build-snaps:
+      - go/1.23/stable
+
+    build-packages:
+      - gcc
+      - pkg-config
+      - libusb-1.0-0-dev
+
+    stage-packages:
+      - libusb-1.0-0
+
+    override-build: |
+      # Build the Go application
+      export CGO_ENABLED=1
+      go build -v -o $SNAPCRAFT_PART_INSTALL/bin/nexus-open \
+        -ldflags "-X main.version=$SNAPCRAFT_PROJECT_VERSION" \
+        ./cmd/nexus-open
+
+      # Copy configuration templates
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/nexus-open
+
+      # Install udev rules (for reference, user must install manually)
+      cp packaging/udev/99-corsair-nexus.rules $SNAPCRAFT_PART_INSTALL/share/nexus-open/
+
+      # Install desktop file
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/applications
+      cp packaging/desktop/nexus-open.desktop $SNAPCRAFT_PART_INSTALL/share/applications/
+
+      # Install documentation
+      mkdir -p $SNAPCRAFT_PART_INSTALL/share/doc/nexus-open
+      cp README.md $SNAPCRAFT_PART_INSTALL/share/doc/nexus-open/
+      cp docs/INSTALLATION.md $SNAPCRAFT_PART_INSTALL/share/doc/nexus-open/ || true
+
+# Plugs for hardware access
+plugs:
+  raw-usb:
+    interface: raw-usb
+    # Only allow Corsair iCUE Nexus device
+    usb-vendor: 0x1b1c
+    usb-product: 0x1b8e
+
+# Layout for configuration
+layout:
+  /etc/nexus-open:
+    bind: $SNAP_DATA/etc
+
+# Hooks
+hooks:
+  install:
+    plugs:
+      - network
+  configure:
+    plugs:
+      - network
