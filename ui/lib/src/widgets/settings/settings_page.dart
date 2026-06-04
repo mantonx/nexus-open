@@ -452,7 +452,7 @@ class _DotGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.032)
+      ..color = Colors.white.withOpacity(0.045)
       ..strokeWidth = 1;
     const step = 24.0;
     for (double x = step; x < size.width; x += step) {
