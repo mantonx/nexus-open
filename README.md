@@ -69,8 +69,8 @@ The refactoring from Wails to Flutter is complete! See [PROJECT_PLAN.md](PROJECT
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/nexus-open.git
-cd nexus-open
+git clone https://github.com/mantonx/nexus-next.git
+cd nexus-next
 
 # Build Go backend (using Make)
 make build                 # Development build (with debug info)
@@ -80,9 +80,7 @@ make build-release         # Optimized release build (stripped, smaller)
 go build -o bin/nexus-open ./cmd/nexus-open
 
 # Set up USB permissions (one-time)
-sudo cp packaging/udev/99-corsair-nexus.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo usermod -a -G plugdev $USER
+sudo bash scripts/setup-udev.sh
 # Log out and back in for group changes
 
 # Run backend
@@ -252,7 +250,7 @@ MIT License - see LICENSE file for details
 ## Support
 
 - **Installation:** [docs/INSTALLATION.md](docs/INSTALLATION.md)
-- **Issues:** [GitHub Issues](https://github.com/yourusername/nexus-open/issues)
+- **Issues:** [GitHub Issues](https://github.com/mantonx/nexus-next/issues)
 - **API Documentation:** See REST API endpoints section above
 - **Development:** [PROJECT_PLAN.md](PROJECT_PLAN.md)
 

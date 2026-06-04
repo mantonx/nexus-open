@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"nexus-open/internal/plugin"
+	"github.com/mantonx/nexus-next/internal/plugin"
 )
 
 func main() {

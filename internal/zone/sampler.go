@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"nexus-open/internal/modules/builtin"
-	"nexus-open/internal/plugin"
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/internal/modules/builtin"
+	"github.com/mantonx/nexus-next/internal/plugin"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // Sampler manages periodic sampling of modules and updating zone payloads

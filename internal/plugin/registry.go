@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"nexus-open/internal/modules/builtin"
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/internal/modules/builtin"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // Registry manages module discovery and instantiation

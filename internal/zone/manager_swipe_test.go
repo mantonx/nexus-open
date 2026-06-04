@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 func newTestSwipeManager(t *testing.T) (*Manager, *image.RGBA) {

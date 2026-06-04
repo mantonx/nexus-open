@@ -36,13 +36,16 @@ type ZoneConfig struct {
 
 // Theme represents visual styling
 type Theme struct {
-	Bg               string `yaml:"bg" json:"bg"`                               // Background color (hex)
-	Fg               string `yaml:"fg" json:"fg"`                               // Foreground color (hex)
-	Muted            string `yaml:"muted" json:"muted"`                         // Muted text color (hex)
-	Accent           string `yaml:"accent" json:"accent"`                       // Accent color (hex)
-	GutterPx         int    `yaml:"gutter_px,omitempty" json:"gutter_px,omitempty"` // Gutter width
-	FontSizePrimary  int    `yaml:"font_size_primary,omitempty" json:"font_size_primary,omitempty"`   // Primary text size
-	FontSizeSecondary int   `yaml:"font_size_secondary,omitempty" json:"font_size_secondary,omitempty"` // Secondary text size
+	Bg                     string `yaml:"bg" json:"bg"`                                                           // Background color (hex)
+	Fg                     string `yaml:"fg" json:"fg"`                                                           // Foreground color (hex)
+	Muted                  string `yaml:"muted" json:"muted"`                                                     // Muted text color (hex)
+	Accent                 string `yaml:"accent" json:"accent"`                                                   // Accent color (hex)
+	ZoneBg                 string `yaml:"zone_bg,omitempty" json:"zone_bg,omitempty"`                            // Zone background color (hex)
+	GutterPx               int    `yaml:"gutter_px,omitempty" json:"gutter_px,omitempty"`                        // Gutter width
+	FontSizePrimary        int    `yaml:"font_size_primary,omitempty" json:"font_size_primary,omitempty"`        // Primary text size
+	FontSizeSecondary      int    `yaml:"font_size_secondary,omitempty" json:"font_size_secondary,omitempty"`    // Secondary text size
+	GraphBgOpacity         int    `yaml:"graph_bg_opacity,omitempty" json:"graph_bg_opacity,omitempty"`          // Graph background opacity (0-100)
+	GraphLineOpacity       int    `yaml:"graph_line_opacity,omitempty" json:"graph_line_opacity,omitempty"`      // Graph line opacity (0-100)
 }
 
 // DefaultTheme returns the default dark theme
@@ -50,11 +53,14 @@ func DefaultTheme() Theme {
 	return Theme{
 		Bg:                "#101010",
 		Fg:                "#EAEAEA",
-		Muted:             "#9AA0A6",
+		Muted:             "#B8BDC2", // Improved contrast (was #9AA0A6)
 		Accent:            "#00C8FF",
+		ZoneBg:            "#141414", // Subtle zone lift
 		GutterPx:          2,
-		FontSizePrimary:   14,
-		FontSizeSecondary: 10,
+		FontSizePrimary:   24, // Increased for modern dashboard (was 14)
+		FontSizeSecondary: 9,  // Reduced for better hierarchy (was 10)
+		GraphBgOpacity:    15, // Subtle atmospheric background
+		GraphLineOpacity:  40, // Visible but not dominant
 	}
 }
 
@@ -94,6 +100,16 @@ func (t *Theme) GetMutedColor() color.RGBA {
 // GetAccentColor returns the accent color as color.RGBA
 func (t *Theme) GetAccentColor() color.RGBA {
 	c, _ := t.ParseColor(t.Accent)
+	return c
+}
+
+// GetZoneBgColor returns the zone background color as color.RGBA
+func (t *Theme) GetZoneBgColor() color.RGBA {
+	if t.ZoneBg == "" {
+		// Fallback to main background if not set
+		return t.GetBgColor()
+	}
+	c, _ := t.ParseColor(t.ZoneBg)
 	return c
 }
 

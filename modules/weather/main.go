@@ -13,7 +13,7 @@ import (
 
 	"github.com/hashicorp/go-plugin"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 const (

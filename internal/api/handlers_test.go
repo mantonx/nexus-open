@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
-	"nexus-open/internal/settings"
-	"nexus-open/internal/device"
+	"github.com/mantonx/nexus-next/internal/device"
+	"github.com/mantonx/nexus-next/internal/settings"
 )
 
 func TestHealthHandler(t *testing.T) {
@@ -66,9 +66,12 @@ func TestGetConfigHandler(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	// Verify default values
-	if response.TimeFormat == "" {
-		t.Error("expected non-empty time format")
+	// Verify default values are present
+	if response.BackgroundColor == "" {
+		t.Error("expected non-empty background color")
+	}
+	if response.TextColor == "" {
+		t.Error("expected non-empty text color")
 	}
 }
 
@@ -82,13 +85,9 @@ func TestUpdateConfigHandler_Valid(t *testing.T) {
 	mockDev := device.NewMockDevice()
 	server := NewServer(":0", cfg, mockDev, logger)
 
-	// Create valid config update
 	update := config.Config{
-		Location:        "New York, NY",
-		TimeFormat:      "24h",
-		Unit:            "metric",
-		BackgroundColor: "#000000",
-		TextColor:       "#FFFFFF",
+		BackgroundColor: "#111111",
+		TextColor:       "#EEEEEE",
 	}
 
 	body, _ := json.Marshal(update)
@@ -102,13 +101,9 @@ func TestUpdateConfigHandler_Valid(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	// Verify config was updated
 	currentCfg := cfg.Get()
-	if currentCfg.Location != "New York, NY" {
-		t.Errorf("expected location 'New York, NY', got %s", currentCfg.Location)
-	}
-	if currentCfg.Unit != "metric" {
-		t.Errorf("expected unit 'metric', got %s", currentCfg.Unit)
+	if currentCfg.BackgroundColor != "#111111" {
+		t.Errorf("expected background_color '#111111', got %s", currentCfg.BackgroundColor)
 	}
 }
 
@@ -122,12 +117,8 @@ func TestUpdateConfigHandler_Invalid(t *testing.T) {
 	mockDev := device.NewMockDevice()
 	server := NewServer(":0", cfg, mockDev, logger)
 
-	// Create invalid config (bad time format)
 	update := config.Config{
-		Location:        "New York, NY",
-		TimeFormat:      "invalid",
-		Unit:            "metric",
-		BackgroundColor: "#000000",
+		BackgroundColor: "not-a-color", // Invalid!
 		TextColor:       "#FFFFFF",
 	}
 
@@ -187,9 +178,6 @@ func TestListImagesHandler(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-
-	// Should return empty list or list of images (nil is valid for empty array)
-	// Just verify it decoded without error
 }
 
 func TestCORSMiddleware(t *testing.T) {
@@ -202,7 +190,6 @@ func TestCORSMiddleware(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// Test preflight request
 	req := httptest.NewRequest("OPTIONS", "/api/test", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
 	w := httptest.NewRecorder()
@@ -213,7 +200,6 @@ func TestCORSMiddleware(t *testing.T) {
 		t.Errorf("expected status 200 for preflight, got %d", w.Code)
 	}
 
-	// Check CORS headers
 	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
 		t.Error("missing or incorrect CORS origin header")
 	}
@@ -239,7 +225,6 @@ func TestLoggingMiddleware(t *testing.T) {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
 
-	// Logging middleware should not affect the response
 	if w.Body.String() != "test" {
 		t.Errorf("expected body 'test', got %s", w.Body.String())
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // DebugModule displays debug information about the zone

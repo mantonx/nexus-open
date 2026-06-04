@@ -11,8 +11,8 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 
-	"nexus-open/internal/fonts"
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/internal/fonts"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // Renderer renders a single zone from a Payload
@@ -87,16 +87,18 @@ func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alig
 
 // ContentModel represents the parsed content from a payload
 type ContentModel struct {
-	Icon           *IconContent
-	PrimaryLines   []string
-	Secondary      string
-	GraphData      []float32
-	GraphType      module.GraphType
-	LineSpacing    int                  // Spacing between lines for multi-line Primary text
-	LabelPosition  module.LabelPosition // Where to position the secondary label
-	LabelOffsetX   int                  // Horizontal offset for label (pixels)
-	LabelOffsetY   int                  // Vertical offset for label (pixels)
-	NormalizeGraph bool                 // Whether to normalize graph data to fill from baseline
+	Icon             *IconContent
+	PrimaryLines     []string
+	Secondary        string
+	GraphData        []float32
+	GraphType        module.GraphType
+	LineSpacing      int                  // Spacing between lines for multi-line Primary text
+	LabelPosition    module.LabelPosition // Where to position the secondary label
+	LabelOffsetX     int                  // Horizontal offset for label (pixels)
+	LabelOffsetY     int                  // Vertical offset for label (pixels)
+	NormalizeGraph   bool                 // Whether to normalize graph data to fill from baseline
+	GraphBgOpacity   int                  // Per-module background opacity override (0-100)
+	GraphLineOpacity int                  // Per-module line opacity override (0-100)
 }
 
 // IconContent represents an icon to be rendered
@@ -136,15 +138,17 @@ type CalculatedLayout struct {
 // parsePayload converts a module payload into a content model
 func (r *Renderer) parsePayload(payload module.Payload) ContentModel {
 	model := ContentModel{
-		PrimaryLines:   strings.Split(payload.Primary, "\n"),
-		Secondary:      payload.Secondary,
-		GraphData:      payload.Spark,
-		GraphType:      payload.GraphType,
-		LineSpacing:    payload.LineSpacing,
-		LabelPosition:  payload.LabelPosition,
-		LabelOffsetX:   payload.LabelOffsetX,
-		LabelOffsetY:   payload.LabelOffsetY,
-		NormalizeGraph: payload.NormalizeGraph,
+		PrimaryLines:     strings.Split(payload.Primary, "\n"),
+		Secondary:        payload.Secondary,
+		GraphData:        payload.Spark,
+		GraphType:        payload.GraphType,
+		LineSpacing:      payload.LineSpacing,
+		LabelPosition:    payload.LabelPosition,
+		LabelOffsetX:     payload.LabelOffsetX,
+		LabelOffsetY:     payload.LabelOffsetY,
+		NormalizeGraph:   payload.NormalizeGraph,
+		GraphBgOpacity:   payload.GraphBgOpacity,
+		GraphLineOpacity: payload.GraphLineOpacity,
 	}
 
 	// Add icon if meaningful
@@ -230,7 +234,7 @@ func (r *Renderer) calculateLayout(model ContentModel, measurements Measurements
 	const paddingV = 8
 	const iconTextSpacing = 8
 	const primarySecondarySpacing = 4  // For "below" positioning
-	const labelRightSpacing = 2        // For "right" positioning (less = closer to icon, more space from values)
+	const labelRightSpacing = 8        // For "right" positioning - base spacing between values and label
 
 	layout := CalculatedLayout{}
 
@@ -301,8 +305,20 @@ func (r *Renderer) calculateLayout(model ContentModel, measurements Measurements
 				}
 			}
 
-			// Position label with spacing to the right of the widest primary line
-			secX = contentStartX + maxPrimaryWidth + labelRightSpacing
+			// Position label right after the widest primary line
+			// Module specifies exact spacing via LabelOffsetX
+			secX = contentStartX + maxPrimaryWidth
+
+			// Debug logging for label positioning
+			if model.Secondary == "Network" {
+				r.logger.Debug("network label positioning",
+					"contentStartX", contentStartX,
+					"maxPrimaryWidth", maxPrimaryWidth,
+					"labelOffsetX", model.LabelOffsetX,
+					"finalSecX", secX+model.LabelOffsetX,
+				)
+			}
+
 			// Vertically center with primary text block
 			secY = textBlockStartY + (measurements.PrimaryHeight-measurements.SecondaryHeight)/2
 		} else {
@@ -355,7 +371,7 @@ func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
 	// Step 4: Draw graph as atmospheric background (if present)
 	if len(model.GraphData) > 0 {
 		primaryColor := r.getSeverityColor(payload.Severity)
-		r.drawBackgroundGraph(img, model.GraphData, model.GraphType, primaryColor, model.NormalizeGraph)
+		r.drawBackgroundGraph(img, model.GraphData, model.GraphType, primaryColor, model.NormalizeGraph, model.GraphBgOpacity, model.GraphLineOpacity)
 	}
 
 	// Step 5: Measure and calculate layout
@@ -851,7 +867,7 @@ func (r *Renderer) drawZoneBackground(img *image.RGBA) {
 }
 
 // drawBackgroundGraph renders graph as full-height atmospheric background
-func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphType module.GraphType, col color.RGBA, normalize bool) {
+func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphType module.GraphType, col color.RGBA, normalize bool, moduleBgOpacity, moduleLineOpacity int) {
 	if len(data) == 0 {
 		return
 	}
@@ -867,15 +883,22 @@ func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphTyp
 	// DEBUG: Log graph positioning with image bounds
 	r.logger.Debug("graph position", "type", graphType, "width", r.width, "height", r.height, "img_bounds", img.Bounds(), "graphHeight", graphHeight, "paddingV", paddingV, "yBase", yBase, "normalize", normalize)
 
-	// Get opacity values from theme (default 3% for fills, 8% for lines)
-	// Very low values make graphs barely visible so text remains readable
-	bgOpacity := r.theme.GraphBgOpacity
+	// Get opacity values - prioritize per-module values, then theme, then defaults
+	// Default to very subtle (3% fill, 8% line) unless overridden
+	bgOpacity := moduleBgOpacity
 	if bgOpacity == 0 {
-		bgOpacity = 3  // Extremely subtle background
+		bgOpacity = r.theme.GraphBgOpacity
 	}
-	lineOpacity := r.theme.GraphLineOpacity
+	if bgOpacity == 0 {
+		bgOpacity = 3  // Default: extremely subtle background
+	}
+
+	lineOpacity := moduleLineOpacity
 	if lineOpacity == 0 {
-		lineOpacity = 8  // Very subtle line
+		lineOpacity = r.theme.GraphLineOpacity
+	}
+	if lineOpacity == 0 {
+		lineOpacity = 8  // Default: very subtle line
 	}
 
 	// Create very transparent fill color (default 8% opacity)
