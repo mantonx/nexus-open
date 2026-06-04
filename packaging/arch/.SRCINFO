@@ -1,0 +1,16 @@
+pkgbase = nexus-open
+	pkgdesc = Linux controller for Corsair iCUE Nexus display device
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/yourusername/nexus-open
+	arch = x86_64
+	license = MIT
+	makedepends = go>=1.23
+	makedepends = git
+	depends = libusb
+	optdepends = flutter: for GUI configuration interface
+	backup = etc/udev/rules.d/99-corsair-nexus.rules
+	source = nexus-open-1.0.0.tar.gz::https://github.com/yourusername/nexus-open/archive/v1.0.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = nexus-open

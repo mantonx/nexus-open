@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:provider/provider.dart';
+import '../../models/settings_state.dart';
 import 'tabs/location_tab.dart';
 import 'tabs/display_tab.dart';
 import 'tabs/preview_tab.dart';
+import 'tabs/images_tab.dart';
 
 /// Settings page with tabbed interface for configuring app preferences
 class SettingsPage extends StatefulWidget {
@@ -14,101 +15,106 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _updating = false;
-  String selectedLocation = '';
+  @override
+  void initState() {
+    super.initState();
+    // Load settings from backend when page opens
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SettingsState>().loadFromBackend();
+    });
+  }
 
-  Future<void> _handleUpdate() async {
-    setState(() => _updating = true);
+  Future<void> _handleSave() async {
+    final settingsState = context.read<SettingsState>();
+    await settingsState.saveToBackend();
 
-    print('Updating settings with location: $selectedLocation');
+    if (!mounted) return;
 
-    try {
-      final response = await http.post(
-        Uri.parse('http://localhost:1985/api/config'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'unit': 'imperial',
-          'timeFormat': '12h',
-          'dateFormat': 'DD/MM/YYYY',
-          'backgroundColor': '#FFFFFF',
-          'textColor': '#FFFFFF',
-          'location': selectedLocation, // Use selectedLocation from state
-        }),
-      );
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Settings updated successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        throw 'Server returned ${response.statusCode}';
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Update failed: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _updating = false);
-      }
-    }
+    final success = settingsState.errorMessage == null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(success
+            ? 'Settings saved successfully'
+            : 'Failed to save settings: ${settingsState.errorMessage}'),
+        backgroundColor: success ? Colors.green : Colors.red,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text('Settings',
-              style: TextStyle(color: theme.colorScheme.tertiary)),
-          bottom: TabBar(
-            isScrollable: true,
-            tabs: const [
-              Tab(icon: Icon(Icons.location_on), text: 'Location'),
-              Tab(icon: Icon(Icons.display_settings), text: 'Display'),
-              Tab(icon: Icon(Icons.preview), text: 'Preview'),
-            ],
-            indicatorColor: theme.colorScheme.tertiary,
+    return Consumer<SettingsState>(
+      builder: (context, settingsState, child) {
+        return DefaultTabController(
+          length: 4, // Added Images tab
+          child: Scaffold(
+            appBar: AppBar(
+              title: Row(
+                children: [
+                  Text('Settings',
+                      style: TextStyle(color: theme.colorScheme.tertiary)),
+                  const SizedBox(width: 8),
+                  // Connection status indicator
+                  if (settingsState.isLoading)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(
+                      settingsState.isConnected
+                          ? Icons.cloud_done
+                          : Icons.cloud_off,
+                      size: 20,
+                      color: settingsState.isConnected
+                          ? Colors.green
+                          : Colors.orange,
+                    ),
+                ],
+              ),
+              bottom: TabBar(
+                isScrollable: true,
+                tabs: const [
+                  Tab(icon: Icon(Icons.location_on), text: 'Location'),
+                  Tab(icon: Icon(Icons.display_settings), text: 'Display'),
+                  Tab(icon: Icon(Icons.image), text: 'Images'),
+                  Tab(icon: Icon(Icons.preview), text: 'Preview'),
+                ],
+                indicatorColor: theme.colorScheme.tertiary,
+              ),
+            ),
+            body: TabBarView(
+              children: [
+                LocationTab(
+                  onLocationSelected: (location) {
+                    settingsState.updateConfig(location: location);
+                  },
+                ),
+                const DisplayTab(),
+                const ImagesTab(),
+                const PreviewTab(),
+              ],
+            ),
+            floatingActionButton: FloatingActionButton.extended(
+              onPressed: settingsState.isLoading ? null : _handleSave,
+              backgroundColor: theme.colorScheme.tertiary,
+              icon: settingsState.isLoading
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.save),
+              label: Text(settingsState.isLoading ? 'Saving...' : 'Save'),
+            ),
           ),
-        ),
-        body: TabBarView(
-          children: [
-            LocationTab(onLocationSelected: (location) {
-              setState(() {
-                selectedLocation = location;
-              });
-            }),
-            const DisplayTab(),
-            const PreviewTab(),
-          ],
-        ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _updating ? null : _handleUpdate,
-          backgroundColor: theme.colorScheme.tertiary,
-          icon: _updating
-              ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                )
-              : const Icon(Icons.save),
-          label: Text(_updating ? 'Updating...' : 'Update'),
-        ),
-      ),
+        );
+      },
     );
   }
 }

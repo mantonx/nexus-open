@@ -1,0 +1,90 @@
+# Maintainer: Nexus Open Team <contact@example.com>
+pkgname=nexus-open
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Linux controller for Corsair iCUE Nexus display device"
+arch=('x86_64')
+url="https://github.com/yourusername/nexus-open"
+license=('MIT')
+depends=('libusb' 'libayatana-appindicator')
+optdepends=('flutter: for GUI configuration interface')
+makedepends=('go>=1.23' 'git' 'libayatana-appindicator')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
+sha256sums=('SKIP')  # Update this with actual checksum after release
+backup=('etc/udev/rules.d/99-corsair-nexus.rules')
+
+prepare() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+    # Download Go module dependencies
+    go mod download
+}
+
+build() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    export CGO_CPPFLAGS="${CPPFLAGS}"
+    export CGO_CFLAGS="${CFLAGS}"
+    export CGO_CXXFLAGS="${CXXFLAGS}"
+    export CGO_LDFLAGS="${LDFLAGS}"
+    export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+
+    # Get git commit hash
+    _commit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')
+
+    # Build the binary
+    go build \
+        -ldflags "-linkmode external -extldflags \"${LDFLAGS}\" -X main.version=${pkgver} -X main.commit=${_commit}" \
+        -o "${pkgname}" \
+        ./cmd/nexus-open
+}
+
+check() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    # Run tests
+    go test -v ./...
+}
+
+package() {
+    cd "${srcdir}/${pkgname}-${pkgver}"
+
+    # Install binary
+    install -Dm755 "${pkgname}" "${pkgdir}/usr/bin/${pkgname}"
+
+    # Install udev rules
+    install -Dm644 packaging/udev/99-corsair-nexus.rules \
+        "${pkgdir}/etc/udev/rules.d/99-corsair-nexus.rules"
+
+    # Install systemd user service
+    install -Dm644 packaging/systemd/nexus-open.service \
+        "${pkgdir}/usr/lib/systemd/user/${pkgname}.service"
+
+    # Install desktop file
+    install -Dm644 packaging/desktop/${pkgname}.desktop \
+        "${pkgdir}/usr/share/applications/${pkgname}.desktop"
+
+    # Install documentation
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+    install -Dm644 PROJECT_PLAN.md "${pkgdir}/usr/share/doc/${pkgname}/PROJECT_PLAN.md"
+
+    # Install license
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
+
+post_install() {
+    echo ""
+    echo "==> Nexus Open has been installed!"
+    echo ""
+    echo "To use the device without root privileges:"
+    echo "  1. Add your user to the 'plugdev' group:"
+    echo "     sudo gpasswd -a \$USER plugdev"
+    echo "  2. Reload udev rules:"
+    echo "     sudo udevadm control --reload-rules"
+    echo "     sudo udevadm trigger"
+    echo "  3. Log out and back in (or reboot)"
+    echo ""
+    echo "To enable the service at startup:"
+    echo "  systemctl --user enable nexus-open.service"
+    echo "  systemctl --user start nexus-open.service"
+    echo ""
+}

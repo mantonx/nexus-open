@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.nexusopen.NexusOpen</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Nexus Open</name>
+  <summary>Linux controller for Corsair iCUE Nexus display device</summary>
+
+  <description>
+    <p>
+      Nexus Open provides a native Linux desktop application to control and configure
+      your Corsair iCUE Nexus (640x48 pixel display). Display system metrics, weather
+      information, and custom backgrounds on your device.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Real-time CPU/GPU temperature and network statistics monitoring</li>
+      <li>Location-based weather display with configurable units</li>
+      <li>Custom backgrounds and color schemes</li>
+      <li>REST API for programmatic control</li>
+      <li>Headless mode for background operation</li>
+      <li>Flutter-based configuration interface</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">com.github.nexusopen.NexusOpen.desktop</launchable>
+
+  <url type="homepage">https://github.com/yourusername/nexus-open</url>
+  <url type="bugtracker">https://github.com/yourusername/nexus-open/issues</url>
+  <url type="help">https://github.com/yourusername/nexus-open/blob/main/docs/INSTALLATION.md</url>
+
+  <developer_name>Nexus Open Team</developer_name>
+
+  <categories>
+    <category>Utility</category>
+    <category>System</category>
+    <category>Settings</category>
+  </categories>
+
+  <requires>
+    <display_length compare="ge">small</display_length>
+  </requires>
+
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main configuration interface</caption>
+      <!-- Add actual screenshots when available -->
+      <image>https://raw.githubusercontent.com/yourusername/nexus-open/main/docs/screenshots/main.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="1.0.0" date="2025-10-12">
+      <description>
+        <p>Initial release of Nexus Open</p>
+        <ul>
+          <li>Core functionality for iCUE Nexus display control</li>
+          <li>System monitoring (CPU/GPU temperature, network stats)</li>
+          <li>Weather integration with Open-Meteo API</li>
+          <li>REST API for configuration</li>
+          <li>Flutter-based settings interface</li>
+          <li>64.9% test coverage with comprehensive unit tests</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1" />
+
+  <provides>
+    <binary>nexus-open</binary>
+  </provides>
+
+  <custom>
+    <value key="Flathub::manifest">https://github.com/yourusername/nexus-open/blob/main/packaging/flatpak/com.github.nexusopen.NexusOpen.yaml</value>
+  </custom>
+
+  <keywords>
+    <keyword>corsair</keyword>
+    <keyword>icue</keyword>
+    <keyword>nexus</keyword>
+    <keyword>display</keyword>
+    <keyword>monitoring</keyword>
+    <keyword>temperature</keyword>
+    <keyword>weather</keyword>
+  </keywords>
+</component>

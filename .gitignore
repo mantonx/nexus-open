@@ -1,3 +1,45 @@
-build/bin
+# Build artifacts
+build/
+dist/
+bin/
+tmp/
+
+# Binaries (root-level compiled output only, not cmd/ subdirectories)
+/nexus-open
+/nexus-open-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage files
+*.out
+coverage.html
+
+# IDE and editor files
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies
 node_modules
+vendor/
+
+# Old Wails artifacts (already removed)
 frontend/dist
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+
+# Generated Flutter API client
+ui/lib/generated/api/
