@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/go-plugin"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // Host manages plugin lifecycle (launch, communication, cleanup)

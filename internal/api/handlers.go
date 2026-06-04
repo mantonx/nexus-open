@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"nexus-open/internal/assets"
-	"nexus-open/internal/settings"
+	"github.com/mantonx/nexus-next/internal/assets"
+	"github.com/mantonx/nexus-next/internal/settings"
 )
 
 // ErrorResponse represents an API error response.

@@ -25,3 +25,10 @@ func WithAPIPort(port int) Option {
 		a.apiPort = port
 	}
 }
+
+// WithLayoutPath sets the layout config file path.
+func WithLayoutPath(path string) Option {
+	return func(a *App) {
+		a.layoutPath = path
+	}
+}

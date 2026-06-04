@@ -4,9 +4,31 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
+
+// repoRoot walks up from this file's location to find the repo root (contains go.mod).
+func repoRoot() string {
+	_, file, _, _ := runtime.Caller(0)
+	dir := filepath.Dir(file)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			panic("could not find repo root (go.mod)")
+		}
+		dir = parent
+	}
+}
+
+func defaultLayoutPath() string {
+	return filepath.Join(repoRoot(), "configs/layouts/multi-page.yaml")
+}
 
 func TestApp_New(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -14,7 +36,8 @@ func TestApp_New(t *testing.T) {
 	app, err := New(
 		WithLogger(logger),
 		WithConfigPath(""),
-		WithAPIPort(19850), // Use different port to avoid conflicts
+		WithAPIPort(19850),
+		WithLayoutPath(defaultLayoutPath()),
 	)
 
 	if err != nil {
@@ -35,11 +58,11 @@ func TestApp_New(t *testing.T) {
 	if app.apiServer == nil {
 		t.Error("expected API server to be initialized")
 	}
-	if app.instruments == nil {
-		t.Error("expected instruments to be initialized")
+	if app.zoneManager == nil {
+		t.Error("expected zone manager to be initialized")
 	}
-	if app.display == nil {
-		t.Error("expected display to be initialized")
+	if app.zoneSampler == nil {
+		t.Error("expected zone sampler to be initialized")
 	}
 }
 
@@ -50,6 +73,7 @@ func TestApp_Lifecycle(t *testing.T) {
 		WithLogger(logger),
 		WithConfigPath(""),
 		WithAPIPort(19851),
+		WithLayoutPath(defaultLayoutPath()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -90,6 +114,7 @@ func TestApp_MultipleShutdowns(t *testing.T) {
 		WithLogger(logger),
 		WithConfigPath(""),
 		WithAPIPort(19852),
+		WithLayoutPath(defaultLayoutPath()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -119,6 +144,7 @@ func TestApp_ContextCancellation(t *testing.T) {
 		WithLogger(logger),
 		WithConfigPath(""),
 		WithAPIPort(19853),
+		WithLayoutPath(defaultLayoutPath()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -158,6 +184,7 @@ func TestApp_Options(t *testing.T) {
 		WithLogger(logger),
 		WithConfigPath(""),
 		WithAPIPort(12345),
+		WithLayoutPath(defaultLayoutPath()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)

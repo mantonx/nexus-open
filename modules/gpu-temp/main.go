@@ -14,7 +14,7 @@ import (
 
 	"github.com/hashicorp/go-plugin"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // GPUTempModule monitors GPU temperature
@@ -94,14 +94,16 @@ func (m *GPUTempModule) Sample() (module.Payload, error) {
 	m.graphMu.RUnlock()
 
 	return module.Payload{
-		Primary:   tempStr,
-		Secondary: "GPU Temp",
-		Severity:  severity,
-		Spark:     spark,
-		GraphType: currentGraphType,
-		TTL:       2 * time.Second,
-		Icon:      "microchip",
-		Timestamp: time.Now(),
+		Primary:          tempStr,
+		Secondary:        "GPU Temp",
+		Severity:         severity,
+		Spark:            spark,
+		GraphType:        currentGraphType,
+		TTL:              2 * time.Second,
+		Icon:             "microchip",
+		GraphBgOpacity:   6,  // Subtle but visible background for temperature trends
+		GraphLineOpacity: 12, // Visible line without being overpowering
+		Timestamp:        time.Now(),
 	}, nil
 }
 
@@ -325,8 +327,15 @@ func (m *GPUTempModule) addToHistory(temp float64) {
 	m.historyMu.Lock()
 	defer m.historyMu.Unlock()
 
-	// Normalize to 0-1 range (0-100°C)
-	normalized := float32(temp) / 100.0
+	// Normalize to 0-1 range with sensitive scaling for GPUs (40-80°C typical range)
+	// This makes small temperature variations much more visible
+	const minTemp = 40.0  // Typical idle GPU temp
+	const maxTemp = 80.0  // Typical load GPU temp
+	const rangeTemp = maxTemp - minTemp
+
+	normalized := float32((temp - minTemp) / rangeTemp)
+
+	// Clamp to 0-1 range
 	if normalized > 1.0 {
 		normalized = 1.0
 	}

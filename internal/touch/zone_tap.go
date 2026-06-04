@@ -1,7 +1,7 @@
 package touch
 
 import (
-	"nexus-open/internal/zone"
+	"github.com/mantonx/nexus-next/internal/zone"
 )
 
 // ZoneTapDetector determines which zone was tapped based on touch coordinates.

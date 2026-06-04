@@ -5,14 +5,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
-	"nexus-open/internal/api"
-	"nexus-open/internal/device"
-	settings "nexus-open/internal/settings"
-	"nexus-open/internal/touch"
-	"nexus-open/internal/zone"
+	"github.com/mantonx/nexus-next/internal/api"
+	"github.com/mantonx/nexus-next/internal/device"
+	settings "github.com/mantonx/nexus-next/internal/settings"
+	"github.com/mantonx/nexus-next/internal/touch"
+	"github.com/mantonx/nexus-next/internal/zone"
 )
 
 // App is the main application container that holds all dependencies.
@@ -25,6 +26,7 @@ type App struct {
 	// Configuration
 	configPath string
 	apiPort    int
+	layoutPath string
 
 	// Components
 	cfg          *settings.Manager
@@ -129,14 +131,25 @@ func (a *App) initialize() error {
 	a.logger.Info("zone config manager initialized")
 
 	// 3. Create device connection
-	deviceConfig := device.ConnectionConfig{
-		VendorID:         0x1b1c, // Corsair
-		ProductID:        0x1b8e, // iCUE Nexus
-		ReconnectRetries: 10,
-		ReconnectDelay:   5 * time.Second,
+	// Check if mock device mode is enabled (useful for development without hardware)
+	if os.Getenv("NEXUS_MOCK_DEVICE") == "1" {
+		a.logger.Info("using mock device (NEXUS_MOCK_DEVICE=1)")
+		mockDevice := device.NewMockDevice()
+		// Auto-connect the mock device
+		if err := mockDevice.Connect(a.ctx); err != nil {
+			return fmt.Errorf("failed to connect mock device: %w", err)
+		}
+		a.device = mockDevice
+	} else {
+		deviceConfig := device.ConnectionConfig{
+			VendorID:         0x1b1c, // Corsair
+			ProductID:        0x1b8e, // iCUE Nexus
+			ReconnectRetries: 10,
+			ReconnectDelay:   5 * time.Second,
+		}
+		a.device = device.NewNexusDevice(a.logger, deviceConfig)
+		a.logger.Info("device created")
 	}
-	a.device = device.NewNexusDevice(a.logger, deviceConfig)
-	a.logger.Info("device created")
 
 	// 4. Create API server
 	apiAddr := fmt.Sprintf(":%d", a.apiPort)
@@ -148,8 +161,10 @@ func (a *App) initialize() error {
 	a.logger.Info("zone config manager registered with API server")
 
 	// 5. Create zone manager
-	layoutPath := "configs/layouts/multi-page.yaml"
-	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, layoutPath)
+	if a.layoutPath == "" {
+		a.layoutPath = "configs/layouts/multi-page.yaml"
+	}
+	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, a.layoutPath)
 	if err != nil {
 		return fmt.Errorf("failed to create zone manager: %w", err)
 	}

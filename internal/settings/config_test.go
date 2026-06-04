@@ -17,44 +17,14 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
-				Location:        "New York, NY",
-				TimeFormat:      "12h",
-				Unit:            "imperial",
 				BackgroundColor: "#000000",
 				TextColor:       "#FFFFFF",
 			},
 			wantErr: false,
 		},
 		{
-			name: "invalid time format",
-			config: Config{
-				Location:        "New York, NY",
-				TimeFormat:      "invalid",
-				Unit:            "imperial",
-				BackgroundColor: "#000000",
-				TextColor:       "#FFFFFF",
-			},
-			wantErr: true,
-			errType: ErrInvalidTimeFormat,
-		},
-		{
-			name: "invalid unit",
-			config: Config{
-				Location:        "New York, NY",
-				TimeFormat:      "12h",
-				Unit:            "invalid",
-				BackgroundColor: "#000000",
-				TextColor:       "#FFFFFF",
-			},
-			wantErr: true,
-			errType: ErrInvalidUnit,
-		},
-		{
 			name: "invalid text color",
 			config: Config{
-				Location:        "New York, NY",
-				TimeFormat:      "12h",
-				Unit:            "imperial",
 				BackgroundColor: "#000000",
 				TextColor:       "not-a-color",
 			},
@@ -62,16 +32,13 @@ func TestConfig_Validate(t *testing.T) {
 			errType: ErrInvalidColor,
 		},
 		{
-			name: "empty location",
+			name: "invalid background color",
 			config: Config{
-				Location:        "",
-				TimeFormat:      "12h",
-				Unit:            "imperial",
-				BackgroundColor: "#000000",
+				BackgroundColor: "bad",
 				TextColor:       "#FFFFFF",
 			},
 			wantErr: true,
-			errType: ErrInvalidLocation,
+			errType: ErrInvalidColor,
 		},
 	}
 
@@ -144,31 +111,29 @@ func TestIsValidHexColor(t *testing.T) {
 }
 
 func TestManager_LoadCreateDefault(t *testing.T) {
-	// Create temp directory
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yaml")
 
-	// Create manager (should create default config)
 	mgr, err := NewManager(configPath)
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	// Verify config was created
+	// Verify config file was created
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		t.Error("Config file was not created")
 	}
 
 	// Verify default values
 	cfg := mgr.Get()
-	if cfg.Location != DefaultLocation {
-		t.Errorf("Location = %q, want %q", cfg.Location, DefaultLocation)
+	if cfg.BackgroundColor != DefaultBackgroundColor {
+		t.Errorf("BackgroundColor = %q, want %q", cfg.BackgroundColor, DefaultBackgroundColor)
 	}
-	if cfg.TimeFormat != DefaultTimeFormat {
-		t.Errorf("TimeFormat = %q, want %q", cfg.TimeFormat, DefaultTimeFormat)
+	if cfg.TextColor != DefaultTextColor {
+		t.Errorf("TextColor = %q, want %q", cfg.TextColor, DefaultTextColor)
 	}
-	if cfg.Unit != DefaultUnit {
-		t.Errorf("Unit = %q, want %q", cfg.Unit, DefaultUnit)
+	if cfg.Display.FontFamily != DefaultFontFamily {
+		t.Errorf("Display.FontFamily = %q, want %q", cfg.Display.FontFamily, DefaultFontFamily)
 	}
 }
 
@@ -181,43 +146,33 @@ func TestManager_Update(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	// Update configuration
 	newCfg := Config{
-		Location:        "San Francisco, CA",
-		TimeFormat:      "24h",
-		Unit:            "metric",
 		BackgroundColor: "#111111",
 		TextColor:       "#EEEEEE",
 		BackgroundImage: "custom.png",
 		ImagePaths:      []string{"img1.png", "img2.png"},
 	}
 
-	err = mgr.Update(newCfg)
-	if err != nil {
+	if err := mgr.Update(newCfg); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	// Verify update
 	cfg := mgr.Get()
-	if cfg.Location != newCfg.Location {
-		t.Errorf("Location = %q, want %q", cfg.Location, newCfg.Location)
+	if cfg.BackgroundColor != newCfg.BackgroundColor {
+		t.Errorf("BackgroundColor = %q, want %q", cfg.BackgroundColor, newCfg.BackgroundColor)
 	}
-	if cfg.TimeFormat != newCfg.TimeFormat {
-		t.Errorf("TimeFormat = %q, want %q", cfg.TimeFormat, newCfg.TimeFormat)
-	}
-	if cfg.Unit != newCfg.Unit {
-		t.Errorf("Unit = %q, want %q", cfg.Unit, newCfg.Unit)
+	if cfg.TextColor != newCfg.TextColor {
+		t.Errorf("TextColor = %q, want %q", cfg.TextColor, newCfg.TextColor)
 	}
 
-	// Create new manager to verify persistence
+	// Verify persistence
 	mgr2, err := NewManager(configPath)
 	if err != nil {
-		t.Fatalf("NewManager() error = %v", err)
+		t.Fatalf("NewManager() reload error = %v", err)
 	}
-
 	cfg2 := mgr2.Get()
-	if cfg2.Location != newCfg.Location {
-		t.Errorf("After reload: Location = %q, want %q", cfg2.Location, newCfg.Location)
+	if cfg2.BackgroundColor != newCfg.BackgroundColor {
+		t.Errorf("After reload: BackgroundColor = %q, want %q", cfg2.BackgroundColor, newCfg.BackgroundColor)
 	}
 }
 
@@ -230,23 +185,18 @@ func TestManager_UpdateInvalid(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	// Try to update with invalid config
 	invalidCfg := Config{
-		Location:        "Test",
-		TimeFormat:      "invalid", // Invalid!
-		Unit:            "imperial",
-		BackgroundColor: "#000000",
+		BackgroundColor: "not-a-color", // Invalid!
 		TextColor:       "#FFFFFF",
 	}
 
-	err = mgr.Update(invalidCfg)
-	if err == nil {
+	if err := mgr.Update(invalidCfg); err == nil {
 		t.Error("Update() should have failed with invalid config")
 	}
 
 	// Verify original config unchanged
 	cfg := mgr.Get()
-	if cfg.TimeFormat == "invalid" {
+	if cfg.BackgroundColor == "not-a-color" {
 		t.Error("Config was updated despite validation error")
 	}
 }
@@ -260,31 +210,24 @@ func TestManager_Watch(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	// Register watcher
 	ch := make(chan Config, 1)
 	mgr.Watch(ch)
 
-	// Update config
 	newCfg := Config{
-		Location:        "Boston, MA",
-		TimeFormat:      "24h",
-		Unit:            "metric",
 		BackgroundColor: "#222222",
 		TextColor:       "#DDDDDD",
 		BackgroundImage: "test.png",
 		ImagePaths:      []string{},
 	}
 
-	err = mgr.Update(newCfg)
-	if err != nil {
+	if err := mgr.Update(newCfg); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	// Verify watcher received update
 	select {
 	case received := <-ch:
-		if received.Location != newCfg.Location {
-			t.Errorf("Watcher received Location = %q, want %q", received.Location, newCfg.Location)
+		if received.BackgroundColor != newCfg.BackgroundColor {
+			t.Errorf("Watcher received BackgroundColor = %q, want %q", received.BackgroundColor, newCfg.BackgroundColor)
 		}
 	default:
 		t.Error("Watcher did not receive config update")

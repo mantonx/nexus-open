@@ -3,6 +3,17 @@
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Enable mock device mode by default for development (set to 0 to use real hardware)
+export NEXUS_MOCK_DEVICE="${NEXUS_MOCK_DEVICE:-1}"
+
+if [ "$NEXUS_MOCK_DEVICE" = "1" ]; then
+    echo "🎭 Mock device mode enabled (no physical hardware required)"
+    echo "   To use real hardware: NEXUS_MOCK_DEVICE=0 ./dev.sh"
+else
+    echo "🔌 Using real hardware device"
+fi
+echo ""
+
 # Kill any existing instances
 killall nexus-open ui 2>/dev/null
 

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"nexus-open/internal/touch"
+	"github.com/mantonx/nexus-next/internal/touch"
 
 	"github.com/karalabe/hid"
 )
@@ -62,13 +62,36 @@ func (n *NexusDevice) Connect(ctx context.Context) error {
 			"usage", fmt.Sprintf("0x%04x", dev.Usage))
 	}
 
-	// Use the first matching device
-	n.deviceInfo = &devices[0]
+	// Try to open each interface until one succeeds
+	// This handles permission issues where some interfaces may not be accessible
+	var device *hid.Device
+	var lastErr error
 
-	// Open the device
-	device, err := n.deviceInfo.Open()
-	if err != nil {
-		return fmt.Errorf("failed to open HID device: %w", err)
+	for i := range devices {
+		n.logger.Debug("attempting to open HID interface", "index", i, "path", devices[i].Path)
+
+		dev, err := devices[i].Open()
+		if err != nil {
+			n.logger.Debug("failed to open interface", "index", i, "error", err)
+			lastErr = err
+			continue
+		}
+
+		// Successfully opened
+		device = dev
+		n.deviceInfo = &devices[i]
+		n.logger.Info("successfully opened HID interface",
+			"index", i,
+			"path", devices[i].Path,
+			"interface", devices[i].Interface)
+		break
+	}
+
+	if device == nil {
+		if lastErr != nil {
+			return fmt.Errorf("failed to open any HID interface (tried %d): %w", len(devices), lastErr)
+		}
+		return fmt.Errorf("failed to open any HID interface (tried %d)", len(devices))
 	}
 
 	n.device = device

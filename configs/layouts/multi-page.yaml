@@ -8,11 +8,11 @@ version: "1.0"
 theme:
   bg: "#101010"
   fg: "#EAEAEA"
-  muted: "#9AA0A6"
+  muted: "#B8BDC2"
   accent: "#00C8FF"
   gutter_px: 2
-  font_size_primary: 14
-  font_size_secondary: 10
+  font_size_primary: 24
+  font_size_secondary: 9
 
 # Navigation settings
 navigation:

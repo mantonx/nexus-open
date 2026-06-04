@@ -4,7 +4,7 @@ package builtin
 import (
 	"time"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // ClockModule displays current time and date with blinking colon

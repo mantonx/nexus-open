@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"nexus-open/internal/zone"
+	"github.com/mantonx/nexus-next/internal/zone"
 )
 
 // DeviceReader is an interface for reading touch events from a device.

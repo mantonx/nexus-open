@@ -6,7 +6,7 @@ import (
 
 	"github.com/hashicorp/go-plugin"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // HelloModule is a simple example module

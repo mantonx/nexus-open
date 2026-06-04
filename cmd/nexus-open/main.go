@@ -22,8 +22,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"nexus-open/internal/app"
-	"nexus-open/internal/tray"
+	"github.com/mantonx/nexus-next/internal/app"
+	"github.com/mantonx/nexus-next/internal/tray"
 )
 
 var (

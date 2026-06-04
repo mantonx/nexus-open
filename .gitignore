@@ -4,9 +4,9 @@ dist/
 bin/
 tmp/
 
-# Binaries
-nexus-open
-nexus-open-*
+# Binaries (root-level compiled output only, not cmd/ subdirectories)
+/nexus-open
+/nexus-open-*
 *.exe
 *.dll
 *.so
@@ -20,7 +20,6 @@ nexus-open-*
 coverage.html
 
 # IDE and editor files
-.vscode/
 .idea/
 *.swp
 *.swo

@@ -14,7 +14,7 @@ import (
 
 	"github.com/hashicorp/go-plugin"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // CPUTempModule monitors CPU temperature
@@ -92,14 +92,16 @@ func (m *CPUTempModule) Sample() (module.Payload, error) {
 	m.graphMu.RUnlock()
 
 	return module.Payload{
-		Primary:   tempStr,
-		Secondary: "CPU Temp",
-		Severity:  severity,
-		Spark:     spark,
-		GraphType: currentGraphType,
-		TTL:       2 * time.Second,
-		Icon:      "cpu",
-		Timestamp: time.Now(),
+		Primary:          tempStr,
+		Secondary:        "CPU Temp",
+		Severity:         severity,
+		Spark:            spark,
+		GraphType:        currentGraphType,
+		TTL:              2 * time.Second,
+		Icon:             "cpu",
+		GraphBgOpacity:   6,  // Subtle but visible background for temperature trends
+		GraphLineOpacity: 12, // Visible line without being overpowering
+		Timestamp:        time.Now(),
 	}, nil
 }
 

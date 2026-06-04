@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/go-plugin"
 	"github.com/shirou/gopsutil/net"
 
-	"nexus-open/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/module"
 )
 
 // NetworkModule monitors network upload/download speeds
@@ -55,11 +55,15 @@ func (m *NetworkModule) Sample() (module.Payload, error) {
 	downSpeed, upSpeed, err := m.getNetworkSpeed()
 	if err != nil {
 		return module.Payload{
-			Primary:   "—",
-			Secondary: "No Network",
-			Severity:  module.SeverityWarn,
-			TTL:       2 * time.Second,
-			Timestamp: time.Now(),
+			Primary:          "—",
+			Secondary:        "No Network",
+			Severity:         module.SeverityWarn,
+			TTL:              2 * time.Second,
+			Icon:             "network-wired",
+			LineSpacing:      20,
+			LabelPosition:    module.LabelPositionRight,
+			LabelOffsetX:     20,
+			Timestamp:        time.Now(),
 		}, nil
 	}
 
@@ -90,17 +94,20 @@ func (m *NetworkModule) Sample() (module.Payload, error) {
 	m.graphMu.RUnlock()
 
 	return module.Payload{
-		Primary:        fmt.Sprintf("↓ %s\n↑ %s", downStr, upStr),
-		Secondary:      "Network",
-		Severity:       module.SeverityOK,
-		Spark:          spark,
-		GraphType:      currentGraphType,
-		TTL:            3 * time.Second,           // Slightly longer than refresh to prevent "module slow" warnings
-		Icon:           "network-wired",
-		LineSpacing:    20,                        // Extra spacing for stacked network speeds
-		LabelPosition:  module.LabelPositionRight, // Position label to the right
-		NormalizeGraph: true,                      // Normalize to show relative bandwidth changes
-		Timestamp:      time.Now(),
+		Primary:          fmt.Sprintf("↓ %s\n↑ %s", downStr, upStr),
+		Secondary:        "Network",
+		Severity:         module.SeverityOK,
+		Spark:            spark,
+		GraphType:        currentGraphType,
+		TTL:              3 * time.Second,           // Slightly longer than refresh to prevent "module slow" warnings
+		Icon:             "network-wired",
+		LineSpacing:      20,                        // Extra spacing for stacked network speeds
+		LabelPosition:    module.LabelPositionRight, // Position label to the right
+		LabelOffsetX:     20,                        // Spacing between values and label (in pixels)
+		NormalizeGraph:   true,                      // Normalize to show relative bandwidth changes
+		GraphBgOpacity:   3,                         // Very subtle background (network graph should be minimal)
+		GraphLineOpacity: 8,                         // Very subtle line
+		Timestamp:        time.Now(),
 	}, nil
 }
 

@@ -74,6 +74,16 @@ type Payload struct {
 	// Set to false for graphs where absolute values matter (temperatures)
 	// Defaults to false (no normalization, show absolute 0-1 values)
 	NormalizeGraph bool `json:"normalize_graph,omitempty"`
+
+	// GraphBgOpacity - Background fill opacity for graphs (0-100)
+	// 0 = fully transparent, 100 = fully opaque
+	// If not set, uses theme default (typically very low for subtlety)
+	GraphBgOpacity int `json:"graph_bg_opacity,omitempty"`
+
+	// GraphLineOpacity - Line opacity for graphs (0-100)
+	// 0 = fully transparent, 100 = fully opaque
+	// If not set, uses theme default (typically low for subtlety)
+	GraphLineOpacity int `json:"graph_line_opacity,omitempty"`
 }
 
 // Severity levels for visual indication
