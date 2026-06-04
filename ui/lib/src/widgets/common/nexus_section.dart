@@ -46,15 +46,32 @@ class NexusSection extends StatelessWidget {
         children: [
           // Title row
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // Orange accent bar
+              Container(
+                width: 2,
+                height: 12,
+                margin: const EdgeInsets.only(right: AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: AppRadius.pillBr,
+                ),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: theme.textTheme.titleMedium),
+                    Text(
+                      title.toUpperCase(),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     if (description != null) ...[
-                      const SizedBox(height: AppSpacing.xs),
+                      const SizedBox(height: 2),
                       Text(description!, style: theme.textTheme.bodySmall),
                     ],
                   ],
@@ -66,6 +83,8 @@ class NexusSection extends StatelessWidget {
               ],
             ],
           ),
+          const SizedBox(height: AppSpacing.sm),
+          Divider(height: 1, thickness: 1, color: AppColors.darkBorder),
           SizedBox(height: titleSpacing),
           child,
         ],

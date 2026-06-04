@@ -60,18 +60,55 @@ class NexusCard extends StatelessWidget {
       );
     }
 
+    // Two-layer approach: outer for shadow, inner for border+clip.
+    // Individual BorderSide colors require no borderRadius — so we use a
+    // uniform border and paint the top highlight as a separate 1px overlay.
     Widget card = Container(
       margin: margin ?? const EdgeInsets.only(bottom: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: cs.surfaceContainer,
         borderRadius: AppRadius.lgBr,
-        border: Border.all(
-          color: accentBorder ? effectiveAccent.withOpacity(0.4) : cs.outline,
-          width: accentBorder ? 1.5 : 1,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.35),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: AppRadius.lgBr,
+        child: Container(
+          decoration: BoxDecoration(
+            color: cs.surfaceContainer,
+            borderRadius: AppRadius.lgBr,
+            border: Border.all(
+              color: accentBorder
+                  ? effectiveAccent.withOpacity(0.4)
+                  : cs.outline,
+              width: accentBorder ? 1.5 : 1,
+            ),
+          ),
+          child: Stack(
+            children: [
+              content,
+              // Top-edge highlight: simulates light source from above
+              if (!accentBorder)
+                Positioned(
+                  top: 0, left: 0, right: 0,
+                  child: Container(
+                    height: 1,
+                    color: Colors.white.withOpacity(0.06),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: content,
     );
 
     if (onTap != null) {
