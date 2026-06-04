@@ -174,6 +174,32 @@ func (s *Server) handleDeleteZoneConfig(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
+// handleZoneStatus returns the current health status of a zone's module.
+// GET /api/zones/:id/status → {"status":"ok"|"error"|"timeout"|"loading","error":"..."}
+func (s *Server) handleZoneStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	zoneID := r.PathValue("id")
+	if zoneID == "" {
+		s.respondError(w, "Zone ID required", http.StatusBadRequest)
+		return
+	}
+
+	if s.zoneStatus == nil {
+		s.respondJSON(w, map[string]string{"status": "loading"}, http.StatusOK)
+		return
+	}
+
+	st := s.zoneStatus.GetZoneStatus(zoneID)
+	s.respondJSON(w, map[string]string{
+		"status": st.Status,
+		"error":  st.Error,
+	}, http.StatusOK)
+}
+
 // moduleNameToPath converts a short module name to full path.
 // e.g., "cpu-temp" -> "exec:./modules/cpu-temp/cpu-temp"
 func moduleNameToPath(name string) string {

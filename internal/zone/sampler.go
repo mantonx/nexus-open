@@ -13,6 +13,12 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
+// ZoneStatus represents the current health of a single zone's module.
+type ZoneStatus struct {
+	Status string // "ok" | "error" | "timeout" | "loading"
+	Error  string // non-empty when Status is "error" or "timeout"
+}
+
 // Sampler manages periodic sampling of modules and updating zone payloads
 type Sampler struct {
 	logger            *slog.Logger
@@ -31,6 +37,8 @@ type Sampler struct {
 	moduleSpec        map[string]string
 	firstSampleMu     sync.Mutex
 	triggerChannels   map[string]chan struct{} // zoneID -> trigger channel for immediate sampling
+	zoneErrors        map[string]ZoneStatus   // zoneID -> last known status
+	zoneErrorsMu      sync.RWMutex
 }
 
 // NewSampler creates a new module sampler
@@ -51,6 +59,7 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 		firstSampleLogged: make(map[string]bool),
 		moduleSpec:        make(map[string]string),
 		triggerChannels:   make(map[string]chan struct{}),
+		zoneErrors:        make(map[string]ZoneStatus),
 	}
 
 	// Register built-in modules
@@ -220,7 +229,7 @@ func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod modul
 		}
 		// Timeout
 		s.logger.Warn("module sample timeout", "zone_id", zoneID)
-		// Update with error payload
+		s.setZoneStatus(zoneID, ZoneStatus{Status: "timeout", Error: "module slow to respond"})
 		s.manager.UpdatePayload(zoneID, module.Payload{
 			Primary:   "Timeout",
 			Secondary: "Module slow",
@@ -230,7 +239,7 @@ func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod modul
 	case res := <-resultCh:
 		if res.err != nil {
 			s.logger.Error("module sample failed", "zone_id", zoneID, "error", res.err)
-			// Update with error payload
+			s.setZoneStatus(zoneID, ZoneStatus{Status: "error", Error: res.err.Error()})
 			s.manager.UpdatePayload(zoneID, module.Payload{
 				Primary:   "Error",
 				Secondary: res.err.Error(),
@@ -251,8 +260,38 @@ func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod modul
 			s.logger.Error("failed to update payload", "zone_id", zoneID, "error", err)
 		}
 
+		s.setZoneStatus(zoneID, ZoneStatus{Status: "ok"})
 		s.recordFirstSample(zoneID)
 	}
+}
+
+// setZoneStatus records the current health of a zone.
+func (s *Sampler) setZoneStatus(zoneID string, status ZoneStatus) {
+	s.zoneErrorsMu.Lock()
+	s.zoneErrors[zoneID] = status
+	s.zoneErrorsMu.Unlock()
+}
+
+// ZoneStatus returns the last known health status for a zone.
+// Returns {Status: "loading"} if no sample has completed yet.
+func (s *Sampler) GetZoneStatus(zoneID string) ZoneStatus {
+	s.zoneErrorsMu.RLock()
+	defer s.zoneErrorsMu.RUnlock()
+	if st, ok := s.zoneErrors[zoneID]; ok {
+		return st
+	}
+	return ZoneStatus{Status: "loading"}
+}
+
+// AllZoneStatuses returns a snapshot of all zone statuses.
+func (s *Sampler) AllZoneStatuses() map[string]ZoneStatus {
+	s.zoneErrorsMu.RLock()
+	defer s.zoneErrorsMu.RUnlock()
+	out := make(map[string]ZoneStatus, len(s.zoneErrors))
+	for k, v := range s.zoneErrors {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Sampler) recordFirstSample(zoneID string) {

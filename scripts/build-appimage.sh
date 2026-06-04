@@ -41,11 +41,6 @@ strip "${APPDIR}/usr/bin/${APP_NAME}"
 echo -e "${YELLOW}Copying desktop file...${NC}"
 cp packaging/desktop/nexus-open.desktop "${APPDIR}/usr/share/applications/"
 
-# Create a simple icon (placeholder - should be replaced with actual icon)
-echo -e "${YELLOW}Creating placeholder icon...${NC}"
-# In a real scenario, you'd copy an actual icon file here
-# For now, we'll note that an icon should be placed at:
-# ${APPDIR}/usr/share/icons/hicolor/256x256/apps/nexus-open.png
 
 # Create AppRun script
 echo -e "${YELLOW}Creating AppRun script...${NC}"
@@ -75,21 +70,38 @@ chmod +x "${APPDIR}/AppRun"
 # Create .desktop file symlink at root
 ln -sf usr/share/applications/nexus-open.desktop "${APPDIR}/nexus-open.desktop"
 
-# Create icon symlink at root (if icon exists)
-# ln -sf usr/share/icons/hicolor/256x256/apps/nexus-open.png "${APPDIR}/nexus-open.png"
-
 # Copy necessary libraries
 echo -e "${YELLOW}Copying library dependencies...${NC}"
-# Find and copy libusb
-if [ -f /usr/lib/x86_64-linux-gnu/libusb-1.0.so.0 ]; then
-    cp /usr/lib/x86_64-linux-gnu/libusb-1.0.so.0* "${APPDIR}/usr/lib/" 2>/dev/null || true
-elif [ -f /usr/lib64/libusb-1.0.so.0 ]; then
-    cp /usr/lib64/libusb-1.0.so.0* "${APPDIR}/usr/lib/" 2>/dev/null || true
-elif [ -f /usr/lib/libusb-1.0.so.0 ]; then
-    cp /usr/lib/libusb-1.0.so.0* "${APPDIR}/usr/lib/" 2>/dev/null || true
-else
-    echo -e "${YELLOW}Warning: libusb-1.0.so.0 not found, AppImage may require it to be installed${NC}"
+
+# Locate libusb dynamically: try pkg-config, then ldd, then common paths
+LIBUSB_PATH=""
+if pkg-config --exists libusb-1.0 2>/dev/null; then
+    LIBUSB_DIR="$(pkg-config --variable=libdir libusb-1.0)"
+    LIBUSB_PATH="${LIBUSB_DIR}/libusb-1.0.so.0"
 fi
+
+if [ -z "${LIBUSB_PATH}" ] || [ ! -f "${LIBUSB_PATH}" ]; then
+    # Fall back to ldd output on the built binary
+    LIBUSB_PATH="$(ldd "${APPDIR}/usr/bin/${APP_NAME}" 2>/dev/null \
+        | awk '/libusb-1\.0/ { print $3 }' | head -1)"
+fi
+
+if [ -n "${LIBUSB_PATH}" ] && [ -f "${LIBUSB_PATH}" ]; then
+    cp "${LIBUSB_PATH}"* "${APPDIR}/usr/lib/" 2>/dev/null || true
+    echo -e "${GREEN}✓ Copied libusb from ${LIBUSB_PATH}${NC}"
+else
+    echo -e "${RED}ERROR: libusb-1.0.so.0 not found. Install libusb-1.0-0-dev and retry.${NC}"
+    exit 1
+fi
+
+# Fail loudly if desktop icon is missing rather than silently building a broken AppImage
+ICON_SRC="packaging/icons/64.png"
+if [ ! -f "${ICON_SRC}" ]; then
+    echo -e "${RED}ERROR: Icon not found at ${ICON_SRC}. Build the icon set first (see packaging/icons/).${NC}"
+    exit 1
+fi
+cp "${ICON_SRC}" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png"
+ln -sf "usr/share/icons/hicolor/256x256/apps/${APP_NAME}.png" "${APPDIR}/${APP_NAME}.png"
 
 # Download appimagetool if not present
 APPIMAGETOOL="build/appimagetool-${ARCH}.AppImage"

@@ -1,6 +1,6 @@
 [Unit]
 Description=Nexus Open - iCUE Nexus Display Controller
-Documentation=https://github.com/yourusername/nexus-open
+Documentation=https://github.com/mantonx/nexus-next
 After=graphical.target
 
 [Service]
