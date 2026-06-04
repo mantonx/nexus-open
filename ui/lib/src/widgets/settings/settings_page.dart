@@ -133,7 +133,8 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
     final ws = context.watch<WsService>();
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return PopScope(
       canPop: !_hasUnsavedChanges,
@@ -147,17 +148,37 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             // ── Connection loss banner ──────────────────────────────────────
             if (!ws.isConnected)
-              MaterialBanner(
-                padding: AppSpacing.paddingHMdVSm,
-                content: const Text('Backend disconnected — changes cannot be saved'),
-                leading: Icon(Icons.cloud_off,
-                    color: cs.warning, size: AppIconSize.md),
-                actions: [
-                  NexusButton.ghost(
-                    label: 'Retry',
-                    onPressed: () => settings.loadFromBackend(),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.darkElevated,
+                  border: Border(
+                    left:   BorderSide(color: cs.warning, width: 3),
+                    bottom: BorderSide(color: AppColors.darkBorder, width: 1),
                   ),
-                ],
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.xs + 2,
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_off_outlined,
+                        size: AppIconSize.sm, color: cs.warning),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        'Backend disconnected — changes cannot be saved',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    NexusButton.ghost(
+                      label: 'Retry',
+                      onPressed: () => settings.loadFromBackend(),
+                    ),
+                  ],
+                ),
               ),
 
             Expanded(
@@ -185,12 +206,19 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   // ── Content area ────────────────────────────────────────
                   Expanded(
-                    child: AnimatedSwitcher(
-                      duration: AppDuration.normal,
-                      child: KeyedSubtree(
-                        key: ValueKey(_selectedIndex),
-                        child: _buildPage(settings),
-                      ),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: CustomPaint(painter: _DotGridPainter()),
+                        ),
+                        AnimatedSwitcher(
+                          duration: AppDuration.normal,
+                          child: KeyedSubtree(
+                            key: ValueKey(_selectedIndex),
+                            child: _buildPage(settings),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -240,7 +268,12 @@ class _NexusRail extends StatelessWidget {
 
     return Container(
       width: 72,
-      color: cs.railBackground,
+      decoration: BoxDecoration(
+        color: cs.railBackground,
+        border: Border(
+          right: BorderSide(color: AppColors.darkBorder, width: 1),
+        ),
+      ),
       child: Column(
         children: [
           // ── App header ─────────────────────────────────────────────────
@@ -255,7 +288,13 @@ class _NexusRail extends StatelessWidget {
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.accent,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 2,
+                    letterSpacing: 3,
+                    shadows: [
+                      Shadow(
+                        color: AppColors.accent.withOpacity(0.7),
+                        blurRadius: 10,
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
@@ -300,8 +339,18 @@ class _NexusRail extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                     decoration: BoxDecoration(
-                      color: isSelected ? cs.accentSubtle : Colors.transparent,
+                      color: isSelected
+                          ? AppColors.accent.withOpacity(0.08)
+                          : Colors.transparent,
                       borderRadius: AppRadius.smBr,
+                      border: Border(
+                        left: BorderSide(
+                          color: isSelected
+                              ? AppColors.accent
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
                     ),
                     child: Column(
                       children: [
@@ -395,6 +444,26 @@ class _NexusRail extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Dot-grid background painter ──────────────────────────────────────────────
+
+class _DotGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.032)
+      ..strokeWidth = 1;
+    const step = 24.0;
+    for (double x = step; x < size.width; x += step) {
+      for (double y = step; y < size.height; y += step) {
+        canvas.drawCircle(Offset(x, y), 1, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DotGridPainter _) => false;
 }
 
 // ── Persistent 640×48 display strip ──────────────────────────────────────────
