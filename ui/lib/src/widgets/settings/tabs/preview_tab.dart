@@ -67,30 +67,93 @@ class PreviewTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        // Miniature preview of how the colours interact
         NexusSection(
           title: 'Colour Preview',
-          description: 'How text will appear on the display.',
-          child: Container(
-            height: 48,
-            decoration: BoxDecoration(
-              color: settings.backgroundColorValue,
-              borderRadius: AppRadius.smBr,
-              border: Border.all(color: cs.outline),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              '14:30  25°C  New York',
-              style: TextStyle(
-                color: settings.textColorValue,
-                fontFamily: 'monospace',
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+          description: 'How text will appear on the 640×48 display.',
+          child: _DevicePreview(
+            textColor: settings.textColorValue,
+            backgroundColor: settings.backgroundColorValue,
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── Device bezel preview ─────────────────────────────────────────────────────
+
+class _DevicePreview extends StatelessWidget {
+  const _DevicePreview({
+    required this.textColor,
+    required this.backgroundColor,
+  });
+
+  final Color textColor;
+  final Color backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        children: [
+          // Outer bezel — mimics the physical iCUE Nexus housing
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A0A0C),
+              borderRadius: AppRadius.smBr,
+              border: Border.all(
+                color: AppColors.dataAccent.withOpacity(0.35),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.dataAccent.withOpacity(0.12),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.6),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 6,
+            ),
+            child: Container(
+              // 640×48 aspect ratio, constrained to fit the card
+              height: 48,
+              constraints: const BoxConstraints(maxWidth: 640),
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: BorderRadius.circular(2),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                '14:30  25°C  New York',
+                style: TextStyle(
+                  color: textColor,
+                  fontFamily: 'monospace',
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            '640 × 48 px',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: AppColors.textMuted,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

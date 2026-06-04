@@ -88,8 +88,6 @@ class _LocationTabState extends State<LocationTab> {
       _isSearching = false;
     });
 
-    print(_cityController.text);
-
     // Notify parent widget of the selected location
     widget.onLocationSelected(_cityController.text);
 
@@ -135,7 +133,9 @@ class _LocationTabState extends State<LocationTab> {
                   ),
                   suggestionsCallback: (pattern) async {
                     if (pattern.isEmpty) {
-                      setState(() => _isSearching = false);
+                      WidgetsBinding.instance.addPostFrameCallback(
+                        (_) { if (mounted) setState(() => _isSearching = false); },
+                      );
                       return [];
                     }
                     return LocationService.searchPlaces(pattern);
