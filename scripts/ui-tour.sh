@@ -15,7 +15,7 @@ URL_FILE=$(mktemp /tmp/nexus-ws-url-XXXXXX)
 PY="$SCRIPT_DIR/flutter-screenshot.py"
 
 mkdir -p "$OUT_DIR"
-rm -f /tmp/nexus-shot-done-*
+rm -f "$OUT_DIR"/*.png /tmp/nexus-shot-done-*
 trap "rm -f $DRIVE_LOG $URL_FILE /tmp/nexus-shot-done-*" EXIT
 
 echo "▶  Starting flutter drive..."

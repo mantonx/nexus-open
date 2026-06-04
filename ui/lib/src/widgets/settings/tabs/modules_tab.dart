@@ -146,7 +146,7 @@ class _ModulesTabState extends State<ModulesTab> {
           physics: const NeverScrollableScrollPhysics(),
           crossAxisSpacing: AppSpacing.sm,
           mainAxisSpacing: AppSpacing.sm,
-          childAspectRatio: 1.6,
+          childAspectRatio: 1.2,
           children: [
             for (final mod in _knownModules)
               _ModuleCard(
