@@ -23,6 +23,7 @@ type Manager struct {
 	config      *Config
 	configPath  string
 	currentPage int
+	themeMu     sync.RWMutex // guards config.Theme live updates
 
 	// Zone state
 	zones      map[string]*Zone
@@ -273,8 +274,22 @@ func (m *Manager) UpdatePayload(zoneID string, payload module.Payload) error {
 	return nil
 }
 
+// UpdateTheme applies a new theme to all subsequent rendered frames.
+// Safe to call from any goroutine; the change takes effect on the next frame.
+func (m *Manager) UpdateTheme(theme Theme) {
+	m.themeMu.Lock()
+	m.config.Theme = theme
+	m.themeMu.Unlock()
+}
+
 // RenderFrame renders the current frame (all zones composited)
 func (m *Manager) RenderFrame() (*image.RGBA, error) {
+	// Snapshot the theme once so all render calls in this frame are consistent
+	// and we avoid holding themeMu across other locks.
+	m.themeMu.RLock()
+	theme := m.config.Theme
+	m.themeMu.RUnlock()
+
 	// Check if transition is active
 	m.transitionMu.RLock()
 	if m.transition.Active && !m.transition.IsComplete() {
@@ -325,8 +340,8 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 				zone.Config.Width,
 				DisplayHeight,
 				"Error",
-				m.config.Theme.GetBgColor(),
-				m.config.Theme.GetFgColor(),
+				theme.GetBgColor(),
+				theme.GetFgColor(),
 			)
 		}
 
@@ -362,6 +377,7 @@ func (m *Manager) GetLastFrame() *image.RGBA {
 }
 
 // renderImmediateFrameForCurrentPage renders the current page ignoring transition state.
+// It takes its own theme snapshot so concurrent UpdateTheme calls are safe.
 // Used for pre-rendering or when we need an up-to-date frame while a transition is in progress.
 func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 	start := time.Now()
@@ -372,6 +388,10 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 			"duration_ms", time.Since(start).Milliseconds(),
 			"success", success)
 	}()
+
+	m.themeMu.RLock()
+	theme := m.config.Theme
+	m.themeMu.RUnlock()
 
 	m.payloadsMu.RLock()
 	defer m.payloadsMu.RUnlock()
@@ -406,8 +426,8 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 				zone.Config.Width,
 				DisplayHeight,
 				"Error",
-				m.config.Theme.GetBgColor(),
-				m.config.Theme.GetFgColor(),
+				theme.GetBgColor(),
+				theme.GetFgColor(),
 			)
 		}
 
