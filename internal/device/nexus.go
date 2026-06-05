@@ -246,6 +246,11 @@ func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
 		_, err := device.Write(packet)
 		if err != nil {
 			n.logger.Error("HID write failed", "chunk", chunkNum, "error", err)
+			// Mark disconnected so monitorConnection triggers a reconnect
+			// rather than continuing to hammer a dead handle.
+			n.mu.Lock()
+			n.connected = false
+			n.mu.Unlock()
 			return fmt.Errorf("failed to write chunk %d: %w", chunkNum, err)
 		}
 	}
@@ -361,9 +366,10 @@ func (n *NexusDevice) GetFirmwareVersion() (string, error) {
 	return firmware, nil
 }
 
-// monitorConnection monitors for device disconnection and attempts reconnection
+// monitorConnection monitors for device disconnection and attempts reconnection.
+// Polls every second so write-failure disconnects are recovered quickly.
 func (n *NexusDevice) monitorConnection() {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -372,12 +378,11 @@ func (n *NexusDevice) monitorConnection() {
 			return
 		case <-ticker.C:
 			if err := n.Health(); err != nil {
-				n.logger.Warn("device health check failed, attempting reconnect", "error", err)
+				n.logger.Warn("device disconnected, attempting reconnect", "error", err)
 
-				// Attempt reconnection
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				if err := n.Connect(ctx); err != nil {
-					n.logger.Error("reconnection failed", "error", err)
+					n.logger.Debug("reconnect attempt failed, will retry", "error", err)
 				} else {
 					n.logger.Info("device reconnected successfully")
 				}
