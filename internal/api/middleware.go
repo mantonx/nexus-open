@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bufio"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -67,6 +69,13 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack lets nhooyr.io/websocket take over the raw TCP connection.
+// Without this, the wrapped responseWriter hides the Hijacker interface
+// and websocket.Accept returns 501 Not Implemented.
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return rw.ResponseWriter.(http.Hijacker).Hijack()
 }
 
 // logRequest logs an HTTP request with structured fields.

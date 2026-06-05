@@ -62,8 +62,10 @@ func (h *hub) Broadcast(msg WSMessage) {
 // handleWS upgrades the connection and streams hub messages to the client.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		// Only allow connections originating from localhost — prevents a
-		// malicious remote page from hijacking the WebSocket via CSWSH.
+		// Allow localhost origins from a browser, plus empty-Origin requests
+		// from Flutter desktop (Linux), which sends no Origin header.
+		// nhooyr.io/websocket passes empty Origin through OriginPatterns
+		// unchanged (see authenticateOrigin — empty string returns nil).
 		OriginPatterns: []string{"localhost:*", "127.0.0.1:*"},
 	})
 	if err != nil {
