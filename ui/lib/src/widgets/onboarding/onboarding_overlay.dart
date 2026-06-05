@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/settings_state.dart';
@@ -112,7 +113,6 @@ class _StepShell extends StatelessWidget {
     required this.buttonLabel,
     required this.onNext,
     this.iconColor,
-    this.statusBadge,
   });
 
   final IconData icon;
@@ -121,7 +121,6 @@ class _StepShell extends StatelessWidget {
   final String body;
   final String buttonLabel;
   final VoidCallback onNext;
-  final Widget? statusBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -178,11 +177,6 @@ class _StepShell extends StatelessWidget {
             ),
           ),
 
-          if (statusBadge != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            statusBadge!,
-          ],
-
           const Spacer(),
 
           NexusButton.primary(
@@ -216,32 +210,220 @@ class _WelcomeStep extends StatelessWidget {
   }
 }
 
-class _ConnectStep extends StatelessWidget {
+class _ConnectStep extends StatefulWidget {
   const _ConnectStep({required this.onNext});
   final VoidCallback onNext;
+
+  @override
+  State<_ConnectStep> createState() => _ConnectStepState();
+}
+
+class _ConnectStepState extends State<_ConnectStep> {
+  static const _udevRulePath =
+      '/usr/lib/udev/rules.d/99-corsair-nexus.rules';
+
+  bool get _udevInstalled => File(_udevRulePath).existsSync();
 
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
     final connected = settings.isConnected;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final udev = _udevInstalled;
 
-    return _StepShell(
-      icon: connected ? Icons.usb : Icons.usb_off_outlined,
-      iconColor: connected
-          ? Theme.of(context).colorScheme.success
-          : AppColors.accent,
-      title: 'Connect your device',
-      body: connected
-          ? 'iCUE Nexus found and connected.'
-          : 'Plug in your iCUE Nexus via USB.\n\n'
-              'If you see a permission error, run:\n'
-              '  sudo scripts/setup-udev.sh\n'
-              'then unplug and replug the device.',
-      buttonLabel: connected ? 'Continue' : 'Skip for now',
-      onNext: onNext,
-      statusBadge: NexusStatusBadge(
-        status: connected ? NexusStatus.ok : NexusStatus.warning,
-        label: connected ? 'Device connected' : 'No device detected',
+    // Auto-advance when device connects — no tap needed.
+    if (connected) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onNext();
+      });
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.xl, AppSpacing.xxl, AppSpacing.xl, AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Icon
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: (connected
+                      ? cs.success
+                      : AppColors.accent)
+                  .withOpacity(0.10),
+              borderRadius: AppRadius.smBr,
+              border: Border.all(
+                color: (connected
+                        ? cs.success
+                        : AppColors.accent)
+                    .withOpacity(0.25),
+              ),
+            ),
+            child: Icon(
+              connected ? Icons.usb : Icons.usb_off_outlined,
+              size: AppIconSize.xl,
+              color: connected ? cs.success : AppColors.accent,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+
+          Text(
+            'CONNECT DEVICE',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: AppColors.accent,
+              letterSpacing: 1.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text('Connect your device',
+              style: theme.textTheme.headlineMedium),
+          const SizedBox(height: AppSpacing.md),
+
+          // Contextual instructions
+          if (!connected) ...[
+            if (!udev) ...[
+              // First-time setup — udev not installed yet
+              _Instruction(
+                step: '1',
+                text: 'Run this once in a terminal:',
+              ),
+              _CodeBlock('sudo nexus-open --setup-udev'),
+              const SizedBox(height: AppSpacing.sm),
+              _Instruction(
+                step: '2',
+                text: 'Unplug and replug your iCUE Nexus.',
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _Instruction(
+                step: '3',
+                text: 'This screen will update automatically.',
+              ),
+            ] else ...[
+              // udev is installed — just needs plugging in
+              _Instruction(
+                step: '1',
+                text: 'Plug your iCUE Nexus into a USB port.',
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _Instruction(
+                step: '2',
+                text: 'This screen will update automatically.',
+              ),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            Row(children: [
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.accent,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                'Waiting for device…',
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ]),
+          ] else ...[
+            Text(
+              'iCUE Nexus found and connected.',
+              style: theme.textTheme.bodyLarge
+                  ?.copyWith(color: cs.onSurfaceVariant, height: 1.6),
+            ),
+          ],
+
+          const SizedBox(height: AppSpacing.md),
+          NexusStatusBadge(
+            status: connected ? NexusStatus.ok : NexusStatus.warning,
+            label:
+                connected ? 'Device connected' : 'No device detected',
+          ),
+
+          const Spacer(),
+
+          NexusButton.primary(
+            label: connected ? 'Continue' : 'Skip for now',
+            onPressed: widget.onNext,
+            expand: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Instruction extends StatelessWidget {
+  const _Instruction({required this.step, required this.text});
+  final String step;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 20,
+          height: 20,
+          margin: const EdgeInsets.only(top: 2),
+          decoration: BoxDecoration(
+            color: AppColors.accent.withOpacity(0.15),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              step,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: AppColors.accent,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: cs.onSurfaceVariant, height: 1.5),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CodeBlock extends StatelessWidget {
+  const _CodeBlock(this.command);
+  final String command;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(left: 28, top: AppSpacing.xs),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.3),
+        borderRadius: AppRadius.smBr,
+        border: Border.all(color: AppColors.darkBorder),
+      ),
+      child: Text(
+        command,
+        style: theme.textTheme.bodySmall?.copyWith(
+          fontFamily: 'monospace',
+          color: AppColors.accent,
+        ),
       ),
     );
   }
