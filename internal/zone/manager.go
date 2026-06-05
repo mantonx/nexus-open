@@ -177,12 +177,14 @@ func (m *Manager) initializePage() error {
 		m.zones[zoneConfig.ID] = zone
 		m.renderers[zoneConfig.ID] = renderer
 
-		// Initialize with placeholder payload
-		m.payloads[zoneConfig.ID] = &module.Payload{
-			Primary:   "—",
-			Secondary: "Loading...",
-			Severity:  module.SeverityOK,
-			Timestamp: time.Now(),
+		// Preserve existing payload if present — stale data is better than
+		// a Loading flash while the sampler catches up after a page switch.
+		if _, exists := m.payloads[zoneConfig.ID]; !exists {
+			m.payloads[zoneConfig.ID] = &module.Payload{
+				Primary:  "—",
+				Severity: module.SeverityOK,
+				Timestamp: time.Now(),
+			}
 		}
 
 		m.logger.Debug("zone initialized",
@@ -1078,24 +1080,21 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 	m.liveSwipePreviewActive = false
 	m.liveSwipeMu.Unlock()
 
-	// Defer page init and sampler restart until after the snap animation so
-	// compositor rebuild doesn't corrupt mid-transition frames, and so the
-	// sampler restarts against the correct new zones (not stale old ones).
-	snapDuration := finalDuration
-	go func() {
-		time.Sleep(snapDuration + 10*time.Millisecond)
-		if err := m.initializePage(); err != nil {
-			m.logger.Error("failed to initialize page after swipe", "error", err)
-		}
-		// Notify sampler after page zones are initialized so it pushes real
-		// data into the right zones immediately (no Loading... flash).
-		if m.onPageChange != nil {
+	// Initialize the new page zones and compositor immediately.
+	// Payloads are preserved (not reset to Loading...) so there's no flash.
+	if err := m.initializePage(); err != nil {
+		m.logger.Error("failed to initialize page after swipe", "error", err)
+	}
+
+	// Restart sampler and pre-render adjacent pages in background.
+	if m.onPageChange != nil {
+		go func() {
 			if err := m.onPageChange(targetPage); err != nil {
 				m.logger.Error("page change callback failed", "error", err)
 			}
-		}
-		go m.preRenderAdjacentPages()
-	}()
+		}()
+	}
+	go m.preRenderAdjacentPages()
 
 	// Ensure the transition finishes with the real target frame (cache may have been stale)
 	targetFrame := m.getCachedPageFrame(targetPage)

@@ -341,11 +341,18 @@ func (s *Sampler) Stop() {
 	// Shutdown plugin host
 }
 
-// RestartForPage restarts sampling for a new page
+// RestartForPage restarts sampling for a new page.
+// Old zone goroutines are cancelled and new ones start immediately —
+// we don't wait for old goroutines to exit so there's no blocking delay.
 func (s *Sampler) RestartForPage(pageIndex int) error {
 	s.logger.Info("restarting sampler for new page", "page", pageIndex)
 
-	// Stop current sampling
+	config := s.manager.GetConfig()
+	if pageIndex >= len(config.Pages) {
+		return fmt.Errorf("invalid page index: %d", pageIndex)
+	}
+
+	// Cancel old goroutines — they'll stop asynchronously.
 	s.mu.Lock()
 	for zoneID, cancel := range s.cancelFuncs {
 		cancel()
@@ -357,15 +364,7 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 	}
 	s.mu.Unlock()
 
-	// Wait for goroutines to stop
-	s.wg.Wait()
-
-	// Start sampling for new page
-	config := s.manager.GetConfig()
-	if pageIndex >= len(config.Pages) {
-		return fmt.Errorf("invalid page index: %d", pageIndex)
-	}
-
+	// Start new zone goroutines immediately without waiting for old ones to exit.
 	page := config.Pages[pageIndex]
 	for _, zoneConfig := range page.Zones {
 		if err := s.startZoneSampling(zoneConfig); err != nil {
