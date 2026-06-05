@@ -31,6 +31,13 @@ type ZoneStatusProvider interface {
 	AllZoneStatuses() map[string]zone.ZoneStatus
 }
 
+// SwipeSimulator is the subset of zone.Manager needed to drive synthetic swipes.
+type SwipeSimulator interface {
+	UpdateLiveSwipe(progress float32, isLeft bool) error
+	FinalizeLiveSwipe(progress float32, velocity float32, isLeft bool) error
+	CancelLiveSwipe() error
+}
+
 // Server manages the HTTP API server.
 type Server struct {
 	server          *http.Server
@@ -38,12 +45,13 @@ type Server struct {
 	cfg             *settings.Manager
 	zoneCfg         *zone.ConfigManager
 	device          DeviceController
-	zoneNotifier    ZoneConfigNotifier   // Notifies zones of config changes
-	zoneStatus      ZoneStatusProvider   // Reports module error state
+	zoneNotifier    ZoneConfigNotifier
+	zoneStatus      ZoneStatusProvider
+	swipeSim        SwipeSimulator       // for /api/debug/swipe
 	windowState     string               // "shown" or "hidden"
 	windowStateCh   chan string
 	hub             *hub
-	lastConnectErr  error // last device connect error, shown in /api/device/info
+	lastConnectErr  error
 }
 
 // NewServer creates a new API server instance.
@@ -125,6 +133,11 @@ func (s *Server) SetLastConnectError(err error) {
 	s.lastConnectErr = err
 }
 
+// SetSwipeSimulator wires in the zone manager for the debug swipe endpoint.
+func (s *Server) SetSwipeSimulator(sim SwipeSimulator) {
+	s.swipeSim = sim
+}
+
 // SetZoneStatusProvider wires in the sampler so zone status can be queried.
 func (s *Server) SetZoneStatusProvider(p ZoneStatusProvider) {
 	s.zoneStatus = p
@@ -156,6 +169,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/window/state", s.handleWindowState)
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
+
+	// Debug endpoints — swipe simulation for tuning transition parameters
+	mux.HandleFunc("/api/debug/swipe", s.handleDebugSwipe)
 
 	// OpenAPI 3.0 spec endpoints
 	mux.HandleFunc("/openapi.yaml", s.handleOpenAPISpec)
