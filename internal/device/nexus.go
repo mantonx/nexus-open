@@ -77,6 +77,12 @@ func (n *NexusDevice) connectOnce(ctx context.Context) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	// Already connected — don't open a second handle to the same device.
+	// Opening a duplicate handle causes the USB stack to reset the device.
+	if n.connected && n.device != nil {
+		return nil
+	}
+
 	// Enumerate HID devices to find iCUE Nexus
 	devices := hid.Enumerate(n.config.VendorID, n.config.ProductID)
 	if len(devices) == 0 {
@@ -372,11 +378,13 @@ func (n *NexusDevice) GetFirmwareVersion() (string, error) {
 // device is absent for an extended period.
 func (n *NexusDevice) monitorConnection() {
 	const (
-		pollInterval = 1 * time.Second
-		maxBackoff   = 30 * time.Second
+		pollInterval    = 1 * time.Second
+		maxBackoff      = 30 * time.Second
+		failuresNeeded  = 2 // consecutive health failures before reconnecting
 	)
 
 	backoff := pollInterval
+	consecutiveFails := 0
 
 	for {
 		select {
@@ -386,8 +394,17 @@ func (n *NexusDevice) monitorConnection() {
 		}
 
 		if err := n.Health(); err == nil {
-			// Device is healthy — reset backoff and poll at normal rate.
+			// Device is healthy — reset everything and poll at normal rate.
 			backoff = pollInterval
+			consecutiveFails = 0
+			continue
+		}
+
+		consecutiveFails++
+		if consecutiveFails < failuresNeeded {
+			// Don't act on a single transient failure — wait for the next poll.
+			n.logger.Debug("device health check failed, waiting for confirmation",
+				"consecutive_fails", consecutiveFails)
 			continue
 		}
 
