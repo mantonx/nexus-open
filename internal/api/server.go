@@ -66,10 +66,13 @@ func NewServer(addr string, cfg *settings.Manager, device DeviceController, logg
 
 	// Create HTTP server with timeouts
 	s.server = &http.Server{
-		Addr:         addr,
-		Handler:      s.middleware(mux),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:        addr,
+		Handler:     s.middleware(mux),
+		ReadTimeout: 10 * time.Second,
+		// WriteTimeout must be 0 for WebSocket: Go's net/http fires it after
+		// the deadline regardless of whether the connection was hijacked, which
+		// tears down long-lived WS connections after 10 s.
+		WriteTimeout: 0,
 		IdleTimeout:  60 * time.Second,
 	}
 
