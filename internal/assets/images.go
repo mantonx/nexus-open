@@ -170,7 +170,7 @@ func GetImages() ([]string, error) {
 		return nil, fmt.Errorf("failed to read images directory: %w", err)
 	}
 
-	var images []string
+	images := make([]string, 0, len(files))
 	for _, file := range files {
 		if !file.IsDir() {
 			images = append(images, file.Name())
