@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/mantonx/nexus-next/internal/app"
@@ -165,16 +166,53 @@ func pidFilePath() string {
 	return filepath.Join(dir, "nexus-open.pid")
 }
 
-// writePIDFile writes the current process PID to path, killing any previous
-// instance recorded there so only one nexus-open holds the device at a time.
+// writePIDFile writes the current process PID to path and terminates any
+// other nexus-open processes already running, regardless of how they were
+// started (different binary path, bypassed PID file, etc.).
 func writePIDFile(path string) error {
-	// If a previous PID file exists, send SIGTERM to that process first.
+	myPID := os.Getpid()
+
+	// Kill any process recorded in the PID file first.
 	if data, err := os.ReadFile(path); err == nil {
-		if prev, err := strconv.Atoi(string(data)); err == nil && prev > 0 {
+		if prev, err := strconv.Atoi(string(data)); err == nil && prev > 0 && prev != myPID {
 			if proc, err := os.FindProcess(prev); err == nil {
 				proc.Signal(syscall.SIGTERM)
 			}
 		}
 	}
-	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0644)
+
+	// Also kill any other nexus-open processes not captured by the PID file
+	// (different binary path, started without PID file support, etc.).
+	killOtherInstances(myPID)
+
+	return os.WriteFile(path, []byte(strconv.Itoa(myPID)), 0644)
+}
+
+// killOtherInstances sends SIGTERM to all other processes whose executable
+// name is "nexus-open", regardless of how they were launched.
+func killOtherInstances(myPID int) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == myPID {
+			continue
+		}
+		// Read the executable name via /proc/<pid>/comm
+		comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSpace(string(comm))
+		if name == "nexus-open" {
+			if proc, err := os.FindProcess(pid); err == nil {
+				proc.Signal(syscall.SIGTERM)
+			}
+		}
+	}
 }
