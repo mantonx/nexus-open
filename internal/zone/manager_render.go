@@ -68,6 +68,11 @@ func (m *Manager) UpdateTheme(theme Theme) {
 		r.UpdateTheme(zoneTheme)
 	}
 	m.themeMu.Unlock()
+
+	// Invalidate the entire page cache — stale frames would show the old theme.
+	m.pageCacheMu.Lock()
+	m.pageCache = make(map[int]*image.RGBA)
+	m.pageCacheMu.Unlock()
 }
 
 // RenderFrame renders the current frame (transition or live zones composited).
