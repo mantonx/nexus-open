@@ -48,10 +48,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deviceConnected := s.device != nil && s.device.IsConnected()
+
+	// "ok" — API up and device connected
+	// "degraded" — API up but device not connected
+	status := "ok"
+	if !deviceConnected {
+		status = "degraded"
+	}
+
 	response := map[string]interface{}{
-		"status":     "ok",
-		"version":    "1.0.0",
-		"first_run":  s.cfg.IsFirstRun,
+		"status":           status,
+		"version":          "1.0.0",
+		"first_run":        s.cfg.IsFirstRun,
+		"device_connected": deviceConnected,
 	}
 
 	s.respondJSON(w, response, http.StatusOK)
