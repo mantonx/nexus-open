@@ -367,27 +367,55 @@ func (n *NexusDevice) GetFirmwareVersion() (string, error) {
 }
 
 // monitorConnection monitors for device disconnection and attempts reconnection.
-// Polls every second so write-failure disconnects are recovered quickly.
+// While connected it polls every second. On disconnect it uses exponential
+// backoff (1s→2s→4s…→30s) to avoid hammering the USB subsystem when the
+// device is absent for an extended period.
 func (n *NexusDevice) monitorConnection() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+	const (
+		pollInterval = 1 * time.Second
+		maxBackoff   = 30 * time.Second
+	)
+
+	backoff := pollInterval
 
 	for {
 		select {
 		case <-n.stopReconnect:
 			return
-		case <-ticker.C:
-			if err := n.Health(); err != nil {
-				n.logger.Warn("device disconnected, attempting reconnect", "error", err)
+		case <-time.After(backoff):
+		}
 
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				if err := n.Connect(ctx); err != nil {
-					n.logger.Debug("reconnect attempt failed, will retry", "error", err)
-				} else {
-					n.logger.Info("device reconnected successfully")
-				}
-				cancel()
+		if err := n.Health(); err == nil {
+			// Device is healthy — reset backoff and poll at normal rate.
+			backoff = pollInterval
+			continue
+		}
+
+		n.logger.Warn("device disconnected, attempting reconnect",
+			"retry_in", backoff)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		reconnErr := n.Connect(ctx)
+		cancel()
+
+		if reconnErr != nil {
+			n.logger.Debug("reconnect attempt failed, will retry",
+				"error", reconnErr,
+				"next_retry_in", min(backoff*2, maxBackoff))
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
+		} else {
+			n.logger.Info("device reconnected successfully")
+			backoff = pollInterval
 		}
 	}
+}
+
+func min(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }

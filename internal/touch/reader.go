@@ -205,8 +205,8 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	buffer := make([]byte, 64)
 	bytesRead, err := t.device.Read(buffer)
 	if err != nil {
-		// Device error - could be disconnect or timeout
-		return []Event{}, nil
+		t.logger.Debug("HID read error", "error", err)
+		return []Event{}, fmt.Errorf("HID read: %w", err)
 	}
 
 	if bytesRead < 8 {
