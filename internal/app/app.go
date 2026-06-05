@@ -202,6 +202,9 @@ func (a *App) initialize() error {
 	// Register zone sampler as status provider so /api/zones/:id/status works.
 	a.apiServer.SetZoneStatusProvider(a.zoneSampler)
 
+	// Wire zone manager for swipe simulation endpoint.
+	a.apiServer.SetSwipeSimulator(a.zoneManager)
+
 	// Propagate display config from settings into the zone manager theme,
 	// both immediately on startup and on every subsequent Flutter UI save.
 	applySettingsTheme := func(cfg settings.Config) {
