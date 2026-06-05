@@ -275,10 +275,16 @@ func (m *Manager) UpdatePayload(zoneID string, payload module.Payload) error {
 }
 
 // UpdateTheme applies a new theme to all subsequent rendered frames.
+// Updates the config, the compositor, and all zone renderers atomically.
 // Safe to call from any goroutine; the change takes effect on the next frame.
 func (m *Manager) UpdateTheme(theme Theme) {
 	m.themeMu.Lock()
 	m.config.Theme = theme
+	// Push the new theme into every renderer so zone backgrounds and colours
+	// update immediately — renderers store their own theme copy.
+	for _, r := range m.renderers {
+		r.UpdateTheme(theme)
+	}
 	m.themeMu.Unlock()
 }
 
