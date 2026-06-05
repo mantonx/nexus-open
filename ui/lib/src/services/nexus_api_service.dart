@@ -15,8 +15,8 @@ class NexusApiService {
 
   NexusApiService({http.Client? client}) : _client = client ?? http.Client();
 
-  /// Check if the backend is healthy. Returns (isHealthy, isFirstRun).
-  Future<({bool healthy, bool firstRun})> checkHealth() async {
+  /// Check backend and hardware health.
+  Future<({bool healthy, bool firstRun, bool deviceConnected})> checkHealth() async {
     try {
       final response = await _client
           .get(Uri.parse('$baseUrl/api/health'))
@@ -26,11 +26,12 @@ class NexusApiService {
         return (
           healthy: true,
           firstRun: body['first_run'] as bool? ?? false,
+          deviceConnected: body['device_connected'] as bool? ?? false,
         );
       }
-      return (healthy: false, firstRun: false);
+      return (healthy: false, firstRun: false, deviceConnected: false);
     } catch (e) {
-      return (healthy: false, firstRun: false);
+      return (healthy: false, firstRun: false, deviceConnected: false);
     }
   }
 

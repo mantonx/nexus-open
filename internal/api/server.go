@@ -17,6 +17,7 @@ import (
 type DeviceController interface {
 	SetBrightness(brightness int) error
 	GetFirmwareVersion() (string, error)
+	IsConnected() bool
 }
 
 // ZoneConfigNotifier can notify zones about config changes.

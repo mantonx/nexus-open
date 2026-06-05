@@ -10,6 +10,7 @@ class SettingsState extends ChangeNotifier {
   // Loading and error states
   bool _isLoading = false;
   bool _isConnected = false;
+  bool _deviceConnected = false;
   String? _errorMessage;
 
   // Theme preference — persisted locally via shared_preferences
@@ -27,6 +28,7 @@ class SettingsState extends ChangeNotifier {
   // Getters
   bool get isLoading => _isLoading;
   bool get isConnected => _isConnected;
+  bool get deviceConnected => _deviceConnected;
   String? get errorMessage => _errorMessage;
   NexusConfig? get config => _config;
   ThemeMode get themeMode => _themeMode;
@@ -96,6 +98,7 @@ class SettingsState extends ChangeNotifier {
       final health = await _apiService.checkHealth();
       _isConnected = health.healthy;
       _isFirstRun = health.firstRun;
+      _deviceConnected = health.deviceConnected;
 
       if (!health.healthy) {
         throw ApiException('Backend is not responding');

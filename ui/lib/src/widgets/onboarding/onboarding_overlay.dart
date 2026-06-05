@@ -227,7 +227,7 @@ class _ConnectStepState extends State<_ConnectStep> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
-    final connected = settings.isConnected;
+    final connected = settings.deviceConnected;
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final udev = _udevInstalled;
