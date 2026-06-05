@@ -238,6 +238,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Layout editor endpoints
 	mux.HandleFunc("/api/layout", s.handleGetLayout)
+	mux.HandleFunc("/api/layout/export", s.handleLayoutExport)
 	mux.HandleFunc("/api/layout/pages", s.handleLayoutPages)
 	mux.HandleFunc("/api/layout/pages/reorder", s.handleReorderPages)
 	mux.HandleFunc("/api/layout/pages/", s.handleLayoutPage)

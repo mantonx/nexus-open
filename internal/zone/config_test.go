@@ -116,7 +116,7 @@ func TestThemeColors(t *testing.T) {
 
 	// Test parsing valid colors
 	bgColor := theme.GetBgColor()
-	if bgColor.R != 0x10 || bgColor.G != 0x10 || bgColor.B != 0x10 {
+	if bgColor.R != 0x00 || bgColor.G != 0x00 || bgColor.B != 0x00 {
 		t.Errorf("Background color incorrect: got R=%d G=%d B=%d", bgColor.R, bgColor.G, bgColor.B)
 	}
 

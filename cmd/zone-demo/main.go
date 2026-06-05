@@ -26,8 +26,8 @@ func main() {
 
 	ctx := context.Background()
 
-	// Create zone manager
-	manager, err := zone.NewManager(ctx, logger, *configPath)
+	// Create zone manager (nil DB — YAML-only mode for this dev binary)
+	manager, err := zone.NewManager(ctx, logger, nil, *configPath)
 	if err != nil {
 		logger.Error("failed to create zone manager", "error", err)
 		os.Exit(1)

@@ -42,8 +42,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Create zone manager
-	zoneManager, err := zone.NewManager(ctx, logger, *configPath)
+	// Create zone manager (nil DB — YAML-only mode for this dev binary)
+	zoneManager, err := zone.NewManager(ctx, logger, nil, *configPath)
 	if err != nil {
 		logger.Error("failed to create zone manager", "error", err)
 		os.Exit(1)

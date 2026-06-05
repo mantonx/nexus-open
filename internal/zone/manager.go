@@ -18,6 +18,7 @@ import (
 	"github.com/nfnt/resize"
 	"gopkg.in/yaml.v3"
 
+	"github.com/mantonx/nexus-next/internal/store"
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
@@ -36,6 +37,7 @@ type Manager struct {
 	logger     *slog.Logger
 	config     *Config
 	configPath string
+	db         *store.DB // nil when running from YAML only (e.g. cmd binaries)
 	currentPage int
 	themeMu    sync.RWMutex // guards config.Theme live updates
 
@@ -93,10 +95,34 @@ type Zone struct {
 }
 
 // NewManager creates a new zone manager.
-func NewManager(ctx context.Context, logger *slog.Logger, configPath string) (*Manager, error) {
-	config, err := LoadConfig(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
+//
+// When db is non-nil the manager loads the layout from SQLite first; if the
+// DB contains no pages it falls back to fallbackYAMLPath and seeds the DB so
+// subsequent starts use the DB path. Pass nil for db (and any string for
+// fallbackYAMLPath) to operate in YAML-only mode (used by the cmd/ binaries).
+func NewManager(ctx context.Context, logger *slog.Logger, db *store.DB, fallbackYAMLPath string) (*Manager, error) {
+	var config *Config
+	var err error
+
+	if db != nil {
+		config, err = LoadConfigFromDB(db)
+		if err != nil {
+			// No layout in DB yet — seed from YAML then use that config.
+			logger.Info("zone: db has no layout, seeding from YAML", "path", fallbackYAMLPath)
+			config, err = LoadConfig(fallbackYAMLPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load fallback YAML config: %w", err)
+			}
+			if seedErr := seedDBFromConfig(db, config, logger); seedErr != nil {
+				// Non-fatal: log and continue with the YAML-loaded config.
+				logger.Warn("zone: failed to seed db from YAML (continuing with YAML)", "error", seedErr)
+			}
+		}
+	} else {
+		config, err = LoadConfig(fallbackYAMLPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load config: %w", err)
+		}
 	}
 
 	if err := config.Validate(); err != nil {
@@ -108,7 +134,8 @@ func NewManager(ctx context.Context, logger *slog.Logger, configPath string) (*M
 	m := &Manager{
 		logger:      logger,
 		config:      config,
-		configPath:  configPath,
+		configPath:  fallbackYAMLPath,
+		db:          db,
 		currentPage: 0,
 		zones:       make(map[string]*Zone),
 		renderers:   make(map[string]*Renderer),
@@ -132,6 +159,48 @@ func NewManager(ctx context.Context, logger *slog.Logger, configPath string) (*M
 	go m.preRenderAdjacentPages()
 
 	return m, nil
+}
+
+// seedDBFromConfig writes cfg into the layout tables in a single transaction.
+// This is called once on first run to bootstrap the DB from the bundled YAML.
+func seedDBFromConfig(db *store.DB, cfg *Config, logger *slog.Logger) error {
+	if cfg == nil || len(cfg.Pages) == 0 {
+		return nil
+	}
+
+	pages := make([]store.StoredPage, len(cfg.Pages))
+	zoneMap := make(map[int64][]store.StoredZone, len(cfg.Pages))
+
+	for i, p := range cfg.Pages {
+		pageID := int64(i + 1)
+		pages[i] = store.StoredPage{ID: pageID, Name: p.Name, Ord: i}
+
+		for j, z := range p.Zones {
+			sz := store.StoredZone{
+				ID:        z.ID,
+				PageID:    pageID,
+				Ord:       j,
+				WidthPx:   z.Width,
+				Plugin:    z.Plugin,
+				RefreshMs: z.RefreshMs,
+				Align:     string(z.Align),
+			}
+			if z.ThemeOverride != nil {
+				sz.ThemeJSON = map[string]any{
+					"accent": z.ThemeOverride.Accent,
+					"bg":     z.ThemeOverride.Bg,
+					"fg":     z.ThemeOverride.Fg,
+				}
+			}
+			zoneMap[pageID] = append(zoneMap[pageID], sz)
+		}
+	}
+
+	if err := db.ImportLayout(pages, zoneMap); err != nil {
+		return err
+	}
+	logger.Info("zone: layout seeded into db", "pages", len(pages))
+	return nil
 }
 
 // LoadConfig loads a zone configuration from YAML.
@@ -246,11 +315,22 @@ func (m *Manager) SetBackground(path string) error {
 	return nil
 }
 
-// Reload reloads the configuration from disk.
+// Reload reloads the configuration. When a DB is available it reloads from
+// the database; otherwise it falls back to the YAML file on disk.
 func (m *Manager) Reload() error {
-	config, err := LoadConfig(m.configPath)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+	var config *Config
+	var err error
+
+	if m.db != nil {
+		config, err = LoadConfigFromDB(m.db)
+		if err != nil {
+			return fmt.Errorf("failed to reload config from db: %w", err)
+		}
+	} else {
+		config, err = LoadConfig(m.configPath)
+		if err != nil {
+			return fmt.Errorf("failed to reload config from yaml: %w", err)
+		}
 	}
 
 	if err := config.Validate(); err != nil {
@@ -263,7 +343,7 @@ func (m *Manager) Reload() error {
 		return fmt.Errorf("failed to reinitialize page: %w", err)
 	}
 
-	m.logger.Info("configuration reloaded", "path", m.configPath)
+	m.logger.Info("configuration reloaded", "db", m.db != nil, "path", m.configPath)
 
 	return nil
 }

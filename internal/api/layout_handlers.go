@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -388,4 +389,36 @@ func (s *Server) validatePageWidth(pageID int64) error {
 		return nil // can't validate — don't block the operation
 	}
 	return store.ValidateZoneWidths(zones)
+}
+
+// handleLayoutExport exports the current live layout as a downloadable YAML file.
+// GET /api/layout/export
+func (s *Server) handleLayoutExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.layoutReloader == nil {
+		s.respondError(w, "Layout not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	cfg := s.layoutReloader.GetConfig()
+	if cfg == nil {
+		s.respondError(w, "No active layout", http.StatusInternalServerError)
+		return
+	}
+
+	data, err := zone.ExportConfigToYAML(cfg)
+	if err != nil {
+		s.logger.Error("layout export: marshal failed", "error", err)
+		s.respondError(w, "Failed to export layout: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.yaml"`, cfg.Name))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(data) //nolint:errcheck
 }

@@ -222,11 +222,11 @@ func (a *App) initialize() error {
 	a.apiServer.SetZoneConfigManager(a.zoneCfg)
 	a.logger.Info("zone config manager registered with API server")
 
-	// 5. Create zone manager
+	// 5. Create zone manager — loads from DB, falling back to YAML on first run.
 	if a.layoutPath == "" {
 		a.layoutPath = "configs/layouts/multi-page.yaml"
 	}
-	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, a.layoutPath)
+	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, a.store, a.layoutPath)
 	if err != nil {
 		return fmt.Errorf("failed to create zone manager: %w", err)
 	}
@@ -267,16 +267,6 @@ func (a *App) initialize() error {
 	a.apiServer.SetNavigator(a.zoneManager)
 	a.apiServer.SetLayoutStore(a.store)
 	a.apiServer.SetLayoutReloader(a.zoneManager)
-
-	// On first DB run, seed the layout tables from the YAML layout file so
-	// the editor has something to show immediately.
-	if a.store.IsFirstRun() {
-		if hasLayout, _ := a.store.HasLayout(); !hasLayout {
-			if err := importLayoutFromYAML(a.store, a.zoneManager.GetConfig(), a.logger); err != nil {
-				a.logger.Warn("layout import from YAML failed (continuing with YAML)", "error", err)
-			}
-		}
-	}
 
 	// Propagate display config from settings into the zone manager theme,
 	// both immediately on startup and on every subsequent Flutter UI save.
