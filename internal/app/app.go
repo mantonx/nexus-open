@@ -231,10 +231,13 @@ func (a *App) initialize() error {
 func (a *App) start() error {
 	a.logger.Debug("starting application components")
 
-	// Connect to device — store the error so the API can surface an actionable message.
+	// Attempt an immediate connection so the common case (device already
+	// plugged in) is instant. If it fails, a background loop keeps retrying
+	// so the device can be plugged in at any time without restarting the app.
 	if err := a.device.Connect(a.ctx); err != nil {
 		a.logger.Warn("failed to connect to device", "error", err)
 		a.apiServer.SetLastConnectError(err)
+		a.startDeviceWatcher()
 	}
 
 	// Start module sampler
@@ -265,6 +268,42 @@ func (a *App) start() error {
 	a.logger.Info("API server started")
 
 	return nil
+}
+
+// startDeviceWatcher polls for the device in the background until it connects.
+// Called when the initial connect attempt fails (device not plugged in yet).
+// Once connected, the device's own monitorConnection goroutine takes over.
+func (a *App) startDeviceWatcher() {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+
+		const pollInterval = 3 * time.Second
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+
+		a.logger.Info("device watcher started — waiting for device to be plugged in")
+
+		for {
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-ticker.C:
+				if a.device.IsConnected() {
+					// Already connected (monitorConnection handled a replug).
+					return
+				}
+				if err := a.device.Connect(a.ctx); err != nil {
+					a.logger.Debug("device not available, will retry", "error", err)
+					a.apiServer.SetLastConnectError(err)
+				} else {
+					a.logger.Info("device connected")
+					a.apiServer.SetLastConnectError(nil)
+					return
+				}
+			}
+		}
+	}()
 }
 
 // renderLoop continuously renders frames and sends them to the device.
