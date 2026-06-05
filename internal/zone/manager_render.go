@@ -247,11 +247,17 @@ func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
 	defer m.payloadsMu.RUnlock()
 
 	for _, zoneConfig := range page.Zones {
-		theme := m.config.Theme
-		if zoneConfig.ThemeOverride != nil {
-			theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
+		// Use live renderer if available (has correct ThemeOverride already applied).
+		var renderer *Renderer
+		if r, ok := m.renderers[zoneConfig.ID]; ok {
+			renderer = r
+		} else {
+			theme := m.config.Theme
+			if zoneConfig.ThemeOverride != nil {
+				theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
+			}
+			renderer = NewRenderer(m.logger, theme, zoneConfig.Width, DisplayHeight, zoneConfig.Align)
 		}
-		renderer := NewRenderer(m.logger, theme, zoneConfig.Width, DisplayHeight, zoneConfig.Align)
 		payload, ok := m.payloads[zoneConfig.ID]
 		if !ok {
 			payload = &module.Payload{Primary: "—", Severity: module.SeverityOK, Timestamp: time.Now()}
