@@ -114,12 +114,12 @@ func (a *App) Shutdown() error {
 		// device — they may be mid-write and still hold a reference.
 		a.wg.Wait()
 
-		// Send a blank frame before disconnecting. The Corsair firmware has no
-		// "release to native" command — it holds the last frame indefinitely.
-		// Sending black ensures the device looks clearly off rather than frozen
-		// on stale content.
+		// Send a blank frame so the device shows black rather than frozen content.
+		// The Corsair firmware has no "release to native" command and will reset
+		// on touch after shutdown — this is a firmware limitation with no
+		// software workaround on Linux.
 		if a.device != nil && a.device.IsConnected() {
-			blank := make([]byte, 640*48*4) // all zeros = black RGBA
+			blank := make([]byte, 640*48*4)
 			if err := a.device.SendFrame(context.Background(), blank); err != nil {
 				a.logger.Debug("failed to send blank frame on shutdown", "error", err)
 			}
