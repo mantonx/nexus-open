@@ -15,7 +15,9 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-const liveSwipePreviewThreshold = 0.24
+// liveSwipePreviewThreshold is the drag progress at which the target page
+// frame is swapped in. 0 = show immediately on first drag update.
+const liveSwipePreviewThreshold = 0.0
 
 // Manager manages zones, their renderers, and lifecycle
 type Manager struct {
@@ -1076,14 +1078,23 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 	m.liveSwipePreviewActive = false
 	m.liveSwipeMu.Unlock()
 
-	// Initialize the new page after the snap animation completes so the
-	// compositor rebuild doesn't corrupt frames mid-transition.
+	// Defer page init and sampler restart until after the snap animation so
+	// compositor rebuild doesn't corrupt mid-transition frames, and so the
+	// sampler restarts against the correct new zones (not stale old ones).
 	snapDuration := finalDuration
 	go func() {
 		time.Sleep(snapDuration + 10*time.Millisecond)
 		if err := m.initializePage(); err != nil {
 			m.logger.Error("failed to initialize page after swipe", "error", err)
 		}
+		// Notify sampler after page zones are initialized so it pushes real
+		// data into the right zones immediately (no Loading... flash).
+		if m.onPageChange != nil {
+			if err := m.onPageChange(targetPage); err != nil {
+				m.logger.Error("page change callback failed", "error", err)
+			}
+		}
+		go m.preRenderAdjacentPages()
 	}()
 
 	// Ensure the transition finishes with the real target frame (cache may have been stale)
@@ -1110,18 +1121,6 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 		}
 		m.transitionMu.Unlock()
 	}
-
-	// Notify page change callback if set (async)
-	if m.onPageChange != nil {
-		go func() {
-			if err := m.onPageChange(targetPage); err != nil {
-				m.logger.Error("page change callback failed", "error", err)
-			}
-		}()
-	}
-
-	// Pre-render adjacent pages in background
-	go m.preRenderAdjacentPages()
 
 	m.transitionMu.RLock()
 	postManualActive := m.transition.Active && m.transition.IsManual()
