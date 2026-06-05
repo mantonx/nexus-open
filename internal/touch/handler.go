@@ -64,7 +64,14 @@ func (h *Handler) Start(ctx context.Context) error {
 // HID reads are blocking — we run them in a tight loop without a ticker so
 // packets are processed as soon as they arrive rather than waiting for the
 // next poll interval (previously up to 50ms stale).
+//
+// On disconnect, the loop waits for the device to reconnect using exponential
+// backoff (1s→2s→4s…→30s) rather than exiting — touch resumes automatically
+// when the device is plugged back in without requiring an app restart.
 func (h *Handler) processLoop(ctx context.Context) {
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -75,10 +82,25 @@ func (h *Handler) processLoop(ctx context.Context) {
 
 		if err := h.processEvents(ctx); err != nil {
 			if err == ErrDeviceDisconnected {
-				h.logger.Warn("device disconnected, stopping touch processing")
-				return
+				h.logger.Warn("touch: device disconnected, waiting for reconnect",
+					"retry_in", backoff)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
+				if backoff < maxBackoff {
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+					}
+				}
+				continue
 			}
 			h.logger.Debug("touch processing error", "error", err)
+		} else {
+			// Successful read — reset backoff so a reconnect starts fresh.
+			backoff = time.Second
 		}
 	}
 }
@@ -93,7 +115,9 @@ func (h *Handler) processEvents(ctx context.Context) error {
 
 	events, err := h.device.ReadTouch(ctx)
 	if err != nil {
-		return err
+		// Any read error from a connected device means the device went away —
+		// treat it as a disconnect so the reconnect backoff loop fires.
+		return ErrDeviceDisconnected
 	}
 
 	for _, event := range events {
