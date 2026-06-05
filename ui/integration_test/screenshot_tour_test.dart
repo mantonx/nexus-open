@@ -3,19 +3,37 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:provider/provider.dart';
 import 'package:open_next/main.dart' as app;
+import 'package:open_next/src/models/settings_state.dart';
+
+// When NEXUS_WITH_BACKEND=1, the Go backend drives firstRun state via the
+// health endpoint — no need to force it manually.
+final _withBackend = Platform.environment['NEXUS_WITH_BACKEND'] == '1';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('screenshot tour — full app coverage', (tester) async {
     app.main();
-    // The WS service polls continuously so pumpAndSettle never settles.
-    // Use a fixed pump with a generous duration instead.
-    await tester.pump(const Duration(seconds: 2));
+    if (_withBackend) {
+      // Wait for the real HTTP round-trips (health + config) to complete.
+      // pumpAndSettle drains the frame queue after each pump until the tree
+      // is idle, which lets the async futures from SettingsState._initialize()
+      // resolve before we start navigating.
+      await tester.pumpAndSettle(const Duration(seconds: 10));
+    } else {
+      await tester.pump(const Duration(seconds: 2));
+    }
 
     // ── Onboarding ────────────────────────────────────────────────────────────
-    // Force first-run state by checking if onboarding is visible
+    final context = tester.element(find.byType(MaterialApp));
+    if (!_withBackend) {
+      // No backend: force onboarding manually so the tour covers that flow.
+      context.read<SettingsState>().forceFirstRun();
+    }
+    await tester.pump(const Duration(milliseconds: 400));
+
     final welcomeBtn = find.text('Get started');
     if (welcomeBtn.evaluate().isNotEmpty) {
       await _screenshot(tester, 'onboarding_welcome');
@@ -48,12 +66,6 @@ void main() {
     }
 
     // ── Settings tabs ─────────────────────────────────────────────────────────
-    // Pump until the rail nav items are visible — confirms settings page loaded
-    for (var i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 200));
-      if (find.byTooltip('Display & Colors').evaluate().isNotEmpty) break;
-    }
-
     final tabs = [
       ('Display & Colors', 'tab_display'),
       ('Location',         'tab_location'),
