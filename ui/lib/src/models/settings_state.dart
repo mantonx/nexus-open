@@ -14,9 +14,7 @@ class SettingsState extends ChangeNotifier {
 
   // Theme preference — persisted locally via shared_preferences
   ThemeMode _themeMode = ThemeMode.dark;
-  // FORCE_ONBOARDING dart-define seeds isFirstRun=true for screenshot tour
-  bool _isFirstRun =
-      bool.fromEnvironment('FORCE_ONBOARDING', defaultValue: false);
+  bool _isFirstRun = false;
 
   // Configuration
   NexusConfig? _config;
@@ -39,6 +37,13 @@ class SettingsState extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kThemeKey, mode.name);
+  }
+
+  /// Force onboarding to show — used by the screenshot tour via VM service.
+  // ignore: use_setters_to_change_properties
+  void forceFirstRun() {
+    _isFirstRun = true;
+    notifyListeners();
   }
 
   void setConnected(bool value) {

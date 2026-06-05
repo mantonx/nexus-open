@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -9,31 +11,36 @@ import 'src/theme/app_theme.dart';
 import 'src/widgets/onboarding/onboarding_overlay.dart';
 import 'src/widgets/settings/settings_page.dart';
 
-// Set --dart-define=FORCE_ONBOARDING=true to show onboarding unconditionally.
-// Used by the screenshot tour to capture onboarding screens without resetting
-// the backend's firstRun flag.
-const bool _forceOnboarding =
-    bool.fromEnvironment('FORCE_ONBOARDING', defaultValue: false);
+// Global key so VM service extensions can access the settings state
+final _appKey = GlobalKey<_OpenNextAppState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize window manager
   await windowManager.ensureInitialized();
 
-  // Set initial window options
-  WindowOptions windowOptions = const WindowOptions(
-    size: Size(800, 600),
-    center: true,
-    backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-    title: 'Nexus Open',
+  windowManager.waitUntilReadyToShow(
+    const WindowOptions(
+      size: Size(800, 600),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      title: 'Nexus Open',
+    ),
+    () async {
+      await windowManager.show();
+      await windowManager.focus();
+    },
   );
 
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
+  // Register VM service extension for screenshot tour — forces onboarding
+  // to show regardless of backend firstRun state. Debug builds only.
+  if (kDebugMode) {
+    developer.registerExtension('ext.nexus.showOnboarding', (_, __) async {
+      _appKey.currentState?._settings?.forceFirstRun();
+      return developer.ServiceExtensionResponse.result('{"status":"ok"}');
+    });
+  }
 
   runApp(
     MultiProvider(
@@ -41,7 +48,7 @@ void main() async {
         ChangeNotifierProvider(create: (_) => SettingsState()),
         ChangeNotifierProvider(create: (_) => WsService()),
       ],
-      child: const OpenNextApp(),
+      child: OpenNextApp(key: _appKey),
     ),
   );
 }
@@ -55,10 +62,12 @@ class OpenNextApp extends StatefulWidget {
 
 class _OpenNextAppState extends State<OpenNextApp> {
   StreamSubscription? _wsSub;
+  SettingsState? _settings;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _settings = context.read<SettingsState>();
     _wsSub?.cancel();
     _wsSub = context.read<WsService>().events.listen(_onWsEvent);
   }
