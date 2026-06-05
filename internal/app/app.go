@@ -281,20 +281,8 @@ func (a *App) initialize() error {
 	// Propagate display config from settings into the zone manager theme,
 	// both immediately on startup and on every subsequent Flutter UI save.
 	applySettingsTheme := func(cfg settings.Config) {
-		current := a.zoneManager.GetConfig().Theme
-		current.Bg = cfg.BackgroundColor
-		current.Fg = cfg.TextColor
-		// Accent is NOT overwritten from TextColor — it stays as the zone theme
-		// accent (cyan by default) which drives graph colours and severity tints.
-		if cfg.Display.FontSize > 0 {
-			current.FontSizePrimary = int(cfg.Display.FontSize)
-		}
-		if cfg.Display.TimeFontSize > 0 {
-			current.FontSizeSecondary = int(cfg.Display.TimeFontSize)
-		}
-		a.zoneManager.UpdateTheme(current)
-
-		// Apply background image/GIF if configured.
+		// Theme is defined entirely in the layout YAML (including per-zone
+		// ThemeOverride accents). Settings only controls the background image.
 		if cfg.BackgroundImage != "" && cfg.BackgroundImage != settings.DefaultBackgroundImage {
 			if dir, err := os.UserConfigDir(); err == nil {
 				imgPath := dir + "/nexus-open/images/" + cfg.BackgroundImage
