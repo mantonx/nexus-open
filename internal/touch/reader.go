@@ -75,6 +75,68 @@ func bFromDx(dx int) int {
 	return 2 // swipe right
 }
 
+// ===== Velocity trailing window =====
+
+// velSample is one position+time snapshot stored during a swipe.
+type velSample struct {
+	x float64
+	t time.Time
+}
+
+// velWindow holds the last velWindowSize samples for release-velocity estimation.
+// On lift we compute a weighted average over the window, weighting recent samples
+// more heavily — the same approach used by UIKit on iOS.
+const velWindowSize = 4
+
+type velWindow struct {
+	samples [velWindowSize]velSample
+	count   int // total samples written (wraps at velWindowSize)
+}
+
+func (w *velWindow) reset() { w.count = 0 }
+
+func (w *velWindow) push(x float64, t time.Time) {
+	w.samples[w.count%velWindowSize] = velSample{x, t}
+	w.count++
+}
+
+// velocity returns a weighted release velocity in pixels/second.
+// Weights are [1, 2, 3, 4] oldest-to-newest so the terminal motion dominates.
+// Returns 0 if fewer than 2 samples are available.
+func (w *velWindow) velocity() float64 {
+	n := w.count
+	if n > velWindowSize {
+		n = velWindowSize
+	}
+	if n < 2 {
+		return 0
+	}
+
+	// Samples are stored in a ring; oldest is at index (count % size) when full.
+	start := 0
+	if w.count > velWindowSize {
+		start = w.count % velWindowSize
+	}
+
+	var weightedSum, weightTotal float64
+	for i := 0; i < n-1; i++ {
+		a := w.samples[(start+i)%velWindowSize]
+		b := w.samples[(start+i+1)%velWindowSize]
+		dt := b.t.Sub(a.t).Seconds()
+		if dt <= 0 {
+			continue
+		}
+		// Weight increases linearly toward the most recent pair.
+		weight := float64(i + 1)
+		weightedSum += (b.x - a.x) / dt * weight
+		weightTotal += weight
+	}
+	if weightTotal == 0 {
+		return 0
+	}
+	return math.Abs(weightedSum / weightTotal)
+}
+
 // ===== HIDTouchReader: HID packet parsing + gesture engine =====
 
 type HIDTouchReader struct {
@@ -89,12 +151,16 @@ type HIDTouchReader struct {
 	// One-Euro filter for smoothing
 	euro oneEuro
 
+	// Velocity trailing window — last N position samples before lift
+	vel velWindow
+
 	// Gesture state
 	lastT       time.Time
 	downPrev    bool
 	pressT      time.Time
 	startX      int
 	swipeActive bool
+	maxRawSeen  int // tracks highest raw X seen — logged on first swipe to validate rawMax
 }
 
 // NewHIDTouchReader creates a new HID touch reader with velocity-aware smoothing
@@ -104,7 +170,7 @@ func NewHIDTouchReader(device *hid.Device, logger *slog.Logger) *HIDTouchReader 
 		logger:      logger,
 		screenWidth: 640,
 		rawMin:      0,
-		rawMax:      1023,
+		rawMax:      486, // observed device max — HID reports 10-bit coords in 0-486 range
 		euro: oneEuro{
 			minCutoff: 1.0,
 			beta:      0.007,
@@ -158,6 +224,10 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	rawX := int(buffer[6]) | (int(buffer[7]) << 8) // Little-endian
 	down := touchState != 0
 
+	if rawX > t.maxRawSeen {
+		t.maxRawSeen = rawX
+	}
+
 	now := time.Now()
 
 	// Calculate dt for smoothing
@@ -197,6 +267,8 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 		t.pressT = now
 		t.swipeActive = false
 		t.downPrev = true
+		t.vel.reset()
+		t.vel.push(float64(xi), now)
 		t.logger.Debug("touch press", "x", xi, "raw", rawX)
 		return events, nil
 	}
@@ -210,6 +282,7 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 		}
 
 		if t.swipeActive {
+			t.vel.push(float64(xi), now)
 			// Emit live swipe progress
 			prog := clamp01(float64(abs(dx)) / float64(t.screenWidth))
 			events = append(events, Event{
@@ -232,14 +305,12 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 		dur := now.Sub(t.pressT)
 
 		if t.swipeActive {
-			// Swipe completion
 			prog := clamp01(float64(abs(dx)) / float64(t.screenWidth))
-
-			// Calculate velocity in pixels/second
-			velocity := float32(0)
-			if dur.Seconds() > 0 {
-				velocity = float32(abs(dx)) / float32(dur.Seconds())
-			}
+			// Release velocity from the trailing window: weighted average of the
+			// last velWindowSize position samples, newest weighted most. This
+			// captures terminal finger speed regardless of swipe direction and
+			// eliminates the One-Euro filter's directional asymmetry.
+			velocity := float32(t.vel.velocity())
 
 			events = append(events, Event{
 				Button:        bFromDx(dx),
@@ -255,7 +326,9 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 				"dx", dx,
 				"progress", int(prog*100),
 				"duration_ms", dur.Milliseconds(),
-				"velocity_px_s", int(velocity))
+				"velocity_px_s", int(velocity),
+				"max_raw_x_seen", t.maxRawSeen,
+				"configured_raw_max", t.rawMax)
 		} else if abs(dx) < t.px(tapMaxMoveFrac) && dur <= tapMaxDur {
 			// Tap
 			events = append(events, Event{
