@@ -231,14 +231,16 @@ func (a *App) initialize() error {
 func (a *App) start() error {
 	a.logger.Debug("starting application components")
 
-	// Attempt an immediate connection so the common case (device already
-	// plugged in) is instant. If it fails, a background loop keeps retrying
-	// so the device can be plugged in at any time without restarting the app.
-	if err := a.device.Connect(a.ctx); err != nil {
-		a.logger.Warn("failed to connect to device", "error", err)
-		a.apiServer.SetLastConnectError(err)
-		a.startDeviceWatcher()
-	}
+	// Start the API server first so Flutter and health checks are available
+	// immediately — device connect can take several seconds on a slow replug.
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		if err := a.apiServer.Start(); err != nil {
+			a.logger.Error("API server error", "error", err)
+		}
+	}()
+	a.logger.Info("API server started")
 
 	// Start module sampler
 	if err := a.zoneSampler.Start(); err != nil {
@@ -257,15 +259,13 @@ func (a *App) start() error {
 	go a.renderLoop()
 	a.logger.Info("zone rendering started")
 
-	// Start API server in background
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-		if err := a.apiServer.Start(); err != nil {
-			a.logger.Error("API server error", "error", err)
-		}
-	}()
-	a.logger.Info("API server started")
+	// Attempt device connect after everything else is running. If it fails,
+	// the watcher retries every 3s so the device can be plugged in any time.
+	if err := a.device.Connect(a.ctx); err != nil {
+		a.logger.Warn("failed to connect to device", "error", err)
+		a.apiServer.SetLastConnectError(err)
+		a.startDeviceWatcher()
+	}
 
 	return nil
 }

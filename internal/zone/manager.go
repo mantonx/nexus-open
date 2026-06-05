@@ -349,7 +349,7 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	}
 
 	// Composite zones into display
-	frame, err := m.compositor.Composite(zoneImages)
+	frame, err := m.compositor.Composite(zoneImages, theme)
 	if err != nil {
 		return nil, fmt.Errorf("failed to composite frame: %w", err)
 	}
@@ -434,7 +434,7 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 		zoneImages[zoneID] = img
 	}
 
-	frame, err := m.compositor.Composite(zoneImages)
+	frame, err := m.compositor.Composite(zoneImages, theme)
 	if err != nil {
 		return nil, fmt.Errorf("failed to composite frame: %w", err)
 	}
@@ -629,9 +629,13 @@ func (m *Manager) preRenderPage(pageIndex int) {
 		zoneImages[zoneConfig.ID] = img
 	}
 
-	// Create temporary compositor for this page layout
-	compositor := NewCompositor(m.logger, m.config.Theme, &page)
-	frame, err := compositor.Composite(zoneImages)
+	// Snapshot theme so UpdateTheme changes are reflected in pre-rendered pages.
+	m.themeMu.RLock()
+	theme := m.config.Theme
+	m.themeMu.RUnlock()
+
+	compositor := NewCompositor(m.logger, theme, &page)
+	frame, err := compositor.Composite(zoneImages, theme)
 	if err != nil {
 		m.logger.Error("failed to pre-render page", "page", pageIndex, "error", err)
 		return
