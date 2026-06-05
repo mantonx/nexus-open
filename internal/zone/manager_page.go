@@ -210,19 +210,17 @@ func (m *Manager) SwitchPageWithTransition(pageIndex int, transitionType Transit
 		return fmt.Errorf("failed to initialize page: %w", err)
 	}
 
-	m.pageCacheMu.RLock()
-	newFrame, cached := m.pageCache[pageIndex]
-	m.pageCacheMu.RUnlock()
+	// Always render fresh after a page switch — the cache may have been built
+	// before this page's renderers were initialised with the correct themes.
+	// The cache is only used for the live swipe preview, not for the final frame.
+	m.pageCacheMu.Lock()
+	delete(m.pageCache, pageIndex)
+	m.pageCacheMu.Unlock()
 
-	if !cached {
-		m.logger.Debug("page not pre-rendered, rendering now", "page", pageIndex)
-		var err error
-		newFrame, err = m.renderImmediateFrameForCurrentPage()
-		if err != nil {
-			return fmt.Errorf("failed to render new frame: %w", err)
-		}
-	} else {
-		m.logger.Debug("using pre-rendered page from cache", "page", pageIndex)
+	var err error
+	newFrame, err := m.renderImmediateFrameForCurrentPage()
+	if err != nil {
+		return fmt.Errorf("failed to render new frame: %w", err)
 	}
 
 	if oldFrame != nil && transitionType != TransitionNone {
