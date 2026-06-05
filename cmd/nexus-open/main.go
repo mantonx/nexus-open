@@ -20,6 +20,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"syscall"
 
 	"github.com/mantonx/nexus-next/internal/app"
@@ -58,6 +60,16 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	}
+
+	// Write PID file so restart scripts can kill the exact previous instance
+	// without accumulating stale processes. Cleaned up automatically on exit.
+	if pidFile := pidFilePath(); pidFile != "" {
+		if err := writePIDFile(pidFile); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write PID file: %v\n", err)
+		} else {
+			defer os.Remove(pidFile)
+		}
 	}
 
 	// Set up logging — NEXUS_DEBUG=1 enables debug level without editing config files
@@ -138,4 +150,31 @@ func main() {
 	}
 
 	logger.Info("shutdown complete")
+}
+
+// pidFilePath returns the PID file path under $XDG_RUNTIME_DIR (or /tmp as
+// fallback). Returns empty string if no suitable directory is available.
+func pidFilePath() string {
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" {
+		dir = filepath.Join(os.TempDir(), fmt.Sprintf("nexus-open-%d", os.Getuid()))
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return ""
+		}
+	}
+	return filepath.Join(dir, "nexus-open.pid")
+}
+
+// writePIDFile writes the current process PID to path, killing any previous
+// instance recorded there so only one nexus-open holds the device at a time.
+func writePIDFile(path string) error {
+	// If a previous PID file exists, send SIGTERM to that process first.
+	if data, err := os.ReadFile(path); err == nil {
+		if prev, err := strconv.Atoi(string(data)); err == nil && prev > 0 {
+			if proc, err := os.FindProcess(prev); err == nil {
+				proc.Signal(syscall.SIGTERM)
+			}
+		}
+	}
+	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0644)
 }
