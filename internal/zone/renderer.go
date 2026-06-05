@@ -31,6 +31,11 @@ type Renderer struct {
 }
 
 // NewRenderer creates a new zone renderer
+// UpdateTheme replaces the renderer's theme for all subsequent Render calls.
+func (r *Renderer) UpdateTheme(theme Theme) {
+	r.theme = theme
+}
+
 func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alignment) *Renderer {
 	r := &Renderer{
 		logger: logger,
