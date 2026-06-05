@@ -3,45 +3,38 @@
 Tracked improvements identified after the June 2026 swipe tuning session.
 Ordered by impact.
 
+**Status as of 2026-06-05:** Items 1–4 are fully implemented. See notes below.
+
 ---
 
 ## High Impact
 
-### 1. Velocity via trailing window
-**File:** `internal/touch/reader.go:240-252`
+### 1. Velocity via trailing window ✅
+**File:** `internal/touch/reader.go` — `velWindow` type
 
-Release velocity currently uses `max(instantaneous, average)` — a workaround for
-the One-Euro filter's directional asymmetry (left flicks read ~2000 px/s, right
-~400-600). The root fix is a proper 4-sample weighted average of the last few HID
-packets before finger lift, weighted toward the most recent sample. This is how
-iOS calculates release velocity and it would eliminate the asymmetry without the
-max() hack.
+4-sample weighted average (`velWindow.velocity()`), newest sample weighted 4×.
+Eliminates One-Euro directional asymmetry. Implemented.
 
-### 2. Spring physics for the snap animation
-**File:** `internal/zone/transition.go:108-140` (`AnimateManualTo`)
+### 2. Spring physics for the snap animation ✅
+**File:** `internal/zone/transition.go` — `tickSpring()`
 
-The finalize snap uses a fixed-duration `easeOutCubic` from current position to
-1.0. A spring model (`velocity += (target - pos) * stiffness - velocity * damping;
-pos += velocity * dt`) would carry the finger's actual momentum into the snap and
-decelerate organically. This is the single biggest felt difference between our
-transitions and iOS — content feels like it has mass.
+Semi-implicit Euler spring: stiffness=400, damping=36 (slightly under-damped).
+Release velocity seeded from `FinalizeLiveSwipe`. Snap duration is emergent.
+Implemented.
 
-### 3. Direction change mid-swipe
-**File:** `internal/zone/manager.go:820` (`UpdateLiveSwipe`)
+### 3. Direction change mid-swipe ✅
+**File:** `internal/zone/manager.go` — `UpdateLiveSwipe()` lines ~1006–1030
 
-`liveSwipeLeft` locks to the direction at first touch and never updates. If the
-user starts swiping right then reverses before lifting, we commit to the wrong
-page. Should update direction from the current signed `dx` on each
-`UpdateLiveSwipe` call (while keeping the original direction for the "started"
-frame setup).
+On direction flip, swaps `OldFrame`/`NewFrame`, flips `TransitionType`, mirrors
+progress around 0.5. Tested in `TestFinalizeLiveSwipeIgnoresDirectionJitter`.
+Implemented.
 
-### 4. Rubber-band at page boundaries
-**File:** `internal/zone/manager.go:840` (`UpdateLiveSwipe`)
+### 4. Rubber-band at page boundaries ✅
+**File:** `internal/zone/manager.go` — `UpdateLiveSwipe()` lines ~995–999
 
-Swiping right on page 0 (or left on the last page) currently wraps to the other
-end silently. Should instead show elastic resistance: scale reported progress by a
-decay factor (e.g. `resistance = progress * 0.3`) and always cancel on lift,
-never committing a boundary-wrap swipe.
+`liveSwipeBoundary` flag set on first packet. Progress scaled by `sqrt(p)*0.25`
+for elastic resistance. Always cancelled on lift (never commits a boundary wrap).
+Implemented.
 
 ---
 

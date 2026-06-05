@@ -5,22 +5,22 @@ import '../../../services/ws_service.dart';
 import '../../../theme/app_tokens.dart';
 import '../../common/common.dart';
 
-class ModulesTab extends StatefulWidget {
-  const ModulesTab({super.key});
+class PluginsTab extends StatefulWidget {
+  const PluginsTab({super.key});
 
   @override
-  State<ModulesTab> createState() => _ModulesTabState();
+  State<PluginsTab> createState() => _PluginsTabState();
 }
 
-class _ModulesTabState extends State<ModulesTab> {
+class _PluginsTabState extends State<PluginsTab> {
   final _api = NexusApiService();
   final Map<String, Map<String, dynamic>> _configs = {};
   final Map<String, String?> _errors = {};
   final Map<String, Map<String, String>> _statuses = {};
   bool _loading = true;
 
-  static const _knownModules = [
-    _ModuleDef(
+  static const _knownPlugins = [
+    _PluginDef(
       zoneId: 'system.cpu',
       label: 'CPU',
       sublabel: 'Temperature',
@@ -32,7 +32,7 @@ class _ModulesTabState extends State<ModulesTab> {
             options: ['sparkline', 'bar', 'area']),
       ],
     ),
-    _ModuleDef(
+    _PluginDef(
       zoneId: 'system.gpu',
       label: 'GPU',
       sublabel: 'Temperature',
@@ -44,7 +44,7 @@ class _ModulesTabState extends State<ModulesTab> {
             options: ['sparkline', 'bar', 'area', 'line']),
       ],
     ),
-    _ModuleDef(
+    _PluginDef(
       zoneId: 'system.weather',
       label: 'Weather',
       sublabel: 'Conditions',
@@ -55,7 +55,7 @@ class _ModulesTabState extends State<ModulesTab> {
             options: ['metric', 'imperial']),
       ],
     ),
-    _ModuleDef(
+    _PluginDef(
       zoneId: 'system.network',
       label: 'Network',
       sublabel: 'Throughput',
@@ -77,15 +77,15 @@ class _ModulesTabState extends State<ModulesTab> {
 
   Future<void> _loadAll() async {
     setState(() => _loading = true);
-    for (final mod in _knownModules) {
+    for (final plugin in _knownPlugins) {
       try {
-        final cfg = await _api.getModuleConfig(mod.zoneId);
-        _configs[mod.zoneId] = cfg;
-        _errors[mod.zoneId] = null;
+        final cfg = await _api.getPluginConfig(plugin.zoneId);
+        _configs[plugin.zoneId] = cfg;
+        _errors[plugin.zoneId] = null;
       } catch (e) {
-        _errors[mod.zoneId] = e.toString();
+        _errors[plugin.zoneId] = e.toString();
       }
-      await _refreshStatus(mod.zoneId);
+      await _refreshStatus(plugin.zoneId);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -105,7 +105,7 @@ class _ModulesTabState extends State<ModulesTab> {
       _errors[zoneId] = null;
     });
     try {
-      await _api.updateModuleConfig(zoneId, current);
+      await _api.updatePluginConfig(zoneId, current);
     } catch (e) {
       if (mounted) setState(() => _errors[zoneId] = e.toString());
     }
@@ -132,7 +132,7 @@ class _ModulesTabState extends State<ModulesTab> {
       padding: AppSpacing.paddingMd,
       children: [
         _TabHeader(
-          title: 'Modules',
+          title: 'Plugins',
           description: 'Changes apply live — no save needed.',
           trailing: !ws.isConnected
               ? NexusStatusBadge(status: NexusStatus.warning, label: 'Not connected')
@@ -146,16 +146,16 @@ class _ModulesTabState extends State<ModulesTab> {
             Expanded(
               child: Column(
                 children: [
-                  for (final mod in _knownModules.asMap().entries
+                  for (final plugin in _knownPlugins.asMap().entries
                       .where((e) => e.key.isEven)
                       .map((e) => e.value))
-                    _ModuleCard(
-                      mod: mod,
-                      config: _configs[mod.zoneId] ?? {},
-                      error: _errors[mod.zoneId],
-                      zoneStatus: _statuses[mod.zoneId],
+                    _PluginCard(
+                      plugin: plugin,
+                      config: _configs[plugin.zoneId] ?? {},
+                      error: _errors[plugin.zoneId],
+                      zoneStatus: _statuses[plugin.zoneId],
                       enabled: ws.isConnected,
-                      onChanged: (k, v) => _updateKey(mod.zoneId, k, v),
+                      onChanged: (k, v) => _updateKey(plugin.zoneId, k, v),
                     ),
                 ],
               ),
@@ -164,16 +164,16 @@ class _ModulesTabState extends State<ModulesTab> {
             Expanded(
               child: Column(
                 children: [
-                  for (final mod in _knownModules.asMap().entries
+                  for (final plugin in _knownPlugins.asMap().entries
                       .where((e) => e.key.isOdd)
                       .map((e) => e.value))
-                    _ModuleCard(
-                      mod: mod,
-                      config: _configs[mod.zoneId] ?? {},
-                      error: _errors[mod.zoneId],
-                      zoneStatus: _statuses[mod.zoneId],
+                    _PluginCard(
+                      plugin: plugin,
+                      config: _configs[plugin.zoneId] ?? {},
+                      error: _errors[plugin.zoneId],
+                      zoneStatus: _statuses[plugin.zoneId],
                       enabled: ws.isConnected,
-                      onChanged: (k, v) => _updateKey(mod.zoneId, k, v),
+                      onChanged: (k, v) => _updateKey(plugin.zoneId, k, v),
                     ),
                 ],
               ),
@@ -185,11 +185,11 @@ class _ModulesTabState extends State<ModulesTab> {
   }
 }
 
-// ── Module card ───────────────────────────────────────────────────────────────
+// ── Plugin card ───────────────────────────────────────────────────────────────
 
-class _ModuleCard extends StatefulWidget {
-  const _ModuleCard({
-    required this.mod,
+class _PluginCard extends StatefulWidget {
+  const _PluginCard({
+    required this.plugin,
     required this.config,
     required this.error,
     required this.enabled,
@@ -197,7 +197,7 @@ class _ModuleCard extends StatefulWidget {
     this.zoneStatus,
   });
 
-  final _ModuleDef mod;
+  final _PluginDef plugin;
   final Map<String, dynamic> config;
   final String? error;
   final Map<String, String>? zoneStatus;
@@ -205,10 +205,10 @@ class _ModuleCard extends StatefulWidget {
   final void Function(String key, String value) onChanged;
 
   @override
-  State<_ModuleCard> createState() => _ModuleCardState();
+  State<_PluginCard> createState() => _PluginCardState();
 }
 
-class _ModuleCardState extends State<_ModuleCard> {
+class _PluginCardState extends State<_PluginCard> {
   bool _expanded = false;
 
   @override
@@ -228,7 +228,7 @@ class _ModuleCardState extends State<_ModuleCard> {
           : widget.error != null
               ? theme.colorScheme.critical
               : null,
-      onTap: widget.mod.keys.isNotEmpty
+      onTap: widget.plugin.keys.isNotEmpty
           ? () => setState(() => _expanded = !_expanded)
           : null,
       child: Column(
@@ -237,16 +237,16 @@ class _ModuleCardState extends State<_ModuleCard> {
           // Header row
           Row(
             children: [
-              Icon(widget.mod.icon,
+              Icon(widget.plugin.icon,
                   size: AppIconSize.md, color: AppColors.accent),
               const SizedBox(width: AppSpacing.xs),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.mod.label,
+                    Text(widget.plugin.label,
                         style: theme.textTheme.titleSmall),
-                    Text(widget.mod.sublabel,
+                    Text(widget.plugin.sublabel,
                         style: theme.textTheme.labelSmall),
                   ],
                 ),
@@ -273,7 +273,7 @@ class _ModuleCardState extends State<_ModuleCard> {
           ],
 
           // Expand indicator
-          if (widget.mod.keys.isNotEmpty) ...[
+          if (widget.plugin.keys.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -295,11 +295,11 @@ class _ModuleCardState extends State<_ModuleCard> {
           ],
 
           // Controls (shown when expanded)
-          if (_expanded && widget.mod.keys.isNotEmpty) ...[
+          if (_expanded && widget.plugin.keys.isNotEmpty) ...[
             const Divider(height: AppSpacing.md),
-            for (final key in widget.mod.keys) ...[
+            for (final key in widget.plugin.keys) ...[
               _buildControl(context, key),
-              if (key != widget.mod.keys.last)
+              if (key != widget.plugin.keys.last)
                 const SizedBox(height: AppSpacing.sm),
             ],
           ],
@@ -403,13 +403,13 @@ class _TabHeader extends StatelessWidget {
   }
 }
 
-class _ModuleDef {
+class _PluginDef {
   final String zoneId;
   final String label;
   final String sublabel;
   final IconData icon;
   final List<_ConfigKey> keys;
-  const _ModuleDef({
+  const _PluginDef({
     required this.zoneId,
     required this.label,
     required this.sublabel,

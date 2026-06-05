@@ -10,6 +10,7 @@ import (
 	"time"
 
 	settings "github.com/mantonx/nexus-next/internal/settings"
+	"github.com/mantonx/nexus-next/internal/store"
 	"github.com/mantonx/nexus-next/internal/zone"
 )
 
@@ -38,6 +39,37 @@ type SwipeSimulator interface {
 	CancelLiveSwipe() error
 }
 
+// Navigator is the subset of zone.Manager needed for page navigation from the UI.
+type Navigator interface {
+	GetCurrentPage() int
+	NumPages() int
+	GetPageInfos() []zone.PageInfo
+	SwitchPage(pageIndex int) error
+}
+
+// LayoutEditor is the subset of interfaces needed to edit the live layout.
+// The store and zone manager are wired separately so neither depends on the other.
+type LayoutStore interface {
+	GetPages() ([]store.StoredPage, error)
+	GetZonesForPage(pageID int64) ([]store.StoredZone, error)
+	GetFullLayout() ([]store.StoredPage, map[int64][]store.StoredZone, error)
+	CreatePage(name string, ord int) (int64, error)
+	UpdatePage(id int64, name string, ord int) error
+	DeletePage(id int64) error
+	ReorderPages(order []int64) error
+	CreateZone(z store.StoredZone) error
+	UpdateZone(z store.StoredZone) error
+	DeleteZone(id string) error
+	ReorderZones(pageID int64, order []string) error
+	HasLayout() (bool, error)
+}
+
+type LayoutReloader interface {
+	ReloadFromConfig(config *zone.Config) error
+	GetConfig() *zone.Config
+	NumPages() int
+}
+
 // Server manages the HTTP API server.
 type Server struct {
 	server          *http.Server
@@ -48,6 +80,9 @@ type Server struct {
 	zoneNotifier    ZoneConfigNotifier
 	zoneStatus      ZoneStatusProvider
 	swipeSim        SwipeSimulator       // for /api/debug/swipe
+	navigator       Navigator            // for /api/navigate/page
+	layoutStore     LayoutStore          // for /api/layout/*
+	layoutReloader  LayoutReloader       // for live reloads after layout edits
 	windowState     string               // "shown" or "hidden"
 	windowStateCh   chan string
 	hub             *hub
@@ -143,6 +178,37 @@ func (s *Server) SetZoneStatusProvider(p ZoneStatusProvider) {
 	s.zoneStatus = p
 }
 
+// SetNavigator wires in the zone manager for page navigation.
+func (s *Server) SetNavigator(n Navigator) {
+	s.navigator = n
+}
+
+// SetLayoutStore wires in the store for layout CRUD.
+func (s *Server) SetLayoutStore(ls LayoutStore) {
+	s.layoutStore = ls
+}
+
+// SetLayoutReloader wires in the zone manager for live layout reloads.
+func (s *Server) SetLayoutReloader(lr LayoutReloader) {
+	s.layoutReloader = lr
+}
+
+// BroadcastPageState sends current page index and page list to all WS clients.
+// Called by the app's render loop whenever the page changes.
+func (s *Server) BroadcastPageState() {
+	if s.navigator == nil {
+		return
+	}
+	s.hub.Broadcast(WSMessage{
+		Type: "page_state",
+		Data: map[string]any{
+			"current_page": s.navigator.GetCurrentPage(),
+			"num_pages":    s.navigator.NumPages(),
+			"pages":        s.navigator.GetPageInfos(),
+		},
+	})
+}
+
 // registerRoutes sets up all API endpoints.
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// API endpoints
@@ -153,8 +219,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/images/{filename}", s.handleServeImage)
 	mux.HandleFunc("/api/images", s.handleListImages)
 
-	// Zone and module config endpoints
-	mux.HandleFunc("/api/modules/", s.handleModuleConfig)
+	// Zone and plugin config endpoints
+	mux.HandleFunc("/api/plugins/", s.handlePluginConfig)
 	mux.HandleFunc("/api/zones/", s.handleZones)
 	mux.HandleFunc("/api/zones/{id}/status", s.handleZoneStatus)
 
@@ -170,8 +236,26 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
 
+	// Layout editor endpoints
+	mux.HandleFunc("/api/layout", s.handleGetLayout)
+	mux.HandleFunc("/api/layout/pages", s.handleLayoutPages)
+	mux.HandleFunc("/api/layout/pages/reorder", s.handleReorderPages)
+	mux.HandleFunc("/api/layout/pages/", s.handleLayoutPage)
+	mux.HandleFunc("/api/layout/zones", s.handleCreateZone)
+	mux.HandleFunc("/api/layout/zones/reorder", s.handleReorderZones)
+	mux.HandleFunc("/api/layout/zones/", s.handleLayoutZone)
+
 	// Debug endpoints — swipe simulation for tuning transition parameters
 	mux.HandleFunc("/api/debug/swipe", s.handleDebugSwipe)
+
+	// Preview navigation — page switching from Flutter UI
+	mux.HandleFunc("/api/navigate/page", s.handleNavigatePage)
+	mux.HandleFunc("/api/navigate/state", s.handleNavigateState)
+
+	// Interactive drag endpoints — called on every drag frame from Flutter preview
+	mux.HandleFunc("/api/debug/swipe/update", s.handleSwipeUpdate)
+	mux.HandleFunc("/api/debug/swipe/finalize", s.handleSwipeFinalize)
+	mux.HandleFunc("/api/debug/swipe/cancel", s.handleSwipeCancel)
 
 	// OpenAPI 3.0 spec endpoints
 	mux.HandleFunc("/openapi.yaml", s.handleOpenAPISpec)

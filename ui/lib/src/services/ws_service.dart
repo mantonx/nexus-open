@@ -18,6 +18,37 @@ class WsWindowStateEvent extends WsEvent {
   WsWindowStateEvent(this.state);
 }
 
+class WsZoneInfo {
+  final String id;
+  final int width;
+  const WsZoneInfo({required this.id, required this.width});
+  factory WsZoneInfo.fromJson(Map<String, dynamic> j) =>
+      WsZoneInfo(id: j['id'] as String, width: j['width'] as int);
+}
+
+class WsPageInfo {
+  final String name;
+  final List<WsZoneInfo> zones;
+  const WsPageInfo({required this.name, required this.zones});
+  factory WsPageInfo.fromJson(Map<String, dynamic> j) => WsPageInfo(
+        name: j['name'] as String,
+        zones: (j['zones'] as List<dynamic>)
+            .map((z) => WsZoneInfo.fromJson(z as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class WsPageStateEvent extends WsEvent {
+  final int currentPage;
+  final int numPages;
+  final List<WsPageInfo> pages;
+  WsPageStateEvent({
+    required this.currentPage,
+    required this.numPages,
+    required this.pages,
+  });
+}
+
 class WsConnectedEvent extends WsEvent {}
 
 class WsDisconnectedEvent extends WsEvent {}
@@ -93,6 +124,15 @@ class WsService extends ChangeNotifier {
           _controller.add(WsFrameEvent(bytes));
         case 'window_state':
           _controller.add(WsWindowStateEvent(data as String));
+        case 'page_state':
+          final d = data as Map<String, dynamic>;
+          _controller.add(WsPageStateEvent(
+            currentPage: d['current_page'] as int,
+            numPages: d['num_pages'] as int,
+            pages: (d['pages'] as List<dynamic>)
+                .map((p) => WsPageInfo.fromJson(p as Map<String, dynamic>))
+                .toList(),
+          ));
       }
     } catch (_) {
       // Malformed message — ignore.

@@ -330,12 +330,13 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 				"max_raw_x_seen", t.maxRawSeen,
 				"configured_raw_max", t.rawMax)
 		} else if abs(dx) < t.px(tapMaxMoveFrac) && dur <= tapMaxDur {
-			// Tap
+			// Tap — xi is the smoothed display-pixel X position (0–screenWidth-1).
 			events = append(events, Event{
 				Button:    0,
 				Pressed:   false,
 				Duration:  dur,
 				Timestamp: now,
+				TapX:      xi,
 			})
 			t.logger.Info("tap detected", "x", xi, "duration_ms", dur.Milliseconds())
 		} else {

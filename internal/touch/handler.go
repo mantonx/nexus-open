@@ -142,7 +142,7 @@ func (h *Handler) handleEvent(event Event) {
 	switch event.Button {
 	case 0: // Tap gesture
 		if h.tapEnabled {
-			h.handleTap()
+			h.handleTap(event)
 		}
 	case 1: // Swipe left (completed)
 		if h.swipeEnabled {
@@ -157,20 +157,42 @@ func (h *Handler) handleEvent(event Event) {
 	}
 }
 
-// handleTap processes a tap gesture.
-func (h *Handler) handleTap() {
-	h.logger.Debug("tap gesture detected")
+// handleTap routes a tap to the zone at event.TapX and executes its OnTap action.
+func (h *Handler) handleTap(event Event) {
+	tapX := event.TapX
 
-	// For now, taps cycle through zones or trigger zone-specific actions
-	// In the future, this could be position-aware to detect which zone was tapped
+	cfg := h.zoneManager.GetConfig()
+	pageIdx := h.zoneManager.GetCurrentPage()
+	if pageIdx >= len(cfg.Pages) {
+		return
+	}
+	page := cfg.Pages[pageIdx]
+	page.ComputeOffsets()
 
-	// Example: Cycle to next page on tap (simple behavior)
-	// In production, you'd want to:
-	// 1. Determine which zone was tapped based on X coordinate
-	// 2. Execute that zone's TapAction (cycle modules, trigger action, etc.)
+	// Find which zone contains tapX.
+	for _, z := range page.Zones {
+		if tapX >= z.X && tapX < z.X+z.Width {
+			h.logger.Info("tap on zone", "zone", z.ID, "x", tapX, "action", z.OnTap)
+			h.executeTapAction(z)
+			return
+		}
+	}
+	h.logger.Debug("tap outside all zones", "x", tapX)
+}
 
-	// For now, just log it
-	h.logger.Info("tap detected - zone-specific action would go here")
+// executeTapAction runs the configured OnTap action for a zone.
+func (h *Handler) executeTapAction(z zone.ZoneConfig) {
+	switch z.OnTap {
+	case zone.TapActionCycle:
+		// Cycle the zone to its next module choice.
+		if err := h.zoneManager.CycleZoneModule(z.ID); err != nil {
+			h.logger.Warn("cycle zone module failed", "zone", z.ID, "error", err)
+		}
+	case zone.TapActionNone, "":
+		// No action configured — silently ignore.
+	default:
+		h.logger.Debug("unknown tap action", "zone", z.ID, "action", z.OnTap)
+	}
 }
 
 // handleLiveSwipe processes live swipe progress events.

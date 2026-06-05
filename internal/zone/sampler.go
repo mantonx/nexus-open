@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/mantonx/nexus-next/internal/modules/builtin"
-	"github.com/mantonx/nexus-next/internal/plugin"
+	pluginhost "github.com/mantonx/nexus-next/internal/module/host"
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
@@ -23,10 +23,10 @@ type ZoneStatus struct {
 type Sampler struct {
 	logger            *slog.Logger
 	manager           *Manager
-	pluginHost        *plugin.Host
+	pluginHost        *pluginhost.Host
 	zoneCfg           *ConfigManager
-	modules           map[string]module.Module // zoneID -> module instance
-	builtins          map[string]module.Module // Built-in modules by name
+	modules           map[string]module.Plugin // zoneID -> plugin instance
+	builtins          map[string]module.Plugin // Built-in plugins by name
 	cancelFuncs       map[string]context.CancelFunc
 	mu                sync.RWMutex
 	ctx               context.Context
@@ -34,7 +34,7 @@ type Sampler struct {
 	wg                sync.WaitGroup
 	zoneStartTimes    map[string]time.Time
 	firstSampleLogged map[string]bool
-	moduleSpec        map[string]string
+	pluginSpec        map[string]string
 	firstSampleMu     sync.Mutex
 	triggerChannels   map[string]chan struct{} // zoneID -> trigger channel for immediate sampling
 	zoneErrors        map[string]ZoneStatus   // zoneID -> last known status
@@ -49,15 +49,15 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 		logger:            logger,
 		manager:           manager,
 		zoneCfg:           zoneCfg,
-		pluginHost:        plugin.NewHost(logger),
-		modules:           make(map[string]module.Module),
-		builtins:          make(map[string]module.Module),
+		pluginHost:        pluginhost.NewHost(logger),
+		modules:           make(map[string]module.Plugin),
+		builtins:          make(map[string]module.Plugin),
 		cancelFuncs:       make(map[string]context.CancelFunc),
 		ctx:               ctx,
 		cancel:            cancel,
 		zoneStartTimes:    make(map[string]time.Time),
 		firstSampleLogged: make(map[string]bool),
-		moduleSpec:        make(map[string]string),
+		pluginSpec:        make(map[string]string),
 		triggerChannels:   make(map[string]chan struct{}),
 		zoneErrors:        make(map[string]ZoneStatus),
 	}
@@ -89,7 +89,7 @@ func (s *Sampler) Start() error {
 		if err := s.startZoneSampling(zoneConfig); err != nil {
 			s.logger.Error("failed to start zone sampling",
 				"zone_id", zoneConfig.ID,
-				"module", zoneConfig.Module,
+				"module", zoneConfig.Plugin,
 				"error", err)
 			// Continue with other zones
 		}
@@ -104,8 +104,8 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	defer s.mu.Unlock()
 
 	// Parse module specification
-	moduleSpec := zoneConfig.Module
-	var mod module.Module
+	moduleSpec := zoneConfig.Plugin
+	var mod module.Plugin
 	var err error
 
 	if strings.HasPrefix(moduleSpec, "builtin:") {
@@ -120,11 +120,11 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	} else if strings.HasPrefix(moduleSpec, "exec:") {
 		// External plugin module
 		modPath := strings.TrimPrefix(moduleSpec, "exec:")
-		mod, err = s.pluginHost.LaunchModule(s.ctx, zoneConfig.ID, modPath)
+		mod, err = s.pluginHost.LaunchPlugin(s.ctx, zoneConfig.ID, modPath)
 		if err != nil {
-			return fmt.Errorf("failed to launch plugin: %w", err)
+			return fmt.Errorf("failed to launch module: %w", err)
 		}
-		s.logger.Info("launched plugin module", "zone_id", zoneConfig.ID, "path", modPath)
+		s.logger.Info("launched module", "zone_id", zoneConfig.ID, "path", modPath)
 	} else {
 		return fmt.Errorf("invalid module specification: %s", moduleSpec)
 	}
@@ -133,12 +133,12 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	s.modules[zoneConfig.ID] = mod
 	s.zoneStartTimes[zoneConfig.ID] = time.Now()
 	s.firstSampleLogged[zoneConfig.ID] = false
-	s.moduleSpec[zoneConfig.ID] = moduleSpec
+	s.pluginSpec[zoneConfig.ID] = moduleSpec
 
 	// Send zone config to module (if available and module supports it)
 	if s.zoneCfg != nil {
 		if config := s.zoneCfg.Get(zoneConfig.ID, moduleSpec); config != nil {
-			if notifier, ok := module.SupportsConfigNotification(mod); ok {
+			if notifier, ok := module.SupportsPluginConfig(mod); ok {
 				if err := notifier.OnConfigChanged(config); err != nil {
 					s.logger.Warn("failed to apply initial zone config",
 						"zone_id", zoneConfig.ID,
@@ -169,7 +169,7 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 }
 
 // sampleLoop periodically samples a module and updates the zone
-func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod module.Module, interval time.Duration) {
+func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod module.Plugin, interval time.Duration) {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(interval)
@@ -201,7 +201,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod module.Modu
 }
 
 // sampleOnce samples a module once and updates the zone
-func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod module.Module) {
+func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod module.Plugin) {
 	// Sample with timeout (longer for network-dependent modules like weather)
 	// Use parent context so cancellation is respected
 	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
@@ -308,7 +308,7 @@ func (s *Sampler) recordFirstSample(zoneID string) {
 	}
 
 	latency := time.Since(start)
-	moduleSpec := s.moduleSpec[zoneID]
+	moduleSpec := s.pluginSpec[zoneID]
 	s.firstSampleLogged[zoneID] = true
 	if latency < 0 {
 		latency = 0
@@ -338,7 +338,22 @@ func (s *Sampler) Stop() {
 	// Wait for all goroutines to finish
 	s.wg.Wait()
 
-	// Shutdown plugin host
+	// Stop all external module subprocesses
+}
+
+// RestartZone stops and restarts sampling for a single zone with a new module spec.
+// Used when a tap action cycles the zone to its next module choice.
+func (s *Sampler) RestartZone(zoneConfig ZoneConfig) error {
+	s.mu.Lock()
+	if cancel, ok := s.cancelFuncs[zoneConfig.ID]; ok {
+		cancel()
+		delete(s.cancelFuncs, zoneConfig.ID)
+		delete(s.modules, zoneConfig.ID)
+		delete(s.pluginSpec, zoneConfig.ID)
+	}
+	s.mu.Unlock()
+
+	return s.startZoneSampling(zoneConfig)
 }
 
 // RestartForPage restarts sampling for a new page.
@@ -360,7 +375,7 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 		delete(s.modules, zoneID)
 		delete(s.zoneStartTimes, zoneID)
 		delete(s.firstSampleLogged, zoneID)
-		delete(s.moduleSpec, zoneID)
+		delete(s.pluginSpec, zoneID)
 	}
 	s.mu.Unlock()
 
@@ -378,12 +393,12 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 }
 
 // applyInitialZoneConfig notifies a module of its current configuration before sampling starts.
-func (s *Sampler) applyInitialZoneConfig(zoneID, moduleSpec string, mod module.Module) {
+func (s *Sampler) applyInitialZoneConfig(zoneID, moduleSpec string, mod module.Plugin) {
 	if s.zoneCfg == nil {
 		return
 	}
 
-	notifier, ok := module.SupportsConfigNotification(mod)
+	notifier, ok := module.SupportsPluginConfig(mod)
 	if !ok {
 		return
 	}
@@ -421,23 +436,23 @@ func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
 
 	// Notify all loaded modules
 	for zoneID, mod := range s.modules {
-		if notifier, ok := module.SupportsConfigNotification(mod); ok {
+		if notifier, ok := module.SupportsPluginConfig(mod); ok {
 			if err := notifier.OnConfigChanged(config); err != nil {
 				s.logger.Error("module config notification failed",
 					"zone_id", zoneID,
-					"module", s.moduleSpec[zoneID],
+					"module", s.pluginSpec[zoneID],
 					"error", err)
 			} else {
 				s.logger.Debug("module config notified",
 					"zone_id", zoneID,
-					"module", s.moduleSpec[zoneID])
+					"module", s.pluginSpec[zoneID])
 				notified++
 				zonesToResample = append(zonesToResample, zoneID)
 			}
 		} else {
 			s.logger.Debug("module does not support config notifications",
 				"zone_id", zoneID,
-				"module", s.moduleSpec[zoneID])
+				"module", s.pluginSpec[zoneID])
 			skipped++
 		}
 	}
@@ -474,7 +489,7 @@ func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]int
 	}
 
 	// Check if module supports config notifications
-	notifier, ok := module.SupportsConfigNotification(mod)
+	notifier, ok := module.SupportsPluginConfig(mod)
 	if !ok {
 		return fmt.Errorf("module for zone %q does not support config notifications", zoneID)
 	}
@@ -483,14 +498,14 @@ func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]int
 	if err := notifier.OnConfigChanged(config); err != nil {
 		s.logger.Error("zone config notification failed",
 			"zone_id", zoneID,
-			"module", s.moduleSpec[zoneID],
+			"module", s.pluginSpec[zoneID],
 			"error", err)
 		return fmt.Errorf("config notification failed: %w", err)
 	}
 
 	s.logger.Info("zone config updated",
 		"zone_id", zoneID,
-		"module", s.moduleSpec[zoneID],
+		"module", s.pluginSpec[zoneID],
 		"config", config)
 
 	// Trigger immediate resampling

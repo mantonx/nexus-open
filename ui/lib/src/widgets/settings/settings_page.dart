@@ -9,11 +9,12 @@ import '../../services/nexus_api_service.dart';
 import '../../services/ws_service.dart';
 import '../../theme/app_tokens.dart';
 import '../common/common.dart';
-import 'tabs/location_tab.dart';
-import 'tabs/display_tab.dart';
-import 'tabs/preview_tab.dart';
+import 'tabs/hardware_preview_tab.dart';
 import 'tabs/images_tab.dart';
-import 'tabs/modules_tab.dart';
+import 'tabs/layout_editor_tab.dart';
+import 'tabs/location_tab.dart';
+import 'tabs/plugins_tab.dart';
+import 'tabs/preview_tab.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -31,9 +32,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // Navigation destinations — icon only, labels shown as tooltips
   static const _destinations = [
-    (icon: Icons.display_settings_outlined, selected: Icons.display_settings, label: 'Display', tooltip: 'Display & Colors'),
+    (icon: Icons.preview_outlined,          selected: Icons.preview,           label: 'Preview',  tooltip: 'Live Hardware Preview'),
+    (icon: Icons.dashboard_customize_outlined, selected: Icons.dashboard_customize, label: 'Layout', tooltip: 'Layout Editor'),
+    (icon: Icons.display_settings_outlined, selected: Icons.display_settings,  label: 'Display',  tooltip: 'Display & Colors'),
     (icon: Icons.location_on_outlined,      selected: Icons.location_on,       label: 'Location', tooltip: 'Location'),
-    (icon: Icons.tune_outlined,             selected: Icons.tune,              label: 'Modules',  tooltip: 'Modules'),
+    (icon: Icons.tune_outlined,             selected: Icons.tune,              label: 'Plugins',  tooltip: 'Plugins'),
     (icon: Icons.image_outlined,            selected: Icons.image,             label: 'Images',   tooltip: 'Images'),
   ];
 
@@ -118,13 +121,15 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildPage(SettingsState s) {
     switch (_selectedIndex) {
-      case 0: return const PreviewTab();
-      case 1: return LocationTab(
+      case 0: return const HardwarePreviewTab();
+      case 1: return const LayoutEditorTab();
+      case 2: return const PreviewTab();
+      case 3: return LocationTab(
         onLocationSelected: (loc) => s.updateConfig(location: loc),
         initialLocation: s.location,
       );
-      case 2: return const ModulesTab();
-      case 3: return const ImagesTab();
+      case 4: return const PluginsTab();
+      case 5: return const ImagesTab();
       default: return const SizedBox.shrink();
     }
   }
@@ -282,16 +287,16 @@ class _NexusRail extends StatelessWidget {
                 AppSpacing.sm, AppSpacing.md, AppSpacing.sm, AppSpacing.sm),
             child: Column(
               children: [
-                // App wordmark
+                // App wordmark — amber glow ties rail to hardware housing colour.
                 Text(
                   'NEXUS',
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: AppColors.accent,
+                    color: AppColors.hardwareAccent,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 3,
                     shadows: [
                       Shadow(
-                        color: AppColors.accent.withOpacity(0.7),
+                        color: AppColors.hardwareAccent.withOpacity(0.7),
                         blurRadius: 10,
                       ),
                     ],
@@ -511,7 +516,7 @@ class _DisplayStripState extends State<_DisplayStrip> {
         borderRadius: AppRadius.xsBr,
         border: Border.all(
           color: _lastFrame != null
-              ? AppColors.accent.withOpacity(0.5)
+              ? AppColors.hardwareAccent.withOpacity(0.5)
               : cs.outline,
           width: 1,
         ),

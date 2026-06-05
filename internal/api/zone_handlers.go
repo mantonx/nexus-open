@@ -6,53 +6,53 @@ import (
 	"strings"
 )
 
-// handleModuleConfig handles GET and POST for module default configs.
-// Routes: GET/POST /api/modules/:moduleName/config
-func (s *Server) handleModuleConfig(w http.ResponseWriter, r *http.Request) {
-	// Parse module name from path: /api/modules/{name}/config
-	path := strings.TrimPrefix(r.URL.Path, "/api/modules/")
+// handlePluginConfig handles GET and POST for plugin default configs.
+// Routes: GET/POST /api/plugins/:pluginName/config
+func (s *Server) handlePluginConfig(w http.ResponseWriter, r *http.Request) {
+	// Parse plugin name from path: /api/plugins/{name}/config
+	path := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
 	parts := strings.Split(path, "/")
 
 	if len(parts) < 2 || parts[1] != "config" {
-		s.respondError(w, "Invalid path format. Use /api/modules/:name/config", http.StatusBadRequest)
+		s.respondError(w, "Invalid path format. Use /api/plugins/:name/config", http.StatusBadRequest)
 		return
 	}
 
-	moduleName := parts[0]
-	if moduleName == "" {
-		s.respondError(w, "Module name is required", http.StatusBadRequest)
+	pluginName := parts[0]
+	if pluginName == "" {
+		s.respondError(w, "Plugin name is required", http.StatusBadRequest)
 		return
 	}
 
-	// Convert module name to full path (e.g., "cpu-temp" -> "exec:./modules/cpu-temp/cpu-temp")
-	modulePath := moduleNameToPath(moduleName)
+	// Convert plugin name to full path (e.g., "cpu-temp" -> "exec:./modules/cpu-temp/cpu-temp")
+	pluginPath := pluginNameToPath(pluginName)
 
 	switch r.Method {
 	case http.MethodGet:
-		s.handleGetModuleConfig(w, r, modulePath)
+		s.handleGetPluginConfig(w, r, pluginPath)
 	case http.MethodPost:
-		s.handleSetModuleConfig(w, r, modulePath)
+		s.handleSetPluginConfig(w, r, pluginPath)
 	default:
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// handleGetModuleConfig returns the default config for a module.
-func (s *Server) handleGetModuleConfig(w http.ResponseWriter, r *http.Request, modulePath string) {
+// handleGetPluginConfig returns the default config for a plugin.
+func (s *Server) handleGetPluginConfig(w http.ResponseWriter, r *http.Request, pluginPath string) {
 	if s.zoneCfg == nil {
 		s.respondError(w, "Zone config manager not initialized", http.StatusInternalServerError)
 		return
 	}
 
-	config := s.zoneCfg.GetModuleDefault(modulePath)
+	config := s.zoneCfg.GetPluginDefault(pluginPath)
 	s.respondJSON(w, map[string]interface{}{
-		"module": modulePath,
+		"plugin": pluginPath,
 		"config": config,
 	}, http.StatusOK)
 }
 
-// handleSetModuleConfig sets the default config for a module.
-func (s *Server) handleSetModuleConfig(w http.ResponseWriter, r *http.Request, modulePath string) {
+// handleSetPluginConfig sets the default config for a plugin.
+func (s *Server) handleSetPluginConfig(w http.ResponseWriter, r *http.Request, pluginPath string) {
 	if s.zoneCfg == nil {
 		s.respondError(w, "Zone config manager not initialized", http.StatusInternalServerError)
 		return
@@ -64,15 +64,15 @@ func (s *Server) handleSetModuleConfig(w http.ResponseWriter, r *http.Request, m
 		return
 	}
 
-	if err := s.zoneCfg.SetModuleDefault(modulePath, config); err != nil {
-		s.logger.Error("failed to set module config", "module", modulePath, "error", err)
-		s.respondError(w, "Failed to save module config", http.StatusInternalServerError)
+	if err := s.zoneCfg.SetPluginDefault(pluginPath, config); err != nil {
+		s.logger.Error("failed to set plugin config", "plugin", pluginPath, "error", err)
+		s.respondError(w, "Failed to save plugin config", http.StatusInternalServerError)
 		return
 	}
 
-	s.logger.Info("module default config updated", "module", modulePath, "config", config)
-	s.respondSuccess(w, "Module config updated successfully", map[string]interface{}{
-		"module": modulePath,
+	s.logger.Info("plugin default config updated", "plugin", pluginPath, "config", config)
+	s.respondSuccess(w, "Plugin config updated successfully", map[string]interface{}{
+		"plugin": pluginPath,
 		"config": config,
 	})
 }
@@ -200,9 +200,9 @@ func (s *Server) handleZoneStatus(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusOK)
 }
 
-// moduleNameToPath converts a short module name to full path.
+// pluginNameToPath converts a short plugin name to full path.
 // e.g., "cpu-temp" -> "exec:./modules/cpu-temp/cpu-temp"
-func moduleNameToPath(name string) string {
+func pluginNameToPath(name string) string {
 	// Check if it's already a full path
 	if strings.HasPrefix(name, "exec:") || strings.HasPrefix(name, "builtin:") {
 		return name

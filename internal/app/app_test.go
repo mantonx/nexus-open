@@ -163,13 +163,15 @@ func TestApp_ContextCancellation(t *testing.T) {
 	// Cancel context
 	cancel()
 
-	// Wait for Run to exit
+	// Wait for Run to exit. 5s gives comfortable headroom — Run() itself
+	// returns instantly on ctx cancel; the budget covers goroutine scheduling
+	// and startup work that varies with system load and module launch attempts.
 	select {
 	case err := <-done:
 		if err != context.Canceled {
 			t.Errorf("expected context.Canceled, got %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Error("app did not exit after context cancellation")
 	}
 

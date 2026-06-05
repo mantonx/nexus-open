@@ -82,6 +82,105 @@ class ApiError with _$ApiError {
       _$ApiErrorFromJson(json);
 }
 
+// ── Layout models ─────────────────────────────────────────────────────────────
+// Plain Dart — not freezed, because the editor mutates these in place.
+
+class LayoutZone {
+  String id;
+  int pageId;
+  int ord;
+  int widthPx;
+  String plugin;
+  int refreshMs;
+  String align;
+  Map<String, dynamic> config;
+  Map<String, dynamic> themeOverride;
+
+  LayoutZone({
+    required this.id,
+    required this.pageId,
+    required this.ord,
+    required this.widthPx,
+    this.plugin = 'builtin:placeholder',
+    this.refreshMs = 2000,
+    this.align = 'center',
+    Map<String, dynamic>? config,
+    Map<String, dynamic>? themeOverride,
+  })  : config = config ?? {},
+        themeOverride = themeOverride ?? {};
+
+  factory LayoutZone.fromJson(Map<String, dynamic> j) => LayoutZone(
+        id: j['id'] as String,
+        pageId: (j['page_id'] as num).toInt(),
+        ord: (j['ord'] as num).toInt(),
+        widthPx: (j['width_px'] as num).toInt(),
+        plugin: j['plugin'] as String? ?? 'builtin:placeholder',
+        refreshMs: (j['refresh_ms'] as num?)?.toInt() ?? 2000,
+        align: j['align'] as String? ?? 'center',
+        config: (j['config'] as Map<String, dynamic>?) ?? {},
+        themeOverride: (j['theme_override'] as Map<String, dynamic>?) ?? {},
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'page_id': pageId,
+        'ord': ord,
+        'width_px': widthPx,
+        'plugin': plugin,
+        'refresh_ms': refreshMs,
+        'align': align,
+        'config': config,
+        'theme_override': themeOverride,
+      };
+
+  LayoutZone copyWith({
+    String? id,
+    int? pageId,
+    int? ord,
+    int? widthPx,
+    String? plugin,
+    int? refreshMs,
+    String? align,
+  }) =>
+      LayoutZone(
+        id: id ?? this.id,
+        pageId: pageId ?? this.pageId,
+        ord: ord ?? this.ord,
+        widthPx: widthPx ?? this.widthPx,
+        plugin: plugin ?? this.plugin,
+        refreshMs: refreshMs ?? this.refreshMs,
+        align: align ?? this.align,
+        config: config,
+        themeOverride: themeOverride,
+      );
+}
+
+class LayoutPage {
+  int id;
+  String name;
+  int ord;
+  List<LayoutZone> zones;
+
+  LayoutPage({
+    required this.id,
+    required this.name,
+    required this.ord,
+    required this.zones,
+  });
+
+  factory LayoutPage.fromJson(Map<String, dynamic> j) => LayoutPage(
+        id: (j['id'] as num).toInt(),
+        name: j['name'] as String,
+        ord: (j['ord'] as num).toInt(),
+        zones: ((j['zones'] as List<dynamic>?) ?? [])
+            .map((z) => LayoutZone.fromJson(z as Map<String, dynamic>))
+            .toList(),
+      );
+
+  int get totalWidth => zones.fold(0, (sum, z) => sum + z.widthPx);
+  bool get isValid => totalWidth == 640;
+}
+
 // ── ApiSuccess ───────────────────────────────────────────────────────────────
 
 @freezed

@@ -20,10 +20,10 @@ func TestConfigValidation(t *testing.T) {
 					{
 						Name: "Main",
 						Zones: []ZoneConfig{
-							{ID: "zone1", Width: 160, Module: "builtin:clock", RefreshMs: 1000},
-							{ID: "zone2", Width: 160, Module: "builtin:clock", RefreshMs: 1000},
-							{ID: "zone3", Width: 160, Module: "builtin:clock", RefreshMs: 1000},
-							{ID: "zone4", Width: 160, Module: "builtin:clock", RefreshMs: 1000},
+							{ID: "zone1", Width: 160, Plugin: "builtin:clock", RefreshMs: 1000},
+							{ID: "zone2", Width: 160, Plugin: "builtin:clock", RefreshMs: 1000},
+							{ID: "zone3", Width: 160, Plugin: "builtin:clock", RefreshMs: 1000},
+							{ID: "zone4", Width: 160, Plugin: "builtin:clock", RefreshMs: 1000},
 						},
 					},
 				},
@@ -33,7 +33,7 @@ func TestConfigValidation(t *testing.T) {
 		{
 			name: "missing name",
 			config: Config{
-				Pages: []Page{{Name: "Main", Zones: []ZoneConfig{{ID: "z1", Width: 640, Module: "test", RefreshMs: 1000}}}},
+				Pages: []Page{{Name: "Main", Zones: []ZoneConfig{{ID: "z1", Width: 640, Plugin: "test", RefreshMs: 1000}}}},
 			},
 			wantErr: true,
 		},
@@ -53,8 +53,8 @@ func TestConfigValidation(t *testing.T) {
 					{
 						Name: "Main",
 						Zones: []ZoneConfig{
-							{ID: "zone1", Width: 200, Module: "test", RefreshMs: 1000},
-							{ID: "zone2", Width: 200, Module: "test", RefreshMs: 1000},
+							{ID: "zone1", Width: 200, Plugin: "test", RefreshMs: 1000},
+							{ID: "zone2", Width: 200, Plugin: "test", RefreshMs: 1000},
 						},
 					},
 				},
@@ -69,8 +69,8 @@ func TestConfigValidation(t *testing.T) {
 					{
 						Name: "Main",
 						Zones: []ZoneConfig{
-							{ID: "zone1", Width: 50, Module: "test", RefreshMs: 1000},
-							{ID: "zone2", Width: 590, Module: "test", RefreshMs: 1000},
+							{ID: "zone1", Width: 50, Plugin: "test", RefreshMs: 1000},
+							{ID: "zone2", Width: 590, Plugin: "test", RefreshMs: 1000},
 						},
 					},
 				},
@@ -93,10 +93,10 @@ func TestPageComputeOffsets(t *testing.T) {
 	page := Page{
 		Name: "Test",
 		Zones: []ZoneConfig{
-			{ID: "zone1", Width: 160, Module: "test", RefreshMs: 1000},
-			{ID: "zone2", Width: 200, Module: "test", RefreshMs: 1000},
-			{ID: "zone3", Width: 120, Module: "test", RefreshMs: 1000},
-			{ID: "zone4", Width: 160, Module: "test", RefreshMs: 1000},
+			{ID: "zone1", Width: 160, Plugin: "test", RefreshMs: 1000},
+			{ID: "zone2", Width: 200, Plugin: "test", RefreshMs: 1000},
+			{ID: "zone3", Width: 120, Plugin: "test", RefreshMs: 1000},
+			{ID: "zone4", Width: 160, Plugin: "test", RefreshMs: 1000},
 		},
 	}
 
@@ -134,22 +134,22 @@ func TestZoneConfigValidation(t *testing.T) {
 	}{
 		{
 			name:    "valid zone",
-			zone:    ZoneConfig{ID: "test", Width: 160, Module: "builtin:clock", RefreshMs: 1000},
+			zone:    ZoneConfig{ID: "test", Width: 160, Plugin: "builtin:clock", RefreshMs: 1000},
 			wantErr: false,
 		},
 		{
 			name:    "missing ID",
-			zone:    ZoneConfig{Width: 160, Module: "test", RefreshMs: 1000},
+			zone:    ZoneConfig{Width: 160, Plugin: "test", RefreshMs: 1000},
 			wantErr: true,
 		},
 		{
 			name:    "width too small",
-			zone:    ZoneConfig{ID: "test", Width: 50, Module: "test", RefreshMs: 1000},
+			zone:    ZoneConfig{ID: "test", Width: 50, Plugin: "test", RefreshMs: 1000},
 			wantErr: true,
 		},
 		{
 			name:    "width too large",
-			zone:    ZoneConfig{ID: "test", Width: 700, Module: "test", RefreshMs: 1000},
+			zone:    ZoneConfig{ID: "test", Width: 700, Plugin: "test", RefreshMs: 1000},
 			wantErr: true,
 		},
 		{
@@ -159,12 +159,12 @@ func TestZoneConfigValidation(t *testing.T) {
 		},
 		{
 			name:    "refresh too fast",
-			zone:    ZoneConfig{ID: "test", Width: 160, Module: "test", RefreshMs: 50},
+			zone:    ZoneConfig{ID: "test", Width: 160, Plugin: "test", RefreshMs: 50},
 			wantErr: true,
 		},
 		{
 			name:    "invalid alignment",
-			zone:    ZoneConfig{ID: "test", Width: 160, Module: "test", RefreshMs: 1000, Align: "invalid"},
+			zone:    ZoneConfig{ID: "test", Width: 160, Plugin: "test", RefreshMs: 1000, Align: "invalid"},
 			wantErr: true,
 		},
 	}

@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/plugin"
+	modulehost "github.com/mantonx/nexus-next/internal/module/host"
 )
 
 func main() {
@@ -28,15 +28,14 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	// Create plugin host
-	host := plugin.NewHost(logger)
-	defer host.KillAll()
+	host := modulehost.NewHost(logger)
+	defer host.StopAll()
 
 	ctx := context.Background()
 
 	// Launch module
 	logger.Info("launching module", "path", modulePath)
-	mod, err := host.LaunchModule(ctx, "test", modulePath)
+	mod, err := host.LaunchPlugin(ctx, "test", modulePath)
 	if err != nil {
 		logger.Error("failed to launch module", "error", err)
 		os.Exit(1)

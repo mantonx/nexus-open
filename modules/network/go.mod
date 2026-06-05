@@ -2,12 +2,12 @@ module nexus-network
 
 go 1.25.2
 
-replace nexus-open => ../..
+replace github.com/mantonx/nexus-next => ../..
 
 require (
 	github.com/hashicorp/go-plugin v1.7.0
+	github.com/mantonx/nexus-next v0.0.0-00010101000000-000000000000
 	github.com/shirou/gopsutil v3.21.11+incompatible
-	nexus-open v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -21,7 +21,7 @@ require (
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/net v0.46.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240314234333-6e1732d8331c // indirect
 	google.golang.org/grpc v1.62.1 // indirect

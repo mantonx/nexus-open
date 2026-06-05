@@ -9,13 +9,13 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// HelloModule is a simple example module
-type HelloModule struct {
+// HelloPlugin is a simple example plugin
+type HelloPlugin struct {
 	counter int
 }
 
 // Describe returns module metadata
-func (m *HelloModule) Describe() (module.Descriptor, error) {
+func (m *HelloPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "Hello Module",
 		Version:     "1.0.0",
@@ -27,7 +27,7 @@ func (m *HelloModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns a hello payload
-func (m *HelloModule) Sample() (module.Payload, error) {
+func (m *HelloPlugin) Sample() (module.Payload, error) {
 	m.counter++
 
 	return module.Payload{
@@ -45,7 +45,7 @@ func main() {
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: module.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"module": &module.ModulePlugin{Impl: &HelloModule{}},
+			"plugin": &module.ExecPlugin{Impl: &HelloPlugin{}},
 		},
 	})
 }

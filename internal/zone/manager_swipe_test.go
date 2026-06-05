@@ -25,7 +25,7 @@ func newTestSwipeManager(t *testing.T) (*Manager, *image.RGBA) {
 					{
 						ID:        "zone-a",
 						Width:     640,
-						Module:    "builtin:test",
+						Plugin:    "builtin:test",
 						RefreshMs: 200,
 						Align:     AlignCenter,
 					},
@@ -37,7 +37,7 @@ func newTestSwipeManager(t *testing.T) (*Manager, *image.RGBA) {
 					{
 						ID:        "zone-b",
 						Width:     640,
-						Module:    "builtin:test",
+						Plugin:    "builtin:test",
 						RefreshMs: 200,
 						Align:     AlignCenter,
 					},

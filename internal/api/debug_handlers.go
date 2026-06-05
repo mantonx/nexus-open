@@ -95,3 +95,74 @@ func (s *Server) handleDebugSwipe(w http.ResponseWriter, r *http.Request) {
 		"velocity":    req.Velocity,
 	})
 }
+
+// handleSwipeUpdate feeds a single live-swipe progress update.
+// POST /api/debug/swipe/update  body: {"progress": 0.35, "is_left": true}
+func (s *Server) handleSwipeUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.swipeSim == nil {
+		s.respondError(w, "Swipe simulator not available", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Progress float32 `json:"progress"`
+		IsLeft   bool    `json:"is_left"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.swipeSim.UpdateLiveSwipe(req.Progress, req.IsLeft); err != nil {
+		s.respondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSwipeFinalize finalises a live swipe (finger lifted).
+// POST /api/debug/swipe/finalize  body: {"progress": 0.6, "velocity": 300, "is_left": true}
+func (s *Server) handleSwipeFinalize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.swipeSim == nil {
+		s.respondError(w, "Swipe simulator not available", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Progress float32 `json:"progress"`
+		Velocity float32 `json:"velocity"`
+		IsLeft   bool    `json:"is_left"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.swipeSim.FinalizeLiveSwipe(req.Progress, req.Velocity, req.IsLeft); err != nil {
+		s.respondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSwipeCancel cancels an in-progress live swipe.
+// POST /api/debug/swipe/cancel
+func (s *Server) handleSwipeCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.swipeSim == nil {
+		s.respondError(w, "Swipe simulator not available", http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.swipeSim.CancelLiveSwipe(); err != nil {
+		s.respondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -7,8 +7,8 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// ClockModule displays current time and date with blinking colon
-type ClockModule struct {
+// ClockPlugin displays current time and date with blinking colon
+type ClockPlugin struct {
 	showColon bool
 	format    ClockFormat
 }
@@ -22,25 +22,25 @@ const (
 )
 
 // NewClock creates a new clock module
-func NewClock() *ClockModule {
+func NewClock() *ClockPlugin {
 	return NewClockWithFormat(ClockFormat12Hour)
 }
 
 // NewClockWithFormat creates a clock module with the requested format.
-func NewClockWithFormat(format ClockFormat) *ClockModule {
+func NewClockWithFormat(format ClockFormat) *ClockPlugin {
 	if format != ClockFormat24Hour {
 		format = ClockFormat12Hour
 	}
-	return &ClockModule{showColon: true, format: format}
+	return &ClockPlugin{showColon: true, format: format}
 }
 
 // NewClock24 returns a 24-hour clock module.
-func NewClock24() *ClockModule {
+func NewClock24() *ClockPlugin {
 	return NewClockWithFormat(ClockFormat24Hour)
 }
 
 // Describe returns module metadata
-func (m *ClockModule) Describe() (module.Descriptor, error) {
+func (m *ClockPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "Clock",
 		Version:     "1.0.0",
@@ -52,7 +52,7 @@ func (m *ClockModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns current time payload
-func (m *ClockModule) Sample() (module.Payload, error) {
+func (m *ClockPlugin) Sample() (module.Payload, error) {
 	now := time.Now()
 
 	// Toggle colon visibility for blinking effect
@@ -70,7 +70,7 @@ func (m *ClockModule) Sample() (module.Payload, error) {
 	}, nil
 }
 
-func (m *ClockModule) formatTime(t time.Time, showColon bool) string {
+func (m *ClockPlugin) formatTime(t time.Time, showColon bool) string {
 	switch m.format {
 	case ClockFormat24Hour:
 		if showColon {
@@ -85,9 +85,9 @@ func (m *ClockModule) formatTime(t time.Time, showColon bool) string {
 	}
 }
 
-// OnConfigChanged implements module.ConfigNotifier interface.
+// OnConfigChanged implements module.PluginConfigNotifier interface.
 // Clock module supports configuring the time format (12h or 24h).
-func (m *ClockModule) OnConfigChanged(config map[string]interface{}) error {
+func (m *ClockPlugin) OnConfigChanged(config map[string]interface{}) error {
 	// Check for clock_format configuration
 	if format, ok := config["clock_format"].(string); ok {
 		switch format {

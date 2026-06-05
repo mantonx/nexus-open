@@ -21,12 +21,24 @@ type Page struct {
 	Zones []ZoneConfig `yaml:"zones" json:"zones"` // Zone configurations
 }
 
+// PageInfo is a lightweight page descriptor sent to the Flutter preview UI.
+type PageInfo struct {
+	Name  string     `json:"name"`
+	Zones []ZoneInfo `json:"zones"`
+}
+
+// ZoneInfo is a lightweight zone descriptor sent to the Flutter preview UI.
+type ZoneInfo struct {
+	ID    string `json:"id"`
+	Width int    `json:"width"`
+}
+
 // ZoneConfig represents configuration for a single zone
 type ZoneConfig struct {
 	ID           string     `yaml:"id" json:"id"`                       // Unique zone identifier
 	Width        int        `yaml:"width" json:"width"`                 // Zone width in pixels
 	X            int        `yaml:"x,omitempty" json:"x,omitempty"`     // X offset (auto-computed if 0)
-	Module       string     `yaml:"module" json:"module"`               // Module endpoint (builtin:name or exec:path)
+	Plugin       string     `yaml:"plugin" json:"plugin"`               // Plugin endpoint (builtin:name or exec:path)
 	RefreshMs    int        `yaml:"refresh_ms" json:"refresh_ms"`       // Sampling interval
 	Align        Alignment  `yaml:"align,omitempty" json:"align,omitempty"` // Text alignment
 	ThemeOverride *Theme    `yaml:"theme_override,omitempty" json:"theme_override,omitempty"` // Per-zone theme
@@ -51,16 +63,16 @@ type Theme struct {
 // DefaultTheme returns the default dark theme
 func DefaultTheme() Theme {
 	return Theme{
-		Bg:                "#101010",
+		Bg:                "#000000",
 		Fg:                "#EAEAEA",
-		Muted:             "#B8BDC2", // Improved contrast (was #9AA0A6)
+		Muted:             "#B8BDC2",
 		Accent:            "#00C8FF",
-		ZoneBg:            "#141414", // Subtle zone lift
+		ZoneBg:            "#000000",
 		GutterPx:          2,
-		FontSizePrimary:   24, // Increased for modern dashboard (was 14)
-		FontSizeSecondary: 9,  // Reduced for better hierarchy (was 10)
-		GraphBgOpacity:    15, // Subtle atmospheric background
-		GraphLineOpacity:  40, // Visible but not dominant
+		FontSizePrimary:   24,
+		FontSizeSecondary: 9,
+		GraphBgOpacity:    0, // new renderer uses gradient fill — this is unused
+		GraphLineOpacity:  0, // new renderer uses fixed 0.95 line opacity
 	}
 }
 
@@ -196,7 +208,7 @@ func (z *ZoneConfig) Validate() error {
 		return fmt.Errorf("zone width must be at most 640px (got %d)", z.Width)
 	}
 
-	if z.Module == "" {
+	if z.Plugin == "" {
 		return fmt.Errorf("zone module is required")
 	}
 

@@ -1,5 +1,4 @@
-// Package module defines the interface and types for Nexus Open modules.
-// Modules are plugins that provide data to zones via RPC.
+// Package plugin defines the interface and types for Nexus Open plugins.
 package module
 
 import "time"
@@ -148,44 +147,44 @@ func (p *Payload) IsExpired() bool {
 	return time.Since(p.Timestamp) > p.TTL
 }
 
-// Module is the interface that all modules must implement.
+// Plugin is the interface that all plugins must implement.
 // This will be used with go-plugin RPC in Phase 2.
-type Module interface {
-	// Describe returns module metadata
+type Plugin interface {
+	// Describe returns plugin metadata
 	Describe() (Descriptor, error)
 
 	// Sample returns current data payload
 	Sample() (Payload, error)
 }
 
-// ConfigNotifier is an optional interface modules can implement
+// PluginConfigNotifier is an optional interface plugins can implement
 // to receive real-time configuration change notifications.
 //
 // When implemented, the host will call OnConfigChanged whenever
-// the global configuration is updated via the API, allowing modules
+// the global configuration is updated via the API, allowing plugins
 // to react to config changes without polling or file watching.
-type ConfigNotifier interface {
+type PluginConfigNotifier interface {
 	// OnConfigChanged is called when the global configuration is updated.
-	// The module should inspect the config map and update its state if relevant.
+	// The plugin should inspect the config map and update its state if relevant.
 	//
 	// Args:
 	//   config: Full configuration as key-value map (e.g., location, unit, time_format)
 	//
 	// Returns:
-	//   error if the module failed to process the config change
+	//   error if the plugin failed to process the config change
 	OnConfigChanged(config map[string]interface{}) error
 }
 
-// SupportsConfigNotification checks if a module implements ConfigNotifier.
+// SupportsPluginConfig checks if a plugin implements PluginConfigNotifier.
 // This allows the host to conditionally broadcast config changes only to
-// modules that can handle them.
+// plugins that can handle them.
 //
 // Example:
 //
-//	if notifier, ok := module.SupportsConfigNotification(m); ok {
+//	if notifier, ok := module.SupportsPluginConfig(m); ok {
 //	    notifier.OnConfigChanged(configMap)
 //	}
-func SupportsConfigNotification(m Module) (ConfigNotifier, bool) {
-	notifier, ok := m.(ConfigNotifier)
+func SupportsPluginConfig(m Plugin) (PluginConfigNotifier, bool) {
+	notifier, ok := m.(PluginConfigNotifier)
 	return notifier, ok
 }

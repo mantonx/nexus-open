@@ -5,37 +5,40 @@ import (
 	"image/color"
 	"image/draw"
 	"log/slog"
+	"math"
 	"strings"
 
+	"github.com/fogleman/gg"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/basicfont"
-	"golang.org/x/image/math/fixed"
 
 	"github.com/mantonx/nexus-next/internal/fonts"
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// Renderer renders a single zone from a Payload
+// Renderer renders a single zone from a Payload using fogleman/gg.
 type Renderer struct {
-	logger *slog.Logger
-	theme  Theme
-	width  int
-	height int
-	align  Alignment
+	logger  *slog.Logger
+	theme   Theme
+	width   int
+	height  int
+	align   Alignment
 
-	fontManager     *fonts.Manager
-	primaryFace     font.Face
-	multiLineFace   font.Face // Smaller font for multi-line content (16pt)
-	secondaryFace   font.Face
-	iconFace        font.Face
+	primaryFace   font.Face // 24pt, HintingFull
+	multiLineFace font.Face // 12pt, HintingFull
+	secondaryFace font.Face // 9pt, HintingFull
+	iconFace      font.Face // FontAwesome fallback (may be nil)
+
+	primarySize   float64
+	secondarySize float64
 }
 
-// NewRenderer creates a new zone renderer
 // UpdateTheme replaces the renderer's theme for all subsequent Render calls.
 func (r *Renderer) UpdateTheme(theme Theme) {
 	r.theme = theme
+	r.reloadFaces()
 }
 
+// NewRenderer creates a new zone renderer.
 func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alignment) *Renderer {
 	r := &Renderer{
 		logger: logger,
@@ -44,756 +47,631 @@ func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alig
 		height: height,
 		align:  align,
 	}
-
-	fontManager := fonts.NewManager(logger)
-	r.fontManager = fontManager
-
-	// Load primary font at configured size (default 24pt for modern dashboard)
-	primarySize := float64(theme.FontSizePrimary)
-	if primarySize == 0 {
-		primarySize = 24 // Default to modern dashboard size
+	r.primarySize = float64(theme.FontSizePrimary)
+	if r.primarySize == 0 {
+		r.primarySize = 24
 	}
-	if face, _, err := fontManager.LoadBestAvailableFont(primarySize); err == nil {
-		r.primaryFace = face
-	} else {
-		logger.Warn("failed to load primary font, using fallback", "error", err)
-		r.primaryFace = basicfont.Face7x13
+	r.secondarySize = float64(theme.FontSizeSecondary)
+	if r.secondarySize == 0 {
+		r.secondarySize = 9
 	}
-
-	// Load multi-line font (12pt - fits two lines in 48px height with labels)
-	if face, _, err := fontManager.LoadBestAvailableFont(12); err == nil {
-		r.multiLineFace = face
-	} else {
-		logger.Warn("failed to load multi-line font, using fallback", "error", err)
-		r.multiLineFace = basicfont.Face7x13
-	}
-
-	// Load secondary font at configured size (default 9pt for modern dashboard)
-	secondarySize := float64(theme.FontSizeSecondary)
-	if secondarySize == 0 {
-		secondarySize = 9 // Default to modern dashboard size
-	}
-	if face, _, err := fontManager.LoadBestAvailableFont(secondarySize); err == nil {
-		r.secondaryFace = face
-	} else {
-		logger.Warn("failed to load secondary font, using fallback", "error", err)
-		r.secondaryFace = basicfont.Face7x13
-	}
-
-	// Load icon font at 18pt (proportional to primary)
-	if iconFace, err := fontManager.GetFace("FontAwesome-Solid", 18); err == nil {
-		r.iconFace = iconFace
-	} else {
-		logger.Warn("failed to load icon font, icons may not render", "error", err)
-	}
-
+	r.reloadFaces()
 	return r
 }
 
-// ContentModel represents the parsed content from a payload
-type ContentModel struct {
-	Icon             *IconContent
-	PrimaryLines     []string
-	Secondary        string
-	GraphData        []float32
-	GraphType        module.GraphType
-	LineSpacing      int                  // Spacing between lines for multi-line Primary text
-	LabelPosition    module.LabelPosition // Where to position the secondary label
-	LabelOffsetX     int                  // Horizontal offset for label (pixels)
-	LabelOffsetY     int                  // Vertical offset for label (pixels)
-	NormalizeGraph   bool                 // Whether to normalize graph data to fill from baseline
-	GraphBgOpacity   int                  // Per-module background opacity override (0-100)
-	GraphLineOpacity int                  // Per-module line opacity override (0-100)
+// reloadFaces loads font faces via fonts.Manager, which already applies
+// HintingFull internally via truetype.NewFace.
+func (r *Renderer) reloadFaces() {
+	fm := fonts.NewManager(r.logger)
+
+	load := func(size float64) font.Face {
+		if face, _, err := fm.LoadBestAvailableFont(size); err == nil {
+			return face
+		}
+		return nil
+	}
+
+	r.primaryFace = load(r.primarySize)
+	r.multiLineFace = load(12)
+	r.secondaryFace = load(11) // 11pt for labels — better hinting than 9pt at this display height
+
+	if face, err := fm.GetFace("FontAwesome-Solid", 18); err == nil {
+		r.iconFace = face
+	}
 }
 
-// IconContent represents an icon to be rendered
-type IconContent struct {
-	Glyph string
-}
+// ── Public API ────────────────────────────────────────────────────────────────
 
-// Measurements holds measured dimensions of content elements
-type Measurements struct {
-	IconWidth  int
-	IconHeight int
-
-	PrimaryWidths  []int // One per line
-	PrimaryHeight  int   // Total height with line spacing
-	LineHeight     int   // Height of a single line
-	LineSpacing    int   // Spacing between line baselines
-
-	SecondaryWidth  int
-	SecondaryHeight int
-
-	TotalContentHeight int // Everything stacked
-}
-
-// LayoutBox represents a positioned rectangular region
-type LayoutBox struct {
-	X, Y          int
-	Width, Height int
-}
-
-// CalculatedLayout holds the calculated positions for all content
-type CalculatedLayout struct {
-	IconBox      *LayoutBox
-	PrimaryBoxes []LayoutBox // One per line
-	SecondaryBox *LayoutBox
-}
-
-// parsePayload converts a module payload into a content model
-func (r *Renderer) parsePayload(payload module.Payload) ContentModel {
-	model := ContentModel{
-		PrimaryLines:     strings.Split(payload.Primary, "\n"),
-		Secondary:        payload.Secondary,
-		GraphData:        payload.Spark,
-		GraphType:        payload.GraphType,
-		LineSpacing:      payload.LineSpacing,
-		LabelPosition:    payload.LabelPosition,
-		LabelOffsetX:     payload.LabelOffsetX,
-		LabelOffsetY:     payload.LabelOffsetY,
-		NormalizeGraph:   payload.NormalizeGraph,
-		GraphBgOpacity:   payload.GraphBgOpacity,
-		GraphLineOpacity: payload.GraphLineOpacity,
-	}
-
-	// Add icon if meaningful
-	if r.shouldShowIcon(payload) {
-		glyph := r.resolveIcon(payload.Icon)
-		if glyph != "" {
-			model.Icon = &IconContent{Glyph: glyph}
-		}
-	}
-
-	return model
-}
-
-// measureContent measures all content elements and calculates total dimensions
-func (r *Renderer) measureContent(model ContentModel) Measurements {
-	m := Measurements{}
-
-	// Measure icon
-	if model.Icon != nil && r.iconFace != nil {
-		m.IconWidth = font.MeasureString(r.iconFace, model.Icon.Glyph).Ceil()
-		m.IconHeight = 18 // Icon font size
-	}
-
-	// Determine which font to use based on number of lines
-	isMultiLine := len(model.PrimaryLines) > 1
-	primaryFont := r.primaryFace
-	var lineHeight, lineSpacing int
-
-	if isMultiLine {
-		// Use smaller font for multi-line (12pt fits 2 lines in 48px with labels)
-		primaryFont = r.multiLineFace
-		lineHeight = 12
-		// Use custom line spacing from module, or default to 18
-		if model.LineSpacing > 0 {
-			lineSpacing = model.LineSpacing
-		} else {
-			lineSpacing = 18 // Default spacing between baselines for multi-line
-		}
-	} else {
-		// Use large font for single line (24pt)
-		primaryFont = r.primaryFace
-		lineHeight = 24
-		lineSpacing = 24
-	}
-
-	// Measure primary lines with appropriate font
-	for _, line := range model.PrimaryLines {
-		if primaryFont != nil {
-			width := font.MeasureString(primaryFont, line).Ceil()
-			m.PrimaryWidths = append(m.PrimaryWidths, width)
-		}
-	}
-
-	// Store line metrics for layout calculation
-	m.LineHeight = lineHeight
-	m.LineSpacing = lineSpacing
-
-	// Calculate total primary height
-	if len(model.PrimaryLines) > 0 {
-		m.PrimaryHeight = len(model.PrimaryLines) * lineSpacing
-		// Adjust for last line (no spacing after it)
-		m.PrimaryHeight -= (lineSpacing - lineHeight)
-	}
-
-	// Measure secondary
-	if model.Secondary != "" && r.secondaryFace != nil {
-		m.SecondaryWidth = font.MeasureString(r.secondaryFace, model.Secondary).Ceil()
-		m.SecondaryHeight = 10 // Secondary font size
-	}
-
-	// Calculate total content height
-	// Use a fixed standard height for all modules to ensure consistent vertical alignment
-	// This makes graphs and all content align at the same vertical position
-	const standardContentHeight = 38 // Fixed height for consistent centering (24pt primary + 4px gap + 10pt secondary)
-	m.TotalContentHeight = standardContentHeight
-
-	return m
-}
-
-// calculateLayout calculates the position of all content elements
-func (r *Renderer) calculateLayout(model ContentModel, measurements Measurements) CalculatedLayout {
-	const paddingH = 16
-	const paddingV = 8
-	const iconTextSpacing = 8
-	const primarySecondarySpacing = 4  // For "below" positioning
-	const labelRightSpacing = 8        // For "right" positioning - base spacing between values and label
-
-	layout := CalculatedLayout{}
-
-	hasIcon := model.Icon != nil
-
-	// Calculate content starting X position
-	contentStartX := paddingH
-	if hasIcon {
-		// Icon flows first on the left
-		iconCenterY := r.height / 2
-		layout.IconBox = &LayoutBox{
-			X:      paddingH,
-			Y:      iconCenterY - measurements.IconHeight/2,
-			Width:  measurements.IconWidth,
-			Height: measurements.IconHeight,
-		}
-
-		// Text flows after icon with spacing
-		contentStartX = paddingH + measurements.IconWidth + iconTextSpacing
-	}
-
-	// Vertically center the entire text block
-	contentCenterY := r.height / 2
-	textBlockStartY := contentCenterY - measurements.TotalContentHeight/2
-
-	// Position primary lines
-	currentY := textBlockStartY
-	for i := range model.PrimaryLines {
-		var lineX int
-		lineWidth := 0
-		if i < len(measurements.PrimaryWidths) {
-			lineWidth = measurements.PrimaryWidths[i]
-		}
-
-		// Determine horizontal alignment
-		if hasIcon || r.align == AlignLeft {
-			// Left-aligned (or after icon)
-			lineX = contentStartX
-		} else if r.align == AlignCenter {
-			// Center-aligned
-			lineX = (r.width - lineWidth) / 2
-		} else {
-			// Right-aligned
-			lineX = r.width - lineWidth - paddingH
-		}
-
-		layout.PrimaryBoxes = append(layout.PrimaryBoxes, LayoutBox{
-			X:      lineX,
-			Y:      currentY,
-			Width:  lineWidth,
-			Height: measurements.LineHeight,
-		})
-
-		currentY += measurements.LineSpacing
-	}
-
-	// Position secondary label based on LabelPosition
-	if model.Secondary != "" {
-		var secX, secY int
-
-		if model.LabelPosition == module.LabelPositionRight {
-			// Position label to the right of primary text
-			// Find the widest primary line to position label after it
-			maxPrimaryWidth := 0
-			for _, width := range measurements.PrimaryWidths {
-				if width > maxPrimaryWidth {
-					maxPrimaryWidth = width
-				}
-			}
-
-			// Position label right after the widest primary line
-			// Module specifies exact spacing via LabelOffsetX
-			secX = contentStartX + maxPrimaryWidth
-
-			// Debug logging for label positioning
-			if model.Secondary == "Network" {
-				r.logger.Debug("network label positioning",
-					"contentStartX", contentStartX,
-					"maxPrimaryWidth", maxPrimaryWidth,
-					"labelOffsetX", model.LabelOffsetX,
-					"finalSecX", secX+model.LabelOffsetX,
-				)
-			}
-
-			// Vertically center with primary text block
-			secY = textBlockStartY + (measurements.PrimaryHeight-measurements.SecondaryHeight)/2
-		} else {
-			// Default: position below primary
-			// (currentY already has spacing from last line)
-			currentY = currentY - measurements.LineSpacing + measurements.LineHeight + primarySecondarySpacing
-			secY = currentY
-
-			// Match alignment with primary
-			if hasIcon || r.align == AlignLeft {
-				secX = contentStartX
-			} else if r.align == AlignCenter {
-				secX = (r.width - measurements.SecondaryWidth) / 2
-			} else {
-				secX = r.width - measurements.SecondaryWidth - paddingH
-			}
-		}
-
-		// Apply custom offsets from module
-		layout.SecondaryBox = &LayoutBox{
-			X:      secX + model.LabelOffsetX,
-			Y:      secY + model.LabelOffsetY,
-			Width:  measurements.SecondaryWidth,
-			Height: 10,
-		}
-	}
-
-	return layout
-}
-
-// Render renders a payload to an image buffer with flexible layout system
+// Render renders a payload into a zone-sized RGBA image.
 func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
-	// Validate payload
 	if err := payload.Validate(); err != nil {
 		return nil, err
 	}
 
-	// Create image buffer
-	img := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
+	dc := gg.NewContext(r.width, r.height)
 
-	// Step 1: Fill main background
-	draw.Draw(img, img.Bounds(), &image.Uniform{r.theme.GetBgColor()}, image.Point{}, draw.Src)
+	// Layer 1: solid background.
+	bg := r.theme.GetBgColor()
+	dc.SetColor(bg)
+	dc.Clear()
 
-	// Step 2: Draw subtle zone background for visual separation
-	r.drawZoneBackground(img)
+	// Parse payload.
+	primary := strings.Split(payload.Primary, "\n")
+	isMulti := len(primary) > 1
 
-	// Step 3: Parse payload into content model
-	model := r.parsePayload(payload)
-
-	// Step 4: Draw graph as atmospheric background (if present)
-	if len(model.GraphData) > 0 {
-		primaryColor := r.getSeverityColor(payload.Severity)
-		r.drawBackgroundGraph(img, model.GraphData, model.GraphType, primaryColor, model.NormalizeGraph, model.GraphBgOpacity, model.GraphLineOpacity)
+	// Zone identity colour — comes from theme accent (set per-zone via ThemeOverride).
+	accentColor := r.theme.GetAccentColor()
+	// Text colour: accent colour always for OK state (zone identity is the accent);
+	// severity override only for warn/crit states.
+	var textColor color.RGBA
+	switch payload.Severity {
+	case module.SeverityWarn, module.SeverityCrit:
+		textColor = r.severityColor(payload.Severity)
+	default:
+		textColor = accentColor
 	}
 
-	// Step 5: Measure and calculate layout
-	measurements := r.measureContent(model)
-	layout := r.calculateLayout(model, measurements)
+	// Layer 2: zone tint (very subtle accent wash).
+	r.drawTint(dc, accentColor, bg)
 
-	// Step 6: Get colors
-	primaryColor := r.getSeverityColor(payload.Severity)
-	secondaryColor := r.theme.GetMutedColor()
-
-	// Step 7: Render icon at calculated position
-	if layout.IconBox != nil && model.Icon != nil {
-		// Add baseline offset for proper font rendering
-		r.drawIconGlyph(img, model.Icon.Glyph, primaryColor,
-			layout.IconBox.X, layout.IconBox.Y+14, r.iconFace)
+	// Layer 3: graph fill + line (if spark data present).
+	if len(payload.Spark) > 0 {
+		r.drawGraph(dc, payload, accentColor)
 	}
 
-	// Step 8: Render primary lines at calculated positions
-	// Use multi-line font if there are multiple lines
-	primaryFont := r.primaryFace
-	baselineOffset := 24 // For 24pt font
-	if len(model.PrimaryLines) > 1 {
-		primaryFont = r.multiLineFace
-		baselineOffset = 16 // For 16pt font
+	// Layer 4: text content.
+	r.drawContent(dc, primary, isMulti, payload.Secondary, payload.Icon, textColor, len(payload.Spark) > 0)
+
+	// Layer 5: progress bar (optional, bottom edge).
+	if payload.Progress > 0 {
+		r.drawProgressBar(dc, payload.Progress, textColor)
 	}
 
-	for i, box := range layout.PrimaryBoxes {
-		if i < len(model.PrimaryLines) {
-			// Add baseline offset for proper font rendering
-			r.drawRawText(img, model.PrimaryLines[i], primaryColor,
-				box.X, box.Y+baselineOffset, primaryFont)
+	return dc.Image().(*image.RGBA), nil
+}
+
+// ── Layer renderers ───────────────────────────────────────────────────────────
+
+// drawTint draws a very subtle accent-colour wash over the entire zone.
+// Alpha scales with background darkness so it stays perceptible on any bg.
+func (r *Renderer) drawTint(dc *gg.Context, accent, bg color.RGBA) {
+	lum := (uint16(bg.R)*299 + uint16(bg.G)*587 + uint16(bg.B)*114) / 1000
+	alpha := 14.0 - float64(lum)*8.0/255.0
+	if alpha < 4 {
+		alpha = 4
+	}
+	dc.SetRGBA(
+		float64(accent.R)/255,
+		float64(accent.G)/255,
+		float64(accent.B)/255,
+		alpha/255,
+	)
+	dc.DrawRectangle(0, 0, float64(r.width), float64(r.height))
+	dc.Fill()
+}
+
+// drawGraph draws the Corsair-inspired graph: bottom-anchored gradient fill,
+// glow halo composited under a crisp 1.5px line.
+func (r *Renderer) drawGraph(dc *gg.Context, payload module.Payload, col color.RGBA) {
+	data := payload.Spark
+	n := len(data)
+	if n < 2 {
+		return
+	}
+
+	// Normalise if requested.
+	vals := make([]float32, n)
+	copy(vals, data)
+	if payload.NormalizeGraph {
+		var mx float32
+		for _, v := range vals {
+			if v > mx {
+				mx = v
+			}
+		}
+		if mx > 0 {
+			for i := range vals {
+				vals[i] /= mx
+			}
+		}
+	}
+	for i, v := range vals {
+		vals[i] = clampFloat(v)
+	}
+
+	H := float64(r.height)
+	W := float64(r.width)
+	xStep := W / float64(n-1)
+
+	// Graph is confined to the bottom portion of the zone so it never
+	// overlaps the label at the top. graphTop is the highest y the line can reach.
+	const graphTop = 32.0
+	graphH := H - graphTop
+	yOf := func(v float32) float64 { return H - float64(v)*graphH }
+
+	ar := float64(col.R) / 255
+	ag := float64(col.G) / 255
+	ab := float64(col.B) / 255
+
+	// ── Layer A: bottom-anchored gradient fill ────────────────────────────────
+	// Find the y-range of the line so we can anchor the gradient to it.
+	var minY float64 = H
+	lineYs := make([]float64, n)
+	for i, v := range vals {
+		lineYs[i] = yOf(v)
+		if lineYs[i] < minY {
+			minY = lineYs[i]
+		}
+	}
+	fillHeight := H - minY
+	if fillHeight < 1 {
+		fillHeight = 1
+	}
+
+	// Build a clipping mask matching the graph polygon, then paint gradient rows.
+	clipDC := gg.NewContext(r.width, r.height)
+	clipDC.MoveTo(0, H)
+	for i := range vals {
+		clipDC.LineTo(float64(i)*xStep, lineYs[i])
+	}
+	clipDC.LineTo(float64(n-1)*xStep, H)
+	clipDC.ClosePath()
+	clipDC.SetRGB(1, 1, 1)
+	clipDC.Fill()
+	mask := clipDC.Image().(*image.RGBA)
+
+	// Paint gradient rows into a temp layer, then mask-composite onto dc.
+	// Gradient is anchored to the bottom of the zone — always glows near the baseline
+	// regardless of how high the line sits. The polygon mask clips anything above the line.
+	const glowBand = 10.0 // px above baseline the fill covers — stays below the label area
+	gradImg := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
+	fillStart := int(H - glowBand)
+	if fillStart < int(minY) {
+		fillStart = int(minY)
+	}
+	for py := fillStart; py < r.height; py++ {
+		distFromBaseline := H - float64(py)
+		t := 1.0 - (distFromBaseline / glowBand)
+		if t < 0 {
+			t = 0
+		}
+		alpha := math.Pow(t, 1.2) * 120
+		if alpha > 120 {
+			alpha = 120
+		}
+		a8 := uint8(alpha)
+		cr := uint8(float64(col.R) * float64(a8) / 255)
+		cg := uint8(float64(col.G) * float64(a8) / 255)
+		cb := uint8(float64(col.B) * float64(a8) / 255)
+		for px := 0; px < r.width; px++ {
+			if mask.RGBAAt(px, py).R > 0 {
+				gradImg.SetRGBA(px, py, color.RGBA{R: cr, G: cg, B: cb, A: a8})
+			}
+		}
+	}
+	// Composite gradient fill onto main context.
+	draw.Draw(dc.Image().(*image.RGBA), dc.Image().Bounds(), gradImg, image.Point{}, draw.Over)
+
+	// ── Layer B: glow halo ────────────────────────────────────────────────────
+	// Render a 3px line onto a blank layer, box-blur it, composite at ~50% opacity.
+	glowDC := gg.NewContext(r.width, r.height)
+	glowDC.MoveTo(0, lineYs[0])
+	for i := 1; i < n; i++ {
+		glowDC.LineTo(float64(i)*xStep, lineYs[i])
+	}
+	glowDC.SetRGBA(ar, ag, ab, 1.0)
+	glowDC.SetLineWidth(2.0)
+	glowDC.SetLineCapRound()
+	glowDC.SetLineJoinRound()
+	glowDC.Stroke()
+	glowLayer := glowDC.Image().(*image.RGBA)
+	boxBlur(glowLayer, 2)
+	blendAlpha(dc.Image().(*image.RGBA), glowLayer, 0.40)
+
+	// ── Layer C: crisp line ───────────────────────────────────────────────────
+	dc.MoveTo(0, lineYs[0])
+	for i := 1; i < n; i++ {
+		dc.LineTo(float64(i)*xStep, lineYs[i])
+	}
+	dc.SetRGBA(ar, ag, ab, 0.95)
+	dc.SetLineWidth(1.5)
+	dc.SetLineCapRound()
+	dc.SetLineJoinRound()
+	dc.Stroke()
+}
+
+// boxBlur applies a fast separable box blur of the given radius to img in-place.
+func boxBlur(img *image.RGBA, radius int) {
+	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	tmp := image.NewRGBA(img.Bounds())
+
+	// Horizontal pass.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var rr, gg, bb, aa int
+			cnt := 0
+			for dx := -radius; dx <= radius; dx++ {
+				nx := x + dx
+				if nx < 0 || nx >= w {
+					continue
+				}
+				c := img.RGBAAt(nx, y)
+				rr += int(c.R); gg += int(c.G); bb += int(c.B); aa += int(c.A)
+				cnt++
+			}
+			if cnt > 0 {
+				tmp.SetRGBA(x, y, color.RGBA{R: uint8(rr / cnt), G: uint8(gg / cnt), B: uint8(bb / cnt), A: uint8(aa / cnt)})
+			}
 		}
 	}
 
-	// Step 9: Render secondary at calculated position
-	if layout.SecondaryBox != nil {
-		// Add baseline offset for proper font rendering
-		r.drawRawText(img, model.Secondary, secondaryColor,
-			layout.SecondaryBox.X, layout.SecondaryBox.Y+10, r.secondaryFace)
+	// Vertical pass.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var rr, gg, bb, aa int
+			cnt := 0
+			for dy := -radius; dy <= radius; dy++ {
+				ny := y + dy
+				if ny < 0 || ny >= h {
+					continue
+				}
+				c := tmp.RGBAAt(x, ny)
+				rr += int(c.R); gg += int(c.G); bb += int(c.B); aa += int(c.A)
+				cnt++
+			}
+			if cnt > 0 {
+				img.SetRGBA(x, y, color.RGBA{R: uint8(rr / cnt), G: uint8(gg / cnt), B: uint8(bb / cnt), A: uint8(aa / cnt)})
+			}
+		}
 	}
-
-	// Step 10: Render progress bar if present (bottom-aligned)
-	if payload.Progress > 0 {
-		r.drawProgressBar(img, payload.Progress, primaryColor)
-	}
-
-	return img, nil
 }
 
-var faIconGlyphs = map[string]string{
-	"cloud":         "\uf0c2",
-	"cpu":           "\uf2db",
-	"microchip":     "\uf2db",
-	"network-wired": "\uf6ff",
-	"hand-wave":     "\ue1d8",
+// blendAlpha composites src onto dst at the given opacity (0–1).
+func blendAlpha(dst, src *image.RGBA, opacity float64) {
+	b := dst.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			s := src.RGBAAt(x, y)
+			if s.A == 0 {
+				continue
+			}
+			d := dst.RGBAAt(x, y)
+			sa := float64(s.A) * opacity / 255.0
+			da := float64(d.A) / 255.0
+			oa := sa + da*(1-sa)
+			if oa == 0 {
+				continue
+			}
+			dst.SetRGBA(x, y, color.RGBA{
+				R: uint8((float64(s.R)*sa + float64(d.R)*da*(1-sa)) / oa),
+				G: uint8((float64(s.G)*sa + float64(d.G)*da*(1-sa)) / oa),
+				B: uint8((float64(s.B)*sa + float64(d.B)*da*(1-sa)) / oa),
+				A: uint8(oa * 255),
+			})
+		}
+	}
 }
 
-func (r *Renderer) resolveIcon(icon string) string {
-	if icon == "" {
-		return ""
+// drawContent draws the primary value, optional icon, and secondary label.
+// Text is monochromatic: label uses a dimmed version of textColor (55% brightness),
+// value uses the full textColor. Horizontal alignment follows r.align.
+func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
+	secondary, icon string, textColor color.RGBA, hasGraph bool) {
+
+	const padL = 8.0
+	const padR = 6.0
+
+	tr := float64(textColor.R) / 255
+	tg := float64(textColor.G) / 255
+	tb := float64(textColor.B) / 255
+
+	// Label: accent colour at 72% — readable without competing with the value.
+	const labelDim = 0.72
+	lr := tr * labelDim
+	lg := tg * labelDim
+	lb := tb * labelDim
+
+	W := float64(r.width)
+	H := float64(r.height)
+
+	// Split layout: used for all zones that have both a label and a graph.
+	// Label is left-anchored and vertically centred; value+icon are right-anchored.
+	// This gives the label a permanent home that never conflicts with graph or value.
+	if hasGraph && secondary != "" {
+		r.drawSplitLayout(dc, primary, isMulti, secondary, icon, tr, tg, tb, lr, lg, lb, W, H)
+		return
 	}
-	runes := []rune(icon)
-	if len(runes) == 1 {
+
+	// Single-line layout (no graph, or no label).
+	if r.primaryFace != nil {
+		dc.SetFontFace(r.primaryFace)
+	}
+
+	// Display-only zones (clock etc): full vertical + horizontal centring.
+	isDisplayOnly := secondary == "" && !hasGraph
+	if isDisplayOnly && r.align == AlignCenter {
+		text := r.truncate(primary[0], W-padL*2, dc)
+		dc.SetRGB(tr, tg, tb)
+		dc.DrawStringAnchored(text, W/2, H/2, 0.5, 0.5)
+		return
+	}
+
+	// Fallback: label near top-left, value in middle.
+	if secondary != "" {
+		if r.secondaryFace != nil {
+			dc.SetFontFace(r.secondaryFace)
+		}
+		label := r.truncateSpaced(dc, secondary, W-padL-padR, 1.0)
+		dc.SetRGB(lr, lg, lb)
+		r.drawSpaced(dc, label, padL, 12, 1.0)
+		if r.primaryFace != nil {
+			dc.SetFontFace(r.primaryFace)
+		}
+	}
+
+	valueBaseline := 36.0
+	if secondary == "" {
+		valueBaseline = 27.0
+	}
+
+	x := padL
+	ax := 0.0
+
+	if icon != "" && r.iconFace != nil && r.align != AlignCenter {
+		glyph := resolveIconGlyph(icon)
+		if glyph != "" {
+			dc.SetFontFace(r.iconFace)
+			dc.SetRGB(tr, tg, tb)
+			dc.DrawString(glyph, x, valueBaseline)
+			x += 26
+			if r.primaryFace != nil {
+				dc.SetFontFace(r.primaryFace)
+			}
+		}
+	}
+
+	var valueX float64
+	switch r.align {
+	case AlignCenter:
+		valueX = W / 2
+		ax = 0.5
+	case AlignRight:
+		valueX = W - padR
+		ax = 1.0
+	default:
+		valueX = x
+		ax = 0.0
+	}
+
+	maxW := W - padL - padR
+	text := r.truncate(primary[0], maxW, dc)
+
+	// Subtle dark scrim behind the value text so it reads over the gradient fill.
+	// Kept faint so it doesn't look like a box — just darkens the gradient slightly.
+	if hasGraph {
+		tw, _ := dc.MeasureString(text)
+		scrX := valueX
+		if ax == 0.5 {
+			scrX = valueX - tw/2
+		} else if ax == 1.0 {
+			scrX = valueX - tw
+		}
+		scrX -= 2
+		dc.SetRGBA(0, 0, 0, 0.28)
+		dc.DrawRectangle(scrX, valueBaseline-22, tw+4, 24)
+		dc.Fill()
+	}
+
+	dc.SetRGB(tr, tg, tb)
+	dc.DrawStringAnchored(text, valueX, valueBaseline, ax, 0)
+}
+
+// drawProgressBar draws a 2px bar at the bottom edge.
+func (r *Renderer) drawProgressBar(dc *gg.Context, progress float32, col color.RGBA) {
+	if progress <= 0 {
+		return
+	}
+	if progress > 1 {
+		progress = 1
+	}
+	const h = 2.0
+	const padH = 4.0
+	W := float64(r.width)
+	H := float64(r.height)
+	filled := (W - padH*2) * float64(progress)
+
+	// Track.
+	dc.SetRGBA(float64(col.R)/255, float64(col.G)/255, float64(col.B)/255, 0.2)
+	dc.DrawRectangle(padH, H-h-2, W-padH*2, h)
+	dc.Fill()
+
+	// Fill.
+	dc.SetRGB(float64(col.R)/255, float64(col.G)/255, float64(col.B)/255)
+	dc.DrawRectangle(padH, H-h-2, filled, h)
+	dc.Fill()
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// drawSpaced draws text with extra letter-spacing (extraPx pixels between glyphs).
+// The current draw colour must already be set on dc before calling.
+// drawSplitLayout renders a zone with:
+//   - Label vertically centred on the LEFT third of the zone
+//   - Value (+ icon) right-anchored on the RIGHT two-thirds
+//
+// Works for both single-line and multi-line (network) values.
+func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti bool,
+	secondary, icon string,
+	tr, tg, tb, lr, lg, lb float64,
+	W, H float64) {
+
+	const padL = 8.0
+	const padR = 6.0
+
+	// Layout constants — all tuned to the 48px zone height.
+	// graphTop=32 → graph occupies bottom 16px, leaving 32px for label+value.
+	// Label near top at y=11, value at y=24 (centred in the 32px content area).
+	const labelY = 11.0
+	const valueY = 24.0
+
+	// All split-layout zones: label top-left, icon+value centred below.
+	if r.secondaryFace != nil {
+		dc.SetFontFace(r.secondaryFace)
+	}
+	label := r.truncateSpaced(dc, secondary, W-padL-padR, 1.0)
+	dc.SetRGB(lr, lg, lb)
+	r.drawSpaced(dc, label, padL, labelY, 1.0)
+
+	if isMulti {
+		// Network: two speed lines right-anchored below label.
+		if r.multiLineFace != nil {
+			dc.SetFontFace(r.multiLineFace)
+		}
+		rightX := W - padR - 8
+		baselines := []float64{20.0, 30.0}
+		for i, line := range primary {
+			if i >= 2 { break }
+			text := r.truncate(line, W-padL-padR, dc)
+			dc.SetRGB(tr, tg, tb)
+			dc.DrawStringAnchored(text, rightX, baselines[i], 1.0, 0)
+		}
+		return
+	}
+
+	// Single line: icon + value centred horizontally below the label.
+	if r.primaryFace != nil {
+		dc.SetFontFace(r.primaryFace)
+	}
+	valueText := r.truncate(primary[0], W-padL*2, dc)
+	vw, _ := dc.MeasureString(valueText)
+
+	var iw float64
+	var glyph string
+	if icon != "" && r.iconFace != nil {
+		glyph = resolveIconGlyph(icon)
+		if glyph != "" {
+			dc.SetFontFace(r.iconFace)
+			iw, _ = dc.MeasureString(glyph)
+			dc.SetFontFace(r.primaryFace)
+		}
+	}
+
+	const iconGap = 4.0
+	groupW := iw + iconGap + vw
+	startX := (W - groupW) / 2
+
+	if glyph != "" && r.iconFace != nil {
+		dc.SetFontFace(r.iconFace)
+		dc.SetRGB(tr, tg, tb)
+		dc.DrawString(glyph, startX, valueY)
+	}
+	if r.primaryFace != nil {
+		dc.SetFontFace(r.primaryFace)
+	}
+	dc.SetRGB(tr, tg, tb)
+	dc.DrawString(valueText, startX+iw+iconGap, valueY)
+}
+
+func (r *Renderer) drawSpaced(dc *gg.Context, text string, x, y, extraPx float64) {
+	for _, ch := range text {
+		s := string(ch)
+		dc.DrawString(s, x, y)
+		w, _ := dc.MeasureString(s)
+		x += w + extraPx
+	}
+}
+
+// measureSpaced returns the total pixel width of text rendered with drawSpaced.
+func (r *Renderer) measureSpaced(dc *gg.Context, text string, extraPx float64) float64 {
+	var total float64
+	runes := []rune(text)
+	for i, ch := range runes {
+		w, _ := dc.MeasureString(string(ch))
+		total += w
+		if i < len(runes)-1 {
+			total += extraPx
+		}
+	}
+	return total
+}
+
+// truncateSpaced clips text accounting for per-character spacing, appending "…" if needed.
+func (r *Renderer) truncateSpaced(dc *gg.Context, text string, maxWidth, extraPx float64) string {
+	if r.measureSpaced(dc, text, extraPx) <= maxWidth {
+		return text
+	}
+	ellipsis := "…"
+	ew, _ := dc.MeasureString(ellipsis)
+	runes := []rune(text)
+	for len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+		if r.measureSpaced(dc, string(runes), extraPx)+ew <= maxWidth {
+			return string(runes) + ellipsis
+		}
+	}
+	return ellipsis
+}
+
+// truncate clips text to maxWidth pixels using the current dc font, appending
+// "…" if needed.
+func (r *Renderer) truncate(text string, maxWidth float64, dc *gg.Context) string {
+	w, _ := dc.MeasureString(text)
+	if w <= maxWidth {
+		return text
+	}
+	ellipsis := "…"
+	ew, _ := dc.MeasureString(ellipsis)
+	runes := []rune(text)
+	for len(runes) > 0 {
+		runes = runes[:len(runes)-1]
+		w, _ = dc.MeasureString(string(runes))
+		if w+ew <= maxWidth {
+			return string(runes) + ellipsis
+		}
+	}
+	return ellipsis
+}
+
+// severityColor maps payload severity to a text colour.
+func (r *Renderer) severityColor(sev module.Severity) color.RGBA {
+	switch sev {
+	case module.SeverityWarn:
+		return color.RGBA{R: 255, G: 176, B: 32, A: 255}
+	case module.SeverityCrit:
+		return color.RGBA{R: 255, G: 68, B: 68, A: 255}
+	default:
+		return r.theme.GetFgColor()
+	}
+}
+
+// resolveIconGlyph maps icon name strings to FontAwesome Unicode glyphs.
+var faGlyphs = map[string]string{
+	"cloud":         "",
+	"cloud-rain":    "",
+	"sun":           "",
+	"snowflake":     "",
+	"bolt":          "",
+	"cpu":           "",
+	"microchip":     "",
+	"desktop":       "",
+	"memory":        "",
+	"network-wired": "",
+	"thermometer":   "",
+	"hand-wave":     "",
+}
+
+func resolveIconGlyph(icon string) string {
+	if g, ok := faGlyphs[icon]; ok {
+		return g
+	}
+	// Pass through if it's already a unicode glyph.
+	if len([]rune(icon)) == 1 {
 		return icon
-	}
-	if glyph, ok := faIconGlyphs[icon]; ok {
-		return glyph
 	}
 	return ""
 }
 
-// drawLine renders optional icon + text respecting alignment.
-func (r *Renderer) drawLine(img *image.RGBA, text string, icon string, col color.RGBA, paddingH, y int, face font.Face) {
-	if face == nil {
-		face = basicfont.Face7x13
-	}
-
-	iconWidth := 0
-	if icon != "" && r.iconFace != nil {
-		iconWidth = font.MeasureString(r.iconFace, icon).Ceil()
-	}
-
-	textWidth := font.MeasureString(face, text).Ceil()
-	if textWidth == 0 {
-		textWidth = 0
-	}
-	spacing := 0
-	if textWidth > 0 && iconWidth > 0 {
-		spacing = 4
-	}
-	lineWidth := iconWidth + spacing + textWidth
-
-	startX := paddingH
-	switch r.align {
-	case AlignCenter:
-		startX = (r.width - lineWidth) / 2
-	case AlignRight:
-		startX = r.width - lineWidth - paddingH
-	}
-
-	x := startX
-	if icon != "" && r.iconFace != nil && iconWidth > 0 {
-		r.drawIconGlyph(img, icon, col, x, y, r.iconFace)
-		x += iconWidth + spacing
-	}
-
-	r.drawRawText(img, text, col, x, y, face)
-}
-
-func (r *Renderer) drawIconGlyph(img *image.RGBA, glyph string, col color.RGBA, baselineX, baselineY int, face font.Face) {
-	if face == nil || glyph == "" {
-		return
-	}
-	// Align icon baseline with primary text baseline (adjusted for better alignment)
-	point := fixed.Point26_6{
-		X: fixed.I(baselineX),
-		Y: fixed.I(baselineY),
-	}
-	drawer := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(col),
-		Face: face,
-		Dot:  point,
-	}
-	drawer.DrawString(glyph)
-}
-
-func (r *Renderer) drawRawText(img *image.RGBA, text string, col color.RGBA, x, y int, face font.Face) {
-	if face == nil {
-		face = basicfont.Face7x13
-	}
-
-	drawer := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(col),
-		Face: face,
-		Dot: fixed.Point26_6{
-			X: fixed.I(x),
-			Y: fixed.I(y),
-		},
-	}
-	drawer.DrawString(text)
-}
-
-// drawGraph renders a graph at the bottom of the zone based on the specified type
-func (r *Renderer) drawGraph(img *image.RGBA, data []float32, graphType module.GraphType, col color.RGBA) {
-	if len(data) == 0 {
-		return
-	}
-
-	// Default to sparkline if not specified
-	if graphType == "" {
-		graphType = module.GraphTypeSparkline
-	}
-
-	switch graphType {
-	case module.GraphTypeBar:
-		r.drawBarGraph(img, data, col)
-	case module.GraphTypeArea:
-		r.drawAreaGraph(img, data, col)
-	case module.GraphTypeLine:
-		r.drawLineGraph(img, data, col)
-	default: // module.GraphTypeSparkline
-		r.drawSparkline(img, data, col)
-	}
-}
-
-// drawSparkline renders a line graph at the bottom of the zone
-func (r *Renderer) drawSparkline(img *image.RGBA, data []float32, col color.RGBA) {
-	if len(data) == 0 {
-		return
-	}
-
-	const sparkHeight = 30  // Much taller for prominence
-	const paddingH = 6
-	const paddingV = 6      // More space at bottom
-
-	availableWidth := r.width - (2 * paddingH)
-	yBase := r.height - paddingV
-
-	// Fully opaque and vibrant
-	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 255}
-
-	// Thicker line (4 pixels for smooth appearance)
-	lineThickness := 4
-
-	// Draw line connecting points
-	for i := 0; i < len(data)-1; i++ {
-		val1 := data[i]
-		val2 := data[i+1]
-
-		// Clamp values
-		if val1 < 0 {
-			val1 = 0
-		}
-		if val1 > 1 {
-			val1 = 1
-		}
-		if val2 < 0 {
-			val2 = 0
-		}
-		if val2 > 1 {
-			val2 = 1
-		}
-
-		// Calculate x positions
-		x1 := paddingH + (i * availableWidth / len(data))
-		x2 := paddingH + ((i + 1) * availableWidth / len(data))
-
-		// Calculate y positions (inverted, higher value = lower y)
-		y1 := yBase - int(float32(sparkHeight)*val1)
-		y2 := yBase - int(float32(sparkHeight)*val2)
-
-		// Draw thick line by drawing multiple parallel lines
-		for offset := -lineThickness/2; offset <= lineThickness/2; offset++ {
-			r.drawLine2D(img, x1, y1+offset, x2, y2+offset, sparkColor)
-		}
-	}
-}
-
-// drawLine2D draws a line between two points (Bresenham's algorithm)
-func (r *Renderer) drawLine2D(img *image.RGBA, x1, y1, x2, y2 int, col color.RGBA) {
-	dx := abs(x2 - x1)
-	dy := abs(y2 - y1)
-	sx := -1
-	if x1 < x2 {
-		sx = 1
-	}
-	sy := -1
-	if y1 < y2 {
-		sy = 1
-	}
-	err := dx - dy
-
-	for {
-		if x1 >= 0 && x1 < r.width && y1 >= 0 && y1 < r.height {
-			img.Set(x1, y1, col)
-		}
-
-		if x1 == x2 && y1 == y2 {
-			break
-		}
-
-		e2 := 2 * err
-		if e2 > -dy {
-			err -= dy
-			x1 += sx
-		}
-		if e2 < dx {
-			err += dx
-			y1 += sy
-		}
-	}
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-// drawBarGraph renders vertical bars at the bottom of the zone
-func (r *Renderer) drawBarGraph(img *image.RGBA, data []float32, col color.RGBA) {
-	if len(data) == 0 {
-		return
-	}
-
-	const sparkHeight = 30  // Taller bars
-	const paddingH = 6
-	const paddingV = 6
-	const barSpacing = 1    // Small gap between bars
-
-	// Calculate bar width
-	availableWidth := r.width - (2 * paddingH)
-	barWidth := (availableWidth - (len(data) * barSpacing)) / len(data)
-	if barWidth < 2 {
-		barWidth = 2  // Minimum 2px bars
-	}
-
-	// Draw bars from bottom
-	yBase := r.height - paddingV
-
-	// Fully opaque and vibrant
-	sparkColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 255}
-
-	for i, value := range data {
-		if value < 0 {
-			value = 0
-		}
-		if value > 1 {
-			value = 1
-		}
-
-		barHeight := int(float32(sparkHeight) * value)
-		x := paddingH + (i * (barWidth + barSpacing))
-
-		// Draw bar
-		for py := yBase - barHeight; py < yBase; py++ {
-			for px := x; px < x+barWidth && px < r.width-paddingH; px++ {
-				img.Set(px, py, sparkColor)
-			}
-		}
-	}
-}
-
-// drawAreaGraph renders a filled area graph at the bottom of the zone
-func (r *Renderer) drawAreaGraph(img *image.RGBA, data []float32, col color.RGBA) {
-	if len(data) == 0 {
-		return
-	}
-
-	const sparkHeight = 30  // Taller area
-	const paddingH = 6
-	const paddingV = 6
-
-	availableWidth := r.width - (2 * paddingH)
-	yBase := r.height - paddingV
-
-	// More prominent fill
-	fillColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 180}
-	// Fully opaque thick line for definition
-	lineColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 255}
-
-	// Draw filled area and top line
-	for i := 0; i < len(data); i++ {
-		value := data[i]
-
-		// Clamp values
-		if value < 0 {
-			value = 0
-		}
-		if value > 1 {
-			value = 1
-		}
-
-		x := paddingH + (i * availableWidth / len(data))
-		y := yBase - int(float32(sparkHeight)*value)
-
-		// Fill column from bottom to value height
-		for py := y; py < yBase; py++ {
-			if x >= 0 && x < r.width && py >= 0 && py < r.height {
-				img.Set(x, py, fillColor)
-			}
-		}
-	}
-
-	// Draw top line connecting points (on top of fill for definition)
-	for i := 0; i < len(data)-1; i++ {
-		val1 := data[i]
-		val2 := data[i+1]
-
-		// Clamp values
-		if val1 < 0 {
-			val1 = 0
-		}
-		if val1 > 1 {
-			val1 = 1
-		}
-		if val2 < 0 {
-			val2 = 0
-		}
-		if val2 > 1 {
-			val2 = 1
-		}
-
-		x1 := paddingH + (i * availableWidth / len(data))
-		x2 := paddingH + ((i + 1) * availableWidth / len(data))
-		y1 := yBase - int(float32(sparkHeight)*val1)
-		y2 := yBase - int(float32(sparkHeight)*val2)
-
-		r.drawLine2D(img, x1, y1, x2, y2, lineColor)
-	}
-}
-
-// drawLineGraph renders a heartbeat-style line graph with ultra-thin crisp line
-func (r *Renderer) drawLineGraph(img *image.RGBA, data []float32, col color.RGBA) {
-	if len(data) == 0 {
-		return
-	}
-
-	const sparkHeight = 30
-	const paddingH = 6
-	const paddingV = 6
-
-	availableWidth := r.width - (2 * paddingH)
-	yBase := r.height - paddingV
-
-	// Draw a single 1-pixel line like an EKG monitor
-	lineColor := color.RGBA{R: col.R, G: col.G, B: col.B, A: 255}
-
-	// Only draw pixels, not lines - this ensures truly 1-pixel thickness
-	for i := 0; i < len(data); i++ {
-		val := clampFloat(data[i])
-		x := paddingH + (i * availableWidth / len(data))
-		y := yBase - int(float32(sparkHeight)*val)
-
-		// Set single pixel
-		if x >= 0 && x < r.width && y >= 0 && y < r.height {
-			img.Set(x, y, lineColor)
-		}
-	}
-}
-
-// blendColors performs alpha blending
-func (r *Renderer) blendColors(bg, fg color.RGBA) color.RGBA {
-	alpha := float32(fg.A) / 255.0
-	invAlpha := 1.0 - alpha
-
-	return color.RGBA{
-		R: uint8(float32(fg.R)*alpha + float32(bg.R)*invAlpha),
-		G: uint8(float32(fg.G)*alpha + float32(bg.G)*invAlpha),
-		B: uint8(float32(fg.B)*alpha + float32(bg.B)*invAlpha),
-		A: 255,
-	}
-}
-
+// clampFloat clamps a float32 to [0, 1].
 func clampFloat(v float32) float32 {
 	if v < 0 {
 		return 0
@@ -804,467 +682,52 @@ func clampFloat(v float32) float32 {
 	return v
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+// ── Legacy stubs kept for compilation ─────────────────────────────────────────
+// These are called from manager_page.go / manager_render.go. They delegate to
+// the new Render() method or are no-ops.
+
+// ContentModel, Measurements, LayoutBox, CalculatedLayout — kept so that any
+// callers in tests still compile. The new renderer does not use them.
+type ContentModel struct {
+	Icon             *IconContent
+	PrimaryLines     []string
+	Secondary        string
+	GraphData        []float32
+	GraphType        module.GraphType
+	LineSpacing      int
+	LabelPosition    module.LabelPosition
+	LabelOffsetX     int
+	LabelOffsetY     int
+	NormalizeGraph   bool
+	GraphBgOpacity   int
+	GraphLineOpacity int
 }
 
-// drawProgressBar renders a progress bar at the bottom of the zone
-func (r *Renderer) drawProgressBar(img *image.RGBA, progress float32, col color.RGBA) {
-	const barHeight = 2
-	const paddingH = 4
-	const paddingV = 2
+type IconContent struct{ Glyph string }
 
-	if progress < 0 {
-		progress = 0
-	}
-	if progress > 1 {
-		progress = 1
-	}
-
-	availableWidth := r.width - (2 * paddingH)
-	filledWidth := int(float32(availableWidth) * progress)
-
-	y0 := r.height - paddingV - barHeight
-	y1 := r.height - paddingV
-
-	// Draw filled portion
-	for y := y0; y < y1; y++ {
-		for x := paddingH; x < paddingH+filledWidth; x++ {
-			img.Set(x, y, col)
-		}
-	}
-
-	// Draw unfilled portion (muted)
-	mutedColor := r.theme.GetMutedColor()
-	mutedColor.A = 80 // More transparent
-
-	for y := y0; y < y1; y++ {
-		for x := paddingH + filledWidth; x < r.width-paddingH; x++ {
-			img.Set(x, y, mutedColor)
-		}
-	}
+type Measurements struct {
+	IconWidth, IconHeight             int
+	PrimaryWidths                     []int
+	PrimaryHeight, LineHeight         int
+	LineSpacing                       int
+	SecondaryWidth, SecondaryHeight   int
+	TotalContentHeight                int
 }
 
-// getSeverityColor returns the appropriate color for a severity level
-func (r *Renderer) getSeverityColor(severity module.Severity) color.RGBA {
-	switch severity {
-	case module.SeverityWarn:
-		// Yellow/Orange
-		return color.RGBA{R: 255, G: 176, B: 32, A: 255}
-	case module.SeverityCrit:
-		// Red
-		return color.RGBA{R: 255, G: 68, B: 68, A: 255}
-	default:
-		// OK - use accent color
-		return r.theme.GetAccentColor()
-	}
+type LayoutBox struct{ X, Y, Width, Height int }
+
+type CalculatedLayout struct {
+	IconBox      *LayoutBox
+	PrimaryBoxes []LayoutBox
+	SecondaryBox *LayoutBox
 }
 
-// Modern Dashboard Rendering Methods
-
-// drawZoneBackground fills the zone with a subtle background color for visual separation
-func (r *Renderer) drawZoneBackground(img *image.RGBA) {
-	zoneBg := r.theme.GetZoneBgColor()
-	draw.Draw(img, img.Bounds(), &image.Uniform{zoneBg}, image.Point{}, draw.Src)
-}
-
-// drawBackgroundGraph renders graph as full-height atmospheric background
-func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphType module.GraphType, col color.RGBA, normalize bool, moduleBgOpacity, moduleLineOpacity int) {
-	if len(data) == 0 {
-		return
+// drawRawText is kept for any legacy call sites in tests.
+func (r *Renderer) drawRawText(img *image.RGBA, text string, col color.RGBA, x, y int, face font.Face) {
+	dc := gg.NewContextForRGBA(img)
+	if face != nil {
+		dc.SetFontFace(face)
 	}
-
-	const paddingH = 16
-	const paddingV = 8
-
-	// Full height minus vertical padding
-	graphHeight := r.height - (2 * paddingV)
-	availableWidth := r.width - (2 * paddingH)
-	yBase := r.height - paddingV
-
-	r.logger.Debug("graph position", "type", graphType, "width", r.width, "height", r.height, "img_bounds", img.Bounds(), "graphHeight", graphHeight, "paddingV", paddingV, "yBase", yBase, "normalize", normalize)
-
-	// Get opacity values - prioritize per-module values, then theme, then defaults
-	// Default to very subtle (3% fill, 8% line) unless overridden
-	bgOpacity := moduleBgOpacity
-	if bgOpacity == 0 {
-		bgOpacity = r.theme.GraphBgOpacity
-	}
-	if bgOpacity == 0 {
-		bgOpacity = 3  // Default: extremely subtle background
-	}
-
-	lineOpacity := moduleLineOpacity
-	if lineOpacity == 0 {
-		lineOpacity = r.theme.GraphLineOpacity
-	}
-	if lineOpacity == 0 {
-		lineOpacity = 8  // Default: very subtle line
-	}
-
-	// Create very transparent fill color (default 8% opacity)
-	fillColor := color.RGBA{
-		R: col.R,
-		G: col.G,
-		B: col.B,
-		A: uint8(bgOpacity * 255 / 100),
-	}
-
-	// Create semi-transparent line color (default 20% opacity)
-	lineColor := color.RGBA{
-		R: col.R,
-		G: col.G,
-		B: col.B,
-		A: uint8(lineOpacity * 255 / 100),
-	}
-
-	// Render based on graph type - all rendered as atmospheric backgrounds
-	switch graphType {
-	case module.GraphTypeArea:
-		r.drawBackgroundAreaGraph(img, data, fillColor, lineColor, paddingH, paddingV, graphHeight, availableWidth, yBase, normalize)
-	case module.GraphTypeBar:
-		r.drawBackgroundBarGraph(img, data, fillColor, paddingH, paddingV, graphHeight, availableWidth, yBase, normalize)
-	case module.GraphTypeLine:
-		r.drawBackgroundLineGraph(img, data, lineColor, paddingH, paddingV, graphHeight, availableWidth, yBase, normalize)
-	default: // Sparkline
-		r.drawBackgroundSparkline(img, data, lineColor, paddingH, paddingV, graphHeight, availableWidth, yBase, normalize)
-	}
-}
-
-// drawBackgroundAreaGraph renders area graph as atmospheric background
-func (r *Renderer) drawBackgroundAreaGraph(img *image.RGBA, data []float32,
-	fillColor, lineColor color.RGBA, paddingH, paddingV, height, width, yBase int, normalize bool) {
-
-	// Find min/max for normalization if requested
-	minVal := float32(0.0)
-	maxVal := float32(1.0)
-	valRange := float32(1.0)
-
-	if normalize {
-		minVal = float32(1.0)
-		maxVal = float32(0.0)
-		for _, value := range data {
-			val := clampFloat(value)
-			if val < minVal {
-				minVal = val
-			}
-			if val > maxVal {
-				maxVal = val
-			}
-		}
-
-		// Normalize range to fill from baseline
-		valRange = maxVal - minVal
-		if valRange < 0.01 {
-			valRange = 1.0 // Avoid division by zero
-		}
-	}
-
-	// First pass: Fill area with transparency
-	for i := 0; i < len(data); i++ {
-		val := clampFloat(data[i])
-		normalizedVal := (val - minVal) / valRange
-		x := paddingH + (i * width / len(data))
-		y := yBase - int(float32(height)*normalizedVal)
-
-		// Fill column from bottom to value with alpha blending
-		for py := y; py <= yBase; py++ {
-			if x >= 0 && x < r.width && py >= 0 && py < r.height {
-				existing := img.At(x, py)
-				blended := r.blendColors(existing.(color.RGBA), fillColor)
-				img.Set(x, py, blended)
-			}
-		}
-	}
-
-	// Second pass: Draw top line
-	for i := 0; i < len(data)-1; i++ {
-		val1 := clampFloat(data[i])
-		val2 := clampFloat(data[i+1])
-		normalizedVal1 := (val1 - minVal) / valRange
-		normalizedVal2 := (val2 - minVal) / valRange
-
-		x1 := paddingH + (i * width / len(data))
-		x2 := paddingH + ((i + 1) * width / len(data))
-		y1 := yBase - int(float32(height)*normalizedVal1)
-		y2 := yBase - int(float32(height)*normalizedVal2)
-
-		r.drawBlendedLine(img, x1, y1, x2, y2, lineColor)
-	}
-}
-
-// drawBackgroundBarGraph renders bars as atmospheric background
-func (r *Renderer) drawBackgroundBarGraph(img *image.RGBA, data []float32,
-	fillColor color.RGBA, paddingH, paddingV, height, width, yBase int, normalize bool) {
-
-	const barSpacing = 1
-	barWidth := (width - (len(data) * barSpacing)) / len(data)
-	if barWidth < 2 {
-		barWidth = 2
-	}
-
-	// Find min/max for normalization if requested
-	minVal := float32(0.0)
-	maxVal := float32(1.0)
-	valRange := float32(1.0)
-
-	if normalize {
-		minVal = float32(1.0)
-		maxVal = float32(0.0)
-		for _, value := range data {
-			val := clampFloat(value)
-			if val < minVal {
-				minVal = val
-			}
-			if val > maxVal {
-				maxVal = val
-			}
-		}
-
-		// Normalize range to fill from baseline
-		valRange = maxVal - minVal
-		if valRange < 0.01 {
-			valRange = 1.0 // Avoid division by zero
-		}
-	}
-
-	for i, value := range data {
-		val := clampFloat(value)
-		// Normalize to 0-1 range based on min/max in dataset (if normalize=true)
-		normalizedVal := (val - minVal) / valRange
-		barHeight := int(float32(height) * normalizedVal)
-		x := paddingH + (i * (barWidth + barSpacing))
-
-		// Draw bar with alpha blending - starts from yBase
-		for py := yBase - barHeight; py <= yBase; py++ {
-			for px := x; px < x+barWidth && px < r.width-paddingH; px++ {
-				if px >= 0 && px < r.width && py >= 0 && py < r.height {
-					existing := img.At(px, py)
-					blended := r.blendColors(existing.(color.RGBA), fillColor)
-					img.Set(px, py, blended)
-				}
-			}
-		}
-	}
-}
-
-// drawBackgroundLineGraph renders line graph as atmospheric background
-func (r *Renderer) drawBackgroundLineGraph(img *image.RGBA, data []float32,
-	lineColor color.RGBA, paddingH, paddingV, height, width, yBase int, normalize bool) {
-
-	// Find min/max for normalization so graph fills from baseline
-	minVal := float32(1.0)
-	maxVal := float32(0.0)
-	for _, value := range data {
-		val := clampFloat(value)
-		if val < minVal {
-			minVal = val
-		}
-		if val > maxVal {
-			maxVal = val
-		}
-	}
-
-	// Normalize range to fill from baseline
-	valRange := maxVal - minVal
-	if valRange < 0.01 {
-		valRange = 1.0 // Avoid division by zero
-	}
-
-	for i := 0; i < len(data)-1; i++ {
-		val1 := clampFloat(data[i])
-		val2 := clampFloat(data[i+1])
-		normalizedVal1 := (val1 - minVal) / valRange
-		normalizedVal2 := (val2 - minVal) / valRange
-
-		x1 := paddingH + (i * width / len(data))
-		x2 := paddingH + ((i + 1) * width / len(data))
-		y1 := yBase - int(float32(height)*normalizedVal1)
-		y2 := yBase - int(float32(height)*normalizedVal2)
-
-		r.drawBlendedLine(img, x1, y1, x2, y2, lineColor)
-	}
-
-	// Draw baseline to ensure all line graphs are visually aligned at yBase
-	for x := paddingH; x < paddingH+width; x++ {
-		if x >= 0 && x < r.width && yBase >= 0 && yBase < r.height {
-			existing := img.At(x, yBase)
-			blended := r.blendColors(existing.(color.RGBA), lineColor)
-			img.Set(x, yBase, blended)
-		}
-	}
-}
-
-// drawBackgroundSparkline renders sparkline as atmospheric background
-func (r *Renderer) drawBackgroundSparkline(img *image.RGBA, data []float32,
-	lineColor color.RGBA, paddingH, paddingV, height, width, yBase int, normalize bool) {
-
-	// Find min/max for normalization so graph fills from baseline
-	minVal := float32(1.0)
-	maxVal := float32(0.0)
-	for _, value := range data {
-		val := clampFloat(value)
-		if val < minVal {
-			minVal = val
-		}
-		if val > maxVal {
-			maxVal = val
-		}
-	}
-
-	// Normalize range to fill from baseline
-	valRange := maxVal - minVal
-	if valRange < 0.01 {
-		valRange = 1.0 // Avoid division by zero
-	}
-
-	// Thinner line for sparkline background (2 pixels instead of 4)
-	lineThickness := 2
-
-	for i := 0; i < len(data)-1; i++ {
-		val1 := clampFloat(data[i])
-		val2 := clampFloat(data[i+1])
-		normalizedVal1 := (val1 - minVal) / valRange
-		normalizedVal2 := (val2 - minVal) / valRange
-
-		x1 := paddingH + (i * width / len(data))
-		x2 := paddingH + ((i + 1) * width / len(data))
-		y1 := yBase - int(float32(height)*normalizedVal1)
-		y2 := yBase - int(float32(height)*normalizedVal2)
-
-		// Draw thin line
-		for offset := -lineThickness / 2; offset <= lineThickness/2; offset++ {
-			r.drawBlendedLine(img, x1, y1+offset, x2, y2+offset, lineColor)
-		}
-	}
-
-	// Draw baseline to ensure all sparklines are visually aligned at yBase
-	for x := paddingH; x < paddingH+width; x++ {
-		if x >= 0 && x < r.width && yBase >= 0 && yBase < r.height {
-			existing := img.At(x, yBase)
-			blended := r.blendColors(existing.(color.RGBA), lineColor)
-			img.Set(x, yBase, blended)
-		}
-	}
-}
-
-// drawBlendedLine draws a line with alpha blending
-func (r *Renderer) drawBlendedLine(img *image.RGBA, x1, y1, x2, y2 int, col color.RGBA) {
-	// Bresenham's algorithm with alpha blending
-	dx := abs(x2 - x1)
-	dy := abs(y2 - y1)
-	sx := -1
-	if x1 < x2 {
-		sx = 1
-	}
-	sy := -1
-	if y1 < y2 {
-		sy = 1
-	}
-	err := dx - dy
-
-	for {
-		if x1 >= 0 && x1 < r.width && y1 >= 0 && y1 < r.height {
-			existing := img.At(x1, y1)
-			blended := r.blendColors(existing.(color.RGBA), col)
-			img.Set(x1, y1, blended)
-		}
-
-		if x1 == x2 && y1 == y2 {
-			break
-		}
-
-		e2 := 2 * err
-		if e2 > -dy {
-			err -= dy
-			x1 += sx
-		}
-		if e2 < dx {
-			err += dx
-			y1 += sy
-		}
-	}
-}
-
-// drawCenteredPrimaryText draws large hero text vertically centered
-func (r *Renderer) drawCenteredPrimaryText(img *image.RGBA, text string, col color.RGBA, paddingH, paddingV int) {
-	if r.primaryFace == nil {
-		return
-	}
-
-	// Calculate vertical centering (approximately center of 48px height)
-	// With 24pt font, baseline should be around y=28-30 for good centering
-	baselineY := r.height/2 + 6
-
-	// Calculate horizontal position based on alignment
-	textWidth := font.MeasureString(r.primaryFace, text).Ceil()
-	var x int
-	switch r.align {
-	case AlignCenter:
-		x = (r.width - textWidth) / 2
-	case AlignRight:
-		x = r.width - textWidth - paddingH
-	default: // AlignLeft
-		x = paddingH
-	}
-
-	r.drawRawText(img, text, col, x, baselineY, r.primaryFace)
-}
-
-// drawSecondaryLabel draws small contextual label below primary
-func (r *Renderer) drawSecondaryLabel(img *image.RGBA, text string, col color.RGBA, paddingH, paddingV int) {
-	if r.secondaryFace == nil {
-		return
-	}
-
-	// Position below primary text (around y=38-40)
-	baselineY := r.height/2 + 16
-
-	// Calculate horizontal position based on alignment
-	textWidth := font.MeasureString(r.secondaryFace, text).Ceil()
-	var x int
-	switch r.align {
-	case AlignCenter:
-		x = (r.width - textWidth) / 2
-	case AlignRight:
-		x = r.width - textWidth - paddingH
-	default: // AlignLeft
-		x = paddingH
-	}
-
-	r.drawRawText(img, text, col, x, baselineY, r.secondaryFace)
-}
-
-// drawIcon draws icon with smart positioning (positioned in top-right corner)
-func (r *Renderer) drawIcon(img *image.RGBA, glyph string, col color.RGBA, paddingH, paddingV int) {
-	if r.iconFace == nil || glyph == "" {
-		return
-	}
-
-	// Measure icon width to position from right edge
-	iconWidth := font.MeasureString(r.iconFace, glyph).Ceil()
-
-	// Position icon in top-right corner, above the text
-	iconX := r.width - iconWidth - paddingH
-	iconY := paddingV + 14 // Top area, with proper baseline
-
-	r.drawIconGlyph(img, glyph, col, iconX, iconY, r.iconFace)
-}
-
-// shouldShowIcon determines if icon should be displayed based on smart visibility rules
-func (r *Renderer) shouldShowIcon(payload module.Payload) bool {
-	// Show icon if no graph data (graph tells the story)
-	hasGraph := len(payload.Spark) > 0
-
-	// Also show icon if it's semantically meaningful
-	isMeaningful := payload.Icon == "cloud" ||
-		payload.Icon == "cloud-rain" ||
-		payload.Icon == "sun" ||
-		payload.Severity != module.SeverityOK
-
-	// Show if no graph OR if icon is meaningful
-	return !hasGraph || isMeaningful
+	dc.SetColor(col)
+	dc.DrawString(text, float64(x), float64(y))
 }

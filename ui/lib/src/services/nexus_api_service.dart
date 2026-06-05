@@ -164,10 +164,10 @@ class NexusApiService {
     return {'status': 'loading', 'error': ''};
   }
 
-  /// Get config for a specific module zone
-  Future<Map<String, dynamic>> getModuleConfig(String zoneId) async {
+  /// Get config for a specific plugin zone
+  Future<Map<String, dynamic>> getPluginConfig(String zoneId) async {
     final response = await _client
-        .get(Uri.parse('$baseUrl/api/modules/$zoneId/config'))
+        .get(Uri.parse('$baseUrl/api/plugins/$zoneId/config'))
         .timeout(timeout);
 
     if (response.statusCode == 200) {
@@ -177,23 +177,167 @@ class NexusApiService {
       }
       return body;
     }
-    throw ApiException('Failed to load module config',
+    throw ApiException('Failed to load plugin config',
         statusCode: response.statusCode);
   }
 
-  /// Update config for a specific module zone
-  Future<void> updateModuleConfig(
+  /// Update config for a specific plugin zone
+  Future<void> updatePluginConfig(
       String zoneId, Map<String, dynamic> config) async {
     final response = await _client
         .post(
-          Uri.parse('$baseUrl/api/modules/$zoneId/config'),
+          Uri.parse('$baseUrl/api/plugins/$zoneId/config'),
           headers: {'Content-Type': 'application/json'},
           body: json.encode(config),
         )
         .timeout(timeout);
 
     if (response.statusCode != 200) {
-      throw ApiException('Failed to update module config',
+      throw ApiException('Failed to update plugin config',
+          statusCode: response.statusCode);
+    }
+  }
+
+  /// Trigger a synthetic swipe (mirrors POST /api/debug/swipe).
+  Future<void> simulateSwipe({
+    String direction = 'left',
+    int durationMs = 200,
+    int finalizeMs = 120,
+    int steps = 20,
+    double velocity = 150,
+    double releaseAt = 0.7,
+  }) async {
+    final response = await _client
+        .post(
+          Uri.parse('$baseUrl/api/debug/swipe'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'direction': direction,
+            'duration_ms': durationMs,
+            'finalize_ms': finalizeMs,
+            'steps': steps,
+            'velocity': velocity,
+            'release_at': releaseAt,
+          }),
+        )
+        .timeout(timeout);
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to simulate swipe',
+          statusCode: response.statusCode);
+    }
+  }
+
+  /// Feed a single live-swipe progress update (called on every drag frame).
+  Future<void> swipeUpdate(double progress, {required bool isLeft}) async {
+    await _client
+        .post(
+          Uri.parse('$baseUrl/api/debug/swipe/update'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({'progress': progress, 'is_left': isLeft}),
+        )
+        .timeout(timeout);
+    // Ignore errors — drag updates are best-effort.
+  }
+
+  /// Finalise a live swipe (finger lifted).
+  Future<void> swipeFinalize(double progress, double velocity,
+      {required bool isLeft}) async {
+    await _client
+        .post(
+          Uri.parse('$baseUrl/api/debug/swipe/finalize'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(
+              {'progress': progress, 'velocity': velocity, 'is_left': isLeft}),
+        )
+        .timeout(timeout);
+  }
+
+  /// Cancel an in-progress live swipe.
+  Future<void> swipeCancel() async {
+    await _client
+        .post(Uri.parse('$baseUrl/api/debug/swipe/cancel'))
+        .timeout(timeout);
+  }
+
+  // ── Layout editor ───────────────────────────────────────────────────────────
+
+  /// Fetch the full layout (all pages + zones).
+  Future<List<LayoutPage>> getLayout() async {
+    final response = await _client
+        .get(Uri.parse('$baseUrl/api/layout'))
+        .timeout(timeout);
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to load layout', statusCode: response.statusCode);
+    }
+    final list = json.decode(response.body) as List<dynamic>;
+    return list.map((e) => LayoutPage.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<int> createPage(String name, int ord) async {
+    final r = await _client.post(Uri.parse('$baseUrl/api/layout/pages'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'name': name, 'ord': ord})).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to create page', statusCode: r.statusCode);
+    final body = json.decode(r.body) as Map<String, dynamic>;
+    return (body['data']?['id'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> updatePage(int id, String name, int ord) async {
+    final r = await _client.put(Uri.parse('$baseUrl/api/layout/pages/$id'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'name': name, 'ord': ord})).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to update page', statusCode: r.statusCode);
+  }
+
+  Future<void> deletePage(int id) async {
+    final r = await _client.delete(Uri.parse('$baseUrl/api/layout/pages/$id')).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to delete page', statusCode: r.statusCode);
+  }
+
+  Future<void> reorderPages(List<int> order) async {
+    final r = await _client.post(Uri.parse('$baseUrl/api/layout/pages/reorder'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'order': order})).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to reorder pages', statusCode: r.statusCode);
+  }
+
+  Future<void> createZone(LayoutZone zone) async {
+    final r = await _client.post(Uri.parse('$baseUrl/api/layout/zones'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(zone.toJson())).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to create zone', statusCode: r.statusCode);
+  }
+
+  Future<void> updateZone(LayoutZone zone) async {
+    final r = await _client.put(Uri.parse('$baseUrl/api/layout/zones/${zone.id}'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(zone.toJson())).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to update zone', statusCode: r.statusCode);
+  }
+
+  Future<void> deleteZone(String zoneId) async {
+    final r = await _client.delete(Uri.parse('$baseUrl/api/layout/zones/$zoneId')).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to delete zone', statusCode: r.statusCode);
+  }
+
+  Future<void> reorderZones(int pageId, List<String> order) async {
+    final r = await _client.post(Uri.parse('$baseUrl/api/layout/zones/reorder'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'page_id': pageId, 'order': order})).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to reorder zones', statusCode: r.statusCode);
+  }
+
+  /// Navigate directly to a page index.
+  Future<void> navigatePage(int pageIndex) async {
+    final response = await _client
+        .post(
+          Uri.parse('$baseUrl/api/navigate/page'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({'page': pageIndex}),
+        )
+        .timeout(timeout);
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to navigate to page $pageIndex',
           statusCode: response.statusCode);
     }
   }

@@ -1,25 +1,29 @@
-// Package config provides configuration management with validation and watching.
+// Package config provides configuration management backed by SQLite.
+//
+// The Manager reads and writes UI preferences (colours, locale, display config)
+// using the shared [store.DB]. On first run it imports any existing config.yaml
+// so users upgrading from a YAML-based installation don't lose their settings.
 package config
 
 import (
 	"errors"
 	"fmt"
 	"image/color"
-	"os"
-	"path/filepath"
+	"log/slog"
 	"regexp"
 	"sync"
 
-	"github.com/spf13/viper"
+	"github.com/mantonx/nexus-next/internal/store"
 )
 
 // Manager handles configuration loading, validation, and watching.
+// The zero value is invalid — use [NewManager].
 type Manager struct {
 	mu         sync.RWMutex
 	cfg        *Config
-	path       string
+	store      *store.DB
 	watchers   []chan<- Config
-	IsFirstRun bool // true when config was created fresh on this launch
+	IsFirstRun bool // true when the DB was freshly created on this launch
 }
 
 // Config holds the application configuration (UI settings only).
@@ -41,7 +45,7 @@ type Config struct {
 	Display DisplayConfig `mapstructure:"display" json:"display"`
 }
 
-// DisplayConfig holds display-specific configuration
+// DisplayConfig holds display-specific configuration.
 // openapi:schema DisplayConfig
 type DisplayConfig struct {
 	// openapi:description Font family name
@@ -53,16 +57,16 @@ type DisplayConfig struct {
 	// openapi:description Time display font size in points
 	// openapi:example 14.0
 	TimeFontSize float64 `mapstructure:"time_font_size" json:"time_font_size"`
-	// openapi:description Layout style (dashboard, minimalist, compact, balanced)
+	// openapi:description Layout style
 	// openapi:enum dashboard minimalist compact balanced
 	// openapi:example dashboard
 	Layout string `mapstructure:"layout" json:"layout"`
-	// openapi:description Date format string (e.g. MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD)
+	// openapi:description Date format string
 	// openapi:example MM/DD/YYYY
 	DateFormat string `mapstructure:"date_format" json:"date_format"`
 }
 
-// Default configuration values (UI settings only).
+// Default configuration values.
 const (
 	DefaultBackgroundColor = "#000000"
 	DefaultBackgroundImage = "background.png"
@@ -80,80 +84,39 @@ var (
 
 var hexColorRegex = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
-// NewManager creates a new configuration manager.
-func NewManager(path string) (*Manager, error) {
-	if path == "" {
-		// Use default config path
-		configDir, err := os.UserConfigDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get config dir: %w", err)
-		}
-		path = filepath.Join(configDir, "nexus-open", "config.yaml")
+// NewManager creates a Manager backed by the given store.
+// It loads the current config from the store (applying defaults for any
+// missing keys) and marks IsFirstRun if the store was newly created.
+func NewManager(s *store.DB, logger *slog.Logger) (*Manager, error) {
+	if logger == nil {
+		logger = slog.Default()
 	}
 
 	m := &Manager{
-		path:     path,
-		watchers: make([]chan<- Config, 0),
+		store:      s,
+		watchers:   make([]chan<- Config, 0),
+		IsFirstRun: s.IsFirstRun(),
 	}
 
-	// Load initial configuration
-	if err := m.Load(); err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
+	cfg, err := m.loadFromStore()
+	if err != nil {
+		return nil, fmt.Errorf("settings: load: %w", err)
 	}
+	m.cfg = cfg
 
+	logger.Info("settings loaded from store")
 	return m, nil
 }
 
-// Load reads configuration from file or creates default if not exists.
-func (m *Manager) Load() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Create default config if file doesn't exist — mark as first run
-	if _, err := os.Stat(m.path); os.IsNotExist(err) {
-		if err := m.createDefaultConfig(); err != nil {
-			return err
-		}
-		m.IsFirstRun = true
+// NewManagerFromPath is a convenience constructor that opens its own store at
+// the given path (or the default path when empty). Callers that already have a
+// *store.DB should use NewManager instead.
+func NewManagerFromPath(path string, logger *slog.Logger) (*Manager, error) {
+	s, err := store.Open(path, logger)
+	if err != nil {
+		return nil, err
 	}
-
-	// Load configuration
-	viper.SetConfigFile(m.path)
-	viper.SetConfigType("yaml")
-
-	if err := viper.ReadInConfig(); err != nil {
-		return fmt.Errorf("failed to read config: %w", err)
-	}
-
-	var cfg Config
-	if err := viper.Unmarshal(&cfg); err != nil {
-		return fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	// Apply defaults for missing display config values
-	if cfg.Display.FontFamily == "" {
-		cfg.Display.FontFamily = DefaultFontFamily
-	}
-	if cfg.Display.FontSize == 0 {
-		cfg.Display.FontSize = DefaultFontSize
-	}
-	if cfg.Display.TimeFontSize == 0 {
-		cfg.Display.TimeFontSize = DefaultTimeFontSize
-	}
-	if cfg.Display.Layout == "" {
-		cfg.Display.Layout = DefaultLayout
-	}
-	if cfg.Display.DateFormat == "" {
-		cfg.Display.DateFormat = DefaultDateFormat
-	}
-
-	// Validate
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("invalid config: %w", err)
-	}
-
-	m.cfg = &cfg
-	return nil
+	return NewManager(s, logger)
 }
 
 // Get returns a copy of the current configuration (thread-safe).
@@ -163,9 +126,8 @@ func (m *Manager) Get() Config {
 	return *m.cfg
 }
 
-// Update atomically updates the configuration and saves to disk.
+// Update atomically validates, persists, and broadcasts new configuration.
 func (m *Manager) Update(cfg Config) error {
-	// Validate first
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -175,14 +137,11 @@ func (m *Manager) Update(cfg Config) error {
 
 	m.cfg = &cfg
 
-	// Save to disk
-	if err := m.save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+	if err := m.saveToStore(cfg); err != nil {
+		return fmt.Errorf("settings: save: %w", err)
 	}
 
-	// Notify watchers
-	m.notifyWatchers(*m.cfg)
-
+	m.notifyWatchers(cfg)
 	return nil
 }
 
@@ -193,66 +152,90 @@ func (m *Manager) Watch(ch chan<- Config) {
 	m.watchers = append(m.watchers, ch)
 }
 
-// save writes current configuration to disk (caller must hold lock).
-func (m *Manager) save() error {
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(m.path), 0755); err != nil {
-		return err
+// ── Store I/O ─────────────────────────────────────────────────────────────────
+
+func (m *Manager) loadFromStore() (*Config, error) {
+	settings, err := m.store.GetSettings()
+	if err != nil {
+		return nil, err
 	}
 
-	viper.SetConfigFile(m.path)
-	viper.SetConfigType("yaml")
-
-	// Set values (UI settings only)
-	viper.Set("background_color", m.cfg.BackgroundColor)
-	viper.Set("background_image", m.cfg.BackgroundImage)
-	viper.Set("text_color", m.cfg.TextColor)
-	viper.Set("image_paths", m.cfg.ImagePaths)
-	viper.Set("display", m.cfg.Display)
-
-	return viper.WriteConfig()
-}
-
-// createDefaultConfig creates a new configuration file with defaults.
-func (m *Manager) createDefaultConfig() error {
-	defaultCfg := &Config{
-		BackgroundColor: DefaultBackgroundColor,
-		BackgroundImage: DefaultBackgroundImage,
-		TextColor:       DefaultTextColor,
-		ImagePaths:      []string{},
+	cfg := &Config{
+		BackgroundColor: getOrDefault(settings, "background_color", DefaultBackgroundColor),
+		BackgroundImage: getOrDefault(settings, "background_image", DefaultBackgroundImage),
+		TextColor:       getOrDefault(settings, "text_color", DefaultTextColor),
 		Display: DisplayConfig{
-			FontFamily:   DefaultFontFamily,
-			FontSize:     DefaultFontSize,
-			TimeFontSize: DefaultTimeFontSize,
-			Layout:       DefaultLayout,
+			FontFamily:   getOrDefault(settings, "display.font_family", DefaultFontFamily),
+			Layout:       getOrDefault(settings, "display.layout", DefaultLayout),
+			DateFormat:   getOrDefault(settings, "display.date_format", DefaultDateFormat),
 		},
 	}
 
-	m.cfg = defaultCfg
-	return m.save()
+	if v := parseFloat(settings["display.font_size"]); v > 0 {
+		cfg.Display.FontSize = v
+	} else {
+		cfg.Display.FontSize = DefaultFontSize
+	}
+	if v := parseFloat(settings["display.time_font_size"]); v > 0 {
+		cfg.Display.TimeFontSize = v
+	} else {
+		cfg.Display.TimeFontSize = DefaultTimeFontSize
+	}
+
+	// Validate and apply defaults for any missing/invalid values.
+	if !isValidHexColor(cfg.BackgroundColor) {
+		cfg.BackgroundColor = DefaultBackgroundColor
+	}
+	if !isValidHexColor(cfg.TextColor) {
+		cfg.TextColor = DefaultTextColor
+	}
+
+	return cfg, nil
 }
 
-// notifyWatchers sends config updates to all registered watchers.
-func (m *Manager) notifyWatchers(cfg Config) {
-	for _, ch := range m.watchers {
-		select {
-		case ch <- cfg:
-		default:
-			// Don't block if watcher is slow
-		}
-	}
+func (m *Manager) saveToStore(cfg Config) error {
+	return m.store.SetSettings(map[string]string{
+		"background_color":        cfg.BackgroundColor,
+		"background_image":        cfg.BackgroundImage,
+		"text_color":              cfg.TextColor,
+		"display.font_family":     cfg.Display.FontFamily,
+		"display.font_size":       formatFloat(cfg.Display.FontSize),
+		"display.time_font_size":  formatFloat(cfg.Display.TimeFontSize),
+		"display.layout":          cfg.Display.Layout,
+		"display.date_format":     cfg.Display.DateFormat,
+	})
 }
+
+// ImportFromYAML imports settings from a legacy config.yaml file into the
+// store. Called once on first run. Silently succeeds if the YAML file doesn't
+// exist (fresh install, not an upgrade).
+func (m *Manager) ImportFromYAML(yamlPath string, logger *slog.Logger) error {
+	legacy, err := loadYAMLConfig(yamlPath)
+	if err != nil {
+		// File doesn't exist → nothing to import.
+		return nil
+	}
+
+	if logger != nil {
+		logger.Info("settings: importing legacy config.yaml", "path", yamlPath)
+	}
+
+	if err := m.Update(*legacy); err != nil {
+		return fmt.Errorf("settings: import yaml: %w", err)
+	}
+	return nil
+}
+
+// ── Validation ────────────────────────────────────────────────────────────────
 
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
-	// Validate colors
 	if !isValidHexColor(c.TextColor) {
 		return fmt.Errorf("%w: text_color=%s", ErrInvalidColor, c.TextColor)
 	}
 	if !isValidHexColor(c.BackgroundColor) {
 		return fmt.Errorf("%w: background_color=%s", ErrInvalidColor, c.BackgroundColor)
 	}
-
 	return nil
 }
 
@@ -266,22 +249,45 @@ func (c *Config) GetBackgroundColor() (color.Color, error) {
 	return parseHexColor(c.BackgroundColor)
 }
 
-// isValidHexColor checks if a string is a valid hex color.
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+func (m *Manager) notifyWatchers(cfg Config) {
+	for _, ch := range m.watchers {
+		select {
+		case ch <- cfg:
+		default:
+		}
+	}
+}
+
 func isValidHexColor(s string) bool {
 	return hexColorRegex.MatchString(s)
 }
 
-// parseHexColor converts hex color string to color.Color.
 func parseHexColor(hex string) (color.Color, error) {
 	if !isValidHexColor(hex) {
 		return nil, ErrInvalidColor
 	}
-
 	var r, g, b uint8
-	_, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
-	if err != nil {
+	if _, err := fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b); err != nil {
 		return nil, err
 	}
-
 	return color.RGBA{R: r, G: g, B: b, A: 255}, nil
+}
+
+func getOrDefault(m map[string]string, key, def string) string {
+	if v, ok := m[key]; ok && v != "" {
+		return v
+	}
+	return def
+}
+
+func parseFloat(s string) float64 {
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
+}
+
+func formatFloat(f float64) string {
+	return fmt.Sprintf("%g", f)
 }

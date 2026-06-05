@@ -15,6 +15,7 @@ import (
 	"github.com/mantonx/nexus-next/internal/api"
 	"github.com/mantonx/nexus-next/internal/device"
 	settings "github.com/mantonx/nexus-next/internal/settings"
+	"github.com/mantonx/nexus-next/internal/store"
 	"github.com/mantonx/nexus-next/internal/touch"
 	"github.com/mantonx/nexus-next/internal/zone"
 )
@@ -32,6 +33,7 @@ type App struct {
 	layoutPath string
 
 	// Components
+	store        *store.DB
 	cfg          *settings.Manager
 	device       device.Device
 	apiServer    *api.Server
@@ -132,6 +134,12 @@ func (a *App) Shutdown() error {
 			}
 		}
 
+		if a.store != nil {
+			if err := a.store.Close(); err != nil {
+				a.logger.Error("error closing store", "error", err)
+			}
+		}
+
 		a.logger.Info("shutdown complete")
 	})
 
@@ -142,18 +150,45 @@ func (a *App) Shutdown() error {
 func (a *App) initialize() error {
 	a.logger.Debug("initializing application components")
 
-	// 1. Load configuration
+	// 1. Open the SQLite store — single source of truth for all config.
+	// configPath is the DB path (empty = default ~/.config/nexus-open/nexus.db).
 	var err error
-	a.cfg, err = settings.NewManager(a.configPath)
+	a.store, err = store.Open(a.configPath, a.logger)
+	if err != nil {
+		return fmt.Errorf("failed to open store: %w", err)
+	}
+
+	// 2. Build settings manager from store.
+	a.cfg, err = settings.NewManager(a.store, a.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create config manager: %w", err)
 	}
-	a.logger.Info("configuration loaded")
 
-	// 2. Load zone configuration manager
-	a.zoneCfg, err = zone.NewConfigManager("")
-	if err != nil {
-		return fmt.Errorf("failed to create zone config manager: %w", err)
+	// On first run import any existing config.yaml so upgrades are seamless.
+	if a.store.IsFirstRun() {
+		legacyYAML := a.configPath
+		if legacyYAML == "" {
+			if dir, e := os.UserConfigDir(); e == nil {
+				legacyYAML = dir + "/nexus-open/config.yaml"
+			}
+		}
+		if err := a.cfg.ImportFromYAML(legacyYAML, a.logger); err != nil {
+			a.logger.Warn("settings: yaml import failed (continuing with defaults)", "error", err)
+		}
+	}
+	a.logger.Info("configuration loaded", "first_run", a.store.IsFirstRun())
+
+	// 3. Build zone config manager from the same store.
+	a.zoneCfg = zone.NewConfigManager(a.store, a.logger)
+
+	// On first run also import legacy zone-configs.yaml.
+	if a.store.IsFirstRun() {
+		if dir, e := os.UserConfigDir(); e == nil {
+			legacyZone := dir + "/nexus-open/zone-configs.yaml"
+			if err := a.zoneCfg.ImportFromYAML(legacyZone); err != nil {
+				a.logger.Warn("zone config: yaml import failed (continuing)", "error", err)
+			}
+		}
 	}
 	a.logger.Info("zone config manager initialized")
 
@@ -203,8 +238,22 @@ func (a *App) initialize() error {
 	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager, a.zoneCfg)
 	a.logger.Info("zone sampler created")
 
-	// Register page change callback to restart sampler on page switch
-	a.zoneManager.SetOnPageChange(a.zoneSampler.RestartForPage)
+	// Register page change callback: restart sampler and broadcast new page state.
+	// BroadcastPageState is fired in its own goroutine — it acquires the hub
+	// lock, and doing that on the same goroutine as sampler restart adds latency
+	// that can push past test timing budgets when modules are slow to launch.
+	a.zoneManager.SetOnPageChange(func(pageIndex int) error {
+		if err := a.zoneSampler.RestartForPage(pageIndex); err != nil {
+			return err
+		}
+		go a.apiServer.BroadcastPageState()
+		return nil
+	})
+
+	// Restart the sampler for a single zone when a tap cycles its module.
+	a.zoneManager.SetOnZoneCycle(func(zoneConfig zone.ZoneConfig) error {
+		return a.zoneSampler.RestartZone(zoneConfig)
+	})
 
 	// Register zone sampler as per-zone config notifier so API updates affect live modules.
 	a.apiServer.SetZoneConfigNotifier(a.zoneSampler)
@@ -213,8 +262,21 @@ func (a *App) initialize() error {
 	// Register zone sampler as status provider so /api/zones/:id/status works.
 	a.apiServer.SetZoneStatusProvider(a.zoneSampler)
 
-	// Wire zone manager for swipe simulation endpoint.
+	// Wire zone manager for swipe simulation, navigation, and layout editing.
 	a.apiServer.SetSwipeSimulator(a.zoneManager)
+	a.apiServer.SetNavigator(a.zoneManager)
+	a.apiServer.SetLayoutStore(a.store)
+	a.apiServer.SetLayoutReloader(a.zoneManager)
+
+	// On first DB run, seed the layout tables from the YAML layout file so
+	// the editor has something to show immediately.
+	if a.store.IsFirstRun() {
+		if hasLayout, _ := a.store.HasLayout(); !hasLayout {
+			if err := importLayoutFromYAML(a.store, a.zoneManager.GetConfig(), a.logger); err != nil {
+				a.logger.Warn("layout import from YAML failed (continuing with YAML)", "error", err)
+			}
+		}
+	}
 
 	// Propagate display config from settings into the zone manager theme,
 	// both immediately on startup and on every subsequent Flutter UI save.
@@ -222,6 +284,8 @@ func (a *App) initialize() error {
 		current := a.zoneManager.GetConfig().Theme
 		current.Bg = cfg.BackgroundColor
 		current.Fg = cfg.TextColor
+		// Accent is NOT overwritten from TextColor — it stays as the zone theme
+		// accent (cyan by default) which drives graph colours and severity tints.
 		if cfg.Display.FontSize > 0 {
 			current.FontSizePrimary = int(cfg.Display.FontSize)
 		}
@@ -229,6 +293,18 @@ func (a *App) initialize() error {
 			current.FontSizeSecondary = int(cfg.Display.TimeFontSize)
 		}
 		a.zoneManager.UpdateTheme(current)
+
+		// Apply background image/GIF if configured.
+		if cfg.BackgroundImage != "" && cfg.BackgroundImage != settings.DefaultBackgroundImage {
+			if dir, err := os.UserConfigDir(); err == nil {
+				imgPath := dir + "/nexus-open/images/" + cfg.BackgroundImage
+				if err := a.zoneManager.SetBackground(imgPath); err != nil {
+					a.logger.Warn("failed to set background image", "path", imgPath, "error", err)
+				}
+			}
+		} else {
+			a.zoneManager.SetBackground("") //nolint:errcheck
+		}
 	}
 
 	// Apply saved settings immediately so hardware reflects stored config on startup.

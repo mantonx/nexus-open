@@ -24,8 +24,8 @@ const (
 	cacheTimeout       = 5 * time.Minute
 )
 
-// WeatherModule monitors weather conditions
-type WeatherModule struct {
+// WeatherPlugin monitors weather conditions
+type WeatherPlugin struct {
 	mu          sync.RWMutex
 	lastUpdate  time.Time
 	cachedData  *WeatherData
@@ -51,9 +51,9 @@ type WeatherData struct {
 	WindSpeed   float64
 }
 
-// NewWeatherModule creates a new weather module
-func NewWeatherModule() *WeatherModule {
-	wm := &WeatherModule{
+// NewWeatherPlugin creates a new weather module
+func NewWeatherPlugin() *WeatherPlugin {
+	wm := &WeatherPlugin{
 		coordsCache: make(map[string]coords),
 		location:    "Jersey City, NJ",
 		unit:        "imperial", // default (°F)
@@ -62,7 +62,7 @@ func NewWeatherModule() *WeatherModule {
 }
 
 // Describe returns module metadata
-func (m *WeatherModule) Describe() (module.Descriptor, error) {
+func (m *WeatherPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "Weather",
 		Version:     "1.0.0",
@@ -74,7 +74,7 @@ func (m *WeatherModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns current weather data
-func (m *WeatherModule) Sample() (module.Payload, error) {
+func (m *WeatherPlugin) Sample() (module.Payload, error) {
 	// Check cache
 	m.mu.RLock()
 	if m.cachedData != nil && time.Since(m.lastUpdate) < cacheTimeout {
@@ -117,7 +117,7 @@ func (m *WeatherModule) Sample() (module.Payload, error) {
 // OnConfigChanged implements module.ConfigNotifier interface.
 // This method is called by the host when configuration changes via the API,
 // allowing the weather module to react instantly without file watching.
-func (m *WeatherModule) OnConfigChanged(config map[string]interface{}) error {
+func (m *WeatherPlugin) OnConfigChanged(config map[string]interface{}) error {
 	m.mu.Lock()
 	oldLocation := m.location
 	oldUnit := m.unit
@@ -169,7 +169,7 @@ func (m *WeatherModule) OnConfigChanged(config map[string]interface{}) error {
 }
 
 // formatPayload converts WeatherData to module.Payload
-func (m *WeatherModule) formatPayload(data *WeatherData) module.Payload {
+func (m *WeatherPlugin) formatPayload(data *WeatherData) module.Payload {
 	var tempStr string
 	if data.Unit == "imperial" {
 		tempStr = fmt.Sprintf("%.0f°F", data.Temperature)
@@ -177,9 +177,12 @@ func (m *WeatherModule) formatPayload(data *WeatherData) module.Payload {
 		tempStr = fmt.Sprintf("%.0f°C", data.Temperature)
 	}
 
-	// Combine weather description with location for clean, compact display
-	// Format: "Clear • Jersey City" or "Partly Cloudy • San Francisco"
-	secondary := fmt.Sprintf("%s • %s", strings.TrimSpace(data.Description), data.Location)
+	// Strip state/country suffix (", NJ" / ", US") — city name alone fits better.
+	loc := data.Location
+	if i := strings.Index(loc, ","); i > 0 {
+		loc = strings.TrimSpace(loc[:i])
+	}
+	secondary := loc
 
 	fmt.Printf("weather payload primary=%q secondary=%q icon=%q\n",
 		tempStr, secondary, data.Icon)
@@ -195,7 +198,7 @@ func (m *WeatherModule) formatPayload(data *WeatherData) module.Payload {
 }
 
 // fetchWeather fetches current weather data
-func (m *WeatherModule) fetchWeather() (*WeatherData, error) {
+func (m *WeatherPlugin) fetchWeather() (*WeatherData, error) {
 	m.mu.RLock()
 	location := m.location
 	unit := m.unit
@@ -262,7 +265,7 @@ func (m *WeatherModule) fetchWeather() (*WeatherData, error) {
 }
 
 // getCityCoordinates gets coordinates for a city name
-func (m *WeatherModule) getCityCoordinates(location string) (float64, float64, error) {
+func (m *WeatherPlugin) getCityCoordinates(location string) (float64, float64, error) {
 	// Check cache first
 	m.coordsMu.Lock()
 	if cached, ok := m.coordsCache[location]; ok {
@@ -407,7 +410,7 @@ func main() {
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: module.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"module": &module.ModulePlugin{Impl: NewWeatherModule()},
+			"plugin": &module.ExecPlugin{Impl: NewWeatherPlugin()},
 		},
 	})
 }

@@ -1,189 +1,94 @@
-// Package zone manages per-zone module configuration.
-// Supports hybrid approach: module defaults + optional zone overrides.
+// Package zone manages per-zone plugin configuration.
+// ConfigManager now delegates storage to the shared [store.DB].
 package zone
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"sync"
+	"log/slog"
 
-	"gopkg.in/yaml.v3"
+	"github.com/mantonx/nexus-next/internal/store"
 )
 
-// ModuleConfig represents the zone configuration file structure.
-type ModuleConfig struct {
-	// ModuleDefaults are shared configs for all zones using a module
-	ModuleDefaults map[string]map[string]interface{} `yaml:"module_defaults,omitempty"`
-	// ZoneOverrides are per-zone configs that override module defaults
-	ZoneOverrides map[string]map[string]interface{} `yaml:"zone_overrides,omitempty"`
-}
-
-// ConfigManager manages zone-specific module configurations.
+// ConfigManager manages zone-specific plugin configurations.
+// It is a thin adapter between the zone package and the store layer.
 type ConfigManager struct {
-	path   string
-	config *ModuleConfig
-	mu     sync.RWMutex
+	store  *store.DB
+	logger *slog.Logger
 }
 
-// NewConfigManager creates a new zone config manager.
-func NewConfigManager(path string) (*ConfigManager, error) {
-	if path == "" {
-		// Use default path
-		configDir, err := os.UserConfigDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get config dir: %w", err)
-		}
-		path = filepath.Join(configDir, "nexus-open", "zone-configs.yaml")
+// NewConfigManager creates a ConfigManager backed by the given store.
+func NewConfigManager(s *store.DB, logger *slog.Logger) *ConfigManager {
+	if logger == nil {
+		logger = slog.Default()
 	}
-
-	m := &ConfigManager{
-		path: path,
-		config: &ModuleConfig{
-			ModuleDefaults: make(map[string]map[string]interface{}),
-			ZoneOverrides:  make(map[string]map[string]interface{}),
-		},
-	}
-
-	// Load existing config if file exists
-	if _, err := os.Stat(path); err == nil {
-		if err := m.load(); err != nil {
-			return nil, fmt.Errorf("failed to load zone config: %w", err)
-		}
-	}
-
-	return m, nil
+	return &ConfigManager{store: s, logger: logger}
 }
 
 // Get returns the effective config for a zone.
-// Resolution order: zone override → module default → nil
-func (m *ConfigManager) Get(zoneID, modulePath string) map[string]interface{} {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	// 1. Check zone override
-	if override, exists := m.config.ZoneOverrides[zoneID]; exists && len(override) > 0 {
-		return copyMap(override)
-	}
-
-	// 2. Check module default
-	if defaults, exists := m.config.ModuleDefaults[modulePath]; exists && len(defaults) > 0 {
-		return copyMap(defaults)
-	}
-
-	// 3. No config
-	return nil
-}
-
-// GetModuleDefault returns the default config for a module.
-func (m *ConfigManager) GetModuleDefault(modulePath string) map[string]interface{} {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if defaults, exists := m.config.ModuleDefaults[modulePath]; exists {
-		return copyMap(defaults)
-	}
-	return nil
-}
-
-// GetZoneOverride returns the zone-specific override (if any).
-func (m *ConfigManager) GetZoneOverride(zoneID string) map[string]interface{} {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	if override, exists := m.config.ZoneOverrides[zoneID]; exists {
-		return copyMap(override)
-	}
-	return nil
-}
-
-// SetModuleDefault sets the default config for a module.
-func (m *ConfigManager) SetModuleDefault(modulePath string, config map[string]interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.config.ModuleDefaults == nil {
-		m.config.ModuleDefaults = make(map[string]map[string]interface{})
-	}
-
-	m.config.ModuleDefaults[modulePath] = copyMap(config)
-	return m.save()
-}
-
-// SetZoneOverride sets a zone-specific config override.
-func (m *ConfigManager) SetZoneOverride(zoneID string, config map[string]interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.config.ZoneOverrides == nil {
-		m.config.ZoneOverrides = make(map[string]map[string]interface{})
-	}
-
-	m.config.ZoneOverrides[zoneID] = copyMap(config)
-	return m.save()
-}
-
-// DeleteZoneOverride removes a zone-specific override.
-func (m *ConfigManager) DeleteZoneOverride(zoneID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	delete(m.config.ZoneOverrides, zoneID)
-	return m.save()
-}
-
-// load reads the config from disk.
-func (m *ConfigManager) load() error {
-	data, err := os.ReadFile(m.path)
+// Resolution order: zone override → nil (plugin defaults removed; use zone IDs).
+func (m *ConfigManager) Get(zoneID, _ string) map[string]interface{} {
+	cfg, err := m.store.GetZoneConfig(zoneID)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	var config ModuleConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("failed to parse config: %w", err)
-	}
-
-	// Initialize maps if nil
-	if config.ModuleDefaults == nil {
-		config.ModuleDefaults = make(map[string]map[string]interface{})
-	}
-	if config.ZoneOverrides == nil {
-		config.ZoneOverrides = make(map[string]map[string]interface{})
-	}
-
-	m.config = &config
-	return nil
-}
-
-// save writes the config to disk (caller must hold lock).
-func (m *ConfigManager) save() error {
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(m.path), 0755); err != nil {
-		return fmt.Errorf("failed to create config dir: %w", err)
-	}
-
-	data, err := yaml.Marshal(m.config)
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(m.path, data, 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
-}
-
-// copyMap creates a deep copy of a map to prevent external modification.
-func copyMap(src map[string]interface{}) map[string]interface{} {
-	if src == nil {
+		m.logger.Warn("zone config: read error", "zone_id", zoneID, "error", err)
 		return nil
 	}
+	return cfg
+}
 
-	dst := make(map[string]interface{}, len(src))
-	for k, v := range src {
-		dst[k] = v
+// GetPluginDefault returns the default config for a plugin path.
+// Stored under the key "plugin:<pluginPath>" for namespace separation.
+// NOTE: Breaking change — DB keys were previously "module:<path>"; existing records are not migrated.
+func (m *ConfigManager) GetPluginDefault(pluginPath string) map[string]interface{} {
+	return m.Get("plugin:"+pluginPath, "")
+}
+
+// GetZoneOverride returns the stored config for zoneID (same as Get now).
+func (m *ConfigManager) GetZoneOverride(zoneID string) map[string]interface{} {
+	return m.Get(zoneID, "")
+}
+
+// SetPluginDefault stores default config for a plugin path.
+// Stored under the key "plugin:<pluginPath>" for namespace separation.
+// NOTE: Breaking change — DB keys were previously "module:<path>"; existing records are not migrated.
+func (m *ConfigManager) SetPluginDefault(pluginPath string, cfg map[string]interface{}) error {
+	return m.store.SetZoneConfig("plugin:"+pluginPath, cfg)
+}
+
+// SetZoneOverride stores the config for a specific zone.
+func (m *ConfigManager) SetZoneOverride(zoneID string, cfg map[string]interface{}) error {
+	return m.store.SetZoneConfig(zoneID, cfg)
+}
+
+// DeleteZoneOverride removes the stored config for zoneID.
+func (m *ConfigManager) DeleteZoneOverride(zoneID string) error {
+	return m.store.DeleteZoneConfig(zoneID)
+}
+
+// BroadcastConfigChange notifies all zones of a global config change
+// (location, unit, time format). Implements zone.ZoneConfigNotifier.
+func (m *ConfigManager) BroadcastConfigChange(cfg map[string]interface{}) {
+	// Global config changes are handled at the sampler level via OnConfigChanged.
+	// The store doesn't need to persist these — they flow from settings.Manager.
+}
+
+// BroadcastZoneConfigChange updates and persists the config for a single zone.
+func (m *ConfigManager) BroadcastZoneConfigChange(zoneID string, cfg map[string]interface{}) error {
+	return m.SetZoneOverride(zoneID, cfg)
+}
+
+// ImportFromYAML imports zone configs from a legacy zone-configs.yaml file.
+// Called once on first run.
+func (m *ConfigManager) ImportFromYAML(path string) error {
+	legacy, err := loadZoneYAML(path)
+	if err != nil {
+		return nil // file doesn't exist — fresh install
 	}
-	return dst
+
+	m.logger.Info("zone config: importing legacy zone-configs.yaml", "path", path)
+
+	for zoneID, cfg := range legacy.ZoneOverrides {
+		if err := m.store.SetZoneConfig(zoneID, cfg); err != nil {
+			m.logger.Warn("zone config: import error", "zone_id", zoneID, "error", err)
+		}
+	}
+	return nil
 }

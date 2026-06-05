@@ -79,9 +79,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx := conn.CloseRead(r.Context())
 
-	// Send current window state immediately on connect so the client is in sync.
+	// Send current window + page state immediately on connect so the client is in sync.
 	s.hub.mu.Lock()
 	_ = wsjson.Write(ctx, conn, WSMessage{Type: "window_state", Data: s.windowState})
+	if s.navigator != nil {
+		_ = wsjson.Write(ctx, conn, WSMessage{
+			Type: "page_state",
+			Data: map[string]any{
+				"current_page": s.navigator.GetCurrentPage(),
+				"num_pages":    s.navigator.NumPages(),
+				"pages":        s.navigator.GetPageInfos(),
+			},
+		})
+	}
 	s.hub.mu.Unlock()
 
 	for {

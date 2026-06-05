@@ -7,22 +7,22 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// DebugModule displays debug information about the zone
-type DebugModule struct {
+// DebugPlugin displays debug information about the zone
+type DebugPlugin struct {
 	zoneID string
 	width  int
 }
 
 // NewDebug creates a new debug module
-func NewDebug(zoneID string, width int) *DebugModule {
-	return &DebugModule{
+func NewDebug(zoneID string, width int) *DebugPlugin {
+	return &DebugPlugin{
 		zoneID: zoneID,
 		width:  width,
 	}
 }
 
 // Describe returns module metadata
-func (m *DebugModule) Describe() (module.Descriptor, error) {
+func (m *DebugPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "Debug",
 		Version:     "1.0.0",
@@ -34,7 +34,7 @@ func (m *DebugModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns debug payload
-func (m *DebugModule) Sample() (module.Payload, error) {
+func (m *DebugPlugin) Sample() (module.Payload, error) {
 	return module.Payload{
 		Primary:   fmt.Sprintf("Zone: %s", m.zoneID),
 		Secondary: fmt.Sprintf("%dpx wide", m.width),
@@ -45,9 +45,9 @@ func (m *DebugModule) Sample() (module.Payload, error) {
 	}, nil
 }
 
-// OnConfigChanged implements module.ConfigNotifier interface.
+// OnConfigChanged implements module.PluginConfigNotifier interface.
 // Debug module doesn't use configuration, so this is a no-op.
-func (m *DebugModule) OnConfigChanged(config map[string]interface{}) error {
+func (m *DebugPlugin) OnConfigChanged(config map[string]interface{}) error {
 	// Debug module doesn't need configuration
 	return nil
 }

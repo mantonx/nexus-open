@@ -12,8 +12,8 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// NetworkModule monitors network upload/download speeds
-type NetworkModule struct {
+// NetworkPlugin monitors network upload/download speeds
+type NetworkPlugin struct {
 	history    []float32  // Sparkline data for download (last 60 samples)
 	historyMu  sync.Mutex // Protect history
 	maxHistory int        // Maximum history length
@@ -26,9 +26,9 @@ type NetworkModule struct {
 	graphMu    sync.RWMutex
 }
 
-// NewNetworkModule creates a new network module
-func NewNetworkModule() *NetworkModule {
-	return &NetworkModule{
+// NewNetworkPlugin creates a new network module
+func NewNetworkPlugin() *NetworkPlugin {
+	return &NetworkPlugin{
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
 		firstRead:  true,
@@ -38,7 +38,7 @@ func NewNetworkModule() *NetworkModule {
 }
 
 // Describe returns module metadata
-func (m *NetworkModule) Describe() (module.Descriptor, error) {
+func (m *NetworkPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "Network",
 		Version:     "1.0.0",
@@ -50,7 +50,7 @@ func (m *NetworkModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns current network statistics
-func (m *NetworkModule) Sample() (module.Payload, error) {
+func (m *NetworkPlugin) Sample() (module.Payload, error) {
 	// Get network speed
 	downSpeed, upSpeed, err := m.getNetworkSpeed()
 	if err != nil {
@@ -105,14 +105,14 @@ func (m *NetworkModule) Sample() (module.Payload, error) {
 		LabelPosition:    module.LabelPositionRight, // Position label to the right
 		LabelOffsetX:     20,                        // Spacing between values and label (in pixels)
 		NormalizeGraph:   true,                      // Normalize to show relative bandwidth changes
-		GraphBgOpacity:   3,                         // Very subtle background (network graph should be minimal)
-		GraphLineOpacity: 8,                         // Very subtle line
+		GraphBgOpacity:   0, // 0 = use renderer default
+		GraphLineOpacity: 0, // 0 = use renderer default
 		Timestamp:        time.Now(),
 	}, nil
 }
 
 // getNetworkSpeed calculates current network speed
-func (m *NetworkModule) getNetworkSpeed() (float64, float64, error) {
+func (m *NetworkPlugin) getNetworkSpeed() (float64, float64, error) {
 	// Get current network stats (all interfaces combined)
 	stats, err := net.IOCounters(false)
 	if err != nil {
@@ -199,7 +199,7 @@ func formatSpeedBits(bytesPerSec float64) string {
 }
 
 // addToHistory adds a download speed sample to history
-func (m *NetworkModule) addToHistory(speed float64) {
+func (m *NetworkPlugin) addToHistory(speed float64) {
 	m.historyMu.Lock()
 	defer m.historyMu.Unlock()
 
@@ -223,7 +223,7 @@ func (m *NetworkModule) addToHistory(speed float64) {
 }
 
 // getSparkline returns sparkline data
-func (m *NetworkModule) getSparkline() []float32 {
+func (m *NetworkPlugin) getSparkline() []float32 {
 	m.historyMu.Lock()
 	defer m.historyMu.Unlock()
 
@@ -237,7 +237,7 @@ func (m *NetworkModule) getSparkline() []float32 {
 // The network module uses the "network_format" config to switch between
 // bytes (KB/s, MB/s) and bits (Kbps, Mbps) display formats,
 // and "graph_type" to change visualization style.
-func (m *NetworkModule) OnConfigChanged(config map[string]interface{}) error {
+func (m *NetworkPlugin) OnConfigChanged(config map[string]interface{}) error {
 	// Update network format
 	m.formatMu.Lock()
 	oldFormat := m.format
@@ -275,7 +275,7 @@ func main() {
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: module.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"module": &module.ModulePlugin{Impl: NewNetworkModule()},
+			"plugin": &module.ExecPlugin{Impl: NewNetworkPlugin()},
 		},
 	})
 }

@@ -17,8 +17,8 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// GPUTempModule monitors GPU temperature
-type GPUTempModule struct {
+// GPUTempPlugin monitors GPU temperature
+type GPUTempPlugin struct {
 	history    []float32  // Sparkline data (last 60 samples)
 	historyMu  sync.Mutex // Protect history
 	maxHistory int        // Maximum history length
@@ -30,9 +30,9 @@ type GPUTempModule struct {
 	graphMu    sync.RWMutex
 }
 
-// NewGPUTempModule creates a new GPU temperature module
-func NewGPUTempModule() *GPUTempModule {
-	return &GPUTempModule{
+// NewGPUTempPlugin creates a new GPU temperature module
+func NewGPUTempPlugin() *GPUTempPlugin {
+	return &GPUTempPlugin{
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
 		graphType:  module.GraphTypeSparkline, // default to sparkline
@@ -41,7 +41,7 @@ func NewGPUTempModule() *GPUTempModule {
 }
 
 // Describe returns module metadata
-func (m *GPUTempModule) Describe() (module.Descriptor, error) {
+func (m *GPUTempPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "GPU Temperature",
 		Version:     "1.0.0",
@@ -53,7 +53,7 @@ func (m *GPUTempModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns current GPU temperature
-func (m *GPUTempModule) Sample() (module.Payload, error) {
+func (m *GPUTempPlugin) Sample() (module.Payload, error) {
 	// Get GPU temperature
 	temp, err := m.getGPUTemp()
 	if err != nil {
@@ -95,20 +95,20 @@ func (m *GPUTempModule) Sample() (module.Payload, error) {
 
 	return module.Payload{
 		Primary:          tempStr,
-		Secondary:        "GPU Temp",
+		Secondary:        "GPU",
 		Severity:         severity,
 		Spark:            spark,
 		GraphType:        currentGraphType,
 		TTL:              2 * time.Second,
-		Icon:             "microchip",
-		GraphBgOpacity:   6,  // Subtle but visible background for temperature trends
-		GraphLineOpacity: 12, // Visible line without being overpowering
+		Icon:             "desktop",
+		GraphBgOpacity:   0,
+		GraphLineOpacity: 0,
 		Timestamp:        time.Now(),
 	}, nil
 }
 
 // getGPUTemp queries for GPU temperature using multiple detection methods
-func (m *GPUTempModule) getGPUTemp() (float64, error) {
+func (m *GPUTempPlugin) getGPUTemp() (float64, error) {
 	// Try NVIDIA first
 	if temp, err := m.getNVIDIATemp(); err == nil {
 		m.setVendor("nvidia")
@@ -137,7 +137,7 @@ func (m *GPUTempModule) getGPUTemp() (float64, error) {
 }
 
 // getNVIDIATemp queries nvidia-smi for NVIDIA GPU temperature
-func (m *GPUTempModule) getNVIDIATemp() (float64, error) {
+func (m *GPUTempPlugin) getNVIDIATemp() (float64, error) {
 	cmd := exec.Command("nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits")
 	output, err := cmd.Output()
 	if err != nil {
@@ -159,7 +159,7 @@ func (m *GPUTempModule) getNVIDIATemp() (float64, error) {
 }
 
 // getAMDTemp queries rocm-smi for AMD GPU temperature
-func (m *GPUTempModule) getAMDTemp() (float64, error) {
+func (m *GPUTempPlugin) getAMDTemp() (float64, error) {
 	// Try rocm-smi first (AMD ROCm stack)
 	cmd := exec.Command("rocm-smi", "--showtemp", "--csv")
 	output, err := cmd.Output()
@@ -185,14 +185,14 @@ func (m *GPUTempModule) getAMDTemp() (float64, error) {
 }
 
 // getIntelTemp queries for Intel GPU temperature
-func (m *GPUTempModule) getIntelTemp() (float64, error) {
+func (m *GPUTempPlugin) getIntelTemp() (float64, error) {
 	// Intel GPUs typically expose temperature via sysfs
 	// /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input
 	return m.findIntelSysfsTemp()
 }
 
 // getSysfsTemp is a generic fallback that searches sysfs for any GPU temp
-func (m *GPUTempModule) getSysfsTemp() (float64, error) {
+func (m *GPUTempPlugin) getSysfsTemp() (float64, error) {
 	// Search /sys/class/drm/card*/device/hwmon/hwmon*/temp*_input
 	pattern := "/sys/class/drm/card*/device/hwmon/hwmon*/temp1_input"
 	matches, err := filepath.Glob(pattern)
@@ -218,7 +218,7 @@ func (m *GPUTempModule) getSysfsTemp() (float64, error) {
 }
 
 // findAMDSysfsTemp searches for AMD GPU temperature in sysfs
-func (m *GPUTempModule) findAMDSysfsTemp() (float64, error) {
+func (m *GPUTempPlugin) findAMDSysfsTemp() (float64, error) {
 	// AMD GPUs appear as /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input
 	// Look for cards with AMD vendor ID (1002) or amdgpu driver
 	cards, err := filepath.Glob("/sys/class/drm/card[0-9]")
@@ -266,7 +266,7 @@ func (m *GPUTempModule) findAMDSysfsTemp() (float64, error) {
 }
 
 // findIntelSysfsTemp searches for Intel GPU temperature in sysfs
-func (m *GPUTempModule) findIntelSysfsTemp() (float64, error) {
+func (m *GPUTempPlugin) findIntelSysfsTemp() (float64, error) {
 	// Intel GPUs appear as /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input
 	// Look for cards with Intel vendor ID (8086) or i915 driver
 	cards, err := filepath.Glob("/sys/class/drm/card[0-9]")
@@ -314,7 +314,7 @@ func (m *GPUTempModule) findIntelSysfsTemp() (float64, error) {
 }
 
 // setVendor sets the detected GPU vendor (thread-safe)
-func (m *GPUTempModule) setVendor(vendor string) {
+func (m *GPUTempPlugin) setVendor(vendor string) {
 	m.vendorMu.Lock()
 	defer m.vendorMu.Unlock()
 	if m.vendor == "" {
@@ -323,27 +323,11 @@ func (m *GPUTempModule) setVendor(vendor string) {
 }
 
 // addToHistory adds a temperature sample to history
-func (m *GPUTempModule) addToHistory(temp float64) {
+func (m *GPUTempPlugin) addToHistory(temp float64) {
 	m.historyMu.Lock()
 	defer m.historyMu.Unlock()
 
-	// Normalize to 0-1 range with sensitive scaling for GPUs (40-80°C typical range)
-	// This makes small temperature variations much more visible
-	const minTemp = 40.0  // Typical idle GPU temp
-	const maxTemp = 80.0  // Typical load GPU temp
-	const rangeTemp = maxTemp - minTemp
-
-	normalized := float32((temp - minTemp) / rangeTemp)
-
-	// Clamp to 0-1 range
-	if normalized > 1.0 {
-		normalized = 1.0
-	}
-	if normalized < 0.0 {
-		normalized = 0.0
-	}
-
-	m.history = append(m.history, normalized)
+	m.history = append(m.history, float32(temp))
 
 	// Keep only last N samples
 	if len(m.history) > m.maxHistory {
@@ -351,19 +335,50 @@ func (m *GPUTempModule) addToHistory(temp float64) {
 	}
 }
 
-// getSparkline returns sparkline data
-func (m *GPUTempModule) getSparkline() []float32 {
+// getSparkline returns sparkline data normalised using the 5th/95th percentile
+// so single spikes don't compress everything else to a flatline.
+func (m *GPUTempPlugin) getSparkline() []float32 {
 	m.historyMu.Lock()
 	defer m.historyMu.Unlock()
 
-	// Return copy to avoid concurrent modification
+	if len(m.history) == 0 {
+		return nil
+	}
+
+	mn, mx := percentileRange(m.history, 5, 95)
+	rng := mx - mn
+	if rng < 2.0 {
+		mid := (mn + mx) / 2
+		mn = mid - 1.0
+		mx = mid + 1.0
+		rng = 2.0
+	}
+
 	spark := make([]float32, len(m.history))
-	copy(spark, m.history)
+	for i, v := range m.history {
+		s := (v - mn) / rng
+		if s < 0 { s = 0 }
+		if s > 1 { s = 1 }
+		spark[i] = s
+	}
 	return spark
 }
 
+func percentileRange(data []float32, loPct, hiPct int) (float32, float32) {
+	sorted := make([]float32, len(data))
+	copy(sorted, data)
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
+	}
+	loIdx := loPct * (len(sorted) - 1) / 100
+	hiIdx := hiPct * (len(sorted) - 1) / 100
+	return sorted[loIdx], sorted[hiIdx]
+}
+
 // getSeverity returns severity based on temperature
-func (m *GPUTempModule) getSeverity(temp float64) module.Severity {
+func (m *GPUTempPlugin) getSeverity(temp float64) module.Severity {
 	switch {
 	case temp >= 90:
 		return module.SeverityCrit // Critical: ≥90°C
@@ -377,7 +392,7 @@ func (m *GPUTempModule) getSeverity(temp float64) module.Severity {
 // OnConfigChanged implements module.ConfigNotifier interface.
 // The GPU temp module uses the "unit" config to switch between Celsius and Fahrenheit,
 // and "graph_type" to change visualization style.
-func (m *GPUTempModule) OnConfigChanged(config map[string]interface{}) error {
+func (m *GPUTempPlugin) OnConfigChanged(config map[string]interface{}) error {
 	// Update unit
 	m.unitMu.Lock()
 	oldUnit := m.unit
@@ -412,7 +427,7 @@ func main() {
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: module.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"module": &module.ModulePlugin{Impl: NewGPUTempModule()},
+			"plugin": &module.ExecPlugin{Impl: NewGPUTempPlugin()},
 		},
 	})
 }

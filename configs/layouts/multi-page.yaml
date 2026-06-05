@@ -6,7 +6,7 @@ version: "1.0"
 
 # Global theme
 theme:
-  bg: "#101010"
+  bg: "#000000"
   fg: "#EAEAEA"
   muted: "#B8BDC2"
   accent: "#00C8FF"
@@ -27,36 +27,42 @@ pages:
     zones:
       - id: system.weather
         width: 160
-        module: exec:./modules/weather/weather
+        plugin: exec:./modules/weather/weather
         refresh_ms: 300000  # 5 minutes
         align: left
+        theme_override:
+          accent: "#C87820"
 
       - id: system.cpu
         width: 160
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./modules/cpu-temp/cpu-temp
         refresh_ms: 2000
-        align: center
+        align: left
+        theme_override:
+          accent: "#38C878"
 
       - id: system.gpu
         width: 160
-        module: exec:./modules/gpu-temp/gpu-temp
+        plugin: exec:./modules/gpu-temp/gpu-temp
         refresh_ms: 2000
-        align: center
+        align: left
         theme_override:
-          accent: "#FF6B6B"
+          accent: "#FF6B35"
 
       - id: system.network
         width: 160
-        module: exec:./modules/network/network
+        plugin: exec:./modules/network/network
         refresh_ms: 2000
-        align: right
+        align: left
+        theme_override:
+          accent: "#00C8FF"
 
   # Page 2: Performance Focus
   - name: "Performance"
     zones:
       - id: performance.cpu
         width: 240
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./modules/cpu-temp/cpu-temp
         refresh_ms: 1000
         align: center
         theme_override:
@@ -64,7 +70,7 @@ pages:
 
       - id: performance.gpu
         width: 240
-        module: exec:./modules/gpu-temp/gpu-temp
+        plugin: exec:./modules/gpu-temp/gpu-temp
         refresh_ms: 1000
         align: center
         theme_override:
@@ -72,7 +78,7 @@ pages:
 
       - id: performance.network
         width: 160
-        module: exec:./modules/network/network
+        plugin: exec:./modules/network/network
         refresh_ms: 1000
         align: right
 
@@ -81,7 +87,7 @@ pages:
     zones:
       - id: clock.time
         width: 640
-        module: builtin:clock
+        plugin: builtin:clock
         refresh_ms: 1000
         align: center
         theme_override:

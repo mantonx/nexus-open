@@ -3,7 +3,7 @@ version: "1.0"
 
 # Global theme
 theme:
-  bg: "#101010"
+  bg: "#000000"
   fg: "#EAEAEA"
   muted: "#B8BDC2"
   accent: "#00C8FF"
@@ -17,47 +17,51 @@ pages:
     zones:
       - id: weather
         width: 160
-        module: builtin:placeholder
+        plugin: builtin:placeholder
         refresh_ms: 5000
         align: left
+        theme_override:
+          accent: "#C87820"
 
       - id: cpu
         width: 160
-        module: builtin:placeholder
+        plugin: builtin:placeholder
         refresh_ms: 2000
-        align: center
+        align: left
+        theme_override:
+          accent: "#38C878"
 
       - id: gpu
         width: 160
-        module: builtin:placeholder
+        plugin: builtin:placeholder
         refresh_ms: 2000
-        align: center
+        align: left
         theme_override:
-          accent: "#FF6B6B"
+          accent: "#FF6B35"
 
       - id: clock
         width: 160
-        module: builtin:placeholder
+        plugin: builtin:placeholder
         refresh_ms: 1000
-        align: right
+        align: center
 
   - name: "Media"
     zones:
       - id: media
         width: 320
-        module: builtin:placeholder
+        plugin: builtin:placeholder
         refresh_ms: 1000
         align: left
 
       - id: network
         width: 160
-        module: builtin:placeholder
+        plugin: builtin:placeholder
         refresh_ms: 2000
         align: center
 
       - id: clock
         width: 160
-        module: builtin:placeholder
+        plugin: builtin:placeholder
         refresh_ms: 1000
         align: right
 

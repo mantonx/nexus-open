@@ -17,8 +17,8 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// CPUTempModule monitors CPU temperature
-type CPUTempModule struct {
+// CPUTempPlugin monitors CPU temperature
+type CPUTempPlugin struct {
 	history    []float32  // Sparkline data (last 60 samples)
 	historyMu  sync.Mutex // Protect history
 	maxHistory int        // Maximum history length
@@ -28,9 +28,9 @@ type CPUTempModule struct {
 	graphMu    sync.RWMutex
 }
 
-// NewCPUTempModule creates a new CPU temperature module
-func NewCPUTempModule() *CPUTempModule {
-	return &CPUTempModule{
+// NewCPUTempPlugin creates a new CPU temperature module
+func NewCPUTempPlugin() *CPUTempPlugin {
+	return &CPUTempPlugin{
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
 		unit:       "metric",                    // default to Celsius
@@ -39,7 +39,7 @@ func NewCPUTempModule() *CPUTempModule {
 }
 
 // Describe returns module metadata
-func (m *CPUTempModule) Describe() (module.Descriptor, error) {
+func (m *CPUTempPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "CPU Temperature",
 		Version:     "1.0.0",
@@ -51,7 +51,7 @@ func (m *CPUTempModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns current CPU temperature
-func (m *CPUTempModule) Sample() (module.Payload, error) {
+func (m *CPUTempPlugin) Sample() (module.Payload, error) {
 	// Get CPU temperature
 	temp, err := m.getCPUTemp()
 	if err != nil {
@@ -93,20 +93,20 @@ func (m *CPUTempModule) Sample() (module.Payload, error) {
 
 	return module.Payload{
 		Primary:          tempStr,
-		Secondary:        "CPU Temp",
+		Secondary:        "CPU",
 		Severity:         severity,
 		Spark:            spark,
 		GraphType:        currentGraphType,
 		TTL:              2 * time.Second,
 		Icon:             "cpu",
-		GraphBgOpacity:   6,  // Subtle but visible background for temperature trends
-		GraphLineOpacity: 12, // Visible line without being overpowering
+		GraphBgOpacity:   0,
+		GraphLineOpacity: 0,
 		Timestamp:        time.Now(),
 	}, nil
 }
 
 // getCPUTemp reads CPU temperature based on OS
-func (m *CPUTempModule) getCPUTemp() (float64, error) {
+func (m *CPUTempPlugin) getCPUTemp() (float64, error) {
 	switch runtime.GOOS {
 	case "linux":
 		return m.readLinuxTemp()
@@ -120,7 +120,7 @@ func (m *CPUTempModule) getCPUTemp() (float64, error) {
 }
 
 // readLinuxTemp reads CPU temperature from sysfs
-func (m *CPUTempModule) readLinuxTemp() (float64, error) {
+func (m *CPUTempPlugin) readLinuxTemp() (float64, error) {
 	// Try thermal_zone0 first (most common)
 	data, err := os.ReadFile("/sys/class/thermal/thermal_zone0/temp")
 	if err != nil {
@@ -141,7 +141,7 @@ func (m *CPUTempModule) readLinuxTemp() (float64, error) {
 }
 
 // readWindowsTemp reads CPU temperature on Windows
-func (m *CPUTempModule) readWindowsTemp() (float64, error) {
+func (m *CPUTempPlugin) readWindowsTemp() (float64, error) {
 	// Use WMIC to query thermal zone temperature
 	cmd := exec.Command("wmic", "/namespace:\\\\root\\wmi", "PATH",
 		"MSAcpi_ThermalZoneTemperature", "GET", "CurrentTemperature", "/value")
@@ -166,7 +166,7 @@ func (m *CPUTempModule) readWindowsTemp() (float64, error) {
 }
 
 // readMacTemp reads CPU temperature on macOS
-func (m *CPUTempModule) readMacTemp() (float64, error) {
+func (m *CPUTempPlugin) readMacTemp() (float64, error) {
 	// Try sysctl first
 	cmd := exec.Command("sysctl", "-n", "machdep.xcpm.cpu_thermal_level")
 	out, err := cmd.Output()
@@ -200,20 +200,11 @@ func (m *CPUTempModule) readMacTemp() (float64, error) {
 }
 
 // addToHistory adds a temperature sample to history
-func (m *CPUTempModule) addToHistory(temp float64) {
+func (m *CPUTempPlugin) addToHistory(temp float64) {
 	m.historyMu.Lock()
 	defer m.historyMu.Unlock()
 
-	// Normalize to 0-1 range (0-100°C)
-	normalized := float32(temp) / 100.0
-	if normalized > 1.0 {
-		normalized = 1.0
-	}
-	if normalized < 0.0 {
-		normalized = 0.0
-	}
-
-	m.history = append(m.history, normalized)
+	m.history = append(m.history, float32(temp))
 
 	// Keep only last N samples
 	if len(m.history) > m.maxHistory {
@@ -221,19 +212,53 @@ func (m *CPUTempModule) addToHistory(temp float64) {
 	}
 }
 
-// getSparkline returns sparkline data
-func (m *CPUTempModule) getSparkline() []float32 {
+// getSparkline returns sparkline data normalised to a stable range.
+// Uses the 10th/90th percentile of history as the scale bounds so a single
+// spike doesn't compress all other values to a flatline.
+func (m *CPUTempPlugin) getSparkline() []float32 {
 	m.historyMu.Lock()
 	defer m.historyMu.Unlock()
 
-	// Return copy to avoid concurrent modification
+	if len(m.history) == 0 {
+		return nil
+	}
+
+	mn, mx := percentileRange(m.history, 5, 95)
+	rng := mx - mn
+	if rng < 2.0 {
+		mid := (mn + mx) / 2
+		mn = mid - 1.0
+		mx = mid + 1.0
+		rng = 2.0
+	}
+
 	spark := make([]float32, len(m.history))
-	copy(spark, m.history)
+	for i, v := range m.history {
+		s := (v - mn) / rng
+		if s < 0 { s = 0 }
+		if s > 1 { s = 1 }
+		spark[i] = s
+	}
 	return spark
 }
 
+// percentileRange returns the lo-th and hi-th percentile values from data.
+func percentileRange(data []float32, loPct, hiPct int) (float32, float32) {
+	sorted := make([]float32, len(data))
+	copy(sorted, data)
+	// Simple insertion sort — history is at most 60 elements.
+	for i := 1; i < len(sorted); i++ {
+		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
+			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+		}
+	}
+	loIdx := loPct * (len(sorted) - 1) / 100
+	hiIdx := hiPct * (len(sorted) - 1) / 100
+	return sorted[loIdx], sorted[hiIdx]
+}
+
 // getSeverity returns severity based on temperature
-func (m *CPUTempModule) getSeverity(temp float64) module.Severity {
+func (m *CPUTempPlugin) getSeverity(temp float64) module.Severity {
 	switch {
 	case temp >= 90:
 		return module.SeverityCrit // Critical: ≥90°C
@@ -247,7 +272,7 @@ func (m *CPUTempModule) getSeverity(temp float64) module.Severity {
 // OnConfigChanged implements module.ConfigNotifier interface.
 // The CPU temp module uses the "unit" config to switch between Celsius and Fahrenheit,
 // and "graph_type" to change visualization style.
-func (m *CPUTempModule) OnConfigChanged(config map[string]interface{}) error {
+func (m *CPUTempPlugin) OnConfigChanged(config map[string]interface{}) error {
 	// Update unit
 	m.unitMu.Lock()
 	oldUnit := m.unit
@@ -282,7 +307,7 @@ func main() {
 	plugin.Serve(&plugin.ServeConfig{
 		HandshakeConfig: module.Handshake,
 		Plugins: map[string]plugin.Plugin{
-			"module": &module.ModulePlugin{Impl: NewCPUTempModule()},
+			"plugin": &module.ExecPlugin{Impl: NewCPUTempPlugin()},
 		},
 	})
 }

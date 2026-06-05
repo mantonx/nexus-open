@@ -115,3 +115,10 @@ echo ""
 SHOTS=$(ls "$OUT_DIR/"*.png 2>/dev/null | wc -l || echo 0)
 echo "   $SHOTS screenshot(s) saved to $OUT_DIR/"
 ls -1 "$OUT_DIR/"*.png 2>/dev/null | xargs -I{} basename {} || true
+
+# flutter drive overwrites the bundle binary with a test-harness build.
+# Rebuild the plain app binary so subsequent launches don't run the tour.
+echo ""
+echo "▶  Rebuilding plain app binary (flutter drive leaves a test binary)..."
+flutter build linux --debug --target=lib/main.dart --suppress-analytics 2>&1 | grep -E "Built|Error|error" || true
+echo "   ✓  Plain binary restored."

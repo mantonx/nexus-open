@@ -21,6 +21,7 @@ import (
 	"github.com/mantonx/nexus-next/internal/api"
 	"github.com/mantonx/nexus-next/internal/device"
 	config "github.com/mantonx/nexus-next/internal/settings"
+	"github.com/mantonx/nexus-next/internal/store"
 	"github.com/mantonx/nexus-next/internal/zone"
 	"log/slog"
 	"nhooyr.io/websocket"
@@ -37,9 +38,14 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	tmpDir := t.TempDir()
-	cfgPath := tmpDir + "/config.yaml"
 
-	cfg, err := config.NewManager(cfgPath)
+	s, err := store.Open(tmpDir+"/test.db", logger)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	cfg, err := config.NewManager(s, logger)
 	if err != nil {
 		t.Fatalf("config.NewManager: %v", err)
 	}
@@ -50,10 +56,7 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 	}
 	t.Cleanup(func() { mockDev.Disconnect() })
 
-	zoneCfg, err := zone.NewConfigManager(tmpDir + "/zones.yaml")
-	if err != nil {
-		t.Fatalf("zone.NewConfigManager: %v", err)
-	}
+	zoneCfg := zone.NewConfigManager(s, logger)
 
 	// Bind on :0 so the OS assigns a free port.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -337,7 +340,7 @@ func TestBrightness_OutOfRange(t *testing.T) {
 func TestModuleConfig_GetEmpty(t *testing.T) {
 	_, base := newTestServer(t)
 
-	resp := get(t, base+"/api/modules/cpu-temp/config")
+	resp := get(t, base+"/api/plugins/cpu-temp/config")
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -345,8 +348,8 @@ func TestModuleConfig_GetEmpty(t *testing.T) {
 	var body map[string]any
 	decodeJSON(t, resp, &body)
 
-	if _, ok := body["module"]; !ok {
-		t.Error("missing 'module' field in response")
+	if _, ok := body["plugin"]; !ok {
+		t.Error("missing 'plugin' field in response")
 	}
 	if _, ok := body["config"]; !ok {
 		t.Error("missing 'config' field in response")
@@ -357,14 +360,14 @@ func TestModuleConfig_SetAndGet(t *testing.T) {
 	_, base := newTestServer(t)
 
 	payload := map[string]any{"unit": "metric", "graph": "sparkline"}
-	resp := postJSON(t, base+"/api/modules/cpu-temp/config", payload)
+	resp := postJSON(t, base+"/api/plugins/cpu-temp/config", payload)
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("POST module config: expected 200, got %d", resp.StatusCode)
 	}
 
 	var got map[string]any
-	decodeJSON(t, get(t, base+"/api/modules/cpu-temp/config"), &got)
+	decodeJSON(t, get(t, base+"/api/plugins/cpu-temp/config"), &got)
 
 	cfg, _ := got["config"].(map[string]any)
 	if cfg["unit"] != "metric" {
@@ -617,9 +620,17 @@ func TestWebSocket_MultipleClients(t *testing.T) {
 func newHandlerServer(t *testing.T) (*api.Server, *httptest.Server) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	cfg, _ := config.NewManager(t.TempDir() + "/config.yaml")
+	s, err := store.Open(t.TempDir()+"/test.db", logger)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	cfg, err := config.NewManager(s, logger)
+	if err != nil {
+		t.Fatalf("config.NewManager: %v", err)
+	}
 	mockDev := device.NewMockDevice()
-	mockDev.Connect(context.Background())
+	mockDev.Connect(context.Background()) //nolint:errcheck
 	t.Cleanup(func() { mockDev.Disconnect() })
 	srv := api.NewServer(":0", cfg, mockDev, logger)
 	return srv, nil

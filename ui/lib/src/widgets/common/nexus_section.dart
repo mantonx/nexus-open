@@ -49,13 +49,13 @@ class NexusSection extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Orange accent bar
+              // Subtle left-edge anchor — structural, not a colour call-out.
               Container(
                 width: 2,
                 height: 12,
                 margin: const EdgeInsets.only(right: AppSpacing.sm),
                 decoration: BoxDecoration(
-                  color: AppColors.accent,
+                  color: cs.onSurfaceVariant.withOpacity(0.35),
                   borderRadius: AppRadius.pillBr,
                 ),
               ),

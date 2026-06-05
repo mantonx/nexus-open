@@ -35,34 +35,35 @@ func main() {
 
 	logger.Info("zone manager created successfully")
 
-	// Update zones with mock data
+	// Update zones with mock data — using 60-sample spark histories to match
+	// what real plugins produce after ~2 minutes of sampling at 2s intervals.
 	mockPayloads := map[string]module.Payload{
 		"weather": {
-			Primary:   "72°F",
-			Secondary: "Albany ☀️",
+			Primary:   "92°F",
+			Secondary: "WEATHER",
 			Severity:  module.SeverityOK,
+			Spark:     genSpark(0.45, 0.05, 60),
 			TTL:       5 * time.Minute,
 			Timestamp: time.Now(),
 		},
 		"cpu": {
-			Primary:   "42°C",
-			Secondary: "Load 31%",
+			Primary:   "28°C",
+			Secondary: "CPU TEMP",
 			Severity:  module.SeverityOK,
-			Spark:     []float32{0.2, 0.3, 0.35, 0.4, 0.45, 0.3, 0.25, 0.31},
+			Spark:     genSpark(0.18, 0.04, 60),
 			TTL:       2 * time.Second,
 			Timestamp: time.Now(),
 		},
 		"gpu": {
-			Primary:   "68°C",
-			Secondary: "Load 87%",
-			Severity:  module.SeverityWarn,
-			Spark:     []float32{0.7, 0.75, 0.8, 0.85, 0.87, 0.9, 0.85, 0.87},
+			Primary:   "52°C",
+			Secondary: "GPU TEMP",
+			Severity:  module.SeverityOK,
+			Spark:     genSpark(0.38, 0.06, 60),
 			TTL:       2 * time.Second,
 			Timestamp: time.Now(),
 		},
 		"clock": {
-			Primary:   time.Now().Format("15:04"),
-			Secondary: time.Now().Format("Jan 02"),
+			Primary:   time.Now().Format("3:04 PM"),
 			Severity:  module.SeverityOK,
 			TTL:       1 * time.Second,
 			Timestamp: time.Now(),
@@ -76,10 +77,10 @@ func main() {
 			Timestamp: time.Now(),
 		},
 		"network": {
-			Primary:   "↓58 MB/s",
-			Secondary: "↑12 MB/s",
+			Primary:   "↓ 137K/s",
+			Secondary: "NETWORK",
 			Severity:  module.SeverityOK,
-			Spark:     []float32{0.4, 0.5, 0.6, 0.7, 0.8, 0.75, 0.6, 0.58},
+			Spark:     genSpark(0.55, 0.20, 60),
 			TTL:       2 * time.Second,
 			Timestamp: time.Now(),
 		},
@@ -124,4 +125,22 @@ func main() {
 	if len(manager.GetConfig().Pages) > 1 {
 		fmt.Printf("  Page 1: %s\n", manager.GetConfig().Pages[1].Name)
 	}
+}
+
+// genSpark generates n spark values around a centre with the given amplitude of noise.
+func genSpark(centre, noise float32, n int) []float32 {
+	out := make([]float32, n)
+	v := centre
+	for i := range out {
+		// Random walk bounded around centre.
+		v += (float32(i%7)-3) * noise / 10
+		if v < centre-noise {
+			v = centre - noise
+		}
+		if v > centre+noise {
+			v = centre + noise
+		}
+		out[i] = v
+	}
+	return out
 }

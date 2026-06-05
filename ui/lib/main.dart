@@ -17,6 +17,7 @@ final _appKey = GlobalKey<_OpenNextAppState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+
   await windowManager.ensureInitialized();
 
   windowManager.waitUntilReadyToShow(

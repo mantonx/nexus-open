@@ -6,21 +6,21 @@ import (
 	"github.com/mantonx/nexus-next/pkg/module"
 )
 
-// PlaceholderModule displays a placeholder message (for loading/errors)
-type PlaceholderModule struct {
+// PlaceholderPlugin displays a placeholder message (for loading/errors)
+type PlaceholderPlugin struct {
 	message string
 }
 
 // NewPlaceholder creates a new placeholder module
-func NewPlaceholder(message string) *PlaceholderModule {
+func NewPlaceholder(message string) *PlaceholderPlugin {
 	if message == "" {
 		message = "Loading..."
 	}
-	return &PlaceholderModule{message: message}
+	return &PlaceholderPlugin{message: message}
 }
 
 // Describe returns module metadata
-func (m *PlaceholderModule) Describe() (module.Descriptor, error) {
+func (m *PlaceholderPlugin) Describe() (module.Descriptor, error) {
 	return module.Descriptor{
 		Name:        "Placeholder",
 		Version:     "1.0.0",
@@ -32,7 +32,7 @@ func (m *PlaceholderModule) Describe() (module.Descriptor, error) {
 }
 
 // Sample returns placeholder payload
-func (m *PlaceholderModule) Sample() (module.Payload, error) {
+func (m *PlaceholderPlugin) Sample() (module.Payload, error) {
 	return module.Payload{
 		Primary:   "—",
 		Secondary: m.message,
@@ -42,9 +42,9 @@ func (m *PlaceholderModule) Sample() (module.Payload, error) {
 	}, nil
 }
 
-// OnConfigChanged implements module.ConfigNotifier interface.
+// OnConfigChanged implements module.PluginConfigNotifier interface.
 // Placeholder module doesn't use configuration, so this is a no-op.
-func (m *PlaceholderModule) OnConfigChanged(config map[string]interface{}) error {
+func (m *PlaceholderPlugin) OnConfigChanged(config map[string]interface{}) error {
 	// Placeholder module doesn't need configuration
 	return nil
 }

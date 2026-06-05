@@ -67,10 +67,12 @@ void main() {
 
     // ── Settings tabs ─────────────────────────────────────────────────────────
     final tabs = [
-      ('Display & Colors', 'tab_display'),
-      ('Location',         'tab_location'),
-      ('Modules',          'tab_modules'),
-      ('Images',           'tab_images'),
+      ('Live Hardware Preview', 'tab_preview'),
+      ('Layout Editor',         'tab_layout'),
+      ('Display & Colors',      'tab_display'),
+      ('Location',              'tab_location'),
+      ('Plugins',               'tab_plugins'),
+      ('Images',                'tab_images'),
     ];
 
     for (final (tooltip, name) in tabs) {
@@ -92,12 +94,12 @@ void main() {
       }
 
       // ── Module card expand ────────────────────────────────────────────────
-      if (name == 'tab_modules') {
+      if (name == 'tab_plugins') {
         final configureBtns = find.text('Configure');
         if (configureBtns.evaluate().isNotEmpty) {
           await tester.tap(configureBtns.first);
           await tester.pump(const Duration(milliseconds: 400));
-          await _screenshot(tester, 'tab_modules_expanded');
+          await _screenshot(tester, 'tab_plugins_expanded');
           final collapseBtns = find.text('Collapse');
           if (collapseBtns.evaluate().isNotEmpty) {
             await tester.tap(collapseBtns.first);
