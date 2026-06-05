@@ -21,8 +21,10 @@ type NexusDevice struct {
 	logger *slog.Logger
 	config ConnectionConfig
 
-	// HID device
-	device      *hid.Device
+	// HID device handles — kept separate so display writes and touch reads
+	// don't share a handle and cause USB resets under sustained load.
+	device      *hid.Device // interface 0: display (frame writes, brightness)
+	touchDevice *hid.Device // interface 1: touch/keyboard input
 	deviceInfo  *hid.DeviceInfo
 	mu          sync.RWMutex
 	connected   bool
@@ -77,10 +79,20 @@ func (n *NexusDevice) connectOnce(ctx context.Context) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Already connected — don't open a second handle to the same device.
-	// Opening a duplicate handle causes the USB stack to reset the device.
+	// Already connected — don't open duplicate handles.
+	// Opening a second handle to the same device resets the USB stack.
 	if n.connected && n.device != nil {
 		return nil
+	}
+
+	// Close any stale handles from a previous partial connect before reopening.
+	if n.device != nil {
+		n.device.Close()
+		n.device = nil
+	}
+	if n.touchDevice != nil {
+		n.touchDevice.Close()
+		n.touchDevice = nil
 	}
 
 	// Enumerate HID devices to find iCUE Nexus
@@ -100,48 +112,62 @@ func (n *NexusDevice) connectOnce(ctx context.Context) error {
 			"usage", fmt.Sprintf("0x%04x", dev.Usage))
 	}
 
-	// The Nexus has two HID interfaces:
+	// The Nexus exposes two HID interfaces:
 	//   interface 0 — display (frame writes, brightness)
 	//   interface 1 — touch/keyboard input
-	// We must open interface 0 for display output. Try it first; only fall
-	// back to other interfaces if it's genuinely unavailable.
-	sortInterfacesByPreference(devices)
+	// Open them separately so display writes and touch reads never share a
+	// handle — simultaneous read+write on one handle causes USB resets.
+	sortInterfacesByPreference(devices) // interface 0 first
 
-	var device *hid.Device
+	var displayDev, touchDev *hid.Device
 	var lastErr error
 
 	for i := range devices {
-		n.logger.Debug("attempting to open HID interface", "index", i, "path", devices[i].Path, "interface", devices[i].Interface)
-
-		dev, err := devices[i].Open()
-		if err != nil {
-			classified := classifyOpenError(err)
-			n.logger.Debug("failed to open interface", "index", i, "error", classified)
-			lastErr = classified
-			continue
+		iface := devices[i].Interface
+		if iface == 0 && displayDev == nil {
+			dev, err := devices[i].Open()
+			if err != nil {
+				lastErr = classifyOpenError(err)
+				n.logger.Debug("failed to open display interface", "error", lastErr)
+				continue
+			}
+			displayDev = dev
+			n.deviceInfo = &devices[i]
+			n.logger.Info("successfully opened display interface (0)",
+				"path", devices[i].Path)
+		} else if iface == 1 && touchDev == nil {
+			dev, err := devices[i].Open()
+			if err != nil {
+				// Touch interface failure is non-fatal — display still works.
+				n.logger.Warn("failed to open touch interface (1), touch disabled",
+					"error", classifyOpenError(err))
+				continue
+			}
+			touchDev = dev
+			n.logger.Info("successfully opened touch interface (1)",
+				"path", devices[i].Path)
 		}
-
-		device = dev
-		n.deviceInfo = &devices[i]
-		n.logger.Info("successfully opened HID interface",
-			"index", i,
-			"path", devices[i].Path,
-			"interface", devices[i].Interface)
-		break
 	}
 
-	if device == nil {
+	if displayDev == nil {
 		if lastErr != nil {
-			return fmt.Errorf("failed to open any HID interface (tried %d): %w", len(devices), lastErr)
+			return fmt.Errorf("failed to open display interface: %w", lastErr)
 		}
-		return fmt.Errorf("failed to open any HID interface (tried %d)", len(devices))
+		return fmt.Errorf("failed to open display interface")
 	}
 
-	n.device = device
+	n.device = displayDev
+	n.touchDevice = touchDev
 	n.connected = true
 
-	// Initialize touch reader
-	n.touchReader = touch.NewHIDTouchReader(device, n.logger)
+	// Touch reader uses the dedicated touch interface if available, otherwise
+	// falls back to the display interface (original behaviour, less ideal).
+	touchHandle := touchDev
+	if touchHandle == nil {
+		n.logger.Warn("touch interface unavailable, sharing display handle (may cause resets)")
+		touchHandle = displayDev
+	}
+	n.touchReader = touch.NewHIDTouchReader(touchHandle, n.logger)
 
 	n.logger.Info("HID device connected",
 		"vendor_id", n.config.VendorID,
@@ -171,9 +197,15 @@ func (n *NexusDevice) Disconnect() error {
 
 	if n.device != nil {
 		if err := n.device.Close(); err != nil {
-			n.logger.Warn("error closing HID device", "error", err)
+			n.logger.Warn("error closing display HID handle", "error", err)
 		}
 		n.device = nil
+	}
+	if n.touchDevice != nil {
+		if err := n.touchDevice.Close(); err != nil {
+			n.logger.Warn("error closing touch HID handle", "error", err)
+		}
+		n.touchDevice = nil
 	}
 
 	n.connected = false
