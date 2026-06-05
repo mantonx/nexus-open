@@ -12,7 +12,7 @@
 //	-duration    Drag phase duration in ms (default 200)
 //	-finalize    Snap animation duration in ms (default 120)
 //	-steps       Drag steps — higher = smoother simulation (default 20)
-//	-velocity    Release velocity, 0–3 (default 1.0)
+//	-velocity    Release velocity in px/s; real swipes ~120–500 (default 150)
 //	-count       Number of swipes to run, 0 = loop forever (default 0)
 //	-gap         Pause between swipes in ms (default 800)
 //	-analyse     Connect to WS, capture frames, and print per-frame displacement
@@ -25,6 +25,9 @@
 //
 //	# Analyse one swipe: see frame-by-frame displacement and smoothness report
 //	go run ./cmd/swipe-sim -dir left -count 1 -analyse
+//
+//	# Simulate a fast flick (400 px/s) with analysis
+//	go run ./cmd/swipe-sim -dir left -count 1 -velocity 400 -analyse
 //
 //	# Tune: slow drag (400ms), many steps, with analysis
 //	go run ./cmd/swipe-sim -duration 400 -steps 40 -count 2 -analyse
@@ -59,7 +62,7 @@ func main() {
 	durationMs := flag.Int("duration", 200, "drag phase duration (ms)")
 	finalizeMs := flag.Int("finalize", 120, "snap animation duration (ms)")
 	steps := flag.Int("steps", 20, "drag steps")
-	velocity := flag.Float64("velocity", 1.0, "release velocity (0-3)")
+	velocity := flag.Float64("velocity", 150, "release velocity in px/s (real swipes: ~120–500)")
 	releaseAt := flag.Float64("release", 0.7, "progress (0-1) at which finger lifts, triggering snap")
 	count := flag.Int("count", 0, "swipe count (0=forever)")
 	gapMs := flag.Int("gap", 800, "pause between swipes (ms)")
@@ -96,9 +99,10 @@ func main() {
 		if !isLeft {
 			direction = "right"
 		}
-		if *dir == "left" {
+		switch *dir {
+		case "left":
 			direction = "left"
-		} else if *dir == "right" {
+		case "right":
 			direction = "right"
 		}
 
@@ -116,7 +120,7 @@ func main() {
 			time.Sleep(50 * time.Millisecond) // let WS connect settle
 		}
 
-		body, _ := json.Marshal(map[string]interface{}{
+		body, _ := json.Marshal(map[string]any{
 			"direction":   direction,
 			"duration_ms": *durationMs,
 			"finalize_ms": *finalizeMs,
@@ -178,9 +182,10 @@ func main() {
 // ── Frame capture ─────────────────────────────────────────────────────────────
 
 type frameCapture struct {
-	t     time.Time
-	seam  int  // X position of the slide seam (-1 = not found / static frame)
-	img   image.Image
+	t        time.Time
+	seam     int     // X position of the slide seam (-1 = static frame)
+	seamGrad float64 // gradient magnitude at the seam column
+	img      image.Image
 }
 
 func captureFrames(ctx context.Context, wsURL string, ch chan<- frameCapture) {
@@ -191,7 +196,7 @@ func captureFrames(ctx context.Context, wsURL string, ch chan<- frameCapture) {
 	defer conn.CloseNow()
 
 	for {
-		var msg map[string]interface{}
+		var msg map[string]any
 		if err := wsjson.Read(ctx, conn, &msg); err != nil {
 			return
 		}
@@ -210,71 +215,116 @@ func captureFrames(ctx context.Context, wsURL string, ch chan<- frameCapture) {
 		if err != nil {
 			continue
 		}
+		seamX, seamGrad := detectSeamGrad(img)
 		ch <- frameCapture{
-			t:    time.Now(),
-			seam: detectSeam(img),
-			img:  img,
+			t:        time.Now(),
+			seam:     seamX,
+			seamGrad: seamGrad,
+			img:      img,
 		}
 	}
 }
 
-// detectSeam finds the X column where horizontal pixel variance is highest —
-// this is where the old and new page content meet during a slide transition.
-// Returns -1 if no clear seam is found (static frame).
-func detectSeam(img image.Image) int {
+// colAvgGrad computes the column-average colour gradient at position x,
+// comparing columns x-gap and x+gap. Returns the Euclidean distance in
+// RGB space between the two averaged columns.
+func colAvgGrad(avgR, avgG, avgB []float64, x, gap int) float64 {
+	dr := avgR[x+gap] - avgR[x-gap]
+	dg := avgG[x+gap] - avgG[x-gap]
+	db := avgB[x+gap] - avgB[x-gap]
+	return math.Sqrt(dr*dr + dg*dg + db*db)
+}
+
+// columnAverages computes per-column average RGB over all rows.
+func columnAverages(img image.Image) ([]float64, []float64, []float64) {
 	bounds := img.Bounds()
 	w := bounds.Max.X
 	h := bounds.Max.Y
-
-	maxVariance := 0.0
-	seamX := -1
-
-	for x := 1; x < w-1; x++ {
-		var sumDiff float64
-		for y := 0; y < h; y++ {
-			r1, g1, b1, _ := img.At(x-1, y).RGBA()
-			r2, g2, b2, _ := img.At(x+1, y).RGBA()
-			dr := float64(r1>>8) - float64(r2>>8)
-			dg := float64(g1>>8) - float64(g2>>8)
-			db := float64(b1>>8) - float64(b2>>8)
-			sumDiff += math.Sqrt(dr*dr + dg*dg + db*db)
+	avgR := make([]float64, w)
+	avgG := make([]float64, w)
+	avgB := make([]float64, w)
+	for x := range w {
+		var sr, sg, sb float64
+		for y := range h {
+			r, g, b, _ := img.At(x, y).RGBA()
+			sr += float64(r >> 8)
+			sg += float64(g >> 8)
+			sb += float64(b >> 8)
 		}
-		avg := sumDiff / float64(h)
-		if avg > maxVariance {
-			maxVariance = avg
+		avgR[x] = sr / float64(h)
+		avgG[x] = sg / float64(h)
+		avgB[x] = sb / float64(h)
+	}
+	return avgR, avgG, avgB
+}
+
+// detectSeamGrad returns the best-candidate seam column and its gradient score.
+func detectSeamGrad(img image.Image) (seamX int, maxGrad float64) {
+	w := img.Bounds().Max.X
+	if w < 10 {
+		return -1, 0
+	}
+	avgR, avgG, avgB := columnAverages(img)
+	const gap = 3
+	seamX = -1
+	for x := gap; x < w-gap; x++ {
+		g := colAvgGrad(avgR, avgG, avgB, x, gap)
+		if g > maxGrad {
+			maxGrad = g
 			seamX = x
 		}
 	}
-
-	// Below this threshold the frame is likely static (no transition).
-	// Slide transitions produce sharp full-column discontinuities well
-	// above typical content edges; 30.0 filters out zone label boundaries.
-	if maxVariance < 30.0 {
-		return -1
-	}
-	return seamX
+	return seamX, maxGrad
 }
 
 // ── Analysis report ───────────────────────────────────────────────────────────
 
 func printAnalysis(frames []frameCapture, swipeStart time.Time, durationMs, finalizeMs int, direction string) {
-	// Filter to frames that contain transition content
-	var transition []frameCapture
-	for _, f := range frames {
-		if f.seam >= 0 {
-			transition = append(transition, f)
-		}
-	}
-
 	totalMs := durationMs + finalizeMs
 	fmt.Printf("\n  ── Analysis (%s swipe) ─────────────────────────\n", direction)
 	fmt.Printf("  Total frames received : %d\n", len(frames))
-	fmt.Printf("  Transition frames     : %d  (seam detected)\n", len(transition))
 
-	// Note: WS stream broadcasts at ~10fps, so a 320ms swipe yields only ~3
-	// transition frames. Seam at x≥600 after transition = new page fully shown.
 	expectedFrames := (durationMs + finalizeMs) / 100
-	fmt.Printf("  Expected frames (~10fps) : ~%d\n", expectedFrames)
+	fmt.Printf("  Expected frames (~30fps during transition) : ~%d\n", totalMs/33)
+	fmt.Printf("  Expected frames (~10fps baseline)          : ~%d\n", expectedFrames)
+
+	if len(frames) == 0 {
+		fmt.Println("  No frames captured.")
+		fmt.Println()
+		return
+	}
+
+	// Establish the baseline seam from the first frame (static, pre-swipe content).
+	// A frame is a transition frame when its seam has moved from the previous frame
+	// by more than a small tolerance — i.e. the boundary is actively moving.
+	// Trailing static frames (seam stuck after transition completes) are excluded.
+	const motionTolerance = 15 // px; inter-frame seam delta to count as moving
+	baselineSeam := frames[0].seam
+
+	// completed is set once the seam reaches the far edge, meaning the transition
+	// finished. Frames after that are static and should not be included.
+	completed := false
+	var transition []frameCapture
+	prevSeamForFilter := baselineSeam
+	for _, f := range frames {
+		if completed {
+			break
+		}
+		moving := f.seam >= 0 && abs(f.seam-prevSeamForFilter) > motionTolerance
+		if moving {
+			transition = append(transition, f)
+			// Seam within 60px of either edge means transition completed.
+			if f.seam <= 60 || f.seam >= displayWidth-60 {
+				completed = true
+			}
+		}
+		if f.seam >= 0 {
+			prevSeamForFilter = f.seam
+		}
+	}
+
+	fmt.Printf("  Transition frames     : %d  (seam moving >%dpx/frame; baseline %d)\n",
+		len(transition), motionTolerance, baselineSeam)
 
 	if len(transition) == 0 {
 		fmt.Println("  No transition frames captured — swipe may have been too fast")
@@ -298,14 +348,14 @@ func printAnalysis(frames []frameCapture, swipeStart time.Time, durationMs, fina
 			delta = f.seam - prevSeam
 		}
 
-		// Expected progress at this time (easeOutCubic)
+		// Expected seam position based on linear drag progress.
+		// seam = displayWidth * (1 - progress) for a left swipe.
 		tNorm := math.Min(1.0, float64(tMs)/float64(totalMs))
-		expectedProgress := easeOutCubic(tNorm)
-		expectedSeam := 0
+		var expectedSeam int
 		if direction == "left" {
-			expectedSeam = int(float64(displayWidth) * expectedProgress)
+			expectedSeam = int(float64(displayWidth) * (1 - tNorm))
 		} else {
-			expectedSeam = displayWidth - int(float64(displayWidth)*expectedProgress)
+			expectedSeam = int(float64(displayWidth) * tNorm)
 		}
 		seamErr := math.Abs(float64(f.seam - expectedSeam))
 
@@ -320,7 +370,7 @@ func printAnalysis(frames []frameCapture, swipeStart time.Time, durationMs, fina
 		} else if i > 0 && math.Abs(float64(delta)) > float64(displayWidth)/3 {
 			quality = "⚠ jump"
 			issues = append(issues, fmt.Sprintf("frame %d: large jump Δ=%d px", i+1, delta))
-		} else if seamErr > 60 {
+		} else if seamErr > 80 {
 			quality = "~ off-curve"
 		}
 
@@ -385,6 +435,9 @@ func printAnalysis(frames []frameCapture, swipeStart time.Time, durationMs, fina
 	fmt.Println()
 }
 
-func easeOutCubic(t float64) float64 {
-	return 1 - (1-t)*(1-t)*(1-t)
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

@@ -61,24 +61,24 @@ func (h *Handler) Start(ctx context.Context) error {
 }
 
 // processLoop continuously reads and processes touch events.
+// HID reads are blocking — we run them in a tight loop without a ticker so
+// packets are processed as soon as they arrive rather than waiting for the
+// next poll interval (previously up to 50ms stale).
 func (h *Handler) processLoop(ctx context.Context) {
-	ticker := time.NewTicker(50 * time.Millisecond) // Poll at 20Hz
-	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			h.logger.Info("touch handler stopped")
 			return
-		case <-ticker.C:
-			if err := h.processEvents(ctx); err != nil {
-				if err == ErrDeviceDisconnected {
-					h.logger.Warn("device disconnected, stopping touch processing")
-					return
-				}
-				// Log but continue on other errors
-				h.logger.Debug("touch processing error", "error", err)
+		default:
+		}
+
+		if err := h.processEvents(ctx); err != nil {
+			if err == ErrDeviceDisconnected {
+				h.logger.Warn("device disconnected, stopping touch processing")
+				return
 			}
+			h.logger.Debug("touch processing error", "error", err)
 		}
 	}
 }
@@ -86,7 +86,9 @@ func (h *Handler) processLoop(ctx context.Context) {
 // processEvents reads and handles touch events from the device.
 func (h *Handler) processEvents(ctx context.Context) error {
 	if !h.device.IsConnected() {
-		return nil // Silently skip if device not connected
+		// Device absent — pause briefly to avoid spinning at 100% CPU.
+		time.Sleep(50 * time.Millisecond)
+		return nil
 	}
 
 	events, err := h.device.ReadTouch(ctx)
@@ -170,13 +172,12 @@ func (h *Handler) handleSwipeComplete(event Event, isLeft bool) {
 	velocity := event.Velocity
 	directionLabel := map[bool]string{true: "LEFT", false: "RIGHT"}[isLeft]
 
-	h.logger.Debug("🛬 SWIPE RELEASE",
+	h.logger.Info("🛬 SWIPE RELEASE",
 		"direction", directionLabel,
 		"progress_pct", int(progress*100),
 		"velocity_px_s", int(velocity),
 		"pixels", event.SwipePixels,
-		"duration_ms", event.Duration.Milliseconds(),
-		"timestamp_ms", event.Timestamp.UnixMilli())
+		"duration_ms", event.Duration.Milliseconds())
 
 	// Use multi-heuristic decision algorithm to determine commit vs cancel
 	shouldCommit, reason := h.swipeConfig.shouldCommitSwipe(progress, velocity)

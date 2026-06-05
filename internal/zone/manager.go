@@ -46,6 +46,7 @@ type Manager struct {
 	liveSwipeActive        bool
 	liveSwipeProgress      float32
 	liveSwipeLeft          bool
+	liveSwipeBoundary      bool // true when swiping into a page boundary (rubber-band)
 	liveSwipeMu            sync.RWMutex
 	lastSwipeFinalize      time.Time
 	lastSwipeDirLeft       bool
@@ -581,6 +582,42 @@ func (m *Manager) SwitchPageWithTransition(pageIndex int, transitionType Transit
 	return nil
 }
 
+// renderPageFrame renders a page to an image using current payloads.
+// Used to get a target frame for live swipe when the cache is cold.
+func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
+	if pageIndex < 0 || pageIndex >= len(m.config.Pages) {
+		return nil, fmt.Errorf("invalid page index: %d", pageIndex)
+	}
+
+	page := m.config.Pages[pageIndex]
+	zoneImages := make(map[string]*image.RGBA)
+
+	m.payloadsMu.RLock()
+	defer m.payloadsMu.RUnlock()
+
+	for _, zoneConfig := range page.Zones {
+		theme := m.config.Theme
+		if zoneConfig.ThemeOverride != nil {
+			theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
+		}
+		renderer := NewRenderer(m.logger, theme, zoneConfig.Width, DisplayHeight, zoneConfig.Align)
+		payload, ok := m.payloads[zoneConfig.ID]
+		if !ok {
+			payload = &module.Payload{Primary: "—", Severity: module.SeverityOK, Timestamp: time.Now()}
+		}
+		if img, err := renderer.Render(*payload); err == nil {
+			zoneImages[zoneConfig.ID] = img
+		}
+	}
+
+	m.themeMu.RLock()
+	theme := m.config.Theme
+	m.themeMu.RUnlock()
+
+	compositor := NewCompositor(m.logger, theme, &page)
+	return compositor.Composite(zoneImages, theme)
+}
+
 // preRenderAdjacentPages pre-renders the next and previous pages in the background
 func (m *Manager) preRenderAdjacentPages() {
 	// Pre-render next page
@@ -768,10 +805,31 @@ func (m *Manager) UpdateLiveSwipe(progress float32, isLeft bool) error {
 	m.liveSwipeMu.Lock()
 	defer m.liveSwipeMu.Unlock()
 
-	// If not already active, start the live swipe
+	// If not already active, start the live swipe — but ignore stray packets
+	// that arrive within 150ms of a finalize. Fast flicks release the finger
+	// while HID packets are still in-flight; without this guard, the tail
+	// packet restarts a new live swipe on the already-committed page which
+	// then cancels (snaps back) when the finger fully lifts.
 	if !m.liveSwipeActive {
+		if !m.lastSwipeFinalize.IsZero() && time.Since(m.lastSwipeFinalize) < 250*time.Millisecond {
+			m.logger.Info("🚫 live swipe blocked — within cooldown",
+				"since_ms", time.Since(m.lastSwipeFinalize).Milliseconds(),
+				"direction", map[bool]string{true: "left", false: "right"}[isLeft])
+			return nil
+		}
 		m.liveSwipeActive = true
 		m.liveSwipeLeft = isLeft
+
+		// Detect boundary: right-swipe on first page or left-swipe on last page.
+		// We show rubber-band resistance and always cancel on lift.
+		numPages := len(m.config.Pages)
+		m.liveSwipeBoundary = (!isLeft && m.currentPage == 0) ||
+			(isLeft && m.currentPage == numPages-1)
+		if m.liveSwipeBoundary {
+			m.logger.Debug("live swipe at boundary — rubber-band mode",
+				"page", m.currentPage,
+				"direction", map[bool]string{true: "left", false: "right"}[isLeft])
+		}
 
 		// Capture current frame as the "old" frame
 		m.lastFrameMu.Lock()
@@ -796,7 +854,10 @@ func (m *Manager) UpdateLiveSwipe(progress float32, isLeft bool) error {
 			targetPage = (m.currentPage - 1 + len(m.config.Pages)) % len(m.config.Pages)
 		}
 
-		// Try to use fresh cached frame for live swipe preview (deferred engagement)
+		// Get the target page frame from cache if available. On a cold cache,
+		// start with nil and render asynchronously — the live swipe begins
+		// immediately on the current-page frame and the target frame is swapped
+		// in by the preview logic once the render completes.
 		var targetFrame *image.RGBA
 		m.pageCacheMu.RLock()
 		cachedFrame, hasCached := m.pageCache[targetPage]
@@ -806,7 +867,23 @@ func (m *Manager) UpdateLiveSwipe(progress float32, isLeft bool) error {
 			targetFrame = cachedFrame
 			m.logger.Debug("cached target frame ready for live swipe", "page", targetPage)
 		} else {
-			m.logger.Debug("no cached target frame, using placeholder until ready", "page", targetPage)
+			m.logger.Debug("cache cold — rendering target page async", "page", targetPage)
+			go func() {
+				if rendered, err := m.renderPageFrame(targetPage); err == nil {
+					m.pageCacheMu.Lock()
+					m.pageCache[targetPage] = rendered
+					m.pageCacheMu.Unlock()
+					// Swap the target frame into the transition if still active.
+					m.liveSwipeMu.Lock()
+					m.liveSwipeTargetFrame = rendered
+					m.liveSwipeMu.Unlock()
+					m.transitionMu.Lock()
+					if m.transition.Active && m.transition.IsManual() {
+						m.transition.NewFrame = rendered
+					}
+					m.transitionMu.Unlock()
+				}
+			}()
 		}
 
 		previewActive := false
@@ -844,10 +921,44 @@ func (m *Manager) UpdateLiveSwipe(progress float32, isLeft bool) error {
 			"preview_threshold_pct", int(previewThreshold*100))
 	}
 
+	// Apply rubber-band resistance at page boundaries: scale progress by a
+	// decaying factor so the content resists rather than slides freely.
+	if m.liveSwipeBoundary {
+		progress = float32(math.Sqrt(float64(progress)) * 0.25)
+	}
+
 	// Update progress
 	m.liveSwipeProgress = progress
 
-	// Update transition progress by adjusting the start time
+	// If the finger has reversed direction mid-swipe, flip the transition so
+	// the correct page slides in from the correct side.
+	if m.liveSwipeLeft != isLeft {
+		m.liveSwipeLeft = isLeft
+		m.liveSwipeTargetFrame = nil
+		m.liveSwipePreviewActive = false
+
+		// Swap old/new frames and flip the transition type so the visual
+		// direction matches the finger. Progress mirrors around 0.5.
+		m.transitionMu.Lock()
+		if m.transition.Active && m.transition.IsManual() {
+			m.transition.OldFrame, m.transition.NewFrame = m.transition.NewFrame, m.transition.OldFrame
+			if isLeft {
+				m.transition.Type = TransitionSlideLeft
+				m.transition.Direction = 1
+			} else {
+				m.transition.Type = TransitionSlideRight
+				m.transition.Direction = -1
+			}
+			m.transition.SetManualProgress(1 - float64(progress))
+		}
+		m.transitionMu.Unlock()
+
+		m.logger.Debug("live swipe direction reversed",
+			"new_direction", map[bool]string{true: "left", false: "right"}[isLeft],
+			"progress_pct", int(progress*100))
+	}
+
+	// Update transition progress
 	previewLog := ""
 	m.transitionMu.Lock()
 	if m.transition.Active {
@@ -873,15 +984,9 @@ func (m *Manager) UpdateLiveSwipe(progress float32, isLeft bool) error {
 	}
 	manualActive := false
 	manualProgress := 0.0
-	manualAnimating := false
-	manualTarget := 0.0
-	manualDuration := time.Duration(0)
 	if m.transition.Active && m.transition.IsManual() {
 		manualActive = true
 		manualProgress = m.transition.ManualProgress()
-		manualAnimating = m.transition.manualAnimating
-		manualTarget = m.transition.manualTo
-		manualDuration = m.transition.manualDuration
 	}
 	m.transitionMu.Unlock()
 
@@ -902,10 +1007,7 @@ func (m *Manager) UpdateLiveSwipe(progress float32, isLeft bool) error {
 		"direction", map[bool]string{true: "left", false: "right"}[isLeft],
 		"transition_active", transitionActive,
 		"transition_progress_pct", progressPct,
-		"transition_manual", manualActive,
-		"transition_manual_animating", manualAnimating,
-		"transition_manual_target_pct", int(manualTarget*100),
-		"transition_manual_duration_ms", manualDuration.Milliseconds())
+		"transition_manual", manualActive)
 
 	return nil
 }
@@ -923,13 +1025,22 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 	}
 
 	if !m.liveSwipeActive {
-		// Fallback: if we somehow finalize without an active swipe, use provided direction
+		m.logger.Info("⚠️ FinalizeLiveSwipe called but no active swipe",
+			"direction", map[bool]string{true: "left", false: "right"}[isLeft],
+			"progress_pct", int(progress*100))
 		m.liveSwipeLeft = isLeft
 		m.liveSwipeProgress = progress
 		m.lastSwipeFinalize = time.Now()
 		m.lastSwipeDirLeft = isLeft
 		m.liveSwipeMu.Unlock()
 		return nil // No active swipe to finalize
+	}
+
+	// Boundary swipes always cancel — never commit a wrap-around page change.
+	if m.liveSwipeBoundary {
+		m.liveSwipeBoundary = false
+		m.liveSwipeMu.Unlock()
+		return m.CancelLiveSwipe()
 	}
 
 	// Use the direction captured when the live swipe started to avoid jitter flipping pages.
@@ -951,14 +1062,8 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 	transitionStart := m.transition.StartTime
 	manualActive := transitionActive && m.transition.IsManual()
 	manualProgress := 0.0
-	manualAnimating := false
-	manualTarget := 0.0
-	manualDuration := time.Duration(0)
 	if manualActive {
 		manualProgress = m.transition.ManualProgress()
-		manualAnimating = m.transition.manualAnimating
-		manualTarget = m.transition.manualTo
-		manualDuration = m.transition.manualDuration
 	}
 	m.transitionMu.RUnlock()
 
@@ -979,10 +1084,7 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 		"transition_direction", transitionDirection,
 		"transition_progress_pct", int(transitionProgress*100),
 		"transition_manual", manualActive,
-		"transition_manual_progress_pct", int(manualProgress*100),
-		"transition_manual_animating", manualAnimating,
-		"transition_manual_target_pct", int(manualTarget*100),
-		"transition_manual_duration_ms", manualDuration.Milliseconds())
+		"transition_manual_progress_pct", int(manualProgress*100))
 
 	// Calculate target page
 	var targetPage int
@@ -999,76 +1101,30 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 	oldPage := m.currentPage
 	m.currentPage = targetPage
 
-	// Calculate remaining distance and adjust duration based on velocity
-	remainingDistance := 1.0 - currentProgress
-	if remainingDistance < 0 {
-		remainingDistance = 0
-	}
-
-	// Base duration scales with remaining distance so the snap continues at a
-	// consistent perceived speed regardless of where the finger was released.
-	// stretch=180ms means a full-distance snap (released at t=0) takes ~220ms,
-	// giving ~6 frames at 30fps. A 30%-remaining snap takes ~94ms (~3 frames).
-	const (
-		minDuration     = 40 * time.Millisecond
-		distanceStretch = 180 * time.Millisecond
-	)
-
-	additional := time.Duration(float64(distanceStretch) * float64(remainingDistance))
-	finalDuration := minDuration + additional
-
-	// Velocity in px/s (from the touch reader). Higher = faster flick = shorter snap.
-	// The gap between 120 and 170 was previously unhandled; now fully covered.
-	switch {
-	case velocity >= 360:
-		finalDuration = time.Duration(float64(finalDuration) * 0.50)
-	case velocity >= 240:
-		finalDuration = time.Duration(float64(finalDuration) * 0.65)
-	case velocity >= 170:
-		finalDuration = time.Duration(float64(finalDuration) * 0.80)
-	case velocity >= 120:
-		finalDuration = time.Duration(float64(finalDuration) * 0.95)
-	// velocity < 120: slow/careful swipe — use full calculated duration
-	}
-
-	// Clamp: 50ms minimum (enough for 1-2 visible frames), 280ms maximum.
-	if finalDuration < 50*time.Millisecond {
-		finalDuration = 50 * time.Millisecond
-	}
-	if finalDuration > 280*time.Millisecond {
-		finalDuration = 280 * time.Millisecond
-	}
-
 	m.logger.Info("✅ PAGE SWITCH (momentum)",
 		"from", oldPage,
 		"to", targetPage,
-		"remaining", int(remainingDistance*100),
-		"duration_ms", finalDuration.Milliseconds())
+		"progress_pct", int(currentProgress*100),
+		"velocity_px_s", int(velocity))
 
-	// Adjust the transition to complete smoothly from current progress
+	// Start the spring snap from current finger progress, seeded with the
+	// finger's release velocity converted to progress/s. The spring settles
+	// naturally — no hardcoded duration needed.
 	m.transitionMu.Lock()
-	// Set start time so that current progress is maintained and it completes in finalDuration
 	if m.transition.Active {
 		targetFrame := m.liveSwipeTargetFrame
 		if targetFrame != nil && m.transition.IsManual() {
 			if m.transition.NewFrame != targetFrame {
 				m.transition.NewFrame = targetFrame
-				m.logger.Debug("transition preview forced for finalize",
-					"progress_pct", int(currentProgress*100))
 			}
 			m.liveSwipePreviewActive = true
 		}
 		if m.transition.IsManual() {
-			m.logger.Debug("transition finalize manual",
-				"current_progress_pct", int(float64(currentProgress)*100),
-				"duration_ms", finalDuration.Milliseconds())
-			m.transition.FinalizeManual(finalDuration)
+			m.transition.FinalizeManual(velocity)
 		} else {
-			m.logger.Debug("transition finalize timed",
-				"current_progress_pct", int(float64(currentProgress)*100),
-				"duration_ms", finalDuration.Milliseconds())
-			m.transition.Duration = finalDuration
-			m.transition.StartTime = time.Now().Add(-time.Duration(currentProgress * float32(finalDuration)))
+			// Non-manual path: use a short fixed transition.
+			m.transition.Duration = 120 * time.Millisecond
+			m.transition.StartTime = time.Now().Add(-time.Duration(float64(currentProgress) * float64(120*time.Millisecond)))
 		}
 	}
 	m.transitionMu.Unlock()
@@ -1078,6 +1134,7 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 	m.liveSwipeProgress = 0
 	m.liveSwipeTargetFrame = nil
 	m.liveSwipePreviewActive = false
+	m.liveSwipeBoundary = false
 	m.liveSwipeMu.Unlock()
 
 	// Initialize the new page zones and compositor immediately.
@@ -1155,14 +1212,8 @@ func (m *Manager) CancelLiveSwipe() error {
 	transitionDirection := m.transition.Direction
 	manualActive := transitionActive && m.transition.IsManual()
 	manualProgress := 0.0
-	manualAnimating := false
-	manualTarget := 0.0
-	manualDuration := time.Duration(0)
 	if manualActive {
 		manualProgress = m.transition.ManualProgress()
-		manualAnimating = m.transition.manualAnimating
-		manualTarget = m.transition.manualTo
-		manualDuration = m.transition.manualDuration
 	}
 	m.transitionMu.RUnlock()
 
@@ -1173,24 +1224,14 @@ func (m *Manager) CancelLiveSwipe() error {
 		"transition_type", transitionType,
 		"transition_direction", transitionDirection,
 		"transition_manual", manualActive,
-		"transition_manual_progress_pct", int(manualProgress*100),
-		"transition_manual_animating", manualAnimating,
-		"transition_manual_target_pct", int(manualTarget*100),
-		"transition_manual_duration_ms", manualDuration.Milliseconds())
+		"transition_manual_progress_pct", int(manualProgress*100))
 
-	// Stop the transition
+	// Spring snap back to 0 (cancel). AnimateManualTo ignores the duration
+	// argument now — the spring settles naturally.
 	m.transitionMu.Lock()
 	if m.transition.Active {
 		if m.transition.IsManual() {
-			decay := time.Duration(120*float64(currentProgress)) * time.Millisecond
-			if decay < 50*time.Millisecond {
-				decay = 50 * time.Millisecond
-			}
-			m.transition.AnimateManualTo(0, decay)
-			m.logger.Debug("swipe cancel animate back",
-				"duration_ms", decay.Milliseconds(),
-				"start_progress_pct", int(manualProgress*100),
-				"target_progress_pct", 0)
+			m.transition.AnimateManualTo(0, 0)
 		} else {
 			m.transition.Active = false
 		}
@@ -1201,6 +1242,8 @@ func (m *Manager) CancelLiveSwipe() error {
 	m.liveSwipeProgress = 0
 	m.liveSwipeTargetFrame = nil
 	m.liveSwipePreviewActive = false
+	m.liveSwipeBoundary = false
+	m.lastSwipeFinalize = time.Now() // block tail HID packets from restarting a swipe
 
 	m.transitionMu.RLock()
 	postManualActive := m.transition.Active && m.transition.IsManual()

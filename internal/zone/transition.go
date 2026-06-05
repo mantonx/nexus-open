@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"math"
 	"time"
 )
 
@@ -17,29 +18,42 @@ const (
 	TransitionSlideRight
 )
 
+// Spring constants for the finalize/cancel snap animation.
+// stiffness controls how aggressively the snap pulls toward the target.
+// damping prevents oscillation — at criticalDamping = 2*sqrt(stiffness) the
+// spring settles without bouncing. We use slight under-damping for a crisp feel.
+const (
+	springStiffness = 400.0 // progress units/s² — snappy but not instant
+	springDamping   = 36.0  // slightly under-damped: 2*sqrt(400)=40, we use 36
+)
+
 // TransitionState tracks the current state of a page transition.
 type TransitionState struct {
-	Active          bool
-	Type            TransitionType
-	StartTime       time.Time
-	Duration        time.Duration
-	OldFrame        *image.RGBA // Previous page frame
-	NewFrame        *image.RGBA // New page frame
-	Direction       int         // 1 for forward, -1 for backward
-	manual          bool
-	manualProgress  float64
-	manualAnimating bool
-	manualFrom      float64
-	manualTo        float64
-	manualDuration  time.Duration
-	manualStart     time.Time
+	Active    bool
+	Type      TransitionType
+	StartTime time.Time
+	Duration  time.Duration
+	OldFrame  *image.RGBA // Previous page frame
+	NewFrame  *image.RGBA // New page frame
+	Direction int         // 1 for forward, -1 for backward
+
+	// Manual (finger-driven) state
+	manual         bool
+	manualProgress float64
+
+	// Spring animation state — used during finalize and cancel snaps.
+	// Duration is emergent from stiffness/damping, not hardcoded.
+	springActive    bool
+	springTarget    float64  // 0 = cancel, 1 = commit
+	springVelocity  float64  // progress units/second, seeded from finger release velocity
+	springLastTick  time.Time
 }
 
 // NewTransitionState creates a new transition state.
 func NewTransitionState() *TransitionState {
 	return &TransitionState{
 		Active:   false,
-		Duration: 100 * time.Millisecond, // Very snappy 100ms transitions
+		Duration: 100 * time.Millisecond,
 	}
 }
 
@@ -53,18 +67,18 @@ func (ts *TransitionState) Start(transType TransitionType, oldFrame, newFrame *i
 	ts.Direction = direction
 	ts.manual = false
 	ts.manualProgress = 0
-	ts.manualAnimating = false
+	ts.springActive = false
+	ts.springVelocity = 0
 }
 
-// StartManual begins a transition that will be driven by explicit progress updates.
+// StartManual begins a transition driven by explicit progress updates.
 func (ts *TransitionState) StartManual(transType TransitionType, oldFrame, newFrame *image.RGBA, direction int) {
 	ts.Start(transType, oldFrame, newFrame, direction)
 	ts.manual = true
 	ts.manualProgress = 0
-	ts.manualAnimating = false
 }
 
-// SetManualProgress updates the progress for a manually controlled transition.
+// SetManualProgress updates the progress for a finger-driven transition.
 func (ts *TransitionState) SetManualProgress(progress float64) {
 	if !ts.Active {
 		return
@@ -75,7 +89,7 @@ func (ts *TransitionState) SetManualProgress(progress float64) {
 		progress = 1
 	}
 	ts.manual = true
-	ts.manualAnimating = false
+	ts.springActive = false
 	ts.manualProgress = progress
 	if progress >= 1 {
 		ts.manual = false
@@ -83,12 +97,39 @@ func (ts *TransitionState) SetManualProgress(progress float64) {
 	}
 }
 
-// FinalizeManual disables manual control and maps the current progress onto a timed transition.
-func (ts *TransitionState) FinalizeManual(duration time.Duration) {
+// FinalizeManual starts a spring snap toward 1 (commit), seeded with the
+// finger's release velocity converted to progress-units/second.
+// releaseVelocityPxS is the finger speed in pixels/second from the touch reader.
+func (ts *TransitionState) FinalizeManual(releaseVelocityPxS float32) {
 	if !ts.Active {
 		return
 	}
-	ts.AnimateManualTo(1, duration)
+	// Convert px/s to progress/s (progress = px / displayWidth).
+	initialVel := float64(releaseVelocityPxS) / float64(DisplayWidth)
+	ts.startSpring(1.0, initialVel)
+}
+
+// AnimateManualTo starts a spring snap toward target (0 = cancel, 1 = commit)
+// with zero initial velocity. Used for cancel snaps where we don't have a
+// meaningful release velocity.
+func (ts *TransitionState) AnimateManualTo(target float64, _ time.Duration) {
+	if !ts.Active {
+		return
+	}
+	ts.startSpring(target, 0)
+}
+
+func (ts *TransitionState) startSpring(target, initialVelocity float64) {
+	if target < 0 {
+		target = 0
+	} else if target > 1 {
+		target = 1
+	}
+	ts.manual = true
+	ts.springActive = true
+	ts.springTarget = target
+	ts.springVelocity = initialVelocity
+	ts.springLastTick = time.Now()
 }
 
 // IsManual returns true if the transition is currently under manual control.
@@ -104,67 +145,20 @@ func (ts *TransitionState) ManualProgress() float64 {
 	return ts.manualProgress
 }
 
-// AnimateManualTo animates manual progress towards a target over the specified duration.
-func (ts *TransitionState) AnimateManualTo(target float64, duration time.Duration) {
-	if !ts.Active {
-		return
-	}
-	if target < 0 {
-		target = 0
-	} else if target > 1 {
-		target = 1
-	}
-
-	ts.manual = true
-	ts.manualAnimating = false
-
-	if duration <= 0 {
-		ts.manualProgress = target
-		if target <= 0 || target >= 1 {
-			ts.manual = false
-			ts.Active = false
-			if target >= 1 {
-				ts.OldFrame = ts.NewFrame
-			} else {
-				ts.NewFrame = ts.OldFrame
-			}
-		}
-		return
-	}
-
-	ts.manualAnimating = true
-	ts.manualFrom = ts.manualProgress
-	ts.manualTo = target
-	ts.manualDuration = duration
-	ts.manualStart = time.Now()
-}
-
-// GetProgress returns the transition progress (0.0 to 1.0).
+// GetProgress returns the transition progress (0.0 to 1.0) and advances the
+// spring simulation if active.
 func (ts *TransitionState) GetProgress() float64 {
 	if !ts.Active {
 		return 1.0
 	}
 
 	if ts.manual {
-		if ts.manualAnimating {
-			if ts.manualDuration <= 0 {
-				ts.manualProgress = ts.manualTo
-				ts.manualAnimating = false
-			} else {
-				frac := float64(time.Since(ts.manualStart)) / float64(ts.manualDuration)
-				if frac >= 1 {
-					ts.manualProgress = ts.manualTo
-					ts.manualAnimating = false
-				} else {
-					// easeOutCubic for the finalize snap: starts fast (continuing
-				// finger momentum) and decelerates smoothly to a stop.
-				eased := easeOutCubic(frac)
-				ts.manualProgress = ts.manualFrom + (ts.manualTo-ts.manualFrom)*eased
-				}
-			}
+		if ts.springActive {
+			ts.tickSpring()
 		}
 
-		if !ts.manualAnimating {
+		if !ts.springActive {
+			// Spring has settled — check if we're done.
 			if ts.manualProgress >= 1 {
 				ts.manual = false
 				ts.Active = false
@@ -182,15 +176,49 @@ func (ts *TransitionState) GetProgress() float64 {
 		return ts.manualProgress
 	}
 
+	// Timed (non-manual) transition.
 	elapsed := time.Since(ts.StartTime)
 	progress := float64(elapsed) / float64(ts.Duration)
-
 	if progress >= 1.0 {
 		ts.Active = false
 		return 1.0
 	}
-
 	return progress
+}
+
+// tickSpring advances the spring simulation by the elapsed time since the last tick.
+// Uses semi-implicit Euler integration — stable for the stiffness values we use.
+func (ts *TransitionState) tickSpring() {
+	now := time.Now()
+	dt := now.Sub(ts.springLastTick).Seconds()
+	ts.springLastTick = now
+
+	// Clamp dt so a long pause (e.g. debugger) doesn't catapult the spring.
+	if dt > 0.05 {
+		dt = 0.05
+	}
+
+	displacement := ts.manualProgress - ts.springTarget
+	// Spring force: F = -stiffness*x - damping*v
+	acceleration := -springStiffness*displacement - springDamping*ts.springVelocity
+	ts.springVelocity += acceleration * dt
+	ts.manualProgress += ts.springVelocity * dt
+
+	// Clamp to valid range.
+	if ts.manualProgress < 0 {
+		ts.manualProgress = 0
+	} else if ts.manualProgress > 1 {
+		ts.manualProgress = 1
+	}
+
+	// Settle check: spring is done when both displacement and velocity are tiny.
+	settled := math.Abs(ts.manualProgress-ts.springTarget) < 0.002 &&
+		math.Abs(ts.springVelocity) < 0.01
+	if settled {
+		ts.manualProgress = ts.springTarget
+		ts.springVelocity = 0
+		ts.springActive = false
+	}
 }
 
 // IsComplete returns whether the transition is finished.
@@ -208,22 +236,13 @@ func (ts *TransitionState) Render() *image.RGBA {
 	}
 
 	progress := ts.GetProgress()
-	// Manual transitions: GetProgress returns the raw finger position (drag)
-	// or an already-eased value (finalize snap via AnimateManualTo). Either
-	// way, no additional easing is applied here — doing so would double-ease
-	// the finalize snap and make it feel front-loaded and jerky.
-	//
-	// Timed transitions (non-manual page switches): apply easeInOutCubic for
-	// a natural acceleration/deceleration arc.
+	// Manual transitions: GetProgress already advances the spring or returns the
+	// raw finger position — no additional easing applied here.
+	// Timed transitions: apply easeInOutCubic.
 	var easedProgress float64
 	if ts.manual {
-		// Manual / finger-driven: GetProgress() already applies easing inside
-		// AnimateManualTo (finalize snap) or returns raw finger position (drag).
-		// Don't double-ease here.
 		easedProgress = progress
 	} else {
-		// Timed page switch (non-manual): apply easeInOutCubic for a natural
-		// acceleration/deceleration arc.
 		easedProgress = easeInOutCubic(progress)
 	}
 
@@ -242,23 +261,17 @@ func (ts *TransitionState) Render() *image.RGBA {
 // renderFade creates a fade transition between two frames.
 func (ts *TransitionState) renderFade(progress float64) *image.RGBA {
 	result := image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
-
-	// Blend old and new frames
 	for y := 0; y < DisplayHeight; y++ {
 		for x := 0; x < DisplayWidth; x++ {
 			oldColor := ts.OldFrame.RGBAAt(x, y)
 			newColor := ts.NewFrame.RGBAAt(x, y)
-
-			// Linear interpolation
 			r := uint8(float64(oldColor.R)*(1-progress) + float64(newColor.R)*progress)
 			g := uint8(float64(oldColor.G)*(1-progress) + float64(newColor.G)*progress)
 			b := uint8(float64(oldColor.B)*(1-progress) + float64(newColor.B)*progress)
 			a := uint8(float64(oldColor.A)*(1-progress) + float64(newColor.A)*progress)
-
 			result.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: a})
 		}
 	}
-
 	return result
 }
 
@@ -266,14 +279,11 @@ func (ts *TransitionState) renderFade(progress float64) *image.RGBA {
 // direction: -1 for left, 1 for right
 func (ts *TransitionState) renderSlide(progress float64, direction int) *image.RGBA {
 	result := image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
-
-	// Calculate offsets based on direction
 	offset := int(float64(DisplayWidth) * progress * float64(direction))
 
-	// Draw old frame sliding out
+	// Draw old frame sliding out.
 	oldRect := image.Rect(offset, 0, DisplayWidth+offset, DisplayHeight)
 	if oldRect.Min.X < DisplayWidth && oldRect.Max.X > 0 {
-		// Clip to visible bounds
 		srcOffsetX := 0
 		if oldRect.Min.X < 0 {
 			srcOffsetX = -oldRect.Min.X
@@ -282,14 +292,12 @@ func (ts *TransitionState) renderSlide(progress float64, direction int) *image.R
 		if oldRect.Max.X > DisplayWidth {
 			oldRect.Max.X = DisplayWidth
 		}
-
 		draw.Draw(result, oldRect, ts.OldFrame, image.Point{X: srcOffsetX, Y: 0}, draw.Src)
 	}
 
-	// Draw new frame sliding in
+	// Draw new frame sliding in.
 	newRect := image.Rect(offset-DisplayWidth*direction, 0, DisplayWidth+offset-DisplayWidth*direction, DisplayHeight)
 	if newRect.Min.X < DisplayWidth && newRect.Max.X > 0 {
-		// Clip to visible bounds
 		srcOffsetX := 0
 		if newRect.Min.X < 0 {
 			srcOffsetX = -newRect.Min.X
@@ -298,20 +306,13 @@ func (ts *TransitionState) renderSlide(progress float64, direction int) *image.R
 		if newRect.Max.X > DisplayWidth {
 			newRect.Max.X = DisplayWidth
 		}
-
 		draw.Draw(result, newRect, ts.NewFrame, image.Point{X: srcOffsetX, Y: 0}, draw.Src)
 	}
 
 	return result
 }
 
-// easeOutCubic applies an ease-out easing function for snappy transitions.
-// Starts fast and decelerates towards the end.
-func easeOutCubic(t float64) float64 {
-	return 1 - (1-t)*(1-t)*(1-t)
-}
-
-// easeInOutCubic applies an easing function to progress for smoother transitions.
+// easeInOutCubic applies an easing function for timed (non-manual) transitions.
 func easeInOutCubic(t float64) float64 {
 	if t < 0.5 {
 		return 4 * t * t * t

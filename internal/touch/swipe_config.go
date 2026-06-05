@@ -53,15 +53,17 @@ type SwipeConfig struct {
 func DefaultSwipeConfig() SwipeConfig {
 	return SwipeConfig{
 		// Velocity thresholds (tuned for 640px screen)
-		VelocityFastFlick: 310, // Fast flick (commit with less distance only when very fast)
-		VelocityMedium:    185, // Boundary for slow vs medium
+		// Velocity thresholds calibrated to corrected rawMax=486 px/s readings.
+		// Typical flicks now read 500–5000 px/s; slow drags ~50–300 px/s.
+		VelocityFastFlick: 800,  // Fast flick — commit with less distance above this
+		VelocityMedium:    300,  // Boundary for slow vs medium
 
-		// Distance thresholds
-		DistanceAutoCancel: 0.15, // Always cancel below 15%
-		DistanceAutoCommit: 0.50, // Always commit above 50%
-		DistanceStandard:   0.24, // Normal threshold (~154px)
-		DistanceFastFlick:  0.22, // Fast flick threshold (~140px)
-		DistanceSlowDrag:   0.28, // Slow drag threshold (~179px)
+		// Distance thresholds — now correct relative to true screen width.
+		DistanceAutoCancel: 0.05, // Always cancel below 5% (~32px) — clear non-intent
+		DistanceAutoCommit: 0.40, // Always commit above 40% — clear intent
+		DistanceStandard:   0.15, // Normal threshold (~96px)
+		DistanceFastFlick:  0.07, // Fast flick threshold (~45px) — short flick commits
+		DistanceSlowDrag:   0.20, // Slow drag threshold (~128px)
 	}
 }
 

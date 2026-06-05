@@ -17,8 +17,8 @@ type SwipeSimRequest struct {
 	// Steps: number of incremental UpdateLiveSwipe calls during the drag. Default: 20.
 	// More steps = smoother simulation of finger drag; fewer = choppier.
 	Steps int `json:"steps"`
-	// Velocity: reported finger velocity at release (0–3). Higher = snappier finalize.
-	// Default: 1.0
+	// Velocity: finger velocity at release in pixels/second. Typical real swipes
+	// range from ~120 px/s (slow drag) to ~500 px/s (fast flick). Default: 150.
 	Velocity float32 `json:"velocity"`
 	// ReleaseAt: progress (0–1) at which the finger is "lifted", triggering finalize.
 	// Real swipes typically release at 0.5–0.8. Default: 0.7.
@@ -61,7 +61,7 @@ func (s *Server) handleDebugSwipe(w http.ResponseWriter, r *http.Request) {
 		req.Steps = 20
 	}
 	if req.Velocity <= 0 {
-		req.Velocity = 1.0
+		req.Velocity = 150 // typical slow-drag velocity in px/s
 	}
 	if req.ReleaseAt <= 0 || req.ReleaseAt > 1 {
 		req.ReleaseAt = 0.7
