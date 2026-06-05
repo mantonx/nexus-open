@@ -370,6 +370,15 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 
 // GetLastFrame returns a copy of the most recently rendered frame, or nil if no frame
 // has been rendered yet. The copy is safe to read after the call returns.
+// IsTransitioning reports whether a page transition is currently in progress.
+// Used by the render loop to decide whether to broadcast every frame (30fps)
+// rather than the usual every-3rd-frame (~10fps) subsample.
+func (m *Manager) IsTransitioning() bool {
+	m.transitionMu.RLock()
+	defer m.transitionMu.RUnlock()
+	return m.transition.Active && !m.transition.IsComplete()
+}
+
 func (m *Manager) GetLastFrame() *image.RGBA {
 	m.lastFrameMu.Lock()
 	defer m.lastFrameMu.Unlock()

@@ -357,9 +357,11 @@ func (a *App) renderLoop() {
 				}
 			}
 
-			// Broadcast to WebSocket clients at ~10 FPS (every 3rd tick)
+			// During transitions broadcast every frame (30fps) so the WS
+			// analyser and Flutter preview see the full motion. Otherwise
+			// subsample to every 3rd frame (~10fps) to keep bandwidth low.
 			frameCount++
-			if frameCount%3 == 0 {
+			if a.zoneManager.IsTransitioning() || frameCount%3 == 0 {
 				var buf bytes.Buffer
 				if err := png.Encode(&buf, frame); err == nil {
 					encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
