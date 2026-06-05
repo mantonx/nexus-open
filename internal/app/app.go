@@ -102,11 +102,24 @@ func (a *App) Shutdown() error {
 		close(a.shutdownCh)
 		a.cancel()
 
-		// Stop components in reverse order
-		shutdownErr = a.stop()
+		// Stop sampler and API server (does not close HID device yet)
+		a.zoneSampler.Stop()
+		if a.apiServer != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			a.apiServer.Shutdown(shutdownCtx) //nolint:errcheck
+		}
 
-		// Wait for all goroutines to finish
+		// Wait for render loop and watcher to exit before closing the HID
+		// device — they may be mid-write and still hold a reference.
 		a.wg.Wait()
+
+		// Close HID device last, after all goroutines have stopped.
+		if a.device != nil {
+			if err := a.device.Disconnect(); err != nil {
+				a.logger.Error("error disconnecting device", "error", err)
+			}
+		}
 
 		a.logger.Info("shutdown complete")
 	})
@@ -354,30 +367,6 @@ func (a *App) renderLoop() {
 	}
 }
 
-// stop halts all running components.
-func (a *App) stop() error {
-	a.logger.Debug("stopping application components")
-
-	// Stop zone sampler
-	if a.zoneSampler != nil {
-		a.zoneSampler.Stop()
-	}
-
-	// Stop API server
-	if a.apiServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := a.apiServer.Shutdown(shutdownCtx); err != nil {
-			a.logger.Error("error shutting down API server", "error", err)
-		}
-	}
-
-	// Stop device connection last
-	if a.device != nil {
-		if err := a.device.Disconnect(); err != nil {
-			a.logger.Error("error disconnecting device", "error", err)
-		}
-	}
-
-	return nil
-}
+// stop is no longer used — shutdown logic moved to Shutdown() to ensure
+// goroutines exit before the HID handle is closed.
+func (a *App) stop() error { return nil }
