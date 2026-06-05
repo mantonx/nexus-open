@@ -189,6 +189,37 @@ func (a *App) initialize() error {
 	// Register zone sampler as status provider so /api/zones/:id/status works.
 	a.apiServer.SetZoneStatusProvider(a.zoneSampler)
 
+	// Propagate display config from settings into the zone manager theme,
+	// both immediately on startup and on every subsequent Flutter UI save.
+	applySettingsTheme := func(cfg settings.Config) {
+		current := a.zoneManager.GetConfig().Theme
+		current.Bg = cfg.BackgroundColor
+		current.Fg = cfg.TextColor
+		if cfg.Display.FontSize > 0 {
+			current.FontSizePrimary = int(cfg.Display.FontSize)
+		}
+		if cfg.Display.TimeFontSize > 0 {
+			current.FontSizeSecondary = int(cfg.Display.TimeFontSize)
+		}
+		a.zoneManager.UpdateTheme(current)
+	}
+
+	// Apply saved settings immediately so hardware reflects stored config on startup.
+	applySettingsTheme(a.cfg.Get())
+
+	// Watch for future saves from the Flutter UI.
+	settingsCh := make(chan settings.Config, 4)
+	a.cfg.Watch(settingsCh)
+	go func() {
+		for cfg := range settingsCh {
+			applySettingsTheme(cfg)
+			a.logger.Debug("theme updated from settings",
+				"bg", cfg.BackgroundColor,
+				"fg", cfg.TextColor,
+			)
+		}
+	}()
+
 	// 7. Create touch handler
 	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
 	a.logger.Info("touch handler created")
