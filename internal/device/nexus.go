@@ -94,13 +94,18 @@ func (n *NexusDevice) connectOnce(ctx context.Context) error {
 			"usage", fmt.Sprintf("0x%04x", dev.Usage))
 	}
 
-	// Try to open each interface until one succeeds
-	// This handles permission issues where some interfaces may not be accessible
+	// The Nexus has two HID interfaces:
+	//   interface 0 — display (frame writes, brightness)
+	//   interface 1 — touch/keyboard input
+	// We must open interface 0 for display output. Try it first; only fall
+	// back to other interfaces if it's genuinely unavailable.
+	sortInterfacesByPreference(devices)
+
 	var device *hid.Device
 	var lastErr error
 
 	for i := range devices {
-		n.logger.Debug("attempting to open HID interface", "index", i, "path", devices[i].Path)
+		n.logger.Debug("attempting to open HID interface", "index", i, "path", devices[i].Path, "interface", devices[i].Interface)
 
 		dev, err := devices[i].Open()
 		if err != nil {
@@ -110,7 +115,6 @@ func (n *NexusDevice) connectOnce(ctx context.Context) error {
 			continue
 		}
 
-		// Successfully opened
 		device = dev
 		n.deviceInfo = &devices[i]
 		n.logger.Info("successfully opened HID interface",

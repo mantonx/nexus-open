@@ -3,7 +3,10 @@ package device
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/karalabe/hid"
 )
 
 // Additional sentinel errors for actionable UI messages.
@@ -32,6 +35,15 @@ func NewDeviceError(op string, err error) error {
 		Op:  op,
 		Err: err,
 	}
+}
+
+// sortInterfacesByPreference sorts HID interfaces so interface 0 (display)
+// is tried before interface 1 (touch/keyboard). Taking the wrong interface
+// succeeds at open time but produces hidapi write failures at frame send time.
+func sortInterfacesByPreference(devices []hid.DeviceInfo) {
+	sort.SliceStable(devices, func(i, j int) bool {
+		return devices[i].Interface < devices[j].Interface
+	})
 }
 
 // classifyOpenError maps a raw hidapi open error to a structured sentinel.
