@@ -60,6 +60,7 @@ func main() {
 	finalizeMs := flag.Int("finalize", 120, "snap animation duration (ms)")
 	steps := flag.Int("steps", 20, "drag steps")
 	velocity := flag.Float64("velocity", 1.0, "release velocity (0-3)")
+	releaseAt := flag.Float64("release", 0.7, "progress (0-1) at which finger lifts, triggering snap")
 	count := flag.Int("count", 0, "swipe count (0=forever)")
 	gapMs := flag.Int("gap", 800, "pause between swipes (ms)")
 	analyse := flag.Bool("analyse", false, "capture WS frames and print smoothness report")
@@ -121,6 +122,7 @@ func main() {
 			"finalize_ms": *finalizeMs,
 			"steps":       *steps,
 			"velocity":    *velocity,
+			"release_at":  *releaseAt,
 		})
 
 		swipeStart := time.Now()

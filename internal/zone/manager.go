@@ -1001,33 +1001,38 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 		remainingDistance = 0
 	}
 
-	// Base duration derived from remaining distance so we continue at a similar perceived speed.
+	// Base duration scales with remaining distance so the snap continues at a
+	// consistent perceived speed regardless of where the finger was released.
+	// stretch=180ms means a full-distance snap (released at t=0) takes ~220ms,
+	// giving ~6 frames at 30fps. A 30%-remaining snap takes ~94ms (~3 frames).
 	const (
-		minDuration     = 35 * time.Millisecond
-		distanceStretch = 90 * time.Millisecond
+		minDuration     = 40 * time.Millisecond
+		distanceStretch = 180 * time.Millisecond
 	)
 
-	additional := time.Duration(float32(distanceStretch) * remainingDistance)
+	additional := time.Duration(float64(distanceStretch) * float64(remainingDistance))
 	finalDuration := minDuration + additional
 
-	// Adjust duration based on velocity (faster swipe = shorter finish, slower swipe = longer finish)
+	// Velocity in px/s (from the touch reader). Higher = faster flick = shorter snap.
+	// The gap between 120 and 170 was previously unhandled; now fully covered.
 	switch {
 	case velocity >= 360:
-		finalDuration = time.Duration(float64(finalDuration) * 0.5)
+		finalDuration = time.Duration(float64(finalDuration) * 0.50)
 	case velocity >= 240:
-		finalDuration = time.Duration(float64(finalDuration) * 0.7)
+		finalDuration = time.Duration(float64(finalDuration) * 0.65)
 	case velocity >= 170:
-		finalDuration = time.Duration(float64(finalDuration) * 0.82)
-	case velocity < 120:
-		finalDuration = time.Duration(float64(finalDuration) * 1.3)
+		finalDuration = time.Duration(float64(finalDuration) * 0.80)
+	case velocity >= 120:
+		finalDuration = time.Duration(float64(finalDuration) * 0.95)
+	// velocity < 120: slow/careful swipe — use full calculated duration
 	}
 
-	// Clamp to sensible bounds so we never snap nor drag too long.
-	if finalDuration < 40*time.Millisecond {
-		finalDuration = 40 * time.Millisecond
+	// Clamp: 50ms minimum (enough for 1-2 visible frames), 280ms maximum.
+	if finalDuration < 50*time.Millisecond {
+		finalDuration = 50 * time.Millisecond
 	}
-	if finalDuration > 200*time.Millisecond {
-		finalDuration = 200 * time.Millisecond
+	if finalDuration > 280*time.Millisecond {
+		finalDuration = 280 * time.Millisecond
 	}
 
 	m.logger.Info("✅ PAGE SWITCH (momentum)",
@@ -1071,11 +1076,15 @@ func (m *Manager) FinalizeLiveSwipe(progress float32, velocity float32, isLeft b
 	m.liveSwipePreviewActive = false
 	m.liveSwipeMu.Unlock()
 
-	// Initialize the new page (zones, etc)
-	if err := m.initializePage(); err != nil {
-		m.logger.Error("failed to initialize page after swipe", "error", err)
-		// Don't revert - animation is already running
-	}
+	// Initialize the new page after the snap animation completes so the
+	// compositor rebuild doesn't corrupt frames mid-transition.
+	snapDuration := finalDuration
+	go func() {
+		time.Sleep(snapDuration + 10*time.Millisecond)
+		if err := m.initializePage(); err != nil {
+			m.logger.Error("failed to initialize page after swipe", "error", err)
+		}
+	}()
 
 	// Ensure the transition finishes with the real target frame (cache may have been stale)
 	targetFrame := m.getCachedPageFrame(targetPage)

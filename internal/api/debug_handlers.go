@@ -20,6 +20,9 @@ type SwipeSimRequest struct {
 	// Velocity: reported finger velocity at release (0–3). Higher = snappier finalize.
 	// Default: 1.0
 	Velocity float32 `json:"velocity"`
+	// ReleaseAt: progress (0–1) at which the finger is "lifted", triggering finalize.
+	// Real swipes typically release at 0.5–0.8. Default: 0.7.
+	ReleaseAt float32 `json:"release_at"`
 }
 
 // handleDebugSwipe drives a synthetic swipe through the live transition pipeline.
@@ -60,20 +63,28 @@ func (s *Server) handleDebugSwipe(w http.ResponseWriter, r *http.Request) {
 	if req.Velocity <= 0 {
 		req.Velocity = 1.0
 	}
+	if req.ReleaseAt <= 0 || req.ReleaseAt > 1 {
+		req.ReleaseAt = 0.7
+	}
 
 	isLeft := req.Direction != "right"
+	releaseStep := int(float32(req.Steps) * req.ReleaseAt)
+	if releaseStep < 1 {
+		releaseStep = 1
+	}
 	stepInterval := time.Duration(req.DurationMs) * time.Millisecond / time.Duration(req.Steps)
 
 	// Run the swipe in a goroutine so the HTTP response returns immediately.
 	go func() {
-		// Drag phase: feed incremental progress updates.
-		for i := 1; i <= req.Steps; i++ {
+		// Drag phase: feed incremental progress up to release_at, then finalize.
+		for i := 1; i <= releaseStep; i++ {
 			progress := float32(i) / float32(req.Steps)
 			s.swipeSim.UpdateLiveSwipe(progress, isLeft)
 			time.Sleep(stepInterval)
 		}
-		// Release: finalize at full progress with specified velocity.
-		s.swipeSim.FinalizeLiveSwipe(1.0, req.Velocity, isLeft)
+		// Finalize at release_at progress — matches real finger lifting mid-swipe.
+		releaseProgress := float32(releaseStep) / float32(req.Steps)
+		s.swipeSim.FinalizeLiveSwipe(releaseProgress, req.Velocity, isLeft)
 	}()
 
 	s.respondSuccess(w, "Swipe simulation started", map[string]interface{}{

@@ -156,8 +156,10 @@ func (ts *TransitionState) GetProgress() float64 {
 					ts.manualProgress = ts.manualTo
 					ts.manualAnimating = false
 				} else {
-					eased := easeOutCubic(frac)
-					ts.manualProgress = ts.manualFrom + (ts.manualTo-ts.manualFrom)*eased
+					// easeOutCubic for the finalize snap: starts fast (continuing
+				// finger momentum) and decelerates smoothly to a stop.
+				eased := easeOutCubic(frac)
+				ts.manualProgress = ts.manualFrom + (ts.manualTo-ts.manualFrom)*eased
 				}
 			}
 		}
@@ -206,8 +208,24 @@ func (ts *TransitionState) Render() *image.RGBA {
 	}
 
 	progress := ts.GetProgress()
-	// Apply ease-out for snappy start, smooth finish
-	easedProgress := easeOutCubic(progress)
+	// Manual transitions: GetProgress returns the raw finger position (drag)
+	// or an already-eased value (finalize snap via AnimateManualTo). Either
+	// way, no additional easing is applied here — doing so would double-ease
+	// the finalize snap and make it feel front-loaded and jerky.
+	//
+	// Timed transitions (non-manual page switches): apply easeInOutCubic for
+	// a natural acceleration/deceleration arc.
+	var easedProgress float64
+	if ts.manual {
+		// Manual / finger-driven: GetProgress() already applies easing inside
+		// AnimateManualTo (finalize snap) or returns raw finger position (drag).
+		// Don't double-ease here.
+		easedProgress = progress
+	} else {
+		// Timed page switch (non-manual): apply easeInOutCubic for a natural
+		// acceleration/deceleration arc.
+		easedProgress = easeInOutCubic(progress)
+	}
 
 	switch ts.Type {
 	case TransitionFade:
