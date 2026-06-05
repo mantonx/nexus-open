@@ -9,7 +9,7 @@ pkgbase = nexus-open
 	makedepends = git
 	depends = libusb
 	optdepends = flutter: for GUI configuration interface
-	backup = etc/udev/rules.d/99-corsair-nexus.rules
+	backup = usr/lib/udev/rules.d/99-corsair-nexus.rules
 	source = nexus-open-1.0.0.tar.gz::https://github.com/mantonx/nexus-next/archive/v1.0.0.tar.gz
 	sha256sums = SKIP
 

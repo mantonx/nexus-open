@@ -1,9 +1,16 @@
-# udev rules for Corsair iCUE Nexus
-# This allows non-root users in the plugdev group to access the device
+# udev rules for Corsair iCUE Nexus (VID: 0x1b1c, PID: 0x1b8e)
+#
+# TAG+="uaccess" grants access to the active desktop session automatically
+# via logind — no group membership required on any systemd distro.
+#
+# GROUP="plugdev" is a fallback for headless / multi-user setups where no
+# logind session is present. The group is created by the package installer
+# if it doesn't already exist.
 
-# Corsair iCUE Nexus (VID: 0x1b1c, PID: 0x1b8e)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", \
+    MODE="0660", GROUP="plugdev", TAG+="uaccess"
 
-# hidraw rule is required on Arch and any distro where hidraw ACLs are not
-# inherited from the USB rule (e.g. distros using a custom udev ruleset).
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+# hidraw nodes do not always inherit ACLs from the parent USB device
+# (distro-dependent). This rule ensures direct hidraw access works everywhere.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", \
+    MODE="0660", GROUP="plugdev", TAG+="uaccess"

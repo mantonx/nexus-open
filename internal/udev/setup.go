@@ -10,21 +10,28 @@ import (
 
 const rulesFilename = "99-corsair-nexus.rules"
 
-// Rules is the udev rules content, embedded directly so the binary is
-// self-contained — no dependency on the packaging directory at runtime.
-const rules = `# udev rules for Corsair iCUE Nexus
-# This allows non-root users in the plugdev group to access the device
+// rules is embedded directly so the binary is self-contained — no dependency
+// on the packaging directory at runtime.
+const rules = `# udev rules for Corsair iCUE Nexus (VID: 0x1b1c, PID: 0x1b8e)
+#
+# TAG+="uaccess" grants access to the active desktop session automatically
+# via logind — no group membership required on any systemd distro.
+#
+# GROUP="plugdev" is a fallback for headless / multi-user setups where no
+# logind session is present. The group is created by the package installer
+# if it doesn't already exist.
 
-# Corsair iCUE Nexus (VID: 0x1b1c, PID: 0x1b8e)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", \
+    MODE="0660", GROUP="plugdev", TAG+="uaccess"
 
-# hidraw rule is required on Arch and any distro where hidraw ACLs are not
-# inherited from the USB rule (e.g. distros using a custom udev ruleset).
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+# hidraw nodes do not always inherit ACLs from the parent USB device
+# (distro-dependent). This rule ensures direct hidraw access works everywhere.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", \
+    MODE="0660", GROUP="plugdev", TAG+="uaccess"
 `
 
 // RulesInstalled reports whether the udev rules file is present on disk.
-// Checks both the Arch path (/usr/lib) and the universal path (/etc).
+// Checks both common locations.
 func RulesInstalled() bool {
 	for _, dir := range []string{"/usr/lib/udev/rules.d", "/etc/udev/rules.d"} {
 		if _, err := os.Stat(dir + "/" + rulesFilename); err == nil {
@@ -35,7 +42,6 @@ func RulesInstalled() bool {
 }
 
 // Setup installs the udev rules and reloads udev. Must be called as root.
-// Returns a user-facing error message on failure.
 func Setup() error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("udev setup is only supported on Linux")
@@ -47,6 +53,12 @@ func Setup() error {
 		)
 	}
 
+	// Ensure plugdev group exists — needed as fallback for headless installs
+	// where TAG+="uaccess"/logind is not in play.
+	if err := ensureGroup("plugdev"); err != nil {
+		return err
+	}
+
 	rulesDir := detectRulesDir()
 	if err := os.MkdirAll(rulesDir, 0755); err != nil {
 		return fmt.Errorf("failed to create rules directory %s: %w", rulesDir, err)
@@ -54,7 +66,7 @@ func Setup() error {
 
 	dest := rulesDir + "/" + rulesFilename
 	if err := os.WriteFile(dest, []byte(rules), 0644); err != nil {
-		return fmt.Errorf("failed to write rules to %s: %w", dest, err)
+		return fmt.Errorf("failed to write %s: %w", dest, err)
 	}
 	fmt.Printf("  ✓  Written: %s\n", dest)
 
@@ -70,32 +82,38 @@ func Setup() error {
 	}
 	fmt.Println("  ✓  udev rules reloaded")
 
-	group := plugdevGroup()
 	fmt.Printf("\n✓  Setup complete.\n\n")
-	fmt.Printf("If this is your first install, add yourself to the %q group:\n\n", group)
-	fmt.Printf("  sudo usermod -a -G %s $USER\n\n", group)
-	fmt.Println("Then unplug and replug the iCUE Nexus — the device will be")
-	fmt.Println("accessible without sudo from your next login.")
+	fmt.Println("Unplug and replug your iCUE Nexus — it will be accessible")
+	fmt.Println("immediately in your current desktop session (no logout needed).")
+	fmt.Println()
+	fmt.Println("On headless or multi-user systems, also add yourself to plugdev:")
+	fmt.Println()
+	fmt.Println("  sudo usermod -a -G plugdev $USER")
+	fmt.Println()
+	fmt.Println("and log out/in for the group change to take effect.")
 
 	return nil
 }
 
-// detectRulesDir returns the appropriate udev rules directory for this distro.
+// detectRulesDir returns the best udev rules directory for this system.
+// Prefers /usr/lib/udev/rules.d when it exists (Arch, openSUSE, and other
+// distros that treat /usr/lib as the package-managed location). Falls back
+// to /etc/udev/rules.d which works on all distros.
 func detectRulesDir() string {
-	// Arch Linux uses /usr/lib for package-managed rules.
-	if _, err := os.Stat("/etc/arch-release"); err == nil {
+	if _, err := os.Stat("/usr/lib/udev/rules.d"); err == nil {
 		return "/usr/lib/udev/rules.d"
 	}
 	return "/etc/udev/rules.d"
 }
 
-// plugdevGroup returns the HID access group for this distro.
-// Fedora/RHEL don't ship a plugdev group — they use 'input' instead.
-func plugdevGroup() string {
-	for _, f := range []string{"/etc/fedora-release", "/etc/redhat-release"} {
-		if _, err := os.Stat(f); err == nil {
-			return "input"
-		}
+// ensureGroup creates the named group if it doesn't exist.
+func ensureGroup(name string) error {
+	if out, err := exec.Command("getent", "group", name).Output(); err == nil && len(out) > 0 {
+		return nil // already exists
 	}
-	return "plugdev"
+	if out, err := exec.Command("groupadd", "-r", name).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create group %q: %w\n%s", name, err, out)
+	}
+	fmt.Printf("  ✓  Created group: %s\n", name)
+	return nil
 }
