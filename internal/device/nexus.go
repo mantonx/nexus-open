@@ -156,6 +156,10 @@ func (n *NexusDevice) connectOnce(ctx context.Context) error {
 	n.touchDevice = nil // touch uses same handle as display
 	n.connected = true
 
+	// Clear any frozen frame from a previous session immediately on connect,
+	// before the render loop sends the first real frame.
+	n.clearDisplay(displayDev)
+
 	n.touchReader = touch.NewHIDTouchReader(displayDev, n.logger)
 
 	n.logger.Info("HID device connected",
@@ -391,6 +395,41 @@ func (n *NexusDevice) GetFirmwareVersion() (string, error) {
 
 	n.logger.Debug("firmware version", "version", firmware)
 	return firmware, nil
+}
+
+// clearDisplay sends a blank (black) frame directly to a HID device handle.
+// Used on connect and shutdown to clear stale content from the previous session.
+func (n *NexusDevice) clearDisplay(dev *hid.Device) {
+	const (
+		chunkSize  = 1024
+		headerSize = 8
+		maxPayload = chunkSize - headerSize
+	)
+	blank := make([]byte, FrameSize)
+	totalChunks := (len(blank) + maxPayload - 1) / maxPayload
+	for chunkNum := 0; chunkNum < totalChunks; chunkNum++ {
+		start := chunkNum * maxPayload
+		end := start + maxPayload
+		if end > len(blank) {
+			end = len(blank)
+		}
+		payloadLen := end - start
+		packet := make([]byte, chunkSize)
+		packet[0] = 0x02
+		packet[1] = 0x05
+		packet[2] = 0x40
+		if chunkNum == totalChunks-1 {
+			packet[3] = 0x01
+		}
+		packet[4] = byte(chunkNum & 0xFF)
+		packet[5] = byte((chunkNum >> 8) & 0xFF)
+		packet[6] = byte(payloadLen & 0xFF)
+		packet[7] = byte((payloadLen >> 8) & 0xFF)
+		if _, err := dev.Write(packet); err != nil {
+			n.logger.Debug("clearDisplay write failed", "chunk", chunkNum, "error", err)
+			return
+		}
+	}
 }
 
 // monitorConnection monitors for device disconnection and attempts reconnection.

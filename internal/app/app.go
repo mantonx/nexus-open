@@ -114,6 +114,17 @@ func (a *App) Shutdown() error {
 		// device — they may be mid-write and still hold a reference.
 		a.wg.Wait()
 
+		// Send a blank frame before disconnecting. The Corsair firmware has no
+		// "release to native" command — it holds the last frame indefinitely.
+		// Sending black ensures the device looks clearly off rather than frozen
+		// on stale content.
+		if a.device != nil && a.device.IsConnected() {
+			blank := make([]byte, 640*48*4) // all zeros = black RGBA
+			if err := a.device.SendFrame(context.Background(), blank); err != nil {
+				a.logger.Debug("failed to send blank frame on shutdown", "error", err)
+			}
+		}
+
 		// Close HID device last, after all goroutines have stopped.
 		if a.device != nil {
 			if err := a.device.Disconnect(); err != nil {
