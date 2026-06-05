@@ -14,8 +14,24 @@ else
 fi
 echo ""
 
-# Kill any existing instances
-killall nexus-open ui 2>/dev/null
+# Stop any existing instance via PID file (clean shutdown, releases HID device).
+# Fall back to killall for processes that didn't write a PID file.
+_PID_FILE="${XDG_RUNTIME_DIR:-/tmp/nexus-open-$(id -u)}/nexus-open.pid"
+if [[ -f "$_PID_FILE" ]]; then
+    _PREV_PID=$(cat "$_PID_FILE" 2>/dev/null)
+    if [[ -n "$_PREV_PID" ]] && kill -0 "$_PREV_PID" 2>/dev/null; then
+        echo "Stopping previous nexus-open (PID $_PREV_PID)..."
+        kill "$_PREV_PID" 2>/dev/null
+        # Wait up to 5s for clean exit (wg.Wait drains goroutines)
+        for _ in 1 2 3 4 5; do
+            kill -0 "$_PREV_PID" 2>/dev/null || break
+            sleep 1
+        done
+    fi
+fi
+# Catch anything that bypassed the PID file (old binaries, debug runs)
+pkill -x nexus-open 2>/dev/null || true
+pkill -f "debug/bundle/ui" 2>/dev/null || true
 
 # Generate OpenAPI 3.0 spec from annotations
 echo "Generating OpenAPI 3.0 spec from code annotations..."
