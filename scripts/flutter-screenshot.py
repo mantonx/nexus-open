@@ -38,13 +38,34 @@ def find_ws_url(log_paths: list) -> str:
             return match.group(0).replace("http://", "ws://").rstrip("/") + "/ws"
     raise RuntimeError(f"No VM service URL found in: {log_paths}")
 
-async def screenshot(ws_url: str, out_path: str):
+async def call_extension(ws_url: str, method: str, isolate_id: str) -> dict:
+    """Call a registered VM service extension and return the result."""
+    import websockets
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({
+            "jsonrpc": "2.0", "id": "1",
+            "method": method,
+            "params": {"isolateId": isolate_id},
+        }))
+        return json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+
+async def screenshot(ws_url: str, out_path: str, show_onboarding: bool = False):
     import websockets
     async with websockets.connect(ws_url) as ws:
         # Get isolate ID
         await ws.send(json.dumps({"jsonrpc": "2.0", "id": "1", "method": "getVM", "params": {}}))
         resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
         isolate_id = resp["result"]["isolates"][0]["id"]
+
+        # Optionally trigger onboarding before screenshotting
+        if show_onboarding:
+            await ws.send(json.dumps({
+                "jsonrpc": "2.0", "id": "99",
+                "method": "ext.nexus.showOnboarding",
+                "params": {"isolateId": isolate_id},
+            }))
+            await asyncio.wait_for(ws.recv(), timeout=5)
+            await asyncio.sleep(0.3)  # let the widget tree rebuild
 
         # Get root widget object ID
         await ws.send(json.dumps({
@@ -83,9 +104,12 @@ async def screenshot(ws_url: str, out_path: str):
         print(out_path)
 
 def main():
-    out    = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUT
-    ws_url = sys.argv[2] if len(sys.argv) > 2 else find_ws_url(LOG_FILES)
-    asyncio.run(screenshot(ws_url, out))
+    args = sys.argv[1:]
+    show_onboarding = "--onboarding" in args
+    args = [a for a in args if a != "--onboarding"]
+    out    = args[0] if len(args) > 0 else DEFAULT_OUT
+    ws_url = args[1] if len(args) > 1 else find_ws_url(LOG_FILES)
+    asyncio.run(screenshot(ws_url, out, show_onboarding=show_onboarding))
 
 if __name__ == "__main__":
     main()
