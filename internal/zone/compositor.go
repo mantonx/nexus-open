@@ -34,13 +34,15 @@ func NewCompositor(logger *slog.Logger, theme Theme, page *Page) *Compositor {
 	}
 }
 
-// Composite renders all zones and composites them into a single 640x48 image
-func (c *Compositor) Composite(zoneImages map[string]*image.RGBA) (*image.RGBA, error) {
+// Composite renders all zones and composites them into a single 640x48 image.
+// theme is passed in so live UpdateTheme calls are reflected immediately
+// rather than using the stale copy stored at compositor creation time.
+func (c *Compositor) Composite(zoneImages map[string]*image.RGBA, theme Theme) (*image.RGBA, error) {
 	// Create display buffer
 	display := image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
 
 	// Fill with background color
-	bgColor := c.theme.GetBgColor()
+	bgColor := theme.GetBgColor()
 	draw.Draw(display, display.Bounds(), &image.Uniform{bgColor}, image.Point{}, draw.Src)
 
 	// Ensure offsets are computed
@@ -59,8 +61,8 @@ func (c *Compositor) Composite(zoneImages map[string]*image.RGBA) (*image.RGBA, 
 		draw.Draw(display, destRect, zoneImg, image.Point{}, draw.Src)
 
 		// Draw gutter (vertical separator) if not the last zone
-		if i < len(c.page.Zones)-1 && c.theme.GutterPx > 0 {
-			c.drawGutter(display, zone.X+zone.Width)
+		if i < len(c.page.Zones)-1 && theme.GutterPx > 0 {
+			c.drawGutter(display, zone.X+zone.Width, theme)
 		}
 	}
 
@@ -68,11 +70,11 @@ func (c *Compositor) Composite(zoneImages map[string]*image.RGBA) (*image.RGBA, 
 }
 
 // drawGutter draws a vertical gutter at the specified X position
-func (c *Compositor) drawGutter(img *image.RGBA, x int) {
-	gutterColor := c.theme.GetMutedColor()
+func (c *Compositor) drawGutter(img *image.RGBA, x int, theme Theme) {
+	gutterColor := theme.GetMutedColor()
 	gutterColor.A = 60 // Semi-transparent
 
-	for gx := 0; gx < c.theme.GutterPx; gx++ {
+	for gx := 0; gx < theme.GutterPx; gx++ {
 		for y := 0; y < DisplayHeight; y++ {
 			px := x + gx
 			if px < DisplayWidth {
