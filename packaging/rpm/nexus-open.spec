@@ -57,9 +57,22 @@ for size in 16 48 64 128 256; do
 done
 
 %post
+# Ensure plugdev group exists — fallback for headless installs.
+getent group plugdev > /dev/null 2>&1 || groupadd -r plugdev
+
+# Reload udev so the new rules take effect immediately.
 udevadm control --reload-rules 2>/dev/null || true
 udevadm trigger --subsystem-match=usb 2>/dev/null || true
 udevadm trigger --subsystem-match=hidraw 2>/dev/null || true
+
+echo ""
+echo "Nexus Open installed. Unplug and replug your iCUE Nexus — it will be"
+echo "accessible immediately in your desktop session."
+echo ""
+echo "On headless/multi-user systems also run:"
+echo "  sudo usermod -a -G plugdev \$USER"
+echo "and log out/in for the group change to take effect."
+echo ""
 
 %files
 %license LICENSE

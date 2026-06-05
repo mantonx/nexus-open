@@ -3,45 +3,39 @@ set -e
 
 echo "Setting up Nexus Open..."
 
-# Reload udev rules
-if [ -x "$(command -v udevadm)" ]; then
-    echo "Reloading udev rules..."
-    udevadm control --reload-rules
-    udevadm trigger --subsystem-match=usb --attr-match=idVendor=1b1c --attr-match=idProduct=1b8e
-    udevadm trigger --subsystem-match=hidraw
-fi
-
-# Create plugdev group if it doesn't exist
+# Ensure plugdev group exists — fallback for headless installs where
+# TAG+="uaccess"/logind is not active.
 if ! getent group plugdev > /dev/null 2>&1; then
     echo "Creating plugdev group..."
     groupadd -r plugdev
 fi
 
-# Update desktop database
-if [ -x "$(command -v update-desktop-database)" ]; then
-    echo "Updating desktop database..."
-    update-desktop-database -q /usr/share/applications
+# Reload udev so the new rules take effect immediately.
+if command -v udevadm > /dev/null 2>&1; then
+    echo "Reloading udev rules..."
+    udevadm control --reload-rules
+    udevadm trigger --subsystem-match=usb
+    udevadm trigger --subsystem-match=hidraw
 fi
 
-# Update icon cache
-if [ -x "$(command -v gtk-update-icon-cache)" ]; then
-    echo "Updating icon cache..."
-    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor
-fi
+# Update desktop and icon caches if available.
+command -v update-desktop-database > /dev/null 2>&1 && \
+    update-desktop-database -q /usr/share/applications || true
+command -v gtk-update-icon-cache > /dev/null 2>&1 && \
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
 
 echo ""
-echo "Nexus Open has been installed successfully!"
+echo "Nexus Open installed successfully!"
 echo ""
-echo "IMPORTANT: To access the USB device without root privileges:"
-echo "  1. Add your user to the plugdev group:"
-echo "     sudo usermod -a -G plugdev \$USER"
-echo "  2. Log out and log back in for the group changes to take effect"
+echo "Unplug and replug your iCUE Nexus — it will be accessible immediately"
+echo "in your desktop session (TAG+=\"uaccess\" handles this automatically)."
 echo ""
-echo "To start the service:"
-echo "  systemctl --user enable nexus-open"
-echo "  systemctl --user start nexus-open"
+echo "On headless or multi-user systems, also run:"
+echo "  sudo usermod -a -G plugdev \$USER"
+echo "and log out/in for the group change to take effect."
 echo ""
-echo "To use the GUI, run: nexus-open"
+echo "To start Nexus Open at login:"
+echo "  systemctl --user enable --now nexus-open"
 echo ""
 
 exit 0
