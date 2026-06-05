@@ -24,6 +24,7 @@ import (
 
 	"github.com/mantonx/nexus-next/internal/app"
 	"github.com/mantonx/nexus-next/internal/tray"
+	"github.com/mantonx/nexus-next/internal/udev"
 )
 
 var (
@@ -35,6 +36,7 @@ func main() {
 	// Parse command-line flags
 	var (
 		showVersion = flag.Bool("version", false, "Show version information")
+		setupUdev   = flag.Bool("setup-udev", false, "Install udev rules for device access (requires root)")
 		debug       = flag.Bool("debug", false, "Enable debug logging")
 		configPath  = flag.String("config", "", "Path to configuration file")
 		apiPort     = flag.Int("port", 1985, "API server port")
@@ -45,6 +47,16 @@ func main() {
 	// Show version and exit
 	if *showVersion {
 		fmt.Printf("Nexus Open v%s (commit: %s)\n", version, commit)
+		os.Exit(0)
+	}
+
+	// Install udev rules and exit
+	if *setupUdev {
+		fmt.Println("Installing udev rules for Corsair iCUE Nexus...")
+		if err := udev.Setup(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
