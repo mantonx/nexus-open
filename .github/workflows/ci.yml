@@ -261,6 +261,7 @@ jobs:
     name: Runtime Test (${{ matrix.label }})
     runs-on: ubuntu-24.04
     needs: package-build
+    if: needs.package-build.result == 'success'
     strategy:
       fail-fast: false
       matrix:
