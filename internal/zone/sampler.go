@@ -203,7 +203,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 	s.logger.Debug("starting sample loop", "zone_id", zoneID, "interval", interval)
 
 	// Sample immediately on start.
-	s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck — initial sample; can't restart here
+	s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck // initial sample; can't restart here
 
 	// Get the trigger channel for this zone.
 	s.mu.RLock()
@@ -239,7 +239,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 
 		case <-triggerCh:
 			s.logger.Debug("immediate sample triggered", "zone_id", zoneID)
-			s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck — trigger path; crash caught next tick
+			s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck // trigger path; crash caught next tick
 		}
 	}
 }
