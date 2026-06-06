@@ -231,7 +231,7 @@ func (m *WeatherPlugin) fetchWeather() (*WeatherData, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch weather: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -288,7 +288,7 @@ func (m *WeatherPlugin) getCityCoordinates(location string) (float64, float64, e
 	if err != nil {
 		return 0, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return 0, 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)

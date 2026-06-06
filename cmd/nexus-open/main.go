@@ -59,7 +59,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "nexus-open --show: no running instance found (%v)\n", err)
 			os.Exit(1)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		os.Exit(0)
 	}
 

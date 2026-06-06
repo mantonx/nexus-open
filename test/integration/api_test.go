@@ -155,7 +155,7 @@ func TestHealth_MethodNotAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 405 {
 		t.Errorf("expected 405, got %d", resp.StatusCode)
 	}
@@ -210,10 +210,10 @@ func TestConfig_RoundTrip(t *testing.T) {
 
 	resp := postJSON(t, base+"/api/config", update)
 	if resp.StatusCode != 200 {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		t.Fatalf("POST /api/config: expected 200, got %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Read back and verify the saved values.
 	var got map[string]any
@@ -240,7 +240,7 @@ func TestConfig_InvalidColorRejected(t *testing.T) {
 		"text_color":       "#FFFFFF",
 	}
 	resp := postJSON(t, base+"/api/config", update)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 400 {
 		t.Errorf("expected 400 for invalid color, got %d", resp.StatusCode)
 	}
@@ -253,7 +253,7 @@ func TestConfig_InvalidJSONRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 400 {
 		t.Errorf("expected 400 for invalid JSON, got %d", resp.StatusCode)
 	}
@@ -265,7 +265,7 @@ func TestCORS_HeadersPresent(t *testing.T) {
 	_, base := newTestServer(t)
 
 	resp := get(t, base+"/api/health")
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Error("missing Access-Control-Allow-Origin: *")
@@ -281,7 +281,7 @@ func TestCORS_PreflightReturns200(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Errorf("preflight: expected 200, got %d", resp.StatusCode)
 	}
@@ -313,7 +313,7 @@ func TestBrightness_ValidRange(t *testing.T) {
 
 	for _, level := range []int{0, 50, 100} {
 		resp := postJSON(t, base+"/api/device/brightness", map[string]int{"brightness": level})
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != 200 {
 			t.Errorf("brightness %d: expected 200, got %d", level, resp.StatusCode)
 		}
@@ -325,7 +325,7 @@ func TestBrightness_OutOfRange(t *testing.T) {
 
 	for _, level := range []int{-1, 101} {
 		resp := postJSON(t, base+"/api/device/brightness", map[string]int{"brightness": level})
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != 400 {
 			t.Errorf("brightness %d: expected 400, got %d", level, resp.StatusCode)
 		}
@@ -358,7 +358,7 @@ func TestPluginConfig_SetAndGet(t *testing.T) {
 
 	payload := map[string]any{"unit": "metric", "graph": "sparkline"}
 	resp := postJSON(t, base+"/api/plugins/cpu-temp/config", payload)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("POST plugin config: expected 200, got %d", resp.StatusCode)
 	}
@@ -383,7 +383,7 @@ func TestZoneConfig_SetGetDelete(t *testing.T) {
 	// Set override
 	payload := map[string]any{"color": "#FF0000", "enabled": true}
 	resp := postJSON(t, base+"/api/zones/zone-1/config", payload)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("POST zone config: expected 200, got %d", resp.StatusCode)
 	}
@@ -440,7 +440,7 @@ func TestWindowState_ShowHide(t *testing.T) {
 
 	// Hide
 	resp := postJSON(t, base+"/api/window/hide", nil)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Errorf("POST /hide: expected 200, got %d", resp.StatusCode)
 	}
@@ -452,7 +452,7 @@ func TestWindowState_ShowHide(t *testing.T) {
 
 	// Show
 	resp = postJSON(t, base+"/api/window/show", nil)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Errorf("POST /show: expected 200, got %d", resp.StatusCode)
 	}
@@ -546,7 +546,7 @@ func TestWebSocket_BroadcastsWindowStateChange(t *testing.T) {
 
 	// Trigger a state change via the REST API.
 	resp := postJSON(t, base+"/api/window/hide", nil)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Expect a window_state broadcast on the WebSocket.
 	var msg map[string]any
@@ -619,7 +619,7 @@ func TestErrorResponse_HasExpectedShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resp.StatusCode != 405 {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		t.Fatalf("expected 405, got %d", resp.StatusCode)
 	}
 
