@@ -30,6 +30,64 @@ func TestMigration_IdempotentOpen(t *testing.T) {
 	}
 }
 
+func TestMigration_ModulesToPluginsPathRewrite(t *testing.T) {
+	db := openTestDB(t)
+
+	// Simulate a pre-migration4 zone with the old modules/ path.
+	if _, err := db.db.Exec(
+		`INSERT INTO pages(id, name, ord) VALUES (99, 'Test', 0)`,
+	); err != nil {
+		t.Fatalf("insert page: %v", err)
+	}
+	if _, err := db.db.Exec(
+		`INSERT INTO zones(id, page_id, ord, width_px, module, refresh_ms, align, config_json, theme_json)
+		 VALUES ('z', 99, 0, 640, 'exec:./modules/cpu-temp/cpu-temp', 2000, 'center', '{}', '{}')`,
+	); err != nil {
+		t.Fatalf("insert zone: %v", err)
+	}
+
+	// Run migration4 directly.
+	tx, _ := db.db.Begin()
+	if err := migration4(tx); err != nil {
+		tx.Rollback() //nolint:errcheck
+		t.Fatalf("migration4: %v", err)
+	}
+	tx.Commit() //nolint:errcheck
+
+	zones, _ := db.GetZonesForPage(99)
+	if len(zones) == 0 {
+		t.Fatal("no zones found after migration")
+	}
+	if want := "exec:./plugins/cpu-temp/cpu-temp"; zones[0].Plugin != want {
+		t.Errorf("plugin = %q, want %q", zones[0].Plugin, want)
+	}
+}
+
+func TestMigration_ModulesToPlugins_SkipsNonModules(t *testing.T) {
+	db := openTestDB(t)
+
+	if _, err := db.db.Exec(
+		`INSERT INTO pages(id, name, ord) VALUES (98, 'Test', 0)`,
+	); err != nil {
+		t.Fatalf("insert page: %v", err)
+	}
+	if _, err := db.db.Exec(
+		`INSERT INTO zones(id, page_id, ord, width_px, module, refresh_ms, align, config_json, theme_json)
+		 VALUES ('z', 98, 0, 640, 'builtin:clock', 1000, 'center', '{}', '{}')`,
+	); err != nil {
+		t.Fatalf("insert zone: %v", err)
+	}
+
+	tx, _ := db.db.Begin()
+	migration4(tx) //nolint:errcheck
+	tx.Commit()    //nolint:errcheck
+
+	zones, _ := db.GetZonesForPage(98)
+	if zones[0].Plugin != "builtin:clock" {
+		t.Errorf("builtin plugin was incorrectly rewritten to %q", zones[0].Plugin)
+	}
+}
+
 func TestMigration_SchemaVersion(t *testing.T) {
 	db := openTestDB(t)
 

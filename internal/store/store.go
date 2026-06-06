@@ -29,7 +29,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 // DB is the application's SQLite store. All methods are safe for concurrent use.
 type DB struct {
@@ -287,6 +287,7 @@ func (s *DB) migrate() error {
 		migration1, // v0 → v1: settings + zone_plugin_config
 		migration2, // v1 → v2: pages + zones (layout editor)
 		migration3, // v2 → v3: rename zone_module_config → zone_plugin_config
+		migration4, // v3 → v4: rewrite exec:./modules/ → exec:./plugins/ after directory rename
 	}
 
 	for i := current; i < currentSchemaVersion; i++ {
@@ -372,5 +373,17 @@ func migration3(tx *sql.Tx) error {
 		return nil
 	}
 	_, err := tx.Exec(`ALTER TABLE zone_module_config RENAME TO zone_plugin_config`)
+	return err
+}
+
+// migration4 rewrites exec:./modules/ plugin paths to exec:./plugins/ (v3 → v4).
+// The modules/ directory was renamed to plugins/ in the codebase; any layout
+// seeded before that rename will have stale paths that fail to launch.
+func migration4(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		UPDATE zones
+		SET module = 'exec:./plugins/' || substr(module, length('exec:./modules/') + 1)
+		WHERE module LIKE 'exec:./modules/%'
+	`)
 	return err
 }
