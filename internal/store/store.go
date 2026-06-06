@@ -59,13 +59,19 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 		return nil, fmt.Errorf("store: create dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path+"?_journal=WAL&_timeout=5000&_fk=true")
+	db, err := sql.Open("sqlite", path+"?_journal=WAL&_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("store: open: %w", err)
 	}
 
 	// Single writer to avoid SQLITE_BUSY under concurrent writes.
 	db.SetMaxOpenConns(1)
+
+	// modernc.org/sqlite ignores the _fk DSN param; enforce foreign keys explicitly.
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: enable foreign keys: %w", err)
+	}
 
 	s := &DB{db: db, logger: logger, path: path}
 
