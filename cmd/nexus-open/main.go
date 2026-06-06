@@ -14,10 +14,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -44,8 +46,22 @@ func main() {
 		configPath  = flag.String("config", "", "Path to configuration file")
 		apiPort     = flag.Int("port", 1985, "API server port")
 		enableTray  = flag.Bool("tray", false, "Enable system tray mode with Flutter UI")
+		showWindow  = flag.Bool("show", false, "Show the window of a running instance and exit")
 	)
 	flag.Parse()
+
+	// --show: forward to an already-running daemon via its HTTP API and exit.
+	// This is what the KDE app launcher invokes when the daemon is already up.
+	if *showWindow {
+		apiAddr := fmt.Sprintf("http://localhost:%d/api/window/show", *apiPort)
+		resp, err := http.Post(apiAddr, "application/json", bytes.NewReader([]byte("{}")))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nexus-open --show: no running instance found (%v)\n", err)
+			os.Exit(1)
+		}
+		resp.Body.Close()
+		os.Exit(0)
+	}
 
 	// Show version and exit
 	if *showVersion {

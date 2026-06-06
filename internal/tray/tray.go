@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -129,7 +128,10 @@ func (m *Manager) startFlutter() error {
 	m.flutterCmd.Stderr = os.Stderr
 	// Inherit the current environment and add the minimized flag so the
 	// Flutter window starts hidden — the user brings it up via the tray.
-	m.flutterCmd.Env = append(os.Environ(), "NEXUS_START_MINIMIZED=1")
+	m.flutterCmd.Env = append(os.Environ(),
+		"NEXUS_START_MINIMIZED=1",
+		"WAYLAND_DISPLAY=", // Flutter GTK3 embedder crashes on native Wayland; force XWayland
+	)
 
 	if err := m.flutterCmd.Start(); err != nil {
 		return err
@@ -158,37 +160,46 @@ func (m *Manager) findFlutterExecutable() (string, error) {
 	}
 	exeDir := filepath.Dir(exePath)
 
-	// Look for Flutter executable in the same directory
-	var flutterName string
-	switch runtime.GOOS {
-	case "linux":
-		flutterName = "nexus-open-ui"
-	case "darwin":
-		flutterName = "nexus-open-ui.app/Contents/MacOS/nexus-open-ui"
-	case "windows":
-		flutterName = "nexus-open-ui.exe"
-	default:
-		flutterName = "nexus-open-ui"
+	// Priority 1: XDG install path (~/.local/share/nexus-open/ui)
+	xdgData := os.Getenv("XDG_DATA_HOME")
+	if xdgData == "" {
+		xdgData = filepath.Join(os.Getenv("HOME"), ".local", "share")
+	}
+	installedPath := filepath.Join(xdgData, "nexus-open", "ui")
+	if _, err := os.Stat(installedPath); err == nil {
+		return installedPath, nil
 	}
 
-	flutterPath := filepath.Join(exeDir, flutterName)
-	if _, err := os.Stat(flutterPath); err != nil {
-		// Development mode: look in ui/build directory
-		devPath := filepath.Join(exeDir, "..", "ui", "build", "linux", "x64", "release", "bundle", "nexus_open")
-		if _, err := os.Stat(devPath); err == nil {
-			return devPath, nil
-		}
-		return "", err
+	// Priority 2: sibling to the daemon binary (single-dir deployment)
+	siblingPath := filepath.Join(exeDir, "ui")
+	if _, err := os.Stat(siblingPath); err == nil {
+		return siblingPath, nil
 	}
 
-	return flutterPath, nil
+	// Priority 3: development build path (running from repo root)
+	devPath := filepath.Join(exeDir, "..", "ui", "build", "linux", "x64", "release", "bundle", "ui")
+	if _, err := os.Stat(devPath); err == nil {
+		return devPath, nil
+	}
+
+	return "", fmt.Errorf("Flutter UI binary not found; run 'cd ui && flutter build linux --release'")
 }
 
-// showWindow shows the Flutter window
+// showWindow shows the Flutter window, forwarding an XDG activation token if
+// one is present in the environment so the compositor grants focus permission.
 func (m *Manager) showWindow() {
-	// Call API to tell Flutter to show window
 	url := "http://" + m.apiAddr + "/api/window/show"
-	resp, err := http.Post(url, "application/json", bytes.NewReader([]byte("{}")))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		m.logger.Error("failed to build show window request", "error", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token := os.Getenv("XDG_ACTIVATION_TOKEN"); token != "" {
+		req.Header.Set("X-XDG-Activation-Token", token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		m.logger.Error("failed to send show window command", "error", err)
 		return

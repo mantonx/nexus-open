@@ -7,4 +7,9 @@ Icon=nexus-open
 Terminal=false
 Categories=Utility;System;HardwareSettings;
 Keywords=corsair;nexus;icue;monitor;display;
-StartupNotify=false
+StartupNotify=true
+StartupWMClass=io.nexus.open
+
+[Desktop Action Show]
+Name=Show Window
+Exec=nexus-open --show

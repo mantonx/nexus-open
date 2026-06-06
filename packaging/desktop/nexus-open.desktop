@@ -5,9 +5,13 @@ Name=Nexus Open
 GenericName=iCUE Nexus Controller
 Comment=Control and configure your Corsair iCUE Nexus display
 Icon=nexus-open
-Exec=/usr/bin/nexus-open
+Exec=/usr/bin/nexus-open --tray
 Terminal=false
-Categories=Utility;System;Settings;
+Categories=Utility;System;HardwareSettings;
 Keywords=corsair;icue;nexus;display;monitor;system;
 StartupNotify=true
-StartupWMClass=nexus-open
+StartupWMClass=io.nexus.open
+
+[Desktop Action Show]
+Name=Show Window
+Exec=/usr/bin/nexus-open --show

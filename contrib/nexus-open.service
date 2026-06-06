@@ -2,16 +2,13 @@
 Description=Nexus Open — iCUE Nexus companion daemon
 Documentation=https://github.com/mantonx/nexus-next
 After=graphical-session.target
+Wants=graphical-session.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Projects/nexus-next
-ExecStart=%h/Projects/nexus-next/nexus-open
+ExecStart=%h/.local/bin/nexus-open --tray
 Restart=on-failure
 RestartSec=3s
-
-# Give the udev device node time to appear after login
-ExecStartPre=/bin/sleep 2
 
 [Install]
 WantedBy=graphical-session.target

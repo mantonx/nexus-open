@@ -1,24 +1,17 @@
 [Unit]
-Description=Nexus Open - iCUE Nexus Display Controller
+Description=Nexus Open — iCUE Nexus companion daemon
 Documentation=https://github.com/mantonx/nexus-next
-After=graphical.target
+After=graphical-session.target
+Wants=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/nexus-open
+ExecStart=/usr/bin/nexus-open --tray
 Restart=on-failure
-RestartSec=5s
+RestartSec=3s
 
-# Security settings
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=%h/.config/nexus-open
-
-# Resource limits
-MemoryMax=100M
-CPUQuota=20%
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
