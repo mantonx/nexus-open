@@ -325,6 +325,9 @@ BUILD_DEB=false
 BUILD_RPM=false
 BUILD_PACMAN=false
 RUN_TESTS=false
+TEST_DEB_ONLY=false
+TEST_RPM_ONLY=false
+TEST_PACMAN_ONLY=false
 
 # Default: build all
 if [[ $# -eq 0 ]]; then
@@ -333,18 +336,44 @@ fi
 
 for arg in "$@"; do
     case "$arg" in
-        --deb)    BUILD_DEB=true ;;
-        --rpm)    BUILD_RPM=true ;;
-        --pacman) BUILD_PACMAN=true ;;
-        --test)   BUILD_DEB=true; BUILD_RPM=true; BUILD_PACMAN=true; RUN_TESTS=true ;;
-        *) die "Unknown option: $arg. Usage: ./build-package.sh [--deb] [--rpm] [--pacman] [--test]" ;;
+        --deb)        BUILD_DEB=true ;;
+        --rpm)        BUILD_RPM=true ;;
+        --pacman)     BUILD_PACMAN=true ;;
+        --test)       BUILD_DEB=true; BUILD_RPM=true; BUILD_PACMAN=true; RUN_TESTS=true ;;
+        # Test-only flags: skip build, run Docker test against existing dist/ packages.
+        --test-deb)   TEST_DEB_ONLY=true ;;
+        --test-rpm)   TEST_RPM_ONLY=true ;;
+        --test-pacman) TEST_PACMAN_ONLY=true ;;
+        *) die "Unknown option: $arg. Usage: ./build-package.sh [--deb] [--rpm] [--pacman] [--test] [--test-deb|--test-rpm|--test-pacman]" ;;
     esac
 done
 
+# ── test-only mode (CI: packages pre-built, just run Docker tests) ────────────
+if $TEST_DEB_ONLY || $TEST_RPM_ONLY || $TEST_PACMAN_ONLY; then
+    command -v docker &>/dev/null || die "docker not found"
+    if $TEST_DEB_ONLY; then
+        f=$(ls -t "$OUT_DIR"/nexus-open_*.deb 2>/dev/null | head -1)
+        [[ -n "$f" ]] || die "No .deb found in $OUT_DIR/ — build first"
+        test_deb "$f" && ok "deb test passed" || die "deb test FAILED"
+    fi
+    if $TEST_RPM_ONLY; then
+        f=$(ls -t "$OUT_DIR"/nexus-open-*.rpm 2>/dev/null | head -1)
+        [[ -n "$f" ]] || die "No .rpm found in $OUT_DIR/ — build first"
+        test_rpm "$f" && ok "rpm test passed" || die "rpm test FAILED"
+    fi
+    if $TEST_PACMAN_ONLY; then
+        f=$(ls -t "$OUT_DIR"/nexus-open-*.pkg.tar.* 2>/dev/null | head -1)
+        [[ -n "$f" ]] || die "No .pkg.tar.* found in $OUT_DIR/ — build first"
+        test_pacman "$f" && ok "pacman test passed" || die "pacman test FAILED"
+    fi
+    exit 0
+fi
+
+# ── build mode ────────────────────────────────────────────────────────────────
 echo "Building Nexus Open v${PKG_VERSION} packages..."
 echo ""
 
-# deb builds its own binary inside Ubuntu 22.04 for glibc compatibility.
+# deb builds its own binary inside Ubuntu 24.04 for glibc compatibility.
 # rpm and pacman use a native binary (the host distro's glibc is fine for
 # Fedora/Arch users who will have a recent glibc).
 if $BUILD_RPM || $BUILD_PACMAN; then
