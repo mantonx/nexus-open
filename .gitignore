@@ -60,3 +60,4 @@ ui/lib/generated/api/
 # freezed + json_serializable generated files
 ui/lib/**/*.freezed.dart
 ui/lib/**/*.g.dart
+dist/

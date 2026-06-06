@@ -11,11 +11,12 @@ if ! getent group plugdev > /dev/null 2>&1; then
 fi
 
 # Reload udev so the new rules take effect immediately.
+# Guard against container/CI environments where udevd is not running.
 if command -v udevadm > /dev/null 2>&1; then
     echo "Reloading udev rules..."
-    udevadm control --reload-rules
-    udevadm trigger --subsystem-match=usb
-    udevadm trigger --subsystem-match=hidraw
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=usb 2>/dev/null || true
+    udevadm trigger --subsystem-match=hidraw 2>/dev/null || true
 fi
 
 # Update desktop and icon caches if available.
