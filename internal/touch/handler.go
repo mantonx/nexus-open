@@ -30,8 +30,7 @@ type Handler struct {
 	zoneManager *zone.Manager
 
 	// Gesture state
-	lastTouch   time.Time
-	touchActive bool
+	lastTouch time.Time
 
 	// Configuration
 	swipeEnabled bool

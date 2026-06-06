@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 )
@@ -39,7 +38,7 @@ func (s *DB) GetPages() ([]StoredPage, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var pages []StoredPage
 	for rows.Next() {
@@ -116,7 +115,7 @@ func (s *DB) GetZonesForPage(pageID int64) ([]StoredZone, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var zones []StoredZone
 	for rows.Next() {
@@ -315,16 +314,3 @@ func ValidateZoneWidths(zones []StoredZone) error {
 	return nil
 }
 
-// zoneFromRow is a helper used internally.
-func scanZone(rows *sql.Rows) (StoredZone, error) {
-	var z StoredZone
-	var cfgRaw, themeRaw string
-	err := rows.Scan(&z.ID, &z.PageID, &z.Ord, &z.WidthPx, &z.Plugin,
-		&z.RefreshMs, &z.Align, &cfgRaw, &themeRaw)
-	if err != nil {
-		return z, err
-	}
-	json.Unmarshal([]byte(cfgRaw), &z.ConfigJSON)  //nolint:errcheck
-	json.Unmarshal([]byte(themeRaw), &z.ThemeJSON) //nolint:errcheck
-	return z, nil
-}

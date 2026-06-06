@@ -69,14 +69,14 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 
 	// modernc.org/sqlite ignores the _fk DSN param; enforce foreign keys explicitly.
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("store: enable foreign keys: %w", err)
 	}
 
 	s := &DB{db: db, logger: logger, path: path}
 
 	if err := s.migrate(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
 
@@ -144,7 +144,7 @@ func (s *DB) GetSettings() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	m := make(map[string]string)
 	for rows.Next() {
@@ -175,7 +175,7 @@ func (s *DB) SetSettings(settings map[string]string) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for k, v := range settings {
 		if _, err := stmt.Exec(k, v); err != nil {
@@ -246,7 +246,7 @@ func (s *DB) GetAllZoneConfigs() (map[string]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]map[string]interface{})
 	for rows.Next() {

@@ -63,7 +63,7 @@ func (m *Manager) UpdateLiveSwipe(progress float32, isLeft bool) error {
 			oldFrame = frame
 		}
 
-		targetPage := m.currentPage
+		var targetPage int
 		if isLeft {
 			targetPage = (m.currentPage + 1) % len(m.config.Pages)
 		} else {

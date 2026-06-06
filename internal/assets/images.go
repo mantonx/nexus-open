@@ -108,7 +108,7 @@ func SaveImage(filename string, data io.Reader) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	// Encode the resized image in the original format
 	switch format {

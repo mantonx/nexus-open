@@ -195,7 +195,7 @@ func (r *Renderer) drawGraph(dc *gg.Context, payload plugin.Payload, col color.R
 
 	// ── Layer A: bottom-anchored gradient fill ────────────────────────────────
 	// Find the y-range of the line so we can anchor the gradient to it.
-	var minY float64 = H
+	minY := H
 	lineYs := make([]float64, n)
 	for i, v := range vals {
 		lineYs[i] = yOf(v)
@@ -203,11 +203,6 @@ func (r *Renderer) drawGraph(dc *gg.Context, payload plugin.Payload, col color.R
 			minY = lineYs[i]
 		}
 	}
-	fillHeight := H - minY
-	if fillHeight < 1 {
-		fillHeight = 1
-	}
-
 	// Build a clipping mask matching the graph polygon, then paint gradient rows.
 	clipDC := gg.NewContext(r.width, r.height)
 	clipDC.MoveTo(0, H)
@@ -451,9 +446,10 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 	if hasGraph {
 		tw, _ := dc.MeasureString(text)
 		scrX := valueX
-		if ax == 0.5 {
+		switch ax {
+		case 0.5:
 			scrX = valueX - tw/2
-		} else if ax == 1.0 {
+		case 1.0:
 			scrX = valueX - tw
 		}
 		scrX -= 2

@@ -486,10 +486,6 @@ func (a *App) renderLoop() {
 	}
 }
 
-// stop is no longer used — shutdown logic moved to Shutdown() to ensure
-// goroutines exit before the HID handle is closed.
-func (a *App) stop() error { return nil }
-
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()

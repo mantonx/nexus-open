@@ -182,7 +182,7 @@ func (m *Manager) findFlutterExecutable() (string, error) {
 		return devPath, nil
 	}
 
-	return "", fmt.Errorf("Flutter UI binary not found; run 'cd ui && flutter build linux --release'")
+	return "", fmt.Errorf("flutter UI binary not found; run 'cd ui && flutter build linux --release'")
 }
 
 // showWindow shows the Flutter window, forwarding an XDG activation token if
@@ -204,7 +204,7 @@ func (m *Manager) showWindow() {
 		m.logger.Error("failed to send show window command", "error", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		m.logger.Error("show window command failed", "status", resp.StatusCode)
@@ -222,7 +222,7 @@ func (m *Manager) hideWindow() {
 		m.logger.Error("failed to send hide window command", "error", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		m.logger.Error("hide window command failed", "status", resp.StatusCode)
@@ -257,7 +257,7 @@ func (m *Manager) waitForFlutter(timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				m.logger.Info("Flutter UI is ready")
 				return nil
@@ -265,5 +265,5 @@ func (m *Manager) waitForFlutter(timeout time.Duration) error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return fmt.Errorf("Flutter UI did not respond within %s", timeout)
+	return fmt.Errorf("flutter UI did not respond within %s", timeout)
 }

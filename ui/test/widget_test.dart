@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:open_next/src/models/settings_state.dart';
 import 'package:open_next/src/services/nexus_api_service.dart';
@@ -84,6 +85,13 @@ class _FakeWsService extends WsService {
 
 void main() {
   group('SettingsState', () {
+    setUp(() {
+      // Provide an empty in-memory SharedPreferences store so that
+      // SettingsState._initialize() can call SharedPreferences.getInstance()
+      // without hitting the missing-plugin error.
+      SharedPreferences.setMockInitialValues({});
+    });
+
     test('load/save round-trip preserves config fields', () async {
       int postCount = 0;
       final client = MockClient((req) async {
@@ -143,6 +151,12 @@ void main() {
     // PreviewTab is now the Display Colours tab — the live preview strip
     // moved to the persistent _DisplayStrip in the NavigationRail.
 
+    setUp(() {
+      // SettingsState._initialize() uses SharedPreferences; mock it so the
+      // plugin channel doesn't throw MissingPluginException in widget tests.
+      SharedPreferences.setMockInitialValues({});
+    });
+
     testWidgets('shows Display Colours section', (tester) async {
       final settings = SettingsState(
           apiService: NexusApiService(client: _defaultClient));
@@ -154,7 +168,8 @@ void main() {
       ));
       await tester.pump();
 
-      expect(find.text('Display Colours'), findsOneWidget);
+      // NexusSection renders its title via title.toUpperCase()
+      expect(find.text('DISPLAY COLOURS'), findsOneWidget);
     });
 
     testWidgets('shows colour swatches for text and background', (tester) async {
@@ -174,6 +189,10 @@ void main() {
   });
 
   group('PluginsTab', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+    });
+
     testWidgets('renders plugin cards for known plugins', (tester) async {
       final client = MockClient((req) async {
         if (req.url.path.contains('/config')) {

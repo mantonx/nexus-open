@@ -85,7 +85,7 @@ func main() {
 		if err := writePIDFile(pidFile); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not write PID file: %v\n", err)
 		} else {
-			defer os.Remove(pidFile)
+			defer func() { _ = os.Remove(pidFile) }()
 		}
 	}
 
@@ -192,7 +192,7 @@ func writePIDFile(path string) error {
 	if data, err := os.ReadFile(path); err == nil {
 		if prev, err := strconv.Atoi(string(data)); err == nil && prev > 0 && prev != myPID {
 			if proc, err := os.FindProcess(prev); err == nil {
-				proc.Signal(syscall.SIGTERM)
+				_ = proc.Signal(syscall.SIGTERM)
 			}
 		}
 	}
@@ -227,7 +227,7 @@ func killOtherInstances(myPID int) {
 		name := strings.TrimSpace(string(comm))
 		if name == "nexus-open" {
 			if proc, err := os.FindProcess(pid); err == nil {
-				proc.Signal(syscall.SIGTERM)
+				_ = proc.Signal(syscall.SIGTERM)
 			}
 		}
 	}

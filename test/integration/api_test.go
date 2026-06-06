@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -24,8 +23,8 @@ import (
 	"github.com/mantonx/nexus-next/internal/store"
 	"github.com/mantonx/nexus-next/internal/zone"
 	"log/slog"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -43,7 +42,7 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 
 	cfg, err := config.NewManager(s, logger)
 	if err != nil {
@@ -54,7 +53,7 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 	if err := mockDev.Connect(context.Background()); err != nil {
 		t.Fatalf("mock device connect: %v", err)
 	}
-	t.Cleanup(func() { mockDev.Disconnect() })
+	t.Cleanup(func() { _ = mockDev.Disconnect() })
 
 	zoneCfg := zone.NewConfigManager(s, logger)
 
@@ -64,15 +63,13 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 		t.Fatalf("net.Listen: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	_ = ln.Close()
 
 	srv := api.NewServer(fmt.Sprintf(":%d", port), cfg, mockDev, logger)
 	srv.SetZoneConfigManager(zoneCfg)
 
 	go func() {
-		if err := srv.Start(); err != nil {
-			// Server closed normally — not an error.
-		}
+		_ = srv.Start()
 	}()
 
 	// Wait until the server accepts connections.
@@ -90,7 +87,7 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 	})
 
 	return srv, baseURL
@@ -405,7 +402,7 @@ func TestZoneConfig_SetGetDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delResp.Body.Close()
+	_ = delResp.Body.Close()
 	if delResp.StatusCode != 200 {
 		t.Errorf("DELETE zone config: expected 200, got %d", delResp.StatusCode)
 	}
@@ -498,7 +495,7 @@ func TestWebSocket_UpgradeSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WebSocket dial failed: %v", err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 }
 
 func TestWebSocket_ReceivesInitialWindowState(t *testing.T) {
@@ -512,7 +509,7 @@ func TestWebSocket_ReceivesInitialWindowState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WebSocket dial: %v", err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	// The server sends a window_state message immediately on connect.
 	var msg map[string]any
@@ -539,7 +536,7 @@ func TestWebSocket_BroadcastsWindowStateChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	// Drain the initial window_state message.
 	var initial map[string]any
@@ -580,18 +577,18 @@ func TestWebSocket_MultipleClients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial conn1: %v", err)
 	}
-	defer conn1.CloseNow()
+	defer func() { _ = conn1.CloseNow() }()
 
 	conn2, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial conn2: %v", err)
 	}
-	defer conn2.CloseNow()
+	defer func() { _ = conn2.CloseNow() }()
 
 	// Drain initial messages from both.
 	var m map[string]any
-	wsjson.Read(ctx, conn1, &m)
-	wsjson.Read(ctx, conn2, &m)
+	_ = wsjson.Read(ctx, conn1, &m)
+	_ = wsjson.Read(ctx, conn2, &m)
 
 	// Trigger a broadcast.
 	postJSON(t, base+"/api/window/show", nil).Body.Close()
@@ -611,29 +608,6 @@ func TestWebSocket_MultipleClients(t *testing.T) {
 	if msg2["type"] != "window_state" {
 		t.Errorf("conn2 type: want 'window_state', got %v", msg2["type"])
 	}
-}
-
-// ── httptest.Server variant ───────────────────────────────────────────────────
-// These tests use httptest.NewServer for handler-level checks that don't need
-// the full server lifecycle (e.g. checking response body structure for error cases).
-
-func newHandlerServer(t *testing.T) (*api.Server, *httptest.Server) {
-	t.Helper()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	s, err := store.Open(t.TempDir()+"/test.db", logger)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	cfg, err := config.NewManager(s, logger)
-	if err != nil {
-		t.Fatalf("config.NewManager: %v", err)
-	}
-	mockDev := device.NewMockDevice()
-	mockDev.Connect(context.Background()) //nolint:errcheck
-	t.Cleanup(func() { mockDev.Disconnect() })
-	srv := api.NewServer(":0", cfg, mockDev, logger)
-	return srv, nil
 }
 
 func TestErrorResponse_HasExpectedShape(t *testing.T) {

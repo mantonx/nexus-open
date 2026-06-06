@@ -2,7 +2,6 @@ package api
 
 import (
 	"bufio"
-	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -71,23 +70,10 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// Hijack lets nhooyr.io/websocket take over the raw TCP connection.
+// Hijack lets the websocket library take over the raw TCP connection.
 // Without this, the wrapped responseWriter hides the Hijacker interface
 // and websocket.Accept returns 501 Not Implemented.
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return rw.ResponseWriter.(http.Hijacker).Hijack()
 }
 
-// logRequest logs an HTTP request with structured fields.
-func (s *Server) logRequest(r *http.Request, status int, duration time.Duration) {
-	s.logger.LogAttrs(
-		r.Context(),
-		slog.LevelInfo,
-		"http request",
-		slog.String("method", r.Method),
-		slog.String("path", r.URL.Path),
-		slog.Int("status", status),
-		slog.Duration("duration", duration),
-		slog.String("remote_addr", r.RemoteAddr),
-	)
-}

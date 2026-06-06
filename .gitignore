@@ -61,3 +61,4 @@ ui/lib/generated/api/
 ui/lib/**/*.freezed.dart
 ui/lib/**/*.g.dart
 dist/
+.pkg-staging/

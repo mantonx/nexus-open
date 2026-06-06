@@ -50,8 +50,8 @@ import (
 	"syscall"
 	"time"
 
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 const displayWidth = 640
@@ -193,7 +193,7 @@ func captureFrames(ctx context.Context, wsURL string, ch chan<- frameCapture) {
 	if err != nil {
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	for {
 		var msg map[string]any

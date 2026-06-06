@@ -148,7 +148,7 @@ func (s *Server) handleImageUpload(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, "Failed to read image file: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Save image
 	if err := assets.SaveImage(header.Filename, file); err != nil {

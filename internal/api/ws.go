@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"sync"
 
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // WSMessage is a typed envelope for all WebSocket messages sent to clients.
@@ -72,7 +72,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.logger.Debug("WebSocket upgrade failed", "error", err)
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	ch := s.hub.subscribe()
 	defer s.hub.unsubscribe(ch)

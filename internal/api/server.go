@@ -274,7 +274,7 @@ func (s *Server) handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-yaml")
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 // handleOpenAPISpecJSON serves the OpenAPI 3.0 JSON spec
@@ -317,5 +317,5 @@ func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
 </body>
 </html>`
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	_, _ = w.Write([]byte(html))
 }

@@ -15,10 +15,9 @@ import (
 
 // ── fakes ─────────────────────────────────────────────────────────────────────
 
-// fakePlugin counts Sample calls and returns an error after crashAfter calls.
+// fakePlugin counts Sample calls.
 type fakePlugin struct {
-	calls      atomic.Int32
-	crashAfter int32 // 0 = never crash
+	calls atomic.Int32
 }
 
 func (f *fakePlugin) Describe() (plugin.Descriptor, error) {
@@ -50,33 +49,6 @@ func (f *fakePluginHost) Evict(_ string) { f.evicted.Add(1) }
 
 // compile-time check: fakePluginHost satisfies the interface
 var _ pluginhost.PluginHost = (*fakePluginHost)(nil)
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-func newTestSampler(t *testing.T, cfg *Config, host pluginhost.PluginHost) *Sampler {
-	t.Helper()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	manager := &Manager{
-		logger:     logger,
-		config:     cfg,
-		zones:      make(map[string]*Zone),
-		renderers:  make(map[string]*Renderer),
-		payloads:   make(map[string]*plugin.Payload),
-		transition: NewTransitionState(),
-		pageCache:  make(map[int]*image.RGBA),
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-
-	s := NewSampler(ctx, logger, manager, nil, "")
-	s.pluginHost = host
-	return s
-}
 
 func execZoneConfig(id string) ZoneConfig {
 	return ZoneConfig{
