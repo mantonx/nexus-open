@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/settings_state.dart';
-import '../../models/api_models.dart';
 import '../../services/nexus_api_service.dart';
 import '../../services/ws_service.dart';
 import '../../theme/app_tokens.dart';
@@ -57,10 +56,12 @@ class _SettingsPageState extends State<SettingsPage> {
       final api = NexusApiService();
       final info = await api.getDeviceInfo();
       api.dispose();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _deviceModel = info.model;
         _deviceFirmware = info.firmware;
       });
+      }
     } catch (_) {}
   }
 
@@ -145,7 +146,8 @@ class _SettingsPageState extends State<SettingsPage> {
       canPop: !_hasUnsavedChanges,
       onPopInvokedWithResult: (didPop, _) async {
         if (!didPop && _hasUnsavedChanges) {
-          if (await _confirmDiscard() && mounted) Navigator.of(context).pop();
+          final nav = Navigator.of(context);
+          if (await _confirmDiscard() && mounted) nav.pop();
         }
       },
       child: Scaffold(
@@ -296,7 +298,7 @@ class _NexusRail extends StatelessWidget {
                     letterSpacing: 3,
                     shadows: [
                       Shadow(
-                        color: AppColors.hardwareAccent.withOpacity(0.7),
+                        color: AppColors.hardwareAccent.withValues(alpha: 0.7),
                         blurRadius: 10,
                       ),
                     ],
@@ -304,7 +306,7 @@ class _NexusRail extends StatelessWidget {
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 // ── 640×48 live display strip ─────────────────────────
-                _DisplayStrip(),
+                const _DisplayStrip(),
                 const SizedBox(height: AppSpacing.xs),
                 // Connection status
                 Semantics(
@@ -345,7 +347,7 @@ class _NexusRail extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? AppColors.accent.withOpacity(0.08)
+                          ? AppColors.accent.withValues(alpha: 0.08)
                           : Colors.transparent,
                       borderRadius: AppRadius.smBr,
                       border: Border(
@@ -364,7 +366,7 @@ class _NexusRail extends StatelessWidget {
                           size: AppIconSize.md,
                           color: isSelected
                               ? AppColors.accent
-                              : Colors.white.withOpacity(0.45),
+                              : Colors.white.withValues(alpha: 0.45),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -373,7 +375,7 @@ class _NexusRail extends StatelessWidget {
                             fontSize: 9,
                             color: isSelected
                                 ? AppColors.accent
-                                : Colors.white.withOpacity(0.45),
+                                : Colors.white.withValues(alpha: 0.45),
                           ),
                         ),
                       ],
@@ -408,7 +410,7 @@ class _NexusRail extends StatelessWidget {
                             ? Icons.light_mode_outlined
                             : Icons.dark_mode_outlined,
                         size: AppIconSize.md,
-                        color: Colors.white.withOpacity(0.55),
+                        color: Colors.white.withValues(alpha: 0.55),
                       ),
                       onPressed: onToggleTheme,
                     ),
@@ -423,7 +425,7 @@ class _NexusRail extends StatelessWidget {
                     message: canSave ? 'Save settings' : 'Not connected',
                     child: IconButton(
                       icon: isLoading
-                          ? SizedBox(
+                          ? const SizedBox(
                               width: AppIconSize.md,
                               height: AppIconSize.md,
                               child: CircularProgressIndicator(
@@ -436,7 +438,7 @@ class _NexusRail extends StatelessWidget {
                               size: AppIconSize.md,
                               color: canSave
                                   ? AppColors.accent
-                                  : Colors.white.withOpacity(0.25),
+                                  : Colors.white.withValues(alpha: 0.25),
                             ),
                       onPressed: canSave ? onSave : null,
                     ),
@@ -457,7 +459,7 @@ class _DotGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.045)
+      ..color = Colors.white.withValues(alpha: 0.045)
       ..strokeWidth = 1;
     const step = 24.0;
     for (double x = step; x < size.width; x += step) {
@@ -516,7 +518,7 @@ class _DisplayStripState extends State<_DisplayStrip> {
         borderRadius: AppRadius.xsBr,
         border: Border.all(
           color: _lastFrame != null
-              ? AppColors.hardwareAccent.withOpacity(0.5)
+              ? AppColors.hardwareAccent.withValues(alpha: 0.5)
               : cs.outline,
           width: 1,
         ),

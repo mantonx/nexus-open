@@ -74,7 +74,7 @@ class _PreviewTabState extends State<PreviewTab> {
                   settings.setTextColor,
                 ),
               ),
-              Divider(height: AppSpacing.sm, color: cs.outline.withOpacity(0.4)),
+              Divider(height: AppSpacing.sm, color: cs.outline.withValues(alpha: 0.4)),
               _ColorRow(
                 label: 'Background colour',
                 color: settings.backgroundColorValue,
@@ -108,7 +108,7 @@ class _PreviewTabState extends State<PreviewTab> {
           titleSpacing: AppSpacing.sm,
           trailing: connected
               ? null
-              : NexusStatusBadge(
+              : const NexusStatusBadge(
                   status: NexusStatus.warning, label: 'Device required'),
           child: Row(
             children: [
@@ -279,7 +279,6 @@ class _DevicePreview extends StatelessWidget {
   final Color backgroundColor;
 
   // All housing colours are fixed — never follow app theme
-  static const _housing        = Color(0xFF0E0E10); // matte black plastic
   static const _housingHighlight = Color(0xFF242428); // top edge catch-light
   static const _glossySurround = Color(0xFF0A0A0C); // glossy panel around display
   static const _mountingSlot   = Color(0xFF1A1A1E); // side bracket slots
@@ -313,12 +312,12 @@ class _DevicePreview extends StatelessWidget {
                   border: Border.all(color: _housingHighlight, width: 0.5),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.75),
+                      color: Colors.black.withValues(alpha: 0.75),
                       blurRadius: 20,
                       offset: const Offset(0, 8),
                     ),
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.4),
+                      color: Colors.black.withValues(alpha: 0.4),
                       blurRadius: 4,
                       offset: const Offset(0, 2),
                     ),
@@ -334,7 +333,7 @@ class _DevicePreview extends StatelessWidget {
                   child: Row(
                     children: [
                       // Left mounting slot
-                      _MountingEnd(slot: _mountingSlot),
+                      const _MountingEnd(slot: _mountingSlot),
 
                       // Glossy surround + recessed display
                       Expanded(
@@ -346,7 +345,7 @@ class _DevicePreview extends StatelessWidget {
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                               colors: [
-                                Colors.white.withOpacity(0.05),
+                                Colors.white.withValues(alpha: 0.05),
                                 Colors.transparent,
                               ],
                             ),
@@ -363,7 +362,7 @@ class _DevicePreview extends StatelessWidget {
                               borderRadius: BorderRadius.circular(1),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.9),
+                                  color: Colors.black.withValues(alpha: 0.9),
                                   blurRadius: 6,
                                   spreadRadius: 1,
                                 ),
@@ -403,7 +402,7 @@ class _DevicePreview extends StatelessWidget {
                                           begin: Alignment.topLeft,
                                           end: Alignment.centerRight,
                                           colors: [
-                                            Colors.white.withOpacity(0.06),
+                                            Colors.white.withValues(alpha: 0.06),
                                             Colors.transparent,
                                           ],
                                           stops: const [0.0, 0.4],
@@ -419,7 +418,7 @@ class _DevicePreview extends StatelessWidget {
                       ),
 
                       // Right mounting slot
-                      _MountingEnd(slot: _mountingSlot),
+                      const _MountingEnd(slot: _mountingSlot),
                     ],
                   ),
                 ),
@@ -461,7 +460,7 @@ class _MountingEnd extends StatelessWidget {
               borderRadius: BorderRadius.circular(2),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.6),
+                  color: Colors.black.withValues(alpha: 0.6),
                   blurRadius: 2,
                   offset: const Offset(1, 1),
                 ),
@@ -478,7 +477,7 @@ class _MountingEnd extends StatelessWidget {
               borderRadius: BorderRadius.circular(2),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.6),
+                  color: Colors.black.withValues(alpha: 0.6),
                   blurRadius: 2,
                   offset: const Offset(1, 1),
                 ),
@@ -496,7 +495,7 @@ class _ScanlinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.black.withOpacity(0.07)
+      ..color = Colors.black.withValues(alpha: 0.07)
       ..strokeWidth = 0.5;
     for (double y = 0; y < size.height; y += 2) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
@@ -529,7 +528,7 @@ class _ColorRow extends StatelessWidget {
     final luminance = color.computeLuminance();
     final swatchText = luminance > 0.5 ? Colors.black87 : Colors.white70;
     final hexStr =
-        '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+        '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
@@ -607,7 +606,6 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
           onColorChanged: (c) => setState(() => _current = c),
           enableAlpha: false,
           displayThumbColor: true,
-          showLabel: true,
           paletteType: PaletteType.hsvWithHue,
         ),
       ),

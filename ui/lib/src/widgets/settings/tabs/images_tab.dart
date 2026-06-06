@@ -208,8 +208,8 @@ class _ImageTile extends StatelessWidget {
             right: 0,
             child: Container(
               height: 32,
-              decoration: BoxDecoration(
-                borderRadius: const BorderRadius.only(
+              decoration: const BoxDecoration(
+                borderRadius: BorderRadius.only(
                   bottomLeft: Radius.circular(AppRadius.lg),
                   bottomRight: Radius.circular(AppRadius.lg),
                 ),
@@ -296,7 +296,7 @@ class _EmptyState extends StatelessWidget {
                 height: 10,
                 decoration: BoxDecoration(
                   border: Border.all(
-                    color: AppColors.accent.withOpacity(0.4),
+                    color: AppColors.accent.withValues(alpha: 0.4),
                     width: 1,
                   ),
                   borderRadius: BorderRadius.circular(2),
@@ -305,7 +305,7 @@ class _EmptyState extends StatelessWidget {
                   child: Icon(
                     Icons.add,
                     size: 8,
-                    color: AppColors.accent.withOpacity(0.5),
+                    color: AppColors.accent.withValues(alpha: 0.5),
                   ),
                 ),
               ),

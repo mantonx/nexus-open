@@ -55,7 +55,7 @@ class NexusSection extends StatelessWidget {
                 height: 12,
                 margin: const EdgeInsets.only(right: AppSpacing.sm),
                 decoration: BoxDecoration(
-                  color: cs.onSurfaceVariant.withOpacity(0.35),
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.35),
                   borderRadius: AppRadius.pillBr,
                 ),
               ),

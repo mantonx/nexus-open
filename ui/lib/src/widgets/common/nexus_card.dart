@@ -70,12 +70,12 @@ class NexusCard extends StatelessWidget {
         borderRadius: AppRadius.lgBr,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.35 : 0.10),
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.10),
             blurRadius: isDark ? 8 : 6,
             offset: const Offset(0, 2),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.12 : 0.06),
+            color: Colors.black.withValues(alpha: isDark ? 0.12 : 0.06),
             blurRadius: isDark ? 24 : 16,
             offset: const Offset(0, 6),
           ),
@@ -89,7 +89,7 @@ class NexusCard extends StatelessWidget {
             borderRadius: AppRadius.lgBr,
             border: Border.all(
               color: accentBorder
-                  ? effectiveAccent.withOpacity(0.4)
+                  ? effectiveAccent.withValues(alpha: 0.4)
                   : cs.outline,
               width: accentBorder ? 1.5 : 1,
             ),
@@ -103,7 +103,7 @@ class NexusCard extends StatelessWidget {
                   top: 0, left: 0, right: 0,
                   child: Container(
                     height: 1,
-                    color: Colors.white.withOpacity(0.06),
+                    color: Colors.white.withValues(alpha: 0.06),
                   ),
                 ),
             ],

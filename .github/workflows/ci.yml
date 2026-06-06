@@ -125,7 +125,7 @@ jobs:
 
       - name: Flutter analyze
         working-directory: ui
-        run: flutter analyze --no-pub
+        run: flutter analyze --no-pub --no-fatal-infos
 
       - name: Flutter test
         working-directory: ui

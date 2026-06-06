@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,10 +7,8 @@ import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 
 import 'package:open_next/src/models/settings_state.dart';
-import 'package:open_next/src/models/api_models.dart';
 import 'package:open_next/src/services/nexus_api_service.dart';
 import 'package:open_next/src/services/ws_service.dart';
-import 'package:open_next/src/widgets/settings/settings_page.dart';
 import 'package:open_next/src/widgets/settings/tabs/preview_tab.dart';
 import 'package:open_next/src/widgets/settings/tabs/plugins_tab.dart';
 // AppTheme is intentionally not imported here — google_fonts 5.1.0 has a
@@ -242,24 +239,3 @@ void main() {
   });
 }
 
-// ── Test fakes ───────────────────────────────────────────────────────────────
-
-class _LiveFakeWsService extends WsService {
-  _LiveFakeWsService() : super.fake();
-
-  void injectFrame(Uint8List bytes) => injectEvent(WsFrameEvent(bytes));
-  // markConnected() is inherited from WsService
-}
-
-/// Minimal 1x1 transparent PNG bytes for testing Image.memory rendering.
-Uint8List _minimalPng() {
-  // 67-byte 1x1 RGBA PNG
-  return Uint8List.fromList([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
-    0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00, 0x01, 0x00, 0x00,
-    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
-    0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
-  ]);
-}

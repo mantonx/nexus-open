@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/place.dart';
 
@@ -24,7 +25,7 @@ class LocationService {
       }
       return [];
     } catch (e) {
-      print('Error searching places: $e');
+      debugPrint('Error searching places: $e');
       return [];
     }
   }

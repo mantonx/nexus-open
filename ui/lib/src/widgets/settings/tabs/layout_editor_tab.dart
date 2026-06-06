@@ -266,7 +266,7 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_error!, style: TextStyle(color: AppColors.error)),
+            Text(_error!, style: const TextStyle(color: AppColors.error)),
             const SizedBox(height: AppSpacing.md),
             FilledButton(onPressed: _loadLayout, child: const Text('Retry')),
           ],
@@ -429,20 +429,20 @@ class _LiveFrame extends StatelessWidget {
         borderRadius: const BorderRadius.all(Radius.circular(4)),
         border: Border.all(color: _housingHighlight, width: 0.5),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.6), blurRadius: 16, offset: const Offset(0, 6)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.6), blurRadius: 16, offset: const Offset(0, 6)),
         ],
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
         child: Row(children: [
-          _MountingEnd(slot: _mountingSlot),
+          const _MountingEnd(slot: _mountingSlot),
           Expanded(
             child: Container(
               decoration: BoxDecoration(
                 color: _glossySurround,
                 gradient: LinearGradient(
                   begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  colors: [Colors.white.withOpacity(0.04), Colors.transparent],
+                  colors: [Colors.white.withValues(alpha: 0.04), Colors.transparent],
                 ),
               ),
               padding: const EdgeInsets.all(6),
@@ -464,7 +464,7 @@ class _LiveFrame extends StatelessWidget {
                               connected ? 'Waiting for frame…' : 'Not connected',
                               style: TextStyle(
                                 fontSize: 7,
-                                color: connected ? Colors.white24 : Colors.red.withOpacity(0.4),
+                                color: connected ? Colors.white24 : Colors.red.withValues(alpha: 0.4),
                               ),
                             )),
                   ),
@@ -472,7 +472,7 @@ class _LiveFrame extends StatelessWidget {
               ),
             ),
           ),
-          _MountingEnd(slot: _mountingSlot),
+          const _MountingEnd(slot: _mountingSlot),
         ]),
       ),
     );
@@ -516,7 +516,7 @@ class _PageTabBar extends StatelessWidget {
                     horizontal: AppSpacing.md, vertical: AppSpacing.xs),
                 decoration: BoxDecoration(
                   color: i == selectedIdx
-                      ? AppColors.accent.withOpacity(0.15)
+                      ? AppColors.accent.withValues(alpha: 0.15)
                       : Colors.transparent,
                   borderRadius: AppRadius.smBr,
                   border: Border.all(
@@ -542,7 +542,7 @@ class _PageTabBar extends StatelessWidget {
                     const SizedBox(width: AppSpacing.xs),
                     GestureDetector(
                       onTap: () => onDelete(pages[i]),
-                      child: Icon(Icons.close,
+                      child: const Icon(Icons.close,
                           size: AppIconSize.xs, color: AppColors.textMuted),
                     ),
                   ],
@@ -594,7 +594,7 @@ class _ZoneWidthBar extends StatelessWidget {
               Expanded(
                 flex: zones[i].widthPx,
                 child: Container(
-                  color: _palette[i % _palette.length].withOpacity(0.2),
+                  color: _palette[i % _palette.length].withValues(alpha: 0.2),
                   alignment: Alignment.center,
                   child: Text(
                     '${zones[i].widthPx}px',
@@ -605,7 +605,7 @@ class _ZoneWidthBar extends StatelessWidget {
                 ),
               ),
               if (i < zones.length - 1)
-                Container(width: 1, color: cs.outline.withOpacity(0.4)),
+                Container(width: 1, color: cs.outline.withValues(alpha: 0.4)),
             ],
           ],
         ),
@@ -665,7 +665,6 @@ class _ZoneCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
 
     // Max width for the slider: zone can grow up to (current + next - minWidth)
     final maxWidth = nextZone != null
@@ -681,8 +680,8 @@ class _ZoneCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Drag handle
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs, right: AppSpacing.sm),
+            const Padding(
+              padding: EdgeInsets.only(top: AppSpacing.xs, right: AppSpacing.sm),
               child: ReorderableDragStartListener(
                 index: 0, // index is injected by ReorderableListView
                 child: Icon(Icons.drag_handle,
@@ -842,7 +841,7 @@ class _MountingEnd extends StatelessWidget {
         width: 3, height: 12,
         decoration: BoxDecoration(
           color: color, borderRadius: BorderRadius.circular(2),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.5),
               blurRadius: 2, offset: const Offset(1, 1))],
         ),
       );

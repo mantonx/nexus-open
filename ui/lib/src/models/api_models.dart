@@ -1,6 +1,8 @@
 // Models generated from api/openapi.yaml via freezed + json_serializable.
 // After editing this file run: dart run build_runner build --delete-conflicting-outputs
 
+// ignore_for_file: invalid_annotation_target
+
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'api_models.freezed.dart';

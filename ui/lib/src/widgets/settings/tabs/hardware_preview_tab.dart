@@ -129,7 +129,7 @@ class _HardwarePreviewTabState extends State<HardwarePreviewTab> {
                           style: const TextStyle(fontFamily: 'monospace')),
                     ),
                     Text('${z.width}px',
-                        style: TextStyle(color: AppColors.textMuted)),
+                        style: const TextStyle(color: AppColors.textMuted)),
                   ],
                 ),
               ),
@@ -267,7 +267,7 @@ class _HardwareFrame extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.5),
+                        color: Colors.black.withValues(alpha: 0.5),
                         blurRadius: 24,
                         offset: const Offset(0, 8),
                       ),
@@ -290,7 +290,7 @@ class _HardwareFrame extends StatelessWidget {
               border: Border.all(color: _housingHighlight, width: 0.5),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.75),
+                  color: Colors.black.withValues(alpha: 0.75),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -301,7 +301,7 @@ class _HardwareFrame extends StatelessWidget {
                   const EdgeInsets.symmetric(horizontal: 0, vertical: 10),
               child: Row(
                 children: [
-                  _MountingEnd(slot: _mountingSlot),
+                  const _MountingEnd(slot: _mountingSlot),
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
@@ -310,7 +310,7 @@ class _HardwareFrame extends StatelessWidget {
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                           colors: [
-                            Colors.white.withOpacity(0.05),
+                            Colors.white.withValues(alpha: 0.05),
                             Colors.transparent,
                           ],
                         ),
@@ -324,7 +324,7 @@ class _HardwareFrame extends StatelessWidget {
                           borderRadius: BorderRadius.circular(1),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.9),
+                              color: Colors.black.withValues(alpha: 0.9),
                               blurRadius: 6,
                               spreadRadius: 1,
                             ),
@@ -356,7 +356,7 @@ class _HardwareFrame extends StatelessWidget {
                                           style: TextStyle(
                                             color: connected
                                                 ? Colors.white38
-                                                : Colors.red.withOpacity(0.5),
+                                                : Colors.red.withValues(alpha: 0.5),
                                             fontSize: 8,
                                             fontFamily: 'monospace',
                                           ),
@@ -375,7 +375,7 @@ class _HardwareFrame extends StatelessWidget {
                                         begin: Alignment.topLeft,
                                         end: Alignment.centerRight,
                                         colors: [
-                                          Colors.white.withOpacity(0.06),
+                                          Colors.white.withValues(alpha: 0.06),
                                           Colors.transparent,
                                         ],
                                         stops: const [0.0, 0.4],
@@ -390,7 +390,7 @@ class _HardwareFrame extends StatelessWidget {
                       ),
                     ),
                   ),
-                  _MountingEnd(slot: _mountingSlot),
+                  const _MountingEnd(slot: _mountingSlot),
                 ],
               ),
             ),
@@ -427,7 +427,6 @@ class _PageDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -443,7 +442,7 @@ class _PageDots extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: i == currentPage
                       ? AppColors.accent
-                      : AppColors.accent.withOpacity(0.3),
+                      : AppColors.accent.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
@@ -517,7 +516,7 @@ class _ZoneBreakdown extends StatelessWidget {
                   Expanded(
                     flex: page.zones[i].width,
                     child: Container(
-                      color: _zoneColor(i).withOpacity(0.25),
+                      color: _zoneColor(i).withValues(alpha: 0.25),
                       alignment: Alignment.center,
                       child: Text(
                         page.zones[i].id.split('.').last,
@@ -531,7 +530,7 @@ class _ZoneBreakdown extends StatelessWidget {
                     ),
                   ),
                   if (i < page.zones.length - 1)
-                    Container(width: 1, color: cs.outline.withOpacity(0.4)),
+                    Container(width: 1, color: cs.outline.withValues(alpha: 0.4)),
                 ],
               ],
             ),
@@ -613,7 +612,7 @@ class _MountingEnd extends StatelessWidget {
           borderRadius: BorderRadius.circular(2),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.6),
+              color: Colors.black.withValues(alpha: 0.6),
               blurRadius: 2,
               offset: const Offset(1, 1),
             ),
@@ -628,7 +627,7 @@ class _ScanlinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.black.withOpacity(0.07)
+      ..color = Colors.black.withValues(alpha: 0.07)
       ..strokeWidth = 0.5;
     for (double y = 0; y < size.height; y += 2) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);

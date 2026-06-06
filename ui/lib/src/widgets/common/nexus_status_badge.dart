@@ -19,7 +19,7 @@ class NexusStatusBadge extends StatelessWidget {
     super.key,
     required this.status,
     this.label,
-    this.size = _BadgeSize.small,
+    this.size = BadgeSize.small,
   });
 
   /// Icon-only dot variant — no label, minimal footprint.
@@ -27,11 +27,11 @@ class NexusStatusBadge extends StatelessWidget {
     super.key,
     required this.status,
   })  : label = null,
-        size = _BadgeSize.dot;
+        size = BadgeSize.dot;
 
   final NexusStatus status;
   final String? label;
-  final _BadgeSize size;
+  final BadgeSize size;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +39,7 @@ class NexusStatusBadge extends StatelessWidget {
     final theme = Theme.of(context);
     final color = _color(cs);
 
-    if (size == _BadgeSize.dot) {
+    if (size == BadgeSize.dot) {
       return _dot(color);
     }
 
@@ -49,9 +49,9 @@ class NexusStatusBadge extends StatelessWidget {
         vertical: AppSpacing.xs / 2,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: AppRadius.pillBr,
-        border: Border.all(color: color.withOpacity(0.35)),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -87,7 +87,7 @@ class NexusStatusBadge extends StatelessWidget {
         color: color,
         shape: BoxShape.circle,
         boxShadow: status == NexusStatus.ok
-            ? [BoxShadow(color: color.withOpacity(0.6), blurRadius: 6)]
+            ? [BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 6)]
             : null,
       ),
     );
@@ -127,4 +127,4 @@ extension NexusStatusParsing on String {
   }
 }
 
-enum _BadgeSize { small, dot }
+enum BadgeSize { small, dot }

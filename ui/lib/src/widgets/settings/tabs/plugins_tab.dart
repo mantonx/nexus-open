@@ -120,10 +120,9 @@ class _PluginsTabState extends State<PluginsTab> {
   @override
   Widget build(BuildContext context) {
     final ws = context.watch<WsService>();
-    final theme = Theme.of(context);
 
     if (_loading) {
-      return Center(
+      return const Center(
         child: CircularProgressIndicator(color: AppColors.accent),
       );
     }
@@ -135,7 +134,7 @@ class _PluginsTabState extends State<PluginsTab> {
           title: 'Plugins',
           description: 'Changes apply live — no save needed.',
           trailing: !ws.isConnected
-              ? NexusStatusBadge(status: NexusStatus.warning, label: 'Not connected')
+              ? const NexusStatusBadge(status: NexusStatus.warning, label: 'Not connected')
               : null,
         ),
         const SizedBox(height: AppSpacing.md),
@@ -309,7 +308,6 @@ class _PluginCardState extends State<_PluginCard> {
   }
 
   Widget _buildControl(BuildContext context, _ConfigKey key) {
-    final theme = Theme.of(context);
     final current = widget.config[key.id]?.toString() ?? '';
 
     if (key.type == _ControlType.dropdown && key.options != null) {

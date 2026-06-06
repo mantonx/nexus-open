@@ -204,7 +204,7 @@ class SettingsState extends ChangeNotifier {
   /// Set background color (accepts both Color and String)
   void setBackgroundColor(dynamic color) {
     if (color is Color) {
-      final hexColor = '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+      final hexColor = '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
       updateConfig(backgroundColor: hexColor);
     } else if (color is String) {
       updateConfig(backgroundColor: color);
@@ -214,7 +214,7 @@ class SettingsState extends ChangeNotifier {
   /// Set text color (accepts both Color and String)
   void setTextColor(dynamic color) {
     if (color is Color) {
-      final hexColor = '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
+      final hexColor = '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
       updateConfig(textColor: hexColor);
     } else if (color is String) {
       updateConfig(textColor: color);

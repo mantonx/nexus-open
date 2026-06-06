@@ -19,7 +19,7 @@ class AppTheme {
   // ── Dark theme ─────────────────────────────────────────────────────────────
 
   static ThemeData get darkTheme {
-    final cs = const ColorScheme.dark(
+    const cs = ColorScheme.dark(
       // Surfaces — depth: rail(0A) → bg(13) → surface(1C) → elevated(25)
       surface:                 AppColors.darkBg,
       surfaceContainerLowest:  AppColors.darkRail,
@@ -58,7 +58,7 @@ class AppTheme {
   // ── Light theme ────────────────────────────────────────────────────────────
 
   static ThemeData get lightTheme {
-    final cs = const ColorScheme.light(
+    const cs = ColorScheme.light(
       surface:                 AppColors.lightBg,
       surfaceContainerLowest:  AppColors.lightRail,
       surfaceContainer:        AppColors.lightSurface,
@@ -133,7 +133,7 @@ class AppTheme {
           size:  AppIconSize.md,
         ),
         unselectedIconTheme: IconThemeData(
-          color: Colors.white.withOpacity(0.4),
+          color: Colors.white.withValues(alpha: 0.4),
           size:  AppIconSize.md,
         ),
         selectedLabelTextStyle: textTheme.labelSmall?.copyWith(
@@ -141,9 +141,9 @@ class AppTheme {
           fontWeight: FontWeight.w600,
         ),
         unselectedLabelTextStyle: textTheme.labelSmall?.copyWith(
-          color: Colors.white.withOpacity(0.4),
+          color: Colors.white.withValues(alpha: 0.4),
         ),
-        indicatorColor: AppColors.accent.withOpacity(0.18),
+        indicatorColor: AppColors.accent.withValues(alpha: 0.18),
         indicatorShape: RoundedRectangleBorder(
           borderRadius: AppRadius.smBr,
         ),
@@ -224,16 +224,16 @@ class AppTheme {
         style: IconButton.styleFrom(
           foregroundColor: isDark
               ? AppColors.textSecondary
-              : AppColors.lightNavy.withOpacity(0.7),
+              : AppColors.lightNavy.withValues(alpha: 0.7),
         ),
       ),
 
       // ── Slider ────────────────────────────────────────────────────────────
       sliderTheme: SliderThemeData(
         activeTrackColor:   AppColors.accent,
-        inactiveTrackColor: AppColors.accent.withOpacity(0.2),
+        inactiveTrackColor: AppColors.accent.withValues(alpha: 0.2),
         thumbColor:         AppColors.accent,
-        overlayColor:       AppColors.accent.withOpacity(0.16),
+        overlayColor:       AppColors.accent.withValues(alpha: 0.16),
         valueIndicatorColor: AppColors.accent,
         valueIndicatorTextStyle: textTheme.labelSmall?.copyWith(
           color: Colors.white,
@@ -247,7 +247,7 @@ class AppTheme {
         iconColor:        AppColors.accent,
         collapsedIconColor: isDark
             ? AppColors.textSecondary
-            : AppColors.lightNavy.withOpacity(0.5),
+            : AppColors.lightNavy.withValues(alpha: 0.5),
         tilePadding:      AppSpacing.paddingHMd,
         childrenPadding:  EdgeInsets.zero,
       ),
@@ -286,7 +286,7 @@ class AppTheme {
       // ── Tab bar ───────────────────────────────────────────────────────────
       tabBarTheme: TabBarThemeData(
         labelColor:           AppColors.accent,
-        unselectedLabelColor: Colors.white.withOpacity(0.5),
+        unselectedLabelColor: Colors.white.withValues(alpha: 0.5),
         indicatorColor:       AppColors.accent,
         labelStyle:           textTheme.labelLarge,
         unselectedLabelStyle: textTheme.labelLarge,
@@ -295,8 +295,8 @@ class AppTheme {
       // ── Linear progress ───────────────────────────────────────────────────
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color:              AppColors.accent,
-        linearTrackColor:   AppColors.accent.withOpacity(0.15),
-        circularTrackColor: AppColors.accent.withOpacity(0.15),
+        linearTrackColor:   AppColors.accent.withValues(alpha: 0.15),
+        circularTrackColor: AppColors.accent.withValues(alpha: 0.15),
       ),
 
       // ── Checkbox / Radio / Switch ─────────────────────────────────────────
@@ -310,7 +310,7 @@ class AppTheme {
             states.contains(WidgetState.selected) ? AppColors.accent : null),
         trackColor: WidgetStateProperty.resolveWith((states) =>
             states.contains(WidgetState.selected)
-                ? AppColors.accent.withOpacity(0.4)
+                ? AppColors.accent.withValues(alpha: 0.4)
                 : null),
       ),
 

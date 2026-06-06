@@ -46,7 +46,7 @@ class _DisplayTabState extends State<DisplayTab> {
           description: 'Physical display brightness (0–100).',
           trailing: connected
               ? null
-              : NexusStatusBadge(
+              : const NexusStatusBadge(
                   status: NexusStatus.warning, label: 'Device required'),
           child: Row(
             children: [

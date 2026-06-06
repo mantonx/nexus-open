@@ -140,7 +140,7 @@ class _LocationTabState extends State<LocationTab> {
                             color: AppColors.accent, width: 2),
                       ),
                       suffixIcon: _isSearching && _cityController.text.isNotEmpty
-                          ? Padding(
+                          ? const Padding(
                               padding: AppSpacing.paddingXs,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: AppColors.accent),

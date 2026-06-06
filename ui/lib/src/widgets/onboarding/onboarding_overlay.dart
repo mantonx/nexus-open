@@ -138,10 +138,10 @@ class _StepShell extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: AppColors.accent.withOpacity(0.10),
+              color: AppColors.accent.withValues(alpha: 0.10),
               borderRadius: AppRadius.smBr,
               border: Border.all(
-                color: AppColors.accent.withOpacity(0.25),
+                color: AppColors.accent.withValues(alpha: 0.25),
                 width: 1,
               ),
             ),
@@ -253,13 +253,13 @@ class _ConnectStepState extends State<_ConnectStep> {
               color: (connected
                       ? cs.success
                       : AppColors.accent)
-                  .withOpacity(0.10),
+                  .withValues(alpha: 0.10),
               borderRadius: AppRadius.smBr,
               border: Border.all(
                 color: (connected
                         ? cs.success
                         : AppColors.accent)
-                    .withOpacity(0.25),
+                    .withValues(alpha: 0.25),
               ),
             ),
             child: Icon(
@@ -287,36 +287,36 @@ class _ConnectStepState extends State<_ConnectStep> {
           if (!connected) ...[
             if (!udev) ...[
               // First-time setup — udev not installed yet
-              _Instruction(
+              const _Instruction(
                 step: '1',
                 text: 'Run this once in a terminal:',
               ),
-              _CodeBlock('sudo nexus-open --setup-udev'),
+              const _CodeBlock('sudo nexus-open --setup-udev'),
               const SizedBox(height: AppSpacing.sm),
-              _Instruction(
+              const _Instruction(
                 step: '2',
                 text: 'Unplug and replug your iCUE Nexus.',
               ),
               const SizedBox(height: AppSpacing.sm),
-              _Instruction(
+              const _Instruction(
                 step: '3',
                 text: 'This screen will update automatically.',
               ),
             ] else ...[
               // udev is installed — just needs plugging in
-              _Instruction(
+              const _Instruction(
                 step: '1',
                 text: 'Plug your iCUE Nexus into a USB port.',
               ),
               const SizedBox(height: AppSpacing.sm),
-              _Instruction(
+              const _Instruction(
                 step: '2',
                 text: 'This screen will update automatically.',
               ),
             ],
             const SizedBox(height: AppSpacing.md),
             Row(children: [
-              SizedBox(
+              const SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(
@@ -376,7 +376,7 @@ class _Instruction extends StatelessWidget {
           height: 20,
           margin: const EdgeInsets.only(top: 2),
           decoration: BoxDecoration(
-            color: AppColors.accent.withOpacity(0.15),
+            color: AppColors.accent.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
           child: Center(
@@ -414,7 +414,7 @@ class _CodeBlock extends StatelessWidget {
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.md, vertical: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.3),
+        color: Colors.black.withValues(alpha: 0.3),
         borderRadius: AppRadius.smBr,
         border: Border.all(color: AppColors.darkBorder),
       ),
@@ -449,10 +449,10 @@ class _LocationStep extends StatelessWidget {
                 width: 56,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: AppColors.accent.withOpacity(0.10),
+                  color: AppColors.accent.withValues(alpha: 0.10),
                   borderRadius: AppRadius.smBr,
                   border: Border.all(
-                    color: AppColors.accent.withOpacity(0.25),
+                    color: AppColors.accent.withValues(alpha: 0.25),
                     width: 1,
                   ),
                 ),
@@ -526,7 +526,7 @@ class _OnboardingGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.035)
+      ..color = Colors.white.withValues(alpha: 0.035)
       ..strokeWidth = 1;
     const step = 24.0;
     for (double x = step; x < size.width; x += step) {
