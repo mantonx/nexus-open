@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/mantonx/nexus-next/internal/plugins/builtin"
-	pluginhost "github.com/mantonx/nexus-next/internal/plugin/host"
+	pluginhost "github.com/mantonx/nexus-next/internal/plugins/host"
 	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 

@@ -636,9 +636,9 @@ func (r *Renderer) truncate(text string, maxWidth float64, dc *gg.Context) strin
 func (r *Renderer) severityColor(sev plugin.Severity) color.RGBA {
 	switch sev {
 	case plugin.SeverityWarn:
-		return color.RGBA{R: 255, G: 176, B: 32, A: 255}
+		return SeverityColorWarn
 	case plugin.SeverityCrit:
-		return color.RGBA{R: 255, G: 68, B: 68, A: 255}
+		return SeverityColorCrit
 	default:
 		return r.theme.GetFgColor()
 	}
@@ -682,52 +682,3 @@ func clampFloat(v float32) float32 {
 	return v
 }
 
-// ── Legacy stubs kept for compilation ─────────────────────────────────────────
-// These are called from manager_page.go / manager_render.go. They delegate to
-// the new Render() method or are no-ops.
-
-// ContentModel, Measurements, LayoutBox, CalculatedLayout — kept so that any
-// callers in tests still compile. The new renderer does not use them.
-type ContentModel struct {
-	Icon             *IconContent
-	PrimaryLines     []string
-	Secondary        string
-	GraphData        []float32
-	GraphType        plugin.GraphType
-	LineSpacing      int
-	LabelPosition    plugin.LabelPosition
-	LabelOffsetX     int
-	LabelOffsetY     int
-	NormalizeGraph   bool
-	GraphBgOpacity   int
-	GraphLineOpacity int
-}
-
-type IconContent struct{ Glyph string }
-
-type Measurements struct {
-	IconWidth, IconHeight             int
-	PrimaryWidths                     []int
-	PrimaryHeight, LineHeight         int
-	LineSpacing                       int
-	SecondaryWidth, SecondaryHeight   int
-	TotalContentHeight                int
-}
-
-type LayoutBox struct{ X, Y, Width, Height int }
-
-type CalculatedLayout struct {
-	IconBox      *LayoutBox
-	PrimaryBoxes []LayoutBox
-	SecondaryBox *LayoutBox
-}
-
-// drawRawText is kept for any legacy call sites in tests.
-func (r *Renderer) drawRawText(img *image.RGBA, text string, col color.RGBA, x, y int, face font.Face) {
-	dc := gg.NewContextForRGBA(img)
-	if face != nil {
-		dc.SetFontFace(face)
-	}
-	dc.SetColor(col)
-	dc.DrawString(text, float64(x), float64(y))
-}

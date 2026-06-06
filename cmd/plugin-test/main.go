@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	pluginhost "github.com/mantonx/nexus-next/internal/plugin/host"
+	pluginhost "github.com/mantonx/nexus-next/internal/plugins/host"
 )
 
 func main() {

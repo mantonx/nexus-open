@@ -4,9 +4,13 @@ dist/
 bin/
 tmp/
 
-# Binaries (root-level compiled output only, not cmd/ subdirectories)
+# Binaries (root-level compiled output from cmd/ builds)
 /nexus-open
 /nexus-open-*
+/swipe-sim
+/zone-test
+/zone-demo
+/plugin-test
 
 # Plugin binaries (built by make build-plugins; not committed)
 plugins/*/cpu-temp

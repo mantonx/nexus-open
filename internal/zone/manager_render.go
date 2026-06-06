@@ -86,57 +86,20 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 		frame := m.transition.Render()
 		progress := m.transition.GetProgress()
 		m.transitionMu.RUnlock()
-		m.logger.Debug("🎬 RENDERING TRANSITION", "progress", int(progress*100))
+		m.logger.Debug("rendering transition", "progress", int(progress*100))
 		return frame, nil
 	}
 	if m.transition.Active && m.transition.IsComplete() {
-		m.logger.Debug("🏁 TRANSITION COMPLETE - deactivating")
+		m.logger.Debug("transition complete")
 	}
 	m.transitionMu.RUnlock()
 
 	m.payloadsMu.RLock()
 	defer m.payloadsMu.RUnlock()
 
-	zoneImages := make(map[string]*image.RGBA)
-
-	for zoneID, zone := range m.zones {
-		payload, ok := m.payloads[zoneID]
-		if !ok {
-			payload = &plugin.Payload{
-				Primary:   "—",
-				Severity:  plugin.SeverityOK,
-				Timestamp: time.Now(),
-			}
-		}
-
-		if payload.IsExpired() {
-			m.logger.Warn("payload expired", "zone_id", zoneID, "age", time.Since(payload.Timestamp))
-			payload = &plugin.Payload{
-				Primary:   "—",
-				Secondary: "Stale",
-				Severity:  plugin.SeverityWarn,
-				Timestamp: time.Now(),
-			}
-		}
-
-		img, err := zone.Renderer.Render(*payload)
-		if err != nil {
-			m.logger.Error("failed to render zone", "zone_id", zoneID, "error", err)
-			img = RenderPlaceholder(
-				zone.Config.Width,
-				DisplayHeight,
-				"Error",
-				theme.GetBgColor(),
-				theme.GetFgColor(),
-			)
-		}
-
-		zoneImages[zoneID] = img
-	}
-
-	frame, err := m.compositor.Composite(zoneImages, theme)
+	frame, err := m.renderZoneImages(theme)
 	if err != nil {
-		return nil, fmt.Errorf("failed to composite frame: %w", err)
+		return nil, err
 	}
 
 	m.lastFrameMu.Lock()
@@ -186,7 +149,19 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 	m.payloadsMu.RLock()
 	defer m.payloadsMu.RUnlock()
 
-	zoneImages := make(map[string]*image.RGBA)
+	frame, err := m.renderZoneImages(theme)
+	if err != nil {
+		return nil, err
+	}
+
+	success = true
+	return frame, nil
+}
+
+// renderZoneImages renders all current-page zones into a composited frame.
+// Callers must hold m.payloadsMu.RLock before calling.
+func (m *Manager) renderZoneImages(theme Theme) (*image.RGBA, error) {
+	zoneImages := make(map[string]*image.RGBA, len(m.zones))
 
 	for zoneID, zone := range m.zones {
 		payload, ok := m.payloads[zoneID]
@@ -228,8 +203,6 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to composite frame: %w", err)
 	}
-
-	success = true
 	return frame, nil
 }
 

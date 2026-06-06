@@ -149,6 +149,12 @@ const (
 	TapActionCycle TapAction = "cycle" // Cycle through plugin choices
 )
 
+// Severity display colors — fixed values that match the Corsair design language.
+var (
+	SeverityColorWarn = color.RGBA{R: 255, G: 176, B: 32, A: 255}
+	SeverityColorCrit = color.RGBA{R: 255, G: 68, B: 68, A: 255}
+)
+
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	if c.Name == "" {
