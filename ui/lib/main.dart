@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -20,6 +21,8 @@ void main() async {
 
   await windowManager.ensureInitialized();
 
+  final startMinimized = Platform.environment['NEXUS_START_MINIMIZED'] == '1';
+
   windowManager.waitUntilReadyToShow(
     const WindowOptions(
       size: Size(800, 600),
@@ -29,8 +32,12 @@ void main() async {
       title: 'Nexus Open',
     ),
     () async {
-      await windowManager.show();
-      await windowManager.focus();
+      if (startMinimized) {
+        await windowManager.hide();
+      } else {
+        await windowManager.show();
+        await windowManager.focus();
+      }
     },
   );
 

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Nexus Open
+Comment=iCUE Nexus companion — display monitor and configuration
+Exec=nexus-open --tray
+Icon=nexus-open
+Terminal=false
+Categories=Utility;System;HardwareSettings;
+Keywords=corsair;nexus;icue;monitor;display;
+StartupNotify=false

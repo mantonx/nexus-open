@@ -122,12 +122,14 @@ func (m *Manager) startFlutter() error {
 		return err
 	}
 
-	m.logger.Info("starting Flutter UI", "path", flutterPath)
+	m.logger.Info("starting Flutter UI minimized", "path", flutterPath)
 
-	// Start Flutter process
 	m.flutterCmd = exec.CommandContext(m.ctx, flutterPath)
 	m.flutterCmd.Stdout = os.Stdout
 	m.flutterCmd.Stderr = os.Stderr
+	// Inherit the current environment and add the minimized flag so the
+	// Flutter window starts hidden — the user brings it up via the tray.
+	m.flutterCmd.Env = append(os.Environ(), "NEXUS_START_MINIMIZED=1")
 
 	if err := m.flutterCmd.Start(); err != nil {
 		return err
