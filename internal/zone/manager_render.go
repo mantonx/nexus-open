@@ -213,7 +213,12 @@ func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
 		return nil, fmt.Errorf("invalid page index: %d", pageIndex)
 	}
 
-	page := m.config.Pages[pageIndex]
+	srcPage := m.config.Pages[pageIndex]
+	page := srcPage
+	page.Zones = make([]ZoneConfig, len(srcPage.Zones))
+	copy(page.Zones, srcPage.Zones)
+	page.ComputeOffsets()
+
 	zoneImages := make(map[string]*image.RGBA)
 
 	m.payloadsMu.RLock()

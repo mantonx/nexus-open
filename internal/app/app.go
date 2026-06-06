@@ -104,17 +104,40 @@ func (a *App) Shutdown() error {
 		close(a.shutdownCh)
 		a.cancel()
 
-		// Stop sampler and API server (does not close HID device yet)
-		a.zoneSampler.Stop()
-		if a.apiServer != nil {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			a.apiServer.Shutdown(shutdownCtx) //nolint:errcheck
+		// Stop sampler (kills plugin subprocesses) and API server.
+		// Both can block if a plugin hangs or the OS is slow, so enforce a
+		// deadline. Hardware shutdown proceeds regardless after the deadline.
+		stopDone := make(chan struct{})
+		go func() {
+			a.zoneSampler.Stop()
+			close(stopDone)
+		}()
+
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		select {
+		case <-stopDone:
+		case <-stopCtx.Done():
+			a.logger.Warn("sampler stop timed out after 10s; forcing shutdown")
 		}
 
-		// Wait for render loop and watcher to exit before closing the HID
-		// device — they may be mid-write and still hold a reference.
-		a.wg.Wait()
+		if a.apiServer != nil {
+			apiCtx, apiCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer apiCancel()
+			a.apiServer.Shutdown(apiCtx) //nolint:errcheck
+		}
+
+		// Wait for render loop and device watcher goroutines to exit before
+		// closing the HID device — they may be mid-write and still hold a reference.
+		wgDone := make(chan struct{})
+		go func() { a.wg.Wait(); close(wgDone) }()
+		wgCtx, wgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer wgCancel()
+		select {
+		case <-wgDone:
+		case <-wgCtx.Done():
+			a.logger.Warn("render loop did not exit cleanly within 5s")
+		}
 
 		// Send a blank frame so the device shows black rather than frozen content.
 		// The Corsair firmware has no "release to native" command and will reset

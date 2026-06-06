@@ -185,14 +185,14 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 	s.logger.Debug("starting sample loop", "zone_id", zoneID, "interval", interval)
 
 	// Sample immediately on start.
-	s.sampleOnce(ctx, zoneID, mod)
+	s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck — initial sample; can't restart here
 
 	// Get the trigger channel for this zone.
 	s.mu.RLock()
 	triggerCh := s.triggerChannels[zoneID]
 	s.mu.RUnlock()
 
-	// isExec is true for subprocess plugins — only those can crash.
+	// isExec is true for subprocess plugins — only those can crash or hang.
 	s.mu.RLock()
 	isExec := strings.HasPrefix(s.pluginSpec[zoneID], "exec:")
 	s.mu.RUnlock()
@@ -206,9 +206,11 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 			return
 
 		case <-ticker.C:
-			s.sampleOnce(ctx, zoneID, mod)
+			dead := s.sampleOnce(ctx, zoneID, mod)
 
-			if isExec && !s.pluginHost.IsAlive(zoneID) {
+			// Treat a hung (timeout) plugin the same as a crashed one: evict
+			// and restart. IsAlive also catches crashes the timeout path misses.
+			if isExec && (dead || !s.pluginHost.IsAlive(zoneID)) {
 				mod = s.handlePluginCrash(ctx, zoneID, &backoff)
 				if mod == nil {
 					return // context cancelled during restart
@@ -219,7 +221,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 
 		case <-triggerCh:
 			s.logger.Debug("immediate sample triggered", "zone_id", zoneID)
-			s.sampleOnce(ctx, zoneID, mod)
+			s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck — trigger path; crash caught next tick
 		}
 	}
 }
@@ -271,19 +273,19 @@ func (s *Sampler) handlePluginCrash(ctx context.Context, zoneID string, backoff 
 	s.logger.Info("plugin restarted successfully", "zone_id", zoneID, "path", modPath)
 	s.setZoneStatus(zoneID, ZoneStatus{Status: "loading"})
 
-	// Prime the new process with an immediate sample.
-	s.sampleOnce(ctx, zoneID, mod)
+	// Prime the new process with an immediate sample (crash on this prime
+	// is caught by IsAlive on the next regular tick).
+	s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck
 	return mod
 }
 
-// sampleOnce samples a plugin once and updates the zone
-func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod plugin.Plugin) {
-	// Sample with timeout (longer for network-dependent modules like weather)
-	// Use parent context so cancellation is respected
+// sampleOnce samples a plugin once and updates the zone.
+// Returns true if the plugin should be treated as dead (timeout or hard error)
+// and the caller should evict and restart it.
+func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod plugin.Plugin) (dead bool) {
 	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 	defer cancel()
 
-	// Create a channel to receive the result
 	type result struct {
 		payload plugin.Payload
 		err     error
@@ -297,47 +299,48 @@ func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod plugi
 
 	select {
 	case <-ctx.Done():
-		// Check if it's a timeout or cancellation
 		if parentCtx.Err() != nil {
-			// Parent context was cancelled (page change) - silently stop
+			// Parent context cancelled (page change) — not a plugin fault.
 			s.logger.Debug("plugin sample cancelled", "zone_id", zoneID)
-			return
+			return false
 		}
-		// Timeout
-		s.logger.Warn("plugin sample timeout", "zone_id", zoneID)
-		s.setZoneStatus(zoneID, ZoneStatus{Status: "timeout", Error: "plugin slow to respond"})
-		s.manager.UpdatePayload(zoneID, plugin.Payload{
+		// 5s timeout — the subprocess is hung. Treat it as dead so the
+		// caller evicts it and restarts with backoff.
+		s.logger.Warn("plugin sample timeout, evicting", "zone_id", zoneID)
+		s.setZoneStatus(zoneID, ZoneStatus{Status: "timeout", Error: "plugin hung; restarting"})
+		s.manager.UpdatePayload(zoneID, plugin.Payload{ //nolint:errcheck
 			Primary:   "Timeout",
-			Secondary: "Plugin slow",
+			Secondary: "Restarting…",
 			Severity:  plugin.SeverityWarn,
 			Timestamp: time.Now(),
 		})
+		return true
+
 	case res := <-resultCh:
 		if res.err != nil {
 			s.logger.Error("plugin sample failed", "zone_id", zoneID, "error", res.err)
 			s.setZoneStatus(zoneID, ZoneStatus{Status: "error", Error: res.err.Error()})
-			s.manager.UpdatePayload(zoneID, plugin.Payload{
+			s.manager.UpdatePayload(zoneID, plugin.Payload{ //nolint:errcheck
 				Primary:   "Error",
 				Secondary: res.err.Error(),
 				Severity:  plugin.SeverityCrit,
 				Timestamp: time.Now(),
 			})
-			return
+			return false // error ≠ crash; IsAlive check covers actual subprocess death
 		}
 
-		// Check if context was cancelled before updating (avoid race)
 		if parentCtx.Err() != nil {
 			s.logger.Debug("skipping update after cancellation", "zone_id", zoneID)
-			return
+			return false
 		}
 
-		// Update zone with payload
 		if err := s.manager.UpdatePayload(zoneID, res.payload); err != nil {
 			s.logger.Error("failed to update payload", "zone_id", zoneID, "error", err)
 		}
 
 		s.setZoneStatus(zoneID, ZoneStatus{Status: "ok"})
 		s.recordFirstSample(zoneID)
+		return false
 	}
 }
 
@@ -426,7 +429,12 @@ func (s *Sampler) Stop() {
 	// Wait for all goroutines to finish
 	s.wg.Wait()
 
-	// Stop all external plugin subprocesses
+	// Kill all external plugin subprocesses now that no goroutine holds a
+	// reference. Must happen after wg.Wait so we don't race a goroutine
+	// mid-LaunchPlugin or mid-Sample.
+	if h, ok := s.pluginHost.(interface{ StopAll() }); ok {
+		h.StopAll()
+	}
 }
 
 // RestartZone stops and restarts sampling for a single zone with a new plugin spec.

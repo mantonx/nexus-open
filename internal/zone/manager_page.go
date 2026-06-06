@@ -10,12 +10,18 @@ import (
 
 // initializePage sets up zones and renderers for the current page.
 // Preserves existing payloads so there's no Loading flash on page switch.
+//
+// payloadsMu is held for the duration so UpdatePayload (which checks m.zones)
+// cannot observe a partially-rebuilt map while we swap it out.
 func (m *Manager) initializePage() error {
 	if m.currentPage >= len(m.config.Pages) {
 		return fmt.Errorf("invalid page index: %d", m.currentPage)
 	}
 
 	page := &m.config.Pages[m.currentPage]
+
+	m.payloadsMu.Lock()
+	defer m.payloadsMu.Unlock()
 
 	m.zones = make(map[string]*Zone)
 	m.renderers = make(map[string]*Renderer)
@@ -312,7 +318,14 @@ func (m *Manager) preRenderPage(pageIndex int) {
 	start := time.Now()
 	m.logger.Debug("pre-rendering page", "page", pageIndex, "name", m.config.Pages[pageIndex].Name)
 
-	page := m.config.Pages[pageIndex]
+	// Deep-copy the zone slice so ComputeOffsets (called below) doesn't race
+	// with concurrent preRenderPage goroutines writing X on the shared slice.
+	srcPage := m.config.Pages[pageIndex]
+	page := srcPage
+	page.Zones = make([]ZoneConfig, len(srcPage.Zones))
+	copy(page.Zones, srcPage.Zones)
+	page.ComputeOffsets()
+
 	zoneImages := make(map[string]*image.RGBA)
 
 	m.payloadsMu.RLock()

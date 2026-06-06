@@ -114,7 +114,8 @@ func (c *Compositor) Composite(zoneImages map[string]*image.RGBA, theme Theme) (
 
 	// Layer 3: zone images — all zones first, gutters after.
 	// Gutters must be drawn last; otherwise the next zone's draw.Draw overwrites them.
-	c.page.ComputeOffsets()
+	// Zone X offsets were already computed by initializePage/preRenderPage — calling
+	// ComputeOffsets here from concurrent goroutines races on Page.Zones[i].X.
 	for i, zone := range c.page.Zones {
 		zoneImg, ok := zoneImages[zone.ID]
 		if !ok {
