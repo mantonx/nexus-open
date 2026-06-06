@@ -13,7 +13,7 @@ import 'package:open_next/src/services/nexus_api_service.dart';
 import 'package:open_next/src/services/ws_service.dart';
 import 'package:open_next/src/widgets/settings/settings_page.dart';
 import 'package:open_next/src/widgets/settings/tabs/preview_tab.dart';
-import 'package:open_next/src/widgets/settings/tabs/modules_tab.dart';
+import 'package:open_next/src/widgets/settings/tabs/plugins_tab.dart';
 // AppTheme is intentionally not imported here — google_fonts 5.1.0 has a
 // compile-time incompatibility with Dart 3.11 in test mode. Tests use a
 // plain ThemeData() instead. Upgrade google_fonts to fix (see pubspec.yaml).
@@ -176,12 +176,12 @@ void main() {
     });
   });
 
-  group('ModulesTab', () {
-    testWidgets('renders module cards for known modules', (tester) async {
+  group('PluginsTab', () {
+    testWidgets('renders plugin cards for known plugins', (tester) async {
       final client = MockClient((req) async {
         if (req.url.path.contains('/config')) {
           return http.Response(
-              json.encode({'config': {}, 'module': req.url.path}), 200,
+              json.encode({'config': {}, 'plugin': req.url.path}), 200,
               headers: {'content-type': 'application/json'});
         }
         if (req.url.path.contains('/status')) {
@@ -197,7 +197,7 @@ void main() {
           SettingsState(apiService: NexusApiService(client: client));
 
       await tester.pumpWidget(_wrap(
-        const Scaffold(body: ModulesTab()),
+        const Scaffold(body: PluginsTab()),
         settings: settings,
       ));
 
@@ -227,7 +227,7 @@ void main() {
           SettingsState(apiService: NexusApiService(client: client));
 
       await tester.pumpWidget(_wrap(
-        const Scaffold(body: ModulesTab()),
+        const Scaffold(body: PluginsTab()),
         settings: settings,
       ));
       // Use timed pumps — AnimatedContainer in cards prevents pumpAndSettle
@@ -236,8 +236,8 @@ void main() {
       }
 
       // No error/timeout text should be present when all zones report ok
-      expect(find.textContaining('Module error'), findsNothing);
-      expect(find.textContaining('Module timeout'), findsNothing);
+      expect(find.textContaining('Plugin error'), findsNothing);
+      expect(find.textContaining('Plugin timeout'), findsNothing);
     });
   });
 }

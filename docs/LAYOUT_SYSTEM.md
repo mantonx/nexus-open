@@ -178,7 +178,7 @@ type LinePosition struct {
 Execute rendering with calculated positions:
 
 ```go
-func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
+func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
     // 1. Background
     drawBackground(img)
     drawGraph(img, payload.Spark)
@@ -203,7 +203,7 @@ func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
 
 ## Visual Examples
 
-### Network Module (Multi-line)
+### Network Plugin (Multi-line)
 ```
 ┌─────────────────────────────────────┐ 160x48px
 │                                     │
@@ -217,7 +217,7 @@ func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
 - Secondary: "Network" below
 - Graph: Sparkline background
 
-### Weather Module (Icon + Value + Label)
+### Weather Plugin (Icon + Value + Label)
 ```
 ┌─────────────────────────────────────┐ 160x48px
 │                                     │
@@ -232,7 +232,7 @@ func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
 - Secondary: Below, aligned with primary text (not icon)
 - No graph for weather
 
-### CPU/GPU Module (Hero with graph)
+### CPU/GPU Plugin (Hero with graph)
 ```
 ┌─────────────────────────────────────┐ 160x48px
 │                                     │
@@ -295,16 +295,16 @@ func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
 - [ ] Remove old icon positioning code
 
 ### Step 5: Testing
-- [ ] Test network module with stacked speeds
-- [ ] Test weather module with icon + description
+- [ ] Test network plugin with stacked speeds
+- [ ] Test weather plugin with icon + description
 - [ ] Test CPU/GPU with centered hero layout
 - [ ] Verify no overlaps in any scenario
 
 ---
 
-## Module Updates
+## Plugin Updates
 
-### Network Module ✓
+### Network Plugin ✓
 Changed from:
 ```go
 Primary: "↓241Kb ↑80Kb"
@@ -314,7 +314,7 @@ To:
 Primary: "↓ 241Kb\n↑ 80Kb"
 ```
 
-### Weather Module ✓
+### Weather Plugin ✓
 Changed from:
 ```go
 Secondary: data.Location  // "Jersey City, NJ"

@@ -134,6 +134,8 @@ func (s *DB) GetZonesForPage(pageID int64) ([]StoredZone, error) {
 }
 
 // CreateZone inserts a new zone and returns any error.
+// If ConfigJSON is non-empty it is also written to zone_plugin_config so the
+// sampler picks it up without a separate POST /api/zones/:id/config call.
 func (s *DB) CreateZone(z StoredZone) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -147,10 +149,21 @@ func (s *DB) CreateZone(z StoredZone) error {
 		z.ID, z.PageID, z.Ord, z.WidthPx, z.Plugin, z.RefreshMs, z.Align,
 		string(cfgRaw), string(themeRaw),
 	)
+	if err != nil {
+		return err
+	}
+	if len(z.ConfigJSON) > 0 {
+		_, err = s.db.Exec(
+			`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
+			 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
+			z.ID, string(cfgRaw),
+		)
+	}
 	return err
 }
 
 // UpdateZone updates a zone's mutable fields.
+// If ConfigJSON is non-empty it is also synced to zone_plugin_config.
 func (s *DB) UpdateZone(z StoredZone) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -172,7 +185,14 @@ func (s *DB) UpdateZone(z StoredZone) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("zone %q not found", z.ID)
 	}
-	return nil
+	if len(z.ConfigJSON) > 0 {
+		_, err = s.db.Exec(
+			`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
+			 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
+			z.ID, string(cfgRaw),
+		)
+	}
+	return err
 }
 
 // DeleteZone removes a zone by ID.
@@ -266,6 +286,16 @@ func (s *DB) ImportLayout(pages []StoredPage, zonesByPage map[int64][]StoredZone
 				string(cfgRaw), string(themeRaw),
 			); err != nil {
 				return err
+			}
+			// Keep zone_plugin_config in sync with config_json.
+			if len(z.ConfigJSON) > 0 {
+				if _, err := tx.Exec(
+					`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
+					 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
+					z.ID, string(cfgRaw),
+				); err != nil {
+					return err
+				}
 			}
 		}
 	}

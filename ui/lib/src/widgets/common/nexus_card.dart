@@ -20,7 +20,7 @@ class NexusCard extends StatelessWidget {
   final EdgeInsetsGeometry? padding;
 
   /// Highlights the card with an orange left-border accent — used for
-  /// selected states, active module cards, etc.
+  /// selected states, active plugin cards, etc.
   final bool accentBorder;
 
   /// Override the accent colour (defaults to [AppColors.accent]).

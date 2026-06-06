@@ -5,7 +5,7 @@ import (
 	"image"
 	"time"
 
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
 // initializePage sets up zones and renderers for the current page.
@@ -38,9 +38,9 @@ func (m *Manager) initializePage() error {
 		m.renderers[zoneConfig.ID] = renderer
 
 		if _, exists := m.payloads[zoneConfig.ID]; !exists {
-			m.payloads[zoneConfig.ID] = &module.Payload{
+			m.payloads[zoneConfig.ID] = &plugin.Payload{
 				Primary:   "—",
-				Severity:  module.SeverityOK,
+				Severity:  plugin.SeverityOK,
 				Timestamp: time.Now(),
 			}
 		}
@@ -49,7 +49,7 @@ func (m *Manager) initializePage() error {
 			"id", zoneConfig.ID,
 			"width", zoneConfig.Width,
 			"x", zoneConfig.X,
-			"module", zoneConfig.Plugin)
+			"plugin", zoneConfig.Plugin)
 	}
 
 	m.compositor = NewCompositor(m.logger, m.config.Theme, page)
@@ -124,14 +124,14 @@ func (m *Manager) SetOnPageChange(callback func(pageIndex int) error) {
 	m.onPageChange = callback
 }
 
-// SetOnZoneCycle sets a callback invoked when a tap action cycles a zone's module.
+// SetOnZoneCycle sets a callback invoked when a tap action cycles a zone's plugin.
 func (m *Manager) SetOnZoneCycle(callback func(zoneConfig ZoneConfig) error) {
 	m.onZoneCycle = callback
 }
 
-// CycleZoneModule advances the zone to its next module choice and notifies the
+// CycleZonePlugin advances the zone to its next plugin choice and notifies the
 // sampler via the onZoneCycle callback.
-func (m *Manager) CycleZoneModule(zoneID string) error {
+func (m *Manager) CycleZonePlugin(zoneID string) error {
 	var found *ZoneConfig
 	for pi := range m.config.Pages {
 		for zi := range m.config.Pages[pi].Zones {
@@ -157,7 +157,7 @@ func (m *Manager) CycleZoneModule(zoneID string) error {
 	m.choiceIndexMu.Unlock()
 
 	found.Plugin = found.Choices[idx]
-	m.logger.Info("cycling zone module", "zone", zoneID, "module", found.Plugin, "choice", idx)
+	m.logger.Info("cycling zone plugin", "zone", zoneID, "plugin", found.Plugin, "choice", idx)
 
 	if m.onZoneCycle != nil {
 		return m.onZoneCycle(*found)
@@ -335,9 +335,9 @@ func (m *Manager) preRenderPage(pageIndex int) {
 
 		payload, ok := m.payloads[zoneConfig.ID]
 		if !ok {
-			payload = &module.Payload{
+			payload = &plugin.Payload{
 				Primary:   "—",
-				Severity:  module.SeverityOK,
+				Severity:  plugin.SeverityOK,
 				Timestamp: time.Now(),
 			}
 		}

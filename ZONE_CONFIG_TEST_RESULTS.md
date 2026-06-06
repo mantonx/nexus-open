@@ -6,7 +6,7 @@
 
 ## Summary
 
-The zone-based configuration system has been successfully implemented and tested. The system allows independent configuration of modules per-zone via REST API, with proper persistence and real-time updates.
+The zone-based configuration system has been successfully implemented and tested. The system allows independent configuration of plugins per-zone via REST API, with proper persistence and real-time updates.
 
 ## Test Results
 
@@ -15,13 +15,13 @@ The zone-based configuration system has been successfully implemented and tested
 - **Build Status**: Clean compile with no errors
 - **Binary Size**: 24MB (development build)
 
-### ✅ Module Default Configuration
+### ✅ Plugin Default Configuration
 
-**Endpoint**: `POST/GET /api/modules/:moduleName/config`
+**Endpoint**: `POST/GET /api/plugins/:moduleName/config`
 
-**Test 1: Set Module Default**
+**Test 1: Set Plugin Default**
 ```bash
-curl -X POST http://localhost:1985/api/modules/weather/config \
+curl -X POST http://localhost:1985/api/plugins/weather/config \
   -H "Content-Type: application/json" \
   -d '{"location":"New York, NY","unit":"imperial"}'
 ```
@@ -29,17 +29,17 @@ curl -X POST http://localhost:1985/api/modules/weather/config \
 ```json
 {
   "status": "success",
-  "message": "Module config updated successfully",
+  "message": "Plugin config updated successfully",
   "data": {
     "config": {"location": "New York, NY", "unit": "imperial"},
-    "module": "exec:./modules/weather/weather"
+    "plugin": "exec:./plugins/weather/weather"
   }
 }
 ```
 
-**Test 2: Get Module Default**
+**Test 2: Get Plugin Default**
 ```bash
-curl http://localhost:1985/api/modules/weather/config
+curl http://localhost:1985/api/plugins/weather/config
 ```
 **Result**: ✅ Success - Returns saved config correctly
 
@@ -74,7 +74,7 @@ curl -X POST http://localhost:1985/api/zones/gpu/config \
 **Content After Tests**:
 ```yaml
 module_defaults:
-    exec:./modules/weather/weather:
+    exec:./plugins/weather/weather:
         location: New York, NY
         unit: imperial
 zone_overrides:
@@ -90,7 +90,7 @@ zone_overrides:
 **Result**: ✅ Success
 - File created automatically
 - Proper YAML structure
-- Contains both module defaults and zone overrides
+- Contains both plugin defaults and zone overrides
 - Will survive application restart
 
 ### ✅ Delete Operation
@@ -108,7 +108,7 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 }
 ```
 
-**Verification**: Override removed from config file, weather zone falls back to module default
+**Verification**: Override removed from config file, weather zone falls back to plugin default
 
 ## Architecture Verification
 
@@ -116,18 +116,18 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 - **Zone Config Manager**: `/home/fictional/Projects/nexus-next/internal/zoneconfig/manager.go`
 - **API Handlers**: `/home/fictional/Projects/nexus-next/internal/api/zone_handlers.go`
 - **Integration**: Properly wired through `internal/app/app.go`
-- **Config Resolution**: Zone override → Module default → nil (correct precedence)
+- **Config Resolution**: Zone override → Plugin default → nil (correct precedence)
 
 ### ✅ API Endpoints Implemented
-1. `POST /api/modules/:moduleName/config` - Set module default
-2. `GET /api/modules/:moduleName/config` - Get module default
+1. `POST /api/plugins/:moduleName/config` - Set plugin default
+2. `GET /api/plugins/:moduleName/config` - Get plugin default
 3. `POST /api/zones/:zoneID/config` - Set zone override
 4. `GET /api/zones/:zoneID/config` - Get zone override
 5. `DELETE /api/zones/:zoneID/config` - Delete zone override
 
 ### ✅ Real-Time Updates
 - `BroadcastZoneConfigChange()` implemented in sampler
-- Notifies specific zone's module when config changes
+- Notifies specific zone's plugin when config changes
 - Triggers immediate resample after config update
 - No restart required
 
@@ -136,8 +136,8 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 1. **Independent Zone Configuration**: Each zone can have different settings
    - Example: CPU shows Celsius, GPU shows Fahrenheit simultaneously
 
-2. **Module Defaults**: Shared configuration for all zones using a module
-   - Weather module can have default location/unit
+2. **Plugin Defaults**: Shared configuration for all zones using a plugin
+   - Weather plugin can have default location/unit
    - Overridden per-zone when needed
 
 3. **Persistence**: All configurations survive restart
@@ -146,8 +146,8 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
    - Both defaults and overrides persisted
 
 4. **Dynamic Updates**: No restart needed for config changes
-   - API updates trigger immediate module notification
-   - Modules receive `OnConfigChanged()` callback
+   - API updates trigger immediate plugin notification
+   - Plugins receive `OnConfigChanged()` callback
    - Display updates in real-time
 
 5. **Clean API**: RESTful design with proper HTTP methods
@@ -179,8 +179,8 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 
 ### Backward Compatibility
 - ✅ Global config still exists for UI settings (colors, fonts)
-- ✅ Module-specific configs moved to zone-based system
-- ✅ No breaking changes to existing modules
+- ✅ Plugin-specific configs moved to zone-based system
+- ✅ No breaking changes to existing plugins
 
 ## Performance
 
@@ -211,7 +211,7 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 - [ ] Config validation (e.g., unit must be metric/imperial)
 - [ ] UI for managing zone configs
 - [ ] Config import/export
-- [ ] Default configs per module type (registry)
+- [ ] Default configs per plugin type (registry)
 
 ## Conclusion
 
@@ -219,17 +219,17 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 
 All core features have been implemented and tested:
 - ✅ Independent per-zone configuration
-- ✅ Module default configuration  
+- ✅ Plugin default configuration  
 - ✅ REST API with full CRUD operations
 - ✅ Configuration persistence
 - ✅ Real-time updates without restart
 - ✅ Clean code architecture
 - ✅ Comprehensive documentation
 
-The system provides a flexible and user-friendly way to configure modules differently across zones, enabling use cases like:
+The system provides a flexible and user-friendly way to configure plugins differently across zones, enabling use cases like:
 - Different temperature units per zone (CPU in °C, GPU in °F)
 - Different weather locations for multiple weather zones
 - Custom network display formats per zone
-- Any module-specific settings per zone
+- Any plugin-specific settings per zone
 
 **Status: READY FOR PRODUCTION** ✅

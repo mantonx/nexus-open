@@ -177,7 +177,7 @@ Beyond udev, Fedora/RHEL users (≈40% of Linux desktop) have no native package.
 #### 3.4 ✅ — Fix Flatpak metadata placeholders
 
 - Replace all `yourusername` template URLs with real GitHub org/repo.
-- Uncomment the Flutter UI module in `com.github.nexusopen.NexusOpen.yaml`
+- Uncomment the Flutter UI plugin in `com.github.nexusopen.NexusOpen.yaml`
   and make it build correctly.
 - Add at least one screenshot reference (can be generated from zone-demo).
 - Add the app icon (uncomment the icon line).
@@ -237,23 +237,23 @@ values, poor error handling, and design gaps.
 
 ### 4B — Missing Configuration Surfaces
 
-The backend has a full per-zone, per-module config system. The UI exposes none
-of it. Each module accepts specific keys via its `OnConfigChanged` handler:
+The backend has a full per-zone, per-plugin config system. The UI exposes none
+of it. Each plugin accepts specific keys via its `OnConfigChanged` handler:
 
-| Module | Config keys |
+| Plugin | Config keys |
 |--------|-------------|
 | `cpu-temp` | `unit` (metric/imperial), `graph_type` (sparkline/bar/area) |
 | `gpu-temp` | `unit` (metric/imperial), `graph_type` (sparkline/bar/area) |
 | `weather` | `location` (string), `unit` (metric/imperial) |
 | `network` | `network_format` (bytes/bits), `graph_type` (sparkline/bar/area) |
 
-#### 4B.1 ✅ — Add a "Modules" tab to SettingsPage
+#### 4B.1 ✅ — Add a "Plugins" tab to SettingsPage
 
 - New tab (icon: `tune`), placed between Display and Images.
-- Shows one expandable card per active module, loaded from `GET /api/modules/:name/config`.
-- Each card renders the relevant controls for that module's known config keys
+- Shows one expandable card per active plugin, loaded from `GET /api/plugins/:name/config`.
+- Each card renders the relevant controls for that plugin's known config keys
   (dropdowns for enums, text fields for strings).
-- On change, calls `POST /api/modules/:name/config` immediately (no save button —
+- On change, calls `POST /api/plugins/:name/config` immediately (no save button —
   these are live updates via `ConfigNotifier`).
 - On success, briefly animate the card border with the accent color.
 - On failure, show an inline error on the card (not a snackbar).
@@ -297,7 +297,7 @@ that is partially implemented. The Flutter app needs equivalent treatment.
 - At 800px wide, a left-side `NavigationRail` with icons + labels is more
   spacious and modern than a top tab strip. It scales gracefully as more
   sections are added, and gives the content area more vertical room.
-- Navigation items: Preview, Location, Display, Modules, Images.
+- Navigation items: Preview, Location, Display, Plugins, Images.
 - The live 640×48 preview frame (from 2.5) sits as a hero element in the
   header area above the rail, visible regardless of which section is active.
 - Files: `ui/lib/src/widgets/settings/settings_page.dart`
@@ -322,7 +322,7 @@ that is partially implemented. The Flutter app needs equivalent treatment.
   is the signal.
 - Show a persistent `MaterialBanner` (not a snackbar — it disappears) at the top
   of the screen with a retry button.
-- Disable the save FAB and Modules tab controls with a muted overlay while
+- Disable the save FAB and Plugins tab controls with a muted overlay while
   disconnected.
 - File: `ui/lib/src/widgets/settings/settings_page.dart`
 
@@ -330,7 +330,7 @@ that is partially implemented. The Flutter app needs equivalent treatment.
 
 - Warn the user with a dialog if they close or navigate away with unsaved changes
   in the global config (location, time format, colors, etc.).
-- Module config changes are live (no save needed), so no guard needed there.
+- Plugin config changes are live (no save needed), so no guard needed there.
 - File: `ui/lib/src/widgets/settings/settings_page.dart`
 
 #### 4C.6 ✅ — Delete `app.dart`
@@ -363,7 +363,7 @@ most maintainable path. The existing `http`-based `NexusApiService` is retained.
 #### 5.1 ✅ — Commit a baseline OpenAPI spec
 
 - Run the `go-openapi` generation step manually, fix annotation gaps
-  (the `display` sub-struct in `settings.Config`, zone/module config request
+  (the `display` sub-struct in `settings.Config`, zone/plugin config request
   bodies), and commit the result as `api/openapi.yaml`.
 - This file is source of truth. Regenerate on every backend schema change.
 - Files: `api/openapi.yaml` (new, committed)
@@ -372,7 +372,7 @@ most maintainable path. The existing `http`-based `NexusApiService` is retained.
 
 - Run `openapi-generator validate -i api/openapi.yaml` and resolve all warnings.
 - Ensure complete schemas for: `GET /api/config` (full `settings.Config` incl.
-  `date_format`, `theme`), `POST /api/modules/:name/config` request/response,
+  `date_format`, `theme`), `POST /api/plugins/:name/config` request/response,
   `GET /api/images/:filename` (binary), `GET /api/ws` (documented as upgrade).
 - File: `api/openapi.yaml`
 
@@ -421,7 +421,7 @@ deps, compatible with the existing `http`-based `NexusApiService`.
 ## Area 6 — Error Messaging and First-Run Experience
 
 **Problem:** Silent failures are the biggest source of user confusion. USB
-permission errors, backend connection failures, and missing modules all result
+permission errors, backend connection failures, and missing plugins all result
 in the app showing "disconnected" with no actionable guidance. This is the
 difference between a user fixing their own problem in 30 seconds and filing
 a GitHub issue.
@@ -452,14 +452,14 @@ a GitHub issue.
 - Files: `ui/lib/src/widgets/onboarding/` (new),
   `ui/lib/src/widgets/settings/settings_page.dart`
 
-#### 6.3 ✅ — Module error visibility
+#### 6.3 ✅ — Plugin error visibility
 
-- When a module crashes or times out, the zone currently shows a blank placeholder.
-- Show the placeholder text "Module error" (the `RenderPlaceholder` fix already
+- When a plugin crashes or times out, the zone currently shows a blank placeholder.
+- Show the placeholder text "Plugin error" (the `RenderPlaceholder` fix already
   renders text — just pass a meaningful string).
-- Expose module error state through the API: `GET /api/zones/:id/status` returns
+- Expose plugin error state through the API: `GET /api/zones/:id/status` returns
   `{status: "ok"|"error"|"loading", error: "..."}`.
-- Surface this in the Modules tab card (inline error badge).
+- Surface this in the Plugins tab card (inline error badge).
 - Files: `internal/zone/sampler.go`, `internal/api/zone_handlers.go`
 
 #### 6.4 ✅ — Add troubleshooting section to README
@@ -469,7 +469,7 @@ a GitHub issue.
   2. USB permission denied (not in plugdev group)
   3. Backend won't start (port 1985 in use)
   4. Flutter UI won't connect (backend not running)
-  5. Module shows blank (plugin binary not built/found)
+  5. Plugin shows blank (plugin binary not built/found)
 - File: `README.md`
 
 ---
@@ -598,7 +598,7 @@ information (references to unimplemented features, old version numbers).
 
 The 8 files worth keeping publicly are:
 `INSTALLATION.md`, `DEVICE_SETUP.md` (root), `QUICKSTART_ARCH.md`,
-`MODULE_FEATURES.md`, `LAYOUT_SYSTEM.md`, `CONFIG_NOTIFIER.md`,
+`PLUGIN_FEATURES.md`, `LAYOUT_SYSTEM.md`, `CONFIG_NOTIFIER.md`,
 `PROTOCOL_NOTES.md`, `REVERSE_ENGINEERING_FINDINGS.md`, `TERMINOLOGY.md`,
 `ROADMAP.md`, `RELEASE_CHECKLIST.md`.
 
@@ -697,14 +697,14 @@ Week 2 (backend additions + codegen):
   5.3   Wire codegen into build
   5.4   Migrate Flutter to generated client
   6.1   Actionable USB error messages
-  6.3   Module error visibility
+  6.3   Plugin error visibility
   7.1   Add linting to CI
   7.4   Fix AppImage build reliability
   8.1   Flutter readiness check in tray
 
 Week 3 (Flutter-heavy — requires Week 2 backend):
   2.5   Flutter WsService + live preview
-  4B.1  Modules tab
+  4B.1  Plugins tab
   4C.1  Add dark mode
   4C.2  Switch to NavigationRail
   4C.3  Visual design system (8px grid, cards, accent colour)
@@ -729,7 +729,7 @@ Week 4 (polish, packaging, CI release):
 
 ## Out of Scope
 
-- New modules (media player, disk usage, CPU load graph) — separate effort
+- New plugins (media player, disk usage, CPU load graph) — separate effort
 - Layout editor (drag-to-resize zones in UI) — post-v1.1
 - Multi-device support — architectural change
 - NixOS / Gentoo packaging — post-v1.0, referenced in CHANGELOG roadmap

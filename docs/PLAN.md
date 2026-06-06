@@ -35,7 +35,7 @@ Previous plan documents archived to `docs/archive/`.
   - Zone width proportional bar showing current layout at a glance
   - `ReorderableListView` of zone cards, each with:
     - Width slider (adjusts adjacent zone to maintain 640px invariant)
-    - Module dropdown (builtin + exec modules)
+    - Plugin dropdown (builtin + exec plugins)
     - Align dropdown (left/center/right)
     - Delete button
   - "Add zone" button + 640px validity indicator
@@ -51,8 +51,8 @@ New `internal/store` package: SQLite via `modernc.org/sqlite` (pure Go, no CGO).
 Single database at `~/.config/nexus-open/nexus.db` replaces three config stores:
 
 - `config.yaml` (UI settings via viper) → `settings` key/value table
-- `zone-configs.yaml` (module configs) → `zone_module_config` table
-- Module-default path-keyed configs → `zone_module_config` with `module:` prefix
+- `zone-configs.yaml` (plugin configs) → `zone_module_config` table
+- Plugin-default path-keyed configs → `zone_module_config` with `plugin:` prefix
 
 **API surface unchanged** — `settings.Manager`, `zone.ConfigManager`, and all API
 handlers have identical signatures. Tests updated in-place.
@@ -106,10 +106,10 @@ Fix: call `mockDev.Connect()` before the request. Added `context` import.
   current page's zones (after `ComputeOffsets()`), finds the zone containing
   `TapX`, and dispatches its `OnTap` action (`internal/touch/handler.go`)
 - `TapActionCycle` implemented: `zone.Manager.CycleZoneModule(zoneID)` advances
-  the zone's `Choices` list modulo its length, updates `Module` on the config,
+  the zone's `Choices` list modulo its length, updates `Plugin` on the config,
   and fires the `onZoneCycle` callback (`internal/zone/manager.go`)
 - `zone.Sampler.RestartZone(zoneConfig)` stops the old sampling goroutine for
-  a single zone and starts a new one with the updated module spec
+  a single zone and starts a new one with the updated plugin spec
   (`internal/zone/sampler.go`)
 - `app.go` wires `SetOnZoneCycle` → `sampler.RestartZone`, keeping manager and
   sampler decoupled via callback (same pattern as `onPageChange`)
@@ -118,7 +118,7 @@ All tests passing (`go test ./...` — 7 packages, 0 failures).
 
 **Pre-existing flaky test noted:** `TestApp_ContextCancellation` fails
 intermittently when `go test ./...` is run from the repo root (working directory
-issue with relative `exec:` module paths). Passes when run as
+issue with relative `exec:` plugin paths). Passes when run as
 `go test ./internal/app/`. Not caused by our changes; tracked for future fix.
 
 ---
@@ -134,9 +134,9 @@ issue with relative `exec:` module paths). Passes when run as
   damping constants. Most of the swipe backlog items in
   `docs/swipe-improvements.md` are already resolved. Items 3 (direction change)
   and 4 (rubber-band) are the main remaining ones.
-- **Module plugin system** — the RPC-over-subprocess design is questionable
+- **Plugin plugin system** — the RPC-over-subprocess design is questionable
   (see below) but the implementation is sound: proper lifecycle, config
-  notification interface, clean `pkg/module` types.
+  notification interface, clean `pkg/plugin` types.
 - **Zone renderer** (`internal/zone/renderer.go`, 1,270 lines) — layout engine
   is flexible: multi-line, icons, graphs (sparkline/bar/area/line), progress
   bars, label positioning. More capable than it appears from the UI.
@@ -164,7 +164,7 @@ At runtime, config lives in:
   managed by `settings.Manager` via viper
 - `configs/layouts/multi-page.yaml` — page/zone layout loaded by `zone.Manager`
   at startup from a hardcoded relative path
-- `~/.config/nexus-open/zone-configs.yaml` — module config overrides managed by
+- `~/.config/nexus-open/zone-configs.yaml` — plugin config overrides managed by
   `zone.ConfigManager`
 - `shared_preferences` on the Flutter side — theme mode only
 
@@ -172,15 +172,15 @@ Each store has its own file, its own lock, its own save/load path. None are
 transactional. The layout file is not user-editable because the path is relative
 and loaded once at startup with no reload mechanism.
 
-**3. The module plugin system has real costs for no current benefit**
-Every data module (weather, CPU temp, GPU temp, network) is a compiled binary
+**3. The plugin plugin system has real costs for no current benefit**
+Every data plugin (weather, CPU temp, GPU temp, network) is a compiled binary
 launched as a child process over hashicorp/go-plugin (gRPC + protobuf). This
-is the right architecture if you want third-party modules in any language — but
-that isn't happening and there are no external module authors. The costs are
-real: ~50ms startup per module, process management overhead, RPC serialization
+is the right architecture if you want third-party plugins in any language — but
+that isn't happening and there are no external plugin authors. The costs are
+real: ~50ms startup per plugin, process management overhead, RPC serialization
 for a struct that's three strings and a float array, and hashicorp/go-plugin +
-gRPC as dependencies. The modules themselves are already Go — they could be
-compiled in directly behind the `module.Module` interface with zero API change.
+gRPC as dependencies. The plugins themselves are already Go — they could be
+compiled in directly behind the `plugin.Plugin` interface with zero API change.
 This is a deliberate trade-off worth revisiting, not a bug.
 
 **4. Test suite has a failing test**
@@ -202,7 +202,7 @@ maintenance cost for a use case that doesn't match the product context (hardware
 control software used alongside gaming/monitoring tools, always dark).
 
 **7. The Flutter app information architecture doesn't match user mental model**
-The nav rail presents: Preview / Display / Location / Modules / Images. This is
+The nav rail presents: Preview / Display / Location / Plugins / Images. This is
 organized around config categories. The user's actual mental model is: "I have
 a display. It has pages. Pages have zones. Zones show things." The zone editor
 plan fixes this, but the top-level IA should change too — not just add a new
@@ -347,7 +347,7 @@ CREATE TABLE zones (
   page_id      INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
   ord          INTEGER NOT NULL,
   width_px     INTEGER NOT NULL CHECK(width_px >= 80 AND width_px <= 640),
-  module       TEXT    NOT NULL,
+  plugin       TEXT    NOT NULL,
   refresh_ms   INTEGER NOT NULL DEFAULT 2000,
   align        TEXT    NOT NULL DEFAULT 'center',
   config_json  TEXT    NOT NULL DEFAULT '{}',
@@ -379,7 +379,7 @@ The zone editor is the primary user-facing feature. It replaces the YAML file
 as the way to configure what shows on the display.
 
 **Information architecture change:**
-The nav rail should present: `Layout` / `Modules` / `Images` / `Display`. The
+The nav rail should present: `Layout` / `Plugins` / `Images` / `Display`. The
 current "Preview" tab merges into the Layout editor (it becomes the header of
 the layout view). Location moves into Display settings.
 
@@ -406,7 +406,7 @@ the layout view). Location moves into Display settings.
 
 - Zone width slider in each row; adjacent zones compensate (total must stay 640)
 - Drag handle (⠿) for reorder within page
-- Gear (⚙) expands module config inline (absorbs the current Modules tab)
+- Gear (⚙) expands plugin config inline (absorbs the current Plugins tab)
 - Live frame updates as any change is applied
 - Page tabs at top: click to preview, drag to reorder, [+ Add page] appends
 
@@ -416,33 +416,33 @@ GET    /api/layout              — full layout: pages + zones
 POST   /api/layout/pages        — create page {name}
 PUT    /api/layout/pages/:id    — update {name, ord}
 DELETE /api/layout/pages/:id    — delete (cascades zones)
-PUT    /api/layout/zones/:id    — update {width_px, module, refresh_ms, align, config_json, theme_json}
-POST   /api/layout/zones        — add zone {page_id, module, width_px, ...}
+PUT    /api/layout/zones/:id    — update {width_px, plugin, refresh_ms, align, config_json, theme_json}
+POST   /api/layout/zones        — add zone {page_id, plugin, width_px, ...}
 DELETE /api/layout/zones/:id    — remove zone
 PUT    /api/layout/zones/reorder — reorder [{id, ord}]
 ```
 
 ---
 
-### 8. Module system nomenclature cleanup ✅ 2026-06-05
+### 8. Plugin system nomenclature cleanup ✅ 2026-06-05
 
 Eliminated the "plugin" terminology from internal code — everything is a
-"module" from the user's perspective. go-plugin is kept as the exec: transport.
+"plugin" from the user's perspective. go-plugin is kept as the exec: transport.
 
 **Changes made:**
 
-- `ModulePlugin` → `ExecModule` in `pkg/module/plugin.go` (and all 6 callers in
-  `internal/module/host/host.go` and each `modules/*/main.go`)
+- `ModulePlugin` → `ExecModule` in `pkg/plugin/plugin.go` (and all 6 callers in
+  `internal/plugin/host/host.go` and each `plugins/*/main.go`)
 - `rpcServer` → `moduleRPC` — the net/rpc receiver name now registers as
-  `moduleRPC.*` instead of `Plugin.*`, matching the module terminology throughout
+  `moduleRPC.*` instead of `Plugin.*`, matching the plugin terminology throughout
 - `MagicCookieKey` `"NEXUS_MODULE_PLUGIN"` → `"NEXUS_EXEC_MODULE"`
-- Removed "Modules are plugins…" from package doc comment in `types.go`
+- Removed "Plugins are plugins…" from package doc comment in `types.go`
 - Deleted the empty `internal/plugin/` directory (leftover from registry removal)
 
 **Architecture decision:** go-plugin + exec: subprocess model is kept.
-Builtin modules (`builtin:clock` etc.) remain compiled in. The `exec:` prefix
+Builtin plugins (`builtin:clock` etc.) remain compiled in. The `exec:` prefix
 is the deliberate extension point for power users and future third-party authors.
-No dep removal, no change to the `module.Module` interface.
+No dep removal, no change to the `plugin.Plugin` interface.
 
 ---
 
@@ -456,7 +456,7 @@ No dep removal, no change to the `module.Module` interface.
 5. Design system refresh                 ✅ done
 6. SQLite config backend                 (3-4 days)
 7. Zone/page layout editor               (1-2 weeks)
-8. Module system nomenclature cleanup    ✅ done
+8. Plugin system nomenclature cleanup    ✅ done
 ```
 
 Steps 1-4 are largely independent of each other and could be parallelised.

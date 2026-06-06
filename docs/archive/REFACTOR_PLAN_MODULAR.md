@@ -13,7 +13,7 @@
 2. [Current vs Future Architecture](#current-vs-future-architecture)
 3. [Refactor Objectives](#refactor-objectives)
 4. [Zone System Design](#zone-system-design)
-5. [Module Plugin System](#module-plugin-system)
+5. [Plugin Plugin System](#plugin-plugin-system)
 6. [Implementation Phases](#implementation-phases)
 7. [Technical Specifications](#technical-specifications)
 8. [Migration Strategy](#migration-strategy)
@@ -26,19 +26,19 @@
 
 ### Problem Statement
 
-The current Nexus Open architecture uses **hardcoded UI rendering** with fixed layouts and tightly coupled module logic. This limits:
-- User customization (can't rearrange or add modules)
-- Developer extensibility (can't create third-party modules)
+The current Nexus Open architecture uses **hardcoded UI rendering** with fixed layouts and tightly coupled plugin logic. This limits:
+- User customization (can't rearrange or add plugins)
+- Developer extensibility (can't create third-party plugins)
 - Layout flexibility (640x48 screen is underutilized)
-- Visual consistency (each module renders differently)
+- Visual consistency (each plugin renders differently)
 
 ### Solution: Zone-Based Modular System
 
 Replace the monolithic rendering system with:
 1. **Zone-based layout** - Configurable horizontal partitions (JSON/YAML)
-2. **Plugin architecture** - Modules as isolated RPC processes (go-plugin)
+2. **Plugin architecture** - Plugins as isolated RPC processes (go-plugin)
 3. **Centralized rendering** - Host owns all drawing for visual consistency
-4. **Hot reload** - Layout/module changes without restart
+4. **Hot reload** - Layout/plugin changes without restart
 5. **Multi-page support** - Swipeable pages with different zone configurations
 
 ### Key Benefits
@@ -46,7 +46,7 @@ Replace the monolithic rendering system with:
 | Benefit | Impact |
 |---------|--------|
 | **User Experience** | Drag-and-drop zone configuration, unlimited layouts |
-| **Developer Experience** | Write modules in any language, simple RPC contract |
+| **Developer Experience** | Write plugins in any language, simple RPC contract |
 | **Safety** | Plugin crashes don't kill host, sandboxed execution |
 | **Performance** | Independent refresh rates per zone, efficient caching |
 | **Consistency** | Unified visual language, pixel-perfect typography |
@@ -66,14 +66,14 @@ Replace the monolithic rendering system with:
 │   │ Temp   │ │ Temp   │ │  Data  │ │ Time   │ │
 │   └────────┘ └────────┘ └────────┘ └────────┘ │
 │                                                 │
-│   Each module renders itself                    │
+│   Each plugin renders itself                    │
 │   Different fonts, styles, alignments           │
 └─────────────────────────────────────────────────┘
 ```
 
 **Problems:**
 - ❌ Fixed 4-zone layout (160px each)
-- ❌ All modules in one binary (can't add new ones)
+- ❌ All plugins in one binary (can't add new ones)
 - ❌ Inconsistent visual styling
 - ❌ No user configuration
 - ❌ Restart required for any change
@@ -99,7 +99,7 @@ Replace the monolithic rendering system with:
          │              │             │            │
     ┌────┴───┐    ┌────┴────┐   ┌────┴───┐   ┌───┴─────┐
     │Weather │    │  Media  │   │  CPU   │   │  Clock  │
-    │ Module │    │ Module  │   │ Module │   │ Module  │
+    │ Plugin │    │ Plugin  │   │ Plugin │   │ Plugin  │
     │(plugin)│    │(plugin) │   │(plugin)│   │(builtin)│
     └────────┘    └─────────┘   └────────┘   └─────────┘
          ↓              ↓             ↓            ↓
@@ -109,7 +109,7 @@ Replace the monolithic rendering system with:
 
 **Improvements:**
 - ✅ Flexible zone widths (must sum to 640px)
-- ✅ Modules as plugins (exec processes via RPC)
+- ✅ Plugins as plugins (exec processes via RPC)
 - ✅ Consistent rendering (host owns all drawing)
 - ✅ Hot reload (config changes apply live)
 - ✅ Isolated failures (plugin crash ≠ system crash)
@@ -121,18 +121,18 @@ Replace the monolithic rendering system with:
 ### Primary Goals
 
 1. **Modularity**
-   - Decouple modules from host rendering
-   - Enable third-party module development
-   - Support multiple module implementations (Go, Python, Rust, etc.)
+   - Decouple plugins from host rendering
+   - Enable third-party plugin development
+   - Support multiple plugin implementations (Go, Python, Rust, etc.)
 
 2. **Configurability**
    - User-editable layout files (YAML/JSON)
-   - Zone dimensions, ordering, and module assignments
+   - Zone dimensions, ordering, and plugin assignments
    - Per-zone refresh rates and styling
 
 3. **Safety**
    - Process isolation for plugins (go-plugin RPC)
-   - Timeout handling (unresponsive modules)
+   - Timeout handling (unresponsive plugins)
    - Graceful degradation (show placeholder on failure)
 
 4. **Performance**
@@ -148,8 +148,8 @@ Replace the monolithic rendering system with:
 ### Non-Goals (Future Work)
 
 - ❌ Web-based drag-and-drop editor (v2.1+)
-- ❌ Cloud module marketplace (v3.0+)
-- ❌ Scripting language for modules (future)
+- ❌ Cloud plugin marketplace (v3.0+)
+- ❌ Scripting language for plugins (future)
 - ❌ Multi-device support (future)
 
 ---
@@ -175,7 +175,7 @@ zones:
   - id: weather          # Unique identifier
     width: 160           # Pixels (required)
     x: 0                 # Offset (auto-computed if omitted)
-    module: weather      # Module endpoint
+    plugin: weather      # Plugin endpoint
     refresh_ms: 5000     # Sampling interval
     align: left          # left | center | right
     theme_override:      # Optional per-zone styling
@@ -192,24 +192,24 @@ zones:
 **4 Equal Zones (Default)**
 ```yaml
 zones:
-  - { id: weather, width: 160, module: weather }
-  - { id: cpu,     width: 160, module: cpu }
-  - { id: gpu,     width: 160, module: gpu }
-  - { id: clock,   width: 160, module: clock }
+  - { id: weather, width: 160, plugin: weather }
+  - { id: cpu,     width: 160, plugin: cpu }
+  - { id: gpu,     width: 160, plugin: gpu }
+  - { id: clock,   width: 160, plugin: clock }
 ```
 
 **Asymmetric Layout**
 ```yaml
 zones:
-  - { id: media,   width: 320, module: media }   # Wide media player
-  - { id: network, width: 160, module: network }
-  - { id: clock,   width: 160, module: clock }
+  - { id: media,   width: 320, plugin: media }   # Wide media player
+  - { id: network, width: 160, plugin: network }
+  - { id: clock,   width: 160, plugin: clock }
 ```
 
 **Single Full-Width Zone**
 ```yaml
 zones:
-  - { id: main, width: 640, module: dashboard }
+  - { id: main, width: 640, plugin: dashboard }
 ```
 
 ### Zone Content Model
@@ -249,14 +249,14 @@ Each zone renders a **standard card** with consistent structure:
 │  Initialization                                      │
 │  1. Parse layout.yaml                                │
 │  2. Validate zone widths (sum == 640)                │
-│  3. Launch module plugins via go-plugin              │
+│  3. Launch plugin plugins via go-plugin              │
 │  4. Subscribe to config changes (hot reload)         │
 └─────────────────────────────────────────────────────┘
                       ↓
 ┌─────────────────────────────────────────────────────┐
 │  Sampling Loop (per zone, independent timers)        │
 │  Every refresh_ms:                                   │
-│    1. Call module.Sample() via RPC                   │
+│    1. Call plugin.Sample() via RPC                   │
 │    2. Receive Payload{Primary, Secondary, Spark...}  │
 │    3. Cache payload with timestamp                   │
 │    4. Trigger render update                          │
@@ -283,23 +283,23 @@ Each zone renders a **standard card** with consistent structure:
 
 ---
 
-## Module Plugin System
+## Plugin Plugin System
 
-### Module Interface
+### Plugin Interface
 
-Modules expose a **minimal RPC contract** via HashiCorp go-plugin:
+Plugins expose a **minimal RPC contract** via HashiCorp go-plugin:
 
 ```go
-// Module interface (implemented by plugins)
-type Module interface {
-    // Describe returns module metadata
+// Plugin interface (implemented by plugins)
+type Plugin interface {
+    // Describe returns plugin metadata
     Describe() (Descriptor, error)
 
     // Sample returns current data payload
     Sample() (Payload, error)
 }
 
-// Descriptor - module metadata
+// Descriptor - plugin metadata
 type Descriptor struct {
     Name        string   // "CPU Temperature"
     Version     string   // "1.0.0"
@@ -309,7 +309,7 @@ type Descriptor struct {
     RefreshMs   int      // Recommended refresh interval
 }
 
-// Payload - data returned by module
+// Payload - data returned by plugin
 type Payload struct {
     Title     string    `json:"title"`      // Zone title (e.g., "CPU")
     Primary   string    `json:"primary"`    // Main value (e.g., "42°C")
@@ -323,7 +323,7 @@ type Payload struct {
 
 ### Plugin Types
 
-#### 1. Built-in Modules (Native)
+#### 1. Built-in Plugins (Native)
 
 Compiled into the host binary for critical functionality:
 - **clock**: System time/date
@@ -333,65 +333,65 @@ Compiled into the host binary for critical functionality:
 **Pros:** No RPC overhead, always available
 **Cons:** Requires recompilation to update
 
-#### 2. External Modules (Process-Isolated)
+#### 2. External Plugins (Process-Isolated)
 
 Launched as separate processes via go-plugin:
 
 ```yaml
 zones:
   - id: weather
-    module: exec:./modules/weather  # Executable path
+    plugin: exec:./plugins/weather  # Executable path
     refresh_ms: 300000              # 5 minutes
 ```
 
 **Pros:** Safe isolation, any language, hot-reloadable
 **Cons:** RPC overhead (~1-2ms per call)
 
-#### 3. Script Modules (Future)
+#### 3. Script Plugins (Future)
 
 Lightweight scripts interpreted by the host:
 
 ```yaml
 zones:
   - id: custom
-    module: script:./modules/custom.lua
+    plugin: script:./plugins/custom.lua
 ```
 
-**Pros:** No compilation, simple for basic modules
+**Pros:** No compilation, simple for basic plugins
 **Cons:** Not implemented in v2.0
 
 ### Plugin Discovery
 
-Modules are located via:
+Plugins are located via:
 1. **Built-in registry**: `builtin:clock`, `builtin:placeholder`
-2. **Module directory**: `~/.config/nexus-open/modules/`
-3. **Absolute paths**: `exec:/usr/local/bin/weather-module`
-4. **Relative paths**: `exec:./modules/cpu` (relative to config dir)
+2. **Plugin directory**: `~/.config/nexus-open/plugins/`
+3. **Absolute paths**: `exec:/usr/local/bin/weather-plugin`
+4. **Relative paths**: `exec:./plugins/cpu` (relative to config dir)
 
-### Example Module (Go)
+### Example Plugin (Go)
 
 ```go
 package main
 
 import (
     "github.com/hashicorp/go-plugin"
-    "nexus/pkg/module"
+    "nexus/pkg/plugin"
 )
 
 type CPUModule struct{}
 
-func (m *CPUModule) Describe() (module.Descriptor, error) {
-    return module.Descriptor{
+func (m *CPUModule) Describe() (plugin.Descriptor, error) {
+    return plugin.Descriptor{
         Name:      "CPU Temperature",
         Version:   "1.0.0",
         RefreshMs: 2000,
     }, nil
 }
 
-func (m *CPUModule) Sample() (module.Payload, error) {
+func (m *CPUModule) Sample() (plugin.Payload, error) {
     temp := getCPUTemp() // System call
 
-    return module.Payload{
+    return plugin.Payload{
         Title:     "CPU",
         Primary:   fmt.Sprintf("%.1f°C", temp),
         Secondary: "Temperature",
@@ -402,15 +402,15 @@ func (m *CPUModule) Sample() (module.Payload, error) {
 
 func main() {
     plugin.Serve(&plugin.ServeConfig{
-        HandshakeConfig: module.Handshake,
+        HandshakeConfig: plugin.Handshake,
         Plugins: map[string]plugin.Plugin{
-            "module": &module.Plugin{Impl: &CPUModule{}},
+            "plugin": &plugin.Plugin{Impl: &CPUModule{}},
         },
     })
 }
 ```
 
-### Example Module (Python)
+### Example Plugin (Python)
 
 ```python
 #!/usr/bin/env python3
@@ -503,7 +503,7 @@ if __name__ == "__main__":
 - ✅ Tests passing (>70% coverage)
 - ✅ Visual consistency verified
 
-**Example Config (Mock Modules):**
+**Example Config (Mock Plugins):**
 ```yaml
 zones:
   - id: zone1
@@ -522,8 +522,8 @@ zones:
 **Goal:** Implement go-plugin RPC system
 
 **Tasks:**
-1. **Module Interface** (`pkg/module/interface.go`)
-   - Define Module interface
+1. **Plugin Interface** (`pkg/plugin/interface.go`)
+   - Define Plugin interface
    - Descriptor and Payload types
    - Handshake config for go-plugin
 
@@ -533,20 +533,20 @@ zones:
    - Timeout enforcement
    - Crash recovery and restart logic
 
-3. **Built-in Modules** (`internal/modules/builtin/`)
-   - `clock.go`: System time module
+3. **Built-in Plugins** (`internal/plugins/builtin/`)
+   - `clock.go`: System time plugin
    - `placeholder.go`: Error/loading display
    - `debug.go`: Zone visualization
 
 4. **Plugin Registry** (`internal/plugin/registry.go`)
-   - Discover modules (builtin, exec paths)
+   - Discover plugins (builtin, exec paths)
    - Version checking
    - Dependency validation
 
-5. **Example External Modules**
-   - `modules/cpu/`: Go plugin for CPU stats
-   - `modules/weather/`: Go plugin for weather
-   - `modules/hello/`: Minimal example for docs
+5. **Example External Plugins**
+   - `plugins/cpu/`: Go plugin for CPU stats
+   - `plugins/weather/`: Go plugin for weather
+   - `plugins/hello/`: Minimal example for docs
 
 6. **Testing**
    - Mock plugin for testing
@@ -555,53 +555,53 @@ zones:
 
 **Deliverables:**
 - ✅ go-plugin integration working
-- ✅ Built-in modules functional
-- ✅ Example external modules
+- ✅ Built-in plugins functional
+- ✅ Example external plugins
 - ✅ Plugin tests (isolation, crashes)
-- ✅ Documentation for writing modules
+- ✅ Documentation for writing plugins
 
 ---
 
 ### Phase 3: Migrate Existing Instruments (Week 5)
 
-**Goal:** Convert current instruments to modules
+**Goal:** Convert current instruments to plugins
 
 **Tasks:**
-1. **CPU Temperature Module** (`modules/cpu-temp/`)
+1. **CPU Temperature Plugin** (`plugins/cpu-temp/`)
    - Port from `internal/instruments/cpu_temp.go`
    - Linux/Windows/macOS support
    - Sparkline with historical temps
 
-2. **GPU Temperature Module** (`modules/gpu-temp/`)
+2. **GPU Temperature Plugin** (`plugins/gpu-temp/`)
    - Port from `internal/instruments/gpu_temp.go`
    - nvidia-smi integration
    - Threshold severity levels
 
-3. **Network Module** (`modules/network/`)
+3. **Network Plugin** (`plugins/network/`)
    - Port from `internal/instruments/network.go`
    - Upload/download sparklines
    - Bytes/s formatting
 
-4. **Weather Module** (`modules/weather/`)
+4. **Weather Plugin** (`plugins/weather/`)
    - Port from `internal/instruments/weather.go`
    - Open-Meteo + Nominatim geocoding
    - Icon mapping (Font Awesome)
 
-5. **Media Module** (`modules/media/`) - New
+5. **Media Plugin** (`plugins/media/`) - New
    - MPRIS D-Bus integration (Linux)
    - Now playing track/artist
    - Progress bar sparkline
 
-6. **System Stats Module** (`modules/sysinfo/`) - New
+6. **System Stats Plugin** (`plugins/sysinfo/`) - New
    - RAM usage
    - Disk usage
    - Uptime display
 
 **Deliverables:**
-- ✅ All v1.0 instruments as modules
+- ✅ All v1.0 instruments as plugins
 - ✅ Feature parity with current implementation
-- ✅ 2+ new modules (media, sysinfo)
-- ✅ Module documentation
+- ✅ 2+ new plugins (media, sysinfo)
+- ✅ Plugin documentation
 - ✅ Default layout configs
 
 ---
@@ -623,8 +623,8 @@ zones:
    - Debouncing and multi-touch
 
 3. **Zone Cycling** (`internal/zone/cycle.go`)
-   - Per-zone module choices
-   - Tap to cycle through modules
+   - Per-zone plugin choices
+   - Tap to cycle through plugins
    - State persistence (remember selections)
 
 4. **Page Transition Effects**
@@ -649,16 +649,16 @@ zones:
 pages:
   - name: "Dashboard"
     zones:
-      - { id: weather, width: 160, module: weather }
-      - { id: cpu, width: 160, module: cpu-temp }
-      - { id: gpu, width: 160, module: gpu-temp }
-      - { id: clock, width: 160, module: clock }
+      - { id: weather, width: 160, plugin: weather }
+      - { id: cpu, width: 160, plugin: cpu-temp }
+      - { id: gpu, width: 160, plugin: gpu-temp }
+      - { id: clock, width: 160, plugin: clock }
 
   - name: "Media"
     zones:
-      - { id: media, width: 320, module: media }
-      - { id: network, width: 160, module: network }
-      - { id: clock, width: 160, module: clock }
+      - { id: media, width: 320, plugin: media }
+      - { id: network, width: 160, plugin: network }
+      - { id: clock, width: 160, plugin: clock }
 ```
 
 ---
@@ -670,15 +670,15 @@ pages:
 **Tasks:**
 1. **Layout Editor Tab** (`ui/lib/src/widgets/layout/`)
    - Visual zone editor (drag widths)
-   - Module assignment dropdowns
+   - Plugin assignment dropdowns
    - Real-time preview (simulated display)
    - Save/load layout presets
 
-2. **Module Browser** (`ui/lib/src/widgets/modules/`)
-   - List available modules
+2. **Plugin Browser** (`ui/lib/src/widgets/plugins/`)
+   - List available plugins
    - Show Descriptor info (name, version, author)
-   - Test module (run Sample() manually)
-   - Install/update modules (future)
+   - Test plugin (run Sample() manually)
+   - Install/update plugins (future)
 
 3. **Theme Editor** (`ui/lib/src/widgets/theme/`)
    - Color pickers for theme values
@@ -695,13 +695,13 @@ pages:
 5. **API Extensions**
    - `GET /api/layout`: Current layout config
    - `POST /api/layout`: Update layout
-   - `GET /api/modules`: List available modules
-   - `GET /api/modules/{id}`: Module descriptor
-   - `POST /api/modules/{id}/sample`: Test module
+   - `GET /api/plugins`: List available plugins
+   - `GET /api/plugins/{id}`: Plugin descriptor
+   - `POST /api/plugins/{id}/sample`: Test plugin
 
 **Deliverables:**
 - ✅ Layout editor functional
-- ✅ Module browser working
+- ✅ Plugin browser working
 - ✅ Theme customization UI
 - ✅ API endpoints tested
 - ✅ User documentation
@@ -726,21 +726,21 @@ pages:
    - Recovery strategies
 
 3. **Documentation**
-   - **User Guide**: Layout creation, module usage
-   - **Developer Guide**: Writing modules, plugin API
-   - **Module Catalog**: Document all built-in modules
+   - **User Guide**: Layout creation, plugin usage
+   - **Developer Guide**: Writing plugins, plugin API
+   - **Plugin Catalog**: Document all built-in plugins
    - **Migration Guide**: v1.0 → v2.0 upgrade path
 
 4. **Testing**
    - Integration tests (full pipeline)
    - Visual regression tests
-   - Load testing (many modules)
+   - Load testing (many plugins)
    - Device compatibility
 
 5. **Packaging Updates**
    - Update DEB/AUR/AppImage for v2.0
-   - Module installation paths
-   - Example module packages
+   - Plugin installation paths
+   - Example plugin packages
    - Migration scripts
 
 **Deliverables:**
@@ -760,7 +760,7 @@ pages:
 nexus-open/
 ├── cmd/
 │   ├── nexus-open/           # Main host binary
-│   └── module-tool/          # CLI for testing modules
+│   └── plugin-tool/          # CLI for testing plugins
 ├── internal/
 │   ├── zone/                 # Zone manager & renderer
 │   │   ├── manager.go
@@ -774,7 +774,7 @@ nexus-open/
 │   ├── page/                 # Page manager
 │   │   ├── manager.go
 │   │   └── transitions.go
-│   ├── modules/              # Built-in modules
+│   ├── plugins/              # Built-in plugins
 │   │   ├── clock.go
 │   │   ├── placeholder.go
 │   │   └── debug.go
@@ -785,11 +785,11 @@ nexus-open/
 │       ├── engine.go
 │       └── compositor.go
 ├── pkg/
-│   └── module/               # Public module interface
+│   └── plugin/               # Public plugin interface
 │       ├── interface.go
 │       ├── payload.go
 │       └── plugin.go
-├── modules/                  # External modules (examples)
+├── plugins/                  # External plugins (examples)
 │   ├── cpu-temp/
 │   ├── gpu-temp/
 │   ├── weather/
@@ -805,7 +805,7 @@ nexus-open/
 │       ├── dark.yaml
 │       └── light.yaml
 └── docs/
-    ├── MODULE_GUIDE.md       # Writing modules
+    ├── MODULE_GUIDE.md       # Writing plugins
     ├── LAYOUT_GUIDE.md       # Creating layouts
     └── MIGRATION_v2.md       # v1 → v2 upgrade
 ```
@@ -826,11 +826,11 @@ display:
   fps: 30
   default_page: 0
 
-# Module paths
-modules:
+# Plugin paths
+plugins:
   search_paths:
-    - ~/.config/nexus-open/modules
-    - /usr/local/lib/nexus-open/modules
+    - ~/.config/nexus-open/plugins
+    - /usr/local/lib/nexus-open/plugins
   timeout_ms: 500
 
 # API server
@@ -861,19 +861,19 @@ pages:
     zones:
       - id: weather
         width: 160
-        module: builtin:placeholder  # Or exec:./modules/weather
+        plugin: builtin:placeholder  # Or exec:./plugins/weather
         refresh_ms: 300000           # 5 minutes
         align: left
 
       - id: cpu
         width: 160
-        module: exec:./modules/cpu-temp
+        plugin: exec:./plugins/cpu-temp
         refresh_ms: 2000
         align: center
 
       - id: gpu
         width: 160
-        module: exec:./modules/gpu-temp
+        plugin: exec:./plugins/gpu-temp
         refresh_ms: 2000
         align: center
         theme_override:
@@ -881,7 +881,7 @@ pages:
 
       - id: clock
         width: 160
-        module: builtin:clock
+        plugin: builtin:clock
         refresh_ms: 1000
         align: right
 
@@ -889,19 +889,19 @@ pages:
     zones:
       - id: media
         width: 320
-        module: exec:./modules/media
+        plugin: exec:./plugins/media
         refresh_ms: 1000
         align: left
 
       - id: network
         width: 160
-        module: exec:./modules/network
+        plugin: exec:./plugins/network
         refresh_ms: 2000
         align: center
 
       - id: clock
         width: 160
-        module: builtin:clock
+        plugin: builtin:clock
         refresh_ms: 1000
         align: right
 
@@ -912,10 +912,10 @@ navigation:
   auto_rotate_interval_s: 10
 ```
 
-### Module Payload Specification
+### Plugin Payload Specification
 
 ```go
-// Payload represents data from a module
+// Payload represents data from a plugin
 type Payload struct {
     // Title - Zone header (optional, often omitted for space)
     Title string `json:"title,omitempty"`
@@ -1056,9 +1056,9 @@ Output: 640×48×3 byte array (RGB) → USB
 |--------|--------|-------------|
 | **Render Time** | <16ms/frame | 60 FPS capability |
 | **RPC Latency** | <2ms | go-plugin overhead |
-| **Module Sample** | <500ms | Timeout threshold |
+| **Plugin Sample** | <500ms | Timeout threshold |
 | **Config Reload** | <1s | Hot reload speed |
-| **Memory Usage** | <75MB | Including all modules |
+| **Memory Usage** | <75MB | Including all plugins |
 | **CPU Idle** | <3% | No active updates |
 | **CPU Active** | <15% | Full render + sampling |
 
@@ -1100,7 +1100,7 @@ var IconMap = map[string]string{
 Reasons:
 1. Layout system completely replaced
 2. Config format changed (YAML → multi-file YAML)
-3. Instruments → Modules (different interface)
+3. Instruments → Plugins (different interface)
 4. API endpoints extended (new routes)
 
 **Migration Path:**
@@ -1113,8 +1113,8 @@ Reasons:
    - Creates default zone layout matching v1 UI
    - Preserves theme colors and preferences
 
-2. **Module Compatibility Layer** (Optional)
-   - Wrapper that runs v1 instrument code as v2 module
+2. **Plugin Compatibility Layer** (Optional)
+   - Wrapper that runs v1 instrument code as v2 plugin
    - Lower performance but avoids rewrite
    - Only for custom user instruments
 
@@ -1161,12 +1161,12 @@ Reasons:
 | Requirement | Acceptance Test |
 |-------------|-----------------|
 | **Zone System** | User creates 5-zone layout, all zones render correctly |
-| **Plugin Isolation** | Kill module process, host continues running |
+| **Plugin Isolation** | Kill plugin process, host continues running |
 | **Hot Reload** | Edit layout YAML, changes apply in <2s without restart |
 | **Multi-Page** | Configure 3 pages, swipe navigation works |
-| **Touch Interaction** | Tap zone to cycle modules, no lag |
+| **Touch Interaction** | Tap zone to cycle plugins, no lag |
 | **Visual Consistency** | All zones use same font/color scheme |
-| **Performance** | 60 FPS render loop, <500ms module sampling |
+| **Performance** | 60 FPS render loop, <500ms plugin sampling |
 
 ### Quality Requirements
 
@@ -1174,7 +1174,7 @@ Reasons:
 |--------|--------|------------|
 | **Test Coverage** | ≥75% | `go test -cover ./...` |
 | **RPC Latency** | <2ms avg | Benchmark 1000 RPC calls |
-| **Memory Usage** | <75MB | Run 8 modules for 1 hour |
+| **Memory Usage** | <75MB | Run 8 plugins for 1 hour |
 | **CPU Usage (idle)** | <3% | Monitor with no display updates |
 | **Config Reload** | <1s | Measure hot reload time |
 | **Plugin Crash Recovery** | <100ms | Kill plugin, measure restart |
@@ -1183,10 +1183,10 @@ Reasons:
 
 | Document | Completeness |
 |----------|--------------|
-| **User Guide** | Layout editor, module browser, troubleshooting |
-| **Developer Guide** | Module API, RPC protocol, example code |
+| **User Guide** | Layout editor, plugin browser, troubleshooting |
+| **Developer Guide** | Plugin API, RPC protocol, example code |
 | **Migration Guide** | v1→v2 conversion, breaking changes, FAQ |
-| **Module Catalog** | All built-in modules documented with examples |
+| **Plugin Catalog** | All built-in plugins documented with examples |
 | **API Reference** | OpenAPI spec for all HTTP endpoints |
 
 ### User Experience Requirements
@@ -1197,7 +1197,7 @@ Reasons:
 | **Visual Polish** | No tearing, no flicker, smooth transitions |
 | **Error Messages** | All failure modes show helpful error text |
 | **Performance Feel** | No perceptible lag on interaction |
-| **Plugin Discovery** | User finds and installs community module in <2 min |
+| **Plugin Discovery** | User finds and installs community plugin in <2 min |
 
 ---
 
@@ -1209,7 +1209,7 @@ Reasons:
 |-------|----------|--------|--------------|
 | **Phase 1: Zone System** | 2 weeks | 80 hours | None |
 | **Phase 2: Plugins** | 2 weeks | 80 hours | Phase 1 complete |
-| **Phase 3: Migrate Modules** | 1 week | 40 hours | Phase 2 complete |
+| **Phase 3: Migrate Plugins** | 1 week | 40 hours | Phase 2 complete |
 | **Phase 4: Pages & Touch** | 1 week | 40 hours | Phase 1 complete |
 | **Phase 5: Config UI** | 1 week | 40 hours | Phase 2 complete |
 | **Phase 6: Polish** | 1 week | 40 hours | All phases complete |
@@ -1227,11 +1227,11 @@ Reasons:
 
 **Week 4: Plugins Functional**
 - ✅ go-plugin RPC working
-- ✅ 3+ example modules (CPU, Clock, Weather)
+- ✅ 3+ example plugins (CPU, Clock, Weather)
 - ✅ Plugin crash recovery tested
 
 **Week 5: Feature Parity with v1.0**
-- ✅ All v1 instruments ported to modules
+- ✅ All v1 instruments ported to plugins
 - ✅ Default layout matches v1 UI
 - ✅ Performance equal or better
 
@@ -1242,7 +1242,7 @@ Reasons:
 
 **Week 7: Config UI Complete**
 - ✅ Layout editor in Flutter UI
-- ✅ Module browser functional
+- ✅ Plugin browser functional
 - ✅ Theme customization working
 
 **Week 8: Production Ready**
@@ -1289,7 +1289,7 @@ Reasons:
 |------|-------------|--------|------------|
 | **go-plugin complexity** | Medium | High | Prototype early, use official examples |
 | **Performance regression** | Medium | Medium | Benchmark frequently, profile before release |
-| **Plugin ecosystem fragmentation** | Low | Medium | Strong documentation, reference modules |
+| **Plugin ecosystem fragmentation** | Low | Medium | Strong documentation, reference plugins |
 | **Config validation complexity** | Medium | Low | Schema validation library, extensive tests |
 | **Touch input bugs** | Low | Medium | Thorough gesture testing, debounce logic |
 
@@ -1309,7 +1309,7 @@ Reasons:
 |------|-------------|--------|------------|
 | **Migration difficulty** | High | Medium | Automated migration tool, detailed docs |
 | **Config complexity** | Medium | Medium | Presets + visual editor, not just YAML |
-| **Module installation confusion** | Medium | Low | Module browser in UI, one-click install (future) |
+| **Plugin installation confusion** | Medium | Low | Plugin browser in UI, one-click install (future) |
 | **Performance on old hardware** | Low | Low | Optimization passes, configurable FPS |
 
 ---
@@ -1317,7 +1317,7 @@ Reasons:
 ## Future Enhancements (Post-v2.0)
 
 ### v2.1: Community Features
-- **Module Marketplace**: Discover and install community modules
+- **Plugin Marketplace**: Discover and install community plugins
 - **Cloud Sync**: Sync layouts/themes across devices
 - **Layout Templates**: Share layouts via import/export
 
@@ -1327,13 +1327,13 @@ Reasons:
 - **Dynamic Sizing**: Zones resize based on content
 
 ### v2.3: Developer Tools
-- **Module SDK**: CLI tool for scaffolding modules
-- **Hot Reload**: Live code updates for modules during development
-- **Debugging UI**: Inspect module RPC traffic, payloads
+- **Plugin SDK**: CLI tool for scaffolding plugins
+- **Hot Reload**: Live code updates for plugins during development
+- **Debugging UI**: Inspect plugin RPC traffic, payloads
 
 ### v3.0: Scripting & Automation
-- **Lua Scripting**: Simple modules without compilation
-- **Event System**: Modules react to device events
+- **Lua Scripting**: Simple plugins without compilation
+- **Event System**: Plugins react to device events
 - **Automation Rules**: Trigger actions based on data (future)
 
 ---
@@ -1345,12 +1345,12 @@ Reasons:
 | Term | Definition |
 |------|------------|
 | **Zone** | Horizontal partition of the 640x48 display |
-| **Module** | Plugin that provides data via RPC (CPU, Weather, etc.) |
-| **Payload** | Data structure returned by modules (Primary, Secondary, etc.) |
+| **Plugin** | Plugin that provides data via RPC (CPU, Weather, etc.) |
+| **Payload** | Data structure returned by plugins (Primary, Secondary, etc.) |
 | **Host** | Main nexus-open process that manages zones and rendering |
 | **Plugin** | External process launched via go-plugin RPC |
 | **Page** | Set of zones that can be swapped via navigation |
-| **Layout** | Configuration file defining zones and their modules |
+| **Layout** | Configuration file defining zones and their plugins |
 | **Theme** | Color scheme and typography settings |
 
 ### References
@@ -1363,7 +1363,7 @@ Reasons:
 
 ### Related Documents
 
-- [MODULE_GUIDE.md](docs/MODULE_GUIDE.md) - Writing custom modules (TBD)
+- [MODULE_GUIDE.md](docs/MODULE_GUIDE.md) - Writing custom plugins (TBD)
 - [LAYOUT_GUIDE.md](docs/LAYOUT_GUIDE.md) - Creating layouts (TBD)
 - [MIGRATION_v2.md](docs/MIGRATION_v2.md) - Upgrading from v1.0 (TBD)
 - [API_REFERENCE.md](docs/API_REFERENCE.md) - HTTP API specification (TBD)

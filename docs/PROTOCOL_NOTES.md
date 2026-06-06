@@ -212,7 +212,7 @@ func (n *NexusDevice) GetFirmwareVersion() (string, error) {
 
 - **NexusTool**: https://github.com/willneedit/NexusTool (C#, HID-based)
 - **iCUE-ReverseEngineer**: https://github.com/Aytackydln/iCUE-ReverseEngineer (C#, iCUE emulation)
-- **companion-module-icue-nexus**: https://github.com/bitfocus/companion-module-icue-nexus (TypeScript)
+- **companion-plugin-icue-nexus**: https://github.com/bitfocus/companion-plugin-icue-nexus (TypeScript)
 
 ## Notes
 

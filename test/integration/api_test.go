@@ -337,7 +337,7 @@ func TestBrightness_OutOfRange(t *testing.T) {
 
 // ── Module config ─────────────────────────────────────────────────────────────
 
-func TestModuleConfig_GetEmpty(t *testing.T) {
+func TestPluginConfig_GetEmpty(t *testing.T) {
 	_, base := newTestServer(t)
 
 	resp := get(t, base+"/api/plugins/cpu-temp/config")
@@ -356,14 +356,14 @@ func TestModuleConfig_GetEmpty(t *testing.T) {
 	}
 }
 
-func TestModuleConfig_SetAndGet(t *testing.T) {
+func TestPluginConfig_SetAndGet(t *testing.T) {
 	_, base := newTestServer(t)
 
 	payload := map[string]any{"unit": "metric", "graph": "sparkline"}
 	resp := postJSON(t, base+"/api/plugins/cpu-temp/config", payload)
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Fatalf("POST module config: expected 200, got %d", resp.StatusCode)
+		t.Fatalf("POST plugin config: expected 200, got %d", resp.StatusCode)
 	}
 
 	var got map[string]any

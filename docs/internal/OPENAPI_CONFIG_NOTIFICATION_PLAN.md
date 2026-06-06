@@ -1,8 +1,8 @@
-# OpenAPI 3 + Module Config Notification System
+# OpenAPI 3 + Plugin Config Notification System
 
 **Status**: Planning
 **Created**: 2025-10-21
-**Goal**: Add OpenAPI 3 spec for Flutter/Go communication + Generic module config change notifications
+**Goal**: Add OpenAPI 3 spec for Flutter/Go communication + Generic plugin config change notifications
 
 ## Table of Contents
 
@@ -22,15 +22,15 @@
 ### Objectives
 
 1. **OpenAPI 3 Integration**: Add type-safe API contract between Flutter UI and Go backend
-2. **Config Notification System**: Replace file-watching with event-driven config updates for modules
+2. **Config Notification System**: Replace file-watching with event-driven config updates for plugins
 3. **Developer Experience**: Auto-generate Dart models and API clients from Go code
 
 ### Key Benefits
 
 - **Type Safety**: Compile-time errors instead of runtime errors
 - **Auto-Generation**: Dart models generated from OpenAPI spec
-- **Real-time Updates**: Modules receive config changes via RPC instead of polling files
-- **Scalability**: Works for any number of modules
+- **Real-time Updates**: Plugins receive config changes via RPC instead of polling files
+- **Scalability**: Works for any number of plugins
 - **Documentation**: Self-documenting API
 
 ---
@@ -63,22 +63,22 @@ API Handler
     ↓ Save to file (~/.config/nexus-open/config.yaml)
 File System
     ↓ fsnotify detects change
-Weather Module (watches file)
+Weather Plugin (watches file)
     ↓ Reloads config
 ```
 
-### Module RPC Interface
+### Plugin RPC Interface
 
-**File**: `pkg/module/types.go`
+**File**: `pkg/plugin/types.go`
 
 ```go
-type Module interface {
+type Plugin interface {
     Describe() (Descriptor, error)
     Sample() (Payload, error)
 }
 ```
 
-**Current limitation**: Modules only respond to host requests, cannot receive push notifications
+**Current limitation**: Plugins only respond to host requests, cannot receive push notifications
 
 ---
 
@@ -111,22 +111,22 @@ await api.configApi.updateConfig(
 
 ### 2. Config Notification
 
-**Problem**: Each module implements its own file watching
-- Duplicated code across modules
+**Problem**: Each plugin implements its own file watching
+- Duplicated code across plugins
 - File system polling overhead
-- Delay between API update and module receiving change
-- Module-specific implementation (not reusable)
+- Delay between API update and plugin receiving change
+- Plugin-specific implementation (not reusable)
 
 **Solution**: Event-driven RPC notifications
-- API broadcasts to all modules
+- API broadcasts to all plugins
 - Real-time, no polling
-- Generic implementation for all modules
+- Generic implementation for all plugins
 
-### 3. Module Independence
+### 3. Plugin Independence
 
-**Problem**: Modules need to decide which config changes matter to them
+**Problem**: Plugins need to decide which config changes matter to them
 
-**Solution**: Modules implement optional `ConfigNotifier` interface
+**Solution**: Plugins implement optional `ConfigNotifier` interface
 ```go
 type ConfigNotifier interface {
     OnConfigChanged(config map[string]interface{}) error
@@ -158,12 +158,12 @@ type ConfigNotifier interface {
              ↓
     API Handler validates & saves
              ↓
-    Broadcast to all modules via RPC
+    Broadcast to all plugins via RPC
              ↓
     ┌────────┬────────┬──────────┬──────────┐
     ↓        ↓        ↓          ↓          ↓
 Weather   CPU     GPU       Network    (future)
-Module   Module  Module     Module     modules
+Plugin   Plugin  Plugin     Plugin     plugins
 ```
 
 ### New Config Flow
@@ -177,7 +177,7 @@ API Handler
     ↓ Broadcasts via ModuleNotifier
 RPC Layer
     ↓ OnConfigChanged(config map)
-Modules implementing ConfigNotifier
+Plugins implementing ConfigNotifier
     ↓ Extract relevant config
     ↓ Update internal state
 ```
@@ -223,7 +223,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary Update configuration
-// @Description Updates the application configuration and notifies modules
+// @Description Updates the application configuration and notifies plugins
 // @Tags config
 // @Accept json
 // @Produce json
@@ -342,37 +342,37 @@ echo "Generating Flutter API client..."
 
 ---
 
-### Phase 1: Extend Module Interface 🔌
+### Phase 1: Extend Plugin Interface 🔌
 
 **Goal**: Add optional config notification interface
 
 #### Step 1.1: Add ConfigNotifier Interface
 
-**File**: `pkg/module/types.go`
+**File**: `pkg/plugin/types.go`
 
 ```go
-// ConfigNotifier is an optional interface modules can implement
+// ConfigNotifier is an optional interface plugins can implement
 // to receive real-time configuration change notifications
 type ConfigNotifier interface {
     // OnConfigChanged is called when the global configuration is updated.
-    // The module should inspect the config map and update its state if relevant.
+    // The plugin should inspect the config map and update its state if relevant.
     //
     // Args:
     //   config: Full configuration as key-value map
     //
     // Returns:
-    //   error if the module failed to process the config change
+    //   error if the plugin failed to process the config change
     OnConfigChanged(config map[string]interface{}) error
 }
 ```
 
 #### Step 1.2: Type Assertion Helper
 
-**File**: `pkg/module/types.go`
+**File**: `pkg/plugin/types.go`
 
 ```go
-// SupportsConfigNotification checks if a module implements ConfigNotifier
-func SupportsConfigNotification(m Module) (ConfigNotifier, bool) {
+// SupportsConfigNotification checks if a plugin implements ConfigNotifier
+func SupportsConfigNotification(m Plugin) (ConfigNotifier, bool) {
     notifier, ok := m.(ConfigNotifier)
     return notifier, ok
 }
@@ -386,7 +386,7 @@ func SupportsConfigNotification(m Module) (ConfigNotifier, bool) {
 
 #### Step 2.1: Add RPC Method to Client
 
-**File**: `pkg/module/plugin.go`
+**File**: `pkg/plugin/plugin.go`
 
 ```go
 // OnConfigChanged sends a config change notification to the plugin
@@ -394,7 +394,7 @@ func (c *RPCClient) OnConfigChanged(config map[string]interface{}) error {
     var resp struct{} // Empty response
     err := c.client.Call("Plugin.OnConfigChanged", config, &resp)
     if err != nil && err.Error() == "rpc: can't find method Plugin.OnConfigChanged" {
-        // Module doesn't implement ConfigNotifier, silently ignore
+        // Plugin doesn't implement ConfigNotifier, silently ignore
         return nil
     }
     return err
@@ -403,23 +403,23 @@ func (c *RPCClient) OnConfigChanged(config map[string]interface{}) error {
 
 #### Step 2.2: Add RPC Method to Server
 
-**File**: `pkg/module/plugin.go`
+**File**: `pkg/plugin/plugin.go`
 
 ```go
 // OnConfigChanged implements the OnConfigChanged RPC
 func (s *RPCServer) OnConfigChanged(config map[string]interface{}, resp *struct{}) error {
-    // Check if module implements ConfigNotifier
+    // Check if plugin implements ConfigNotifier
     if notifier, ok := s.Impl.(ConfigNotifier); ok {
         return notifier.OnConfigChanged(config)
     }
-    // Module doesn't implement interface, no-op
+    // Plugin doesn't implement interface, no-op
     return nil
 }
 ```
 
 #### Step 2.3: Register Types for Encoding
 
-**File**: `pkg/module/plugin.go`
+**File**: `pkg/plugin/plugin.go`
 
 ```go
 func init() {
@@ -434,66 +434,66 @@ func init() {
 
 ### Phase 3: Add Broadcast Mechanism 📢
 
-**Goal**: Create a notifier to broadcast config changes to all modules
+**Goal**: Create a notifier to broadcast config changes to all plugins
 
-#### Step 3.1: Create Module Notifier
+#### Step 3.1: Create Plugin Notifier
 
-**New File**: `internal/modules/notifier.go`
+**New File**: `internal/plugins/notifier.go`
 
 ```go
-package modules
+package plugins
 
 import (
     "fmt"
     "log/slog"
     "sync"
 
-    "nexus-open/pkg/module"
+    "nexus-open/pkg/plugin"
 )
 
-// ModuleNotifier broadcasts configuration changes to all active modules
+// ModuleNotifier broadcasts configuration changes to all active plugins
 type ModuleNotifier struct {
     mu      sync.RWMutex
-    modules map[string]module.Module // zone_id -> module RPC client
+    plugins map[string]plugin.Plugin // zone_id -> plugin RPC client
     logger  *slog.Logger
 }
 
 // NewModuleNotifier creates a new notifier
 func NewModuleNotifier(logger *slog.Logger) *ModuleNotifier {
     return &ModuleNotifier{
-        modules: make(map[string]module.Module),
+        plugins: make(map[string]plugin.Plugin),
         logger:  logger,
     }
 }
 
-// RegisterModule adds a module to receive config notifications
-func (n *ModuleNotifier) RegisterModule(zoneID string, mod module.Module) {
+// RegisterModule adds a plugin to receive config notifications
+func (n *ModuleNotifier) RegisterModule(zoneID string, mod plugin.Plugin) {
     n.mu.Lock()
     defer n.mu.Unlock()
-    n.modules[zoneID] = mod
-    n.logger.Debug("module registered for notifications", "zone_id", zoneID)
+    n.plugins[zoneID] = mod
+    n.logger.Debug("plugin registered for notifications", "zone_id", zoneID)
 }
 
-// UnregisterModule removes a module from notifications
+// UnregisterModule removes a plugin from notifications
 func (n *ModuleNotifier) UnregisterModule(zoneID string) {
     n.mu.Lock()
     defer n.mu.Unlock()
-    delete(n.modules, zoneID)
-    n.logger.Debug("module unregistered from notifications", "zone_id", zoneID)
+    delete(n.plugins, zoneID)
+    n.logger.Debug("plugin unregistered from notifications", "zone_id", zoneID)
 }
 
-// BroadcastConfigChange sends config update to all registered modules
+// BroadcastConfigChange sends config update to all registered plugins
 func (n *ModuleNotifier) BroadcastConfigChange(config map[string]interface{}) {
     n.mu.RLock()
     defer n.mu.RUnlock()
 
-    n.logger.Info("broadcasting config change to modules", "module_count", len(n.modules))
+    n.logger.Info("broadcasting config change to plugins", "module_count", len(n.plugins))
 
-    for zoneID, mod := range n.modules {
-        // Check if module implements ConfigNotifier via RPC
-        if rpcClient, ok := mod.(*module.RPCClient); ok {
+    for zoneID, mod := range n.plugins {
+        // Check if plugin implements ConfigNotifier via RPC
+        if rpcClient, ok := mod.(*plugin.RPCClient); ok {
             if err := rpcClient.OnConfigChanged(config); err != nil {
-                n.logger.Warn("failed to notify module",
+                n.logger.Warn("failed to notify plugin",
                     "zone_id", zoneID,
                     "error", err)
             } else {
@@ -510,11 +510,11 @@ func (n *ModuleNotifier) BroadcastConfigChange(config map[string]interface{}) {
 **File**: `internal/app/app.go`
 
 ```go
-import "nexus-open/internal/modules"
+import "nexus-open/internal/plugins"
 
 type App struct {
     // ... existing fields
-    moduleNotifier *modules.ModuleNotifier
+    moduleNotifier *plugins.ModuleNotifier
 }
 
 func New(cfg *config.Manager, logger *slog.Logger) (*App, error) {
@@ -522,29 +522,29 @@ func New(cfg *config.Manager, logger *slog.Logger) (*App, error) {
 
     app := &App{
         // ... existing fields
-        moduleNotifier: modules.NewModuleNotifier(logger),
+        moduleNotifier: plugins.NewModuleNotifier(logger),
     }
 
     return app, nil
 }
 
 // Expose notifier for API server
-func (a *App) ModuleNotifier() *modules.ModuleNotifier {
+func (a *App) ModuleNotifier() *plugins.ModuleNotifier {
     return a.moduleNotifier
 }
 ```
 
-#### Step 3.3: Register Modules with Notifier
+#### Step 3.3: Register Plugins with Notifier
 
-**File**: `internal/zone/manager.go` (or wherever modules are launched)
+**File**: `internal/zone/manager.go` (or wherever plugins are launched)
 
 ```go
-// When launching a module plugin:
+// When launching a plugin plugin:
 func (m *Manager) launchModule(zoneID string, modulePath string) error {
     // ... existing plugin launch code
 
     // Get RPC client
-    rpcClient := raw.(module.Module)
+    rpcClient := raw.(plugin.Plugin)
 
     // Register with notifier for config updates
     m.app.ModuleNotifier().RegisterModule(zoneID, rpcClient)
@@ -552,7 +552,7 @@ func (m *Manager) launchModule(zoneID string, modulePath string) error {
     // ... rest of launch code
 }
 
-// When stopping a module:
+// When stopping a plugin:
 func (m *Manager) stopModule(zoneID string) {
     // ... existing stop code
 
@@ -572,14 +572,14 @@ func (m *Manager) stopModule(zoneID string) {
 **File**: `internal/api/server.go`
 
 ```go
-import "nexus-open/internal/modules"
+import "nexus-open/internal/plugins"
 
 type Server struct {
     // ... existing fields
-    moduleNotifier *modules.ModuleNotifier
+    moduleNotifier *plugins.ModuleNotifier
 }
 
-func New(addr string, cfg *config.Manager, device device.Device, logger *slog.Logger, notifier *modules.ModuleNotifier) *Server {
+func New(addr string, cfg *config.Manager, device device.Device, logger *slog.Logger, notifier *plugins.ModuleNotifier) *Server {
     return &Server{
         // ... existing fields
         moduleNotifier: notifier,
@@ -608,7 +608,7 @@ func (a *App) Start() error {
 
 ```go
 // @Summary Update configuration
-// @Description Updates the application configuration and notifies all modules
+// @Description Updates the application configuration and notifies all plugins
 // @Tags config
 // @Accept json
 // @Produce json
@@ -638,11 +638,11 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Broadcast to all modules
+    // Broadcast to all plugins
     configMap := configToMap(newConfig)
     s.moduleNotifier.BroadcastConfigChange(configMap)
 
-    s.logger.Info("configuration updated and broadcast to modules")
+    s.logger.Info("configuration updated and broadcast to plugins")
     s.respondSuccess(w, "Configuration updated successfully", nil)
 }
 
@@ -659,13 +659,13 @@ func configToMap(cfg config.Config) map[string]interface{} {
 
 ---
 
-### Phase 5: Update Weather Module 🌤️
+### Phase 5: Update Weather Plugin 🌤️
 
-**Goal**: Migrate weather module from file watching to RPC notifications
+**Goal**: Migrate weather plugin from file watching to RPC notifications
 
 #### Step 5.1: Remove File Watching
 
-**File**: `modules/weather/main.go`
+**File**: `plugins/weather/main.go`
 
 ```go
 // Remove this line from NewWeatherModule():
@@ -691,10 +691,10 @@ func NewWeatherModule() *WeatherModule {
 
 #### Step 5.2: Implement ConfigNotifier Interface
 
-**File**: `modules/weather/main.go`
+**File**: `plugins/weather/main.go`
 
 ```go
-// OnConfigChanged implements module.ConfigNotifier
+// OnConfigChanged implements plugin.ConfigNotifier
 func (m *WeatherModule) OnConfigChanged(config map[string]interface{}) error {
     m.mu.Lock()
     defer m.mu.Unlock()
@@ -731,20 +731,20 @@ func (m *WeatherModule) OnConfigChanged(config map[string]interface{}) error {
 
 #### Step 5.3: Delete watch.go
 
-**File**: `modules/weather/watch.go`
+**File**: `plugins/weather/watch.go`
 
 ```bash
 # Delete this file - no longer needed
-rm modules/weather/watch.go
+rm plugins/weather/watch.go
 ```
 
 #### Step 5.4: Update Sample() Method
 
-**File**: `modules/weather/main.go`
+**File**: `plugins/weather/main.go`
 
 ```go
 // Sample returns current weather data
-func (m *WeatherModule) Sample() (module.Payload, error) {
+func (m *WeatherModule) Sample() (plugin.Payload, error) {
     // No longer need to call loadConfig() here - config updates via RPC
 
     // Check cache
@@ -821,7 +821,7 @@ swag init -g cmd/nexus-open/main.go -o api/
 
 ```go
 // Go struct -> map[string]interface{} -> gob encoding -> RPC
-// RPC -> gob decoding -> map[string]interface{} -> Module extracts fields
+// RPC -> gob decoding -> map[string]interface{} -> Plugin extracts fields
 ```
 
 ---
@@ -830,25 +830,25 @@ swag init -g cmd/nexus-open/main.go -o api/
 
 ### Unit Tests
 
-**Test**: `pkg/module/types_test.go`
+**Test**: `pkg/plugin/types_test.go`
 ```go
 func TestConfigNotifier(t *testing.T) {
-    // Test that modules implementing ConfigNotifier are detected
-    // Test that modules NOT implementing it return false
+    // Test that plugins implementing ConfigNotifier are detected
+    // Test that plugins NOT implementing it return false
 }
 ```
 
-**Test**: `internal/modules/notifier_test.go`
+**Test**: `internal/plugins/notifier_test.go`
 ```go
 func TestBroadcastConfigChange(t *testing.T) {
-    // Mock module implementing ConfigNotifier
+    // Mock plugin implementing ConfigNotifier
     // Register mock
     // Broadcast config
     // Verify OnConfigChanged was called with correct config
 }
 ```
 
-**Test**: `modules/weather/config_test.go`
+**Test**: `plugins/weather/config_test.go`
 ```go
 func TestWeatherModuleConfigNotification(t *testing.T) {
     wm := NewWeatherModule()
@@ -872,10 +872,10 @@ func TestWeatherModuleConfigNotification(t *testing.T) {
 ```go
 func TestConfigUpdateFlow(t *testing.T) {
     // Start app with test config
-    // Launch weather module
+    // Launch weather plugin
     // POST /api/config with new location
     // Wait briefly
-    // Sample weather module
+    // Sample weather plugin
     // Verify new location is reflected
 }
 ```
@@ -885,8 +885,8 @@ func TestConfigUpdateFlow(t *testing.T) {
 1. Start dev environment: `./dev.sh`
 2. Open Swagger UI: `http://localhost:1985/swagger/`
 3. Test POST `/api/config` with different locations
-4. Check logs for "broadcasting config change to modules"
-5. Verify weather module updates without file watching
+4. Check logs for "broadcasting config change to plugins"
+5. Verify weather plugin updates without file watching
 
 ---
 
@@ -895,23 +895,23 @@ func TestConfigUpdateFlow(t *testing.T) {
 ### Step-by-Step Rollout
 
 1. ✅ **Phase 0**: Add OpenAPI (non-breaking, additive)
-2. ✅ **Phase 1-2**: Extend module interface (non-breaking, optional)
+2. ✅ **Phase 1-2**: Extend plugin interface (non-breaking, optional)
 3. ✅ **Phase 3**: Add notifier (non-breaking, infrastructure)
-4. ✅ **Phase 4**: API broadcasts (works with or without modules listening)
-5. ✅ **Phase 5**: Migrate weather module (one module at a time)
-6. 🔄 **Future**: Migrate other modules as needed
+4. ✅ **Phase 4**: API broadcasts (works with or without plugins listening)
+5. ✅ **Phase 5**: Migrate weather plugin (one plugin at a time)
+6. 🔄 **Future**: Migrate other plugins as needed
 
 ### Backward Compatibility
 
-- Old modules without `ConfigNotifier`: **Still work** (RPC call silently ignored)
-- API still writes to file: **File-based modules still work**
+- Old plugins without `ConfigNotifier`: **Still work** (RPC call silently ignored)
+- API still writes to file: **File-based plugins still work**
 - OpenAPI spec: **Does not break existing HTTP clients**
 
 ### Rollback Plan
 
 If issues arise:
 1. Revert API handler changes (remove broadcast call)
-2. Weather module falls back to file watching
+2. Weather plugin falls back to file watching
 3. OpenAPI spec remains (doesn't affect runtime)
 
 ---
@@ -929,9 +929,9 @@ API Server
 Flutter UI auto-updates settings screen
 ```
 
-### Phase 8: Per-Module Config (Optional)
+### Phase 8: Per-Plugin Config (Optional)
 
-Allow modules to declare their config schema:
+Allow plugins to declare their config schema:
 ```go
 type ConfigurableModule interface {
     ConfigSchema() ConfigSchema
@@ -961,16 +961,16 @@ func ValidateConfig(config Config) error {
 - [ ] Type-safe Dart models for all API objects
 
 ✅ **Config Notification**:
-- [ ] Weather module receives config changes via RPC
-- [ ] No file watching in weather module
+- [ ] Weather plugin receives config changes via RPC
+- [ ] No file watching in weather plugin
 - [ ] Config updates from Flutter UI work in < 100ms
-- [ ] Multiple modules can receive notifications independently
+- [ ] Multiple plugins can receive notifications independently
 
 ✅ **Developer Experience**:
 - [ ] `dev.sh` auto-generates OpenAPI spec
 - [ ] `dev.sh` auto-generates Flutter client
 - [ ] New API endpoints only require swag annotations
-- [ ] Module developers can opt-in to config notifications easily
+- [ ] Plugin developers can opt-in to config notifications easily
 
 ✅ **Testing**:
 - [ ] Unit tests for config notification system
@@ -982,10 +982,10 @@ func ValidateConfig(config Config) error {
 ## Timeline Estimate
 
 - **Phase 0** (OpenAPI): 2-3 hours
-- **Phase 1-2** (Module interface + RPC): 1-2 hours
+- **Phase 1-2** (Plugin interface + RPC): 1-2 hours
 - **Phase 3** (Notifier): 1-2 hours
 - **Phase 4** (API integration): 1 hour
-- **Phase 5** (Weather module): 1 hour
+- **Phase 5** (Weather plugin): 1 hour
 - **Testing**: 2 hours
 - **Total**: ~8-12 hours
 
@@ -996,27 +996,27 @@ func ValidateConfig(config Config) error {
 ### Q1: Should we use `map[string]interface{}` or structured config?
 
 **Decision**: Use `map[string]interface{}` for flexibility
-- Allows any module to extract its relevant fields
-- No coupling between module config and global config struct
+- Allows any plugin to extract its relevant fields
+- No coupling between plugin config and global config struct
 - Easier to extend in the future
 
 ### Q2: Should config notification be synchronous or async?
 
-**Decision**: Synchronous (wait for module to process)
+**Decision**: Synchronous (wait for plugin to process)
 - Simpler error handling
 - Guaranteed order of updates
-- Modules should process quickly (< 10ms typically)
+- Plugins should process quickly (< 10ms typically)
 
-### Q3: What if a module's OnConfigChanged fails?
+### Q3: What if a plugin's OnConfigChanged fails?
 
-**Decision**: Log warning, continue broadcasting to other modules
-- One module's failure shouldn't block others
-- Module will get next config on next Sample() call
+**Decision**: Log warning, continue broadcasting to other plugins
+- One plugin's failure shouldn't block others
+- Plugin will get next config on next Sample() call
 
 ### Q4: Should we keep file-based config as backup?
 
 **Decision**: Yes, keep writing to file
-- Allows modules to load initial config on startup
+- Allows plugins to load initial config on startup
 - Provides persistence across restarts
 - Fallback if RPC notification fails
 

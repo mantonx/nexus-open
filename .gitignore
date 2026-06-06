@@ -7,6 +7,16 @@ tmp/
 # Binaries (root-level compiled output only, not cmd/ subdirectories)
 /nexus-open
 /nexus-open-*
+
+# Plugin binaries (built by make build-plugins; not committed)
+plugins/*/cpu-temp
+plugins/*/gpu-temp
+plugins/*/cpu-load
+plugins/*/gpu-load
+plugins/*/network
+plugins/*/weather
+plugins/*/hello
+plugins/*/nexus-*
 *.exe
 *.dll
 *.so

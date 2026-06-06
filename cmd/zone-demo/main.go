@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/mantonx/nexus-next/internal/zone"
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
 func main() {
@@ -37,11 +37,11 @@ func main() {
 
 	// Update zones with mock data — using 60-sample spark histories to match
 	// what real plugins produce after ~2 minutes of sampling at 2s intervals.
-	mockPayloads := map[string]module.Payload{
+	mockPayloads := map[string]plugin.Payload{
 		"weather": {
 			Primary:   "92°F",
 			Secondary: "WEATHER",
-			Severity:  module.SeverityOK,
+			Severity:  plugin.SeverityOK,
 			Spark:     genSpark(0.45, 0.05, 60),
 			TTL:       5 * time.Minute,
 			Timestamp: time.Now(),
@@ -49,7 +49,7 @@ func main() {
 		"cpu": {
 			Primary:   "28°C",
 			Secondary: "CPU TEMP",
-			Severity:  module.SeverityOK,
+			Severity:  plugin.SeverityOK,
 			Spark:     genSpark(0.18, 0.04, 60),
 			TTL:       2 * time.Second,
 			Timestamp: time.Now(),
@@ -57,14 +57,14 @@ func main() {
 		"gpu": {
 			Primary:   "52°C",
 			Secondary: "GPU TEMP",
-			Severity:  module.SeverityOK,
+			Severity:  plugin.SeverityOK,
 			Spark:     genSpark(0.38, 0.06, 60),
 			TTL:       2 * time.Second,
 			Timestamp: time.Now(),
 		},
 		"clock": {
 			Primary:   time.Now().Format("3:04 PM"),
-			Severity:  module.SeverityOK,
+			Severity:  plugin.SeverityOK,
 			TTL:       1 * time.Second,
 			Timestamp: time.Now(),
 		},
@@ -72,14 +72,14 @@ func main() {
 			Primary:   "Radiohead",
 			Secondary: "Karma Police",
 			Progress:  0.65,
-			Severity:  module.SeverityOK,
+			Severity:  plugin.SeverityOK,
 			TTL:       1 * time.Second,
 			Timestamp: time.Now(),
 		},
 		"network": {
 			Primary:   "↓ 137K/s",
 			Secondary: "NETWORK",
-			Severity:  module.SeverityOK,
+			Severity:  plugin.SeverityOK,
 			Spark:     genSpark(0.55, 0.20, 60),
 			TTL:       2 * time.Second,
 			Timestamp: time.Now(),

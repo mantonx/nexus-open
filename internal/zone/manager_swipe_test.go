@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
 func newTestSwipeManager(t *testing.T) (*Manager, *image.RGBA) {
@@ -61,7 +61,7 @@ func newTestSwipeManager(t *testing.T) (*Manager, *image.RGBA) {
 		currentPage: 0,
 		zones:       make(map[string]*Zone),
 		renderers:   make(map[string]*Renderer),
-		payloads:    make(map[string]*module.Payload),
+		payloads:    make(map[string]*plugin.Payload),
 		transition:  NewTransitionState(),
 		pageCache:   make(map[int]*image.RGBA),
 		ctx:         ctx,

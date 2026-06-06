@@ -5,11 +5,11 @@ import (
 	"image"
 	"time"
 
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
 // UpdatePayload updates the rendered data for a zone and invalidates the page cache.
-func (m *Manager) UpdatePayload(zoneID string, payload module.Payload) error {
+func (m *Manager) UpdatePayload(zoneID string, payload plugin.Payload) error {
 	m.payloadsMu.Lock()
 	defer m.payloadsMu.Unlock()
 
@@ -102,19 +102,19 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	for zoneID, zone := range m.zones {
 		payload, ok := m.payloads[zoneID]
 		if !ok {
-			payload = &module.Payload{
+			payload = &plugin.Payload{
 				Primary:   "—",
-				Severity:  module.SeverityOK,
+				Severity:  plugin.SeverityOK,
 				Timestamp: time.Now(),
 			}
 		}
 
 		if payload.IsExpired() {
 			m.logger.Warn("payload expired", "zone_id", zoneID, "age", time.Since(payload.Timestamp))
-			payload = &module.Payload{
+			payload = &plugin.Payload{
 				Primary:   "—",
 				Secondary: "Stale",
-				Severity:  module.SeverityWarn,
+				Severity:  plugin.SeverityWarn,
 				Timestamp: time.Now(),
 			}
 		}
@@ -191,20 +191,20 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 	for zoneID, zone := range m.zones {
 		payload, ok := m.payloads[zoneID]
 		if !ok || payload == nil {
-			payload = &module.Payload{
+			payload = &plugin.Payload{
 				Primary:   "—",
 				Secondary: "Loading...",
-				Severity:  module.SeverityOK,
+				Severity:  plugin.SeverityOK,
 				Timestamp: time.Now(),
 			}
 		}
 
 		if payload.IsExpired() {
 			m.logger.Warn("payload expired", "zone_id", zoneID, "age", time.Since(payload.Timestamp))
-			payload = &module.Payload{
+			payload = &plugin.Payload{
 				Primary:   "—",
 				Secondary: "Stale",
-				Severity:  module.SeverityWarn,
+				Severity:  plugin.SeverityWarn,
 				Timestamp: time.Now(),
 			}
 		}
@@ -260,7 +260,7 @@ func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
 		}
 		payload, ok := m.payloads[zoneConfig.ID]
 		if !ok {
-			payload = &module.Payload{Primary: "—", Severity: module.SeverityOK, Timestamp: time.Now()}
+			payload = &plugin.Payload{Primary: "—", Severity: plugin.SeverityOK, Timestamp: time.Now()}
 		}
 		if img, err := renderer.Render(*payload); err == nil {
 			zoneImages[zoneConfig.ID] = img

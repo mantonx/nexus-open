@@ -5,7 +5,7 @@ Research from analyzing three open-source iCUE Nexus implementations.
 ## Repositories Analyzed
 
 1. **NexusTool** (C#) - https://github.com/willneedit/NexusTool
-2. **companion-module-icue-nexus** (TypeScript/Node.js) - https://github.com/bitfocus/companion-module-icue-nexus
+2. **companion-plugin-icue-nexus** (TypeScript/Node.js) - https://github.com/bitfocus/companion-plugin-icue-nexus
 3. **iCUE-ReverseEngineer** (C#) - https://github.com/Aytackydln/iCUE-ReverseEngineer
 
 ## Key Findings
@@ -36,7 +36,7 @@ Pixel Data: Starts at byte 8
 
 ### 2. Brightness Control (NEW DISCOVERY)
 
-From **companion-module-icue-nexus**, brightness uses specific byte values:
+From **companion-plugin-icue-nexus**, brightness uses specific byte values:
 
 ```typescript
 const brightnessValues = [0, 4, 12, 16, 64];
@@ -54,7 +54,7 @@ byte[] cmd = [3, 1, brightness];  // brightness 0-100 directly
 device.SendFeatureReport(cmd);
 ```
 
-#### Companion Module (Mapped)
+#### Companion Plugin (Mapped)
 ```typescript
 const data = new Uint8Array([
   3, 1,
@@ -64,7 +64,7 @@ const data = new Uint8Array([
 device.sendFeatureReport(Buffer.from(data));
 ```
 
-**Analysis**: The Companion module uses a 32-byte feature report with specific brightness mappings, while NexusTool uses a minimal 3-byte report. Both appear to work, suggesting:
+**Analysis**: The Companion plugin uses a 32-byte feature report with specific brightness mappings, while NexusTool uses a minimal 3-byte report. Both appear to work, suggesting:
 - The device accepts multiple formats
 - The additional bytes might be optional padding
 - Brightness might support both 0-100 range and specific PWM values
@@ -261,7 +261,7 @@ func (h *HIDDevice) SetBrightness(brightness int) error {
         return ErrInvalidBrightness
     }
 
-    // Use companion module's approach with mapped values
+    // Use companion plugin's approach with mapped values
     brightnessMap := []byte{0, 4, 12, 16, 64}
     level := brightness / 25  // Map 0-100 to 0-4
     if level > 4 {
@@ -345,8 +345,8 @@ This can be done **incrementally** without breaking existing functionality.
   - Uses hidapi library
   - Simple, clean implementation
 
-### Companion Module (TypeScript)
-- **URL**: https://github.com/bitfocus/companion-module-icue-nexus
+### Companion Plugin (TypeScript)
+- **URL**: https://github.com/bitfocus/companion-plugin-icue-nexus
 - **Key Files**:
   - `src/nexus.ts` - Device communication
   - Uses node-hid library

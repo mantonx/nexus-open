@@ -153,7 +153,7 @@ func TestZoneConfigValidation(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "missing module",
+			name:    "missing plugin",
 			zone:    ZoneConfig{ID: "test", Width: 160, RefreshMs: 1000},
 			wantErr: true,
 		},

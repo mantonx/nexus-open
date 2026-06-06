@@ -29,7 +29,7 @@ pages:
 
 ## Proposed Convention
 
-### Format: `{page}.{module}` or `{page}.{module}.{variant}`
+### Format: `{page}.{plugin}` or `{page}.{plugin}.{variant}`
 
 **Examples**:
 ```yaml
@@ -83,10 +83,10 @@ GET /api/zones?page=performance
 → ["performance.cpu", "performance.gpu", "performance.network"]
 ```
 
-### 3. **Module defaults make sense**
+### 3. **Plugin defaults make sense**
 ```bash
 # Set default for all CPU zones
-POST /api/modules/cpu-temp/config {"unit":"metric"}
+POST /api/plugins/cpu-temp/config {"unit":"metric"}
 # Affects: system.cpu, performance.cpu, dashboard.cpu
 
 # Override performance page only
@@ -95,8 +95,8 @@ POST /api/zones/performance.cpu/config {"unit":"imperial"}
 
 ### 4. **Clear hierarchy**
 ```
-Page → Zone → Module
-performance → performance.cpu → exec:./modules/cpu-temp/cpu-temp
+Page → Zone → Plugin
+performance → performance.cpu → exec:./plugins/cpu-temp/cpu-temp
 ```
 
 ---
@@ -127,46 +127,46 @@ pages:
     zones:
       - id: system.weather
         width: 160
-        module: exec:./modules/weather/weather
+        plugin: exec:./plugins/weather/weather
         refresh_ms: 300000
 
       - id: system.cpu
         width: 160
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
         refresh_ms: 2000
 
       - id: system.gpu
         width: 160
-        module: exec:./modules/gpu-temp/gpu-temp
+        plugin: exec:./plugins/gpu-temp/gpu-temp
         refresh_ms: 2000
 
       - id: system.network
         width: 160
-        module: exec:./modules/network/network
+        plugin: exec:./plugins/network/network
         refresh_ms: 2000
 
   - name: "Performance"
     zones:
       - id: performance.cpu
         width: 240
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
         refresh_ms: 1000
 
       - id: performance.gpu
         width: 240
-        module: exec:./modules/gpu-temp/gpu-temp
+        plugin: exec:./plugins/gpu-temp/gpu-temp
         refresh_ms: 1000
 
       - id: performance.network
         width: 160
-        module: exec:./modules/network/network
+        plugin: exec:./plugins/network/network
         refresh_ms: 1000
 
   - name: "Clock"
     zones:
       - id: clock.time
         width: 640
-        module: builtin:clock
+        plugin: builtin:clock
         refresh_ms: 1000
 ```
 
@@ -178,12 +178,12 @@ pages:
 - Use lowercase page name (or short alias)
 - Examples: `system`, `performance`, `clock`, `media`
 
-### 2. **Module Name**
-- Use the logical module name (not the full path)
+### 2. **Plugin Name**
+- Use the logical plugin name (not the full path)
 - Examples: `cpu`, `gpu`, `weather`, `network`, `time`
 
 ### 3. **Optional Variant**
-- Only when multiple instances of same module on same page
+- Only when multiple instances of same plugin on same page
 - Use descriptive variants: `summary`, `detailed`, `home`, `work`
 
 ### 4. **Separator**
@@ -212,7 +212,7 @@ POST /api/zones/system.cpu/config {"unit":"metric"}
 POST /api/zones/performance.cpu/config {"unit":"imperial"}
 
 # Set default for ALL CPU zones
-POST /api/modules/cpu-temp/config {"unit":"metric"}
+POST /api/plugins/cpu-temp/config {"unit":"metric"}
 ```
 
 ---
@@ -227,18 +227,18 @@ pages:
     zones:
       - id: weather.home
         width: 320
-        module: exec:./modules/weather/weather
-        # Module default: Jersey City, NJ
+        plugin: exec:./plugins/weather/weather
+        # Plugin default: Jersey City, NJ
 
       - id: weather.office
         width: 320
-        module: exec:./modules/weather/weather
+        plugin: exec:./plugins/weather/weather
         # Override: New York, NY
 ```
 
 ```bash
-# Set module default (used by weather.home)
-POST /api/modules/weather/config {
+# Set plugin default (used by weather.home)
+POST /api/plugins/weather/config {
   "location": "Jersey City, NJ",
   "unit": "imperial"
 }
@@ -246,7 +246,7 @@ POST /api/modules/weather/config {
 # Override for office widget
 POST /api/zones/weather.office/config {
   "location": "New York, NY"
-  # Inherits unit:"imperial" from module default
+  # Inherits unit:"imperial" from plugin default
 }
 ```
 
@@ -260,19 +260,19 @@ pages:
     zones:
       - id: dashboard.cpu.temp
         width: 160
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
 
       - id: dashboard.cpu.load
         width: 160
-        module: exec:./modules/cpu-load/cpu-load
+        plugin: exec:./plugins/cpu-load/cpu-load
 
       - id: dashboard.cpu.graph
         width: 320
-        module: exec:./modules/cpu-graph/cpu-graph
+        plugin: exec:./plugins/cpu-graph/cpu-graph
 ```
 
 ```bash
-# Different modules, same prefix - clear hierarchy
+# Different plugins, same prefix - clear hierarchy
 POST /api/zones/dashboard.cpu.temp/config {"unit":"metric"}
 POST /api/zones/dashboard.cpu.load/config {"cores":"all"}
 POST /api/zones/dashboard.cpu.graph/config {"history_seconds":60}
@@ -282,13 +282,13 @@ POST /api/zones/dashboard.cpu.graph/config {"history_seconds":60}
 
 ## Summary
 
-**New Convention**: `{page}.{module}.{variant?}`
+**New Convention**: `{page}.{plugin}.{variant?}`
 
 **Benefits**:
 - ✅ Self-documenting zone IDs
 - ✅ Clear page context
 - ✅ Easy to parse and query
-- ✅ Works well with hybrid config (module defaults + zone overrides)
+- ✅ Works well with hybrid config (plugin defaults + zone overrides)
 - ✅ Extensible for variants
 
 **Migration**: Simple rename in layout file, backward compatible with zone config manager

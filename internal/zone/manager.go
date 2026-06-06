@@ -19,7 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/mantonx/nexus-next/internal/store"
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
 // liveSwipePreviewThreshold is the drag progress at which the target page
@@ -44,7 +44,7 @@ type Manager struct {
 	// Zone state
 	zones      map[string]*Zone
 	renderers  map[string]*Renderer
-	payloads   map[string]*module.Payload
+	payloads   map[string]*plugin.Payload
 	payloadsMu sync.RWMutex
 
 	// Compositor for current page
@@ -74,7 +74,7 @@ type Manager struct {
 	// Page change callback
 	onPageChange func(pageIndex int) error
 
-	// Zone cycle callback — called when a tap action advances a zone to the next module choice.
+	// Zone cycle callback — called when a tap action advances a zone to the next plugin choice.
 	onZoneCycle func(zoneConfig ZoneConfig) error
 
 	// Tracks the current choice index per zone for cycling (zoneID → choice index).
@@ -139,7 +139,7 @@ func NewManager(ctx context.Context, logger *slog.Logger, db *store.DB, fallback
 		currentPage: 0,
 		zones:       make(map[string]*Zone),
 		renderers:   make(map[string]*Renderer),
-		payloads:    make(map[string]*module.Payload),
+		payloads:    make(map[string]*plugin.Payload),
 		transition:  NewTransitionState(),
 		pageCache:   make(map[int]*image.RGBA),
 		choiceIndex: make(map[string]int),
@@ -260,6 +260,16 @@ func (m *Manager) ReloadFromConfig(config *Config) error {
 	m.pageCacheMu.Lock()
 	m.pageCache = make(map[int]*image.RGBA)
 	m.pageCacheMu.Unlock()
+
+	// Restart the sampler for the current page so newly added zones are picked
+	// up immediately without requiring a manual page switch.
+	if m.onPageChange != nil {
+		go func() {
+			if err := m.onPageChange(m.currentPage); err != nil {
+				m.logger.Error("layout reload: page change callback failed", "error", err)
+			}
+		}()
+	}
 
 	go m.preRenderAdjacentPages()
 	m.logger.Info("layout reloaded from config",

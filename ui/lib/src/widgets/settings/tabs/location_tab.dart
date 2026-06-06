@@ -108,7 +108,7 @@ class _LocationTabState extends State<LocationTab> {
       children: [
         NexusSection(
           title: 'Location',
-          description: 'Used for the weather module.',
+          description: 'Used for the weather plugin.',
           child: Form(
             key: _formKey,
             child: Column(

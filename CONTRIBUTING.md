@@ -1,6 +1,6 @@
 # Contributing to Nexus Open
 
-Thanks for taking an interest in contributing! This is a hardware interfacing project — contributions that improve device compatibility, add new modules, or improve the Linux desktop experience are especially welcome.
+Thanks for taking an interest in contributing! This is a hardware interfacing project — contributions that improve device compatibility, add new plugins, or improve the Linux desktop experience are especially welcome.
 
 ## Getting Started
 
@@ -34,17 +34,17 @@ See [DEVICE_SETUP.md](DEVICE_SETUP.md) if you have a physical Corsair iCUE Nexus
 - **Tests** — add tests for new behaviour; maintain 60%+ overall coverage (`make coverage`)
 - **No comments on obvious code** — only comment on non-obvious constraints, workarounds, or invariants
 
-## Writing a Module
+## Writing a Plugin
 
-Modules are standalone binaries that communicate with the host over gRPC (via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin)). See `modules/hello/main.go` for the minimal example and `pkg/module/types.go` for the `Payload` type.
+Plugins are standalone binaries that communicate with the host over gRPC (via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin)). See `plugins/hello/main.go` for the minimal example and `pkg/plugin/types.go` for the `Payload` type.
 
 ```
-modules/
-  your-module/
-    main.go        # Implements pkg/module.Module interface
+plugins/
+  your-plugin/
+    main.go        # Implements pkg/plugin.Plugin interface
 ```
 
-Build your module binary and reference it from a layout YAML under `configs/layouts/`.
+Build your plugin binary and reference it from a layout YAML under `configs/layouts/`.
 
 ## Submitting a Pull Request
 

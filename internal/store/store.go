@@ -7,7 +7,7 @@
 // Three logical areas are stored here:
 //   - settings table: flat key/value pairs for UI preferences (colours,
 //     locale, display config). Replaces config.yaml + shared_preferences.
-//   - zone_module_config table: per-zone module configuration overrides
+//   - zone_plugin_config table: per-zone plugin configuration overrides
 //     (graph types, units, etc.). Replaces zone-configs.yaml.
 //   - pages + zones tables: the hardware display layout (which modules
 //     appear where). Replaces configs/layouts/*.yaml for user-edited config;
@@ -29,7 +29,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 // DB is the application's SQLite store. All methods are safe for concurrent use.
 type DB struct {
@@ -179,16 +179,16 @@ func (s *DB) SetSettings(settings map[string]string) error {
 	return tx.Commit()
 }
 
-// ── Zone module config ─────────────────────────────────────────────────────────
+// ── Zone plugin config ────────────────────────────────────────────────────────
 
-// GetZoneConfig returns the stored module config for zoneID, or nil.
+// GetZoneConfig returns the stored plugin config for zoneID, or nil.
 func (s *DB) GetZoneConfig(zoneID string) (map[string]interface{}, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var raw string
 	err := s.db.QueryRow(
-		`SELECT config_json FROM zone_module_config WHERE zone_id = ?`, zoneID,
+		`SELECT config_json FROM zone_plugin_config WHERE zone_id = ?`, zoneID,
 	).Scan(&raw)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -204,7 +204,7 @@ func (s *DB) GetZoneConfig(zoneID string) (map[string]interface{}, error) {
 	return m, nil
 }
 
-// SetZoneConfig upserts the module config for zoneID.
+// SetZoneConfig upserts the plugin config for zoneID.
 func (s *DB) SetZoneConfig(zoneID string, cfg map[string]interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -215,7 +215,7 @@ func (s *DB) SetZoneConfig(zoneID string, cfg map[string]interface{}) error {
 	}
 
 	_, err = s.db.Exec(
-		`INSERT INTO zone_module_config(zone_id, config_json) VALUES(?, ?)
+		`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
 		 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
 		zoneID, string(raw),
 	)
@@ -227,7 +227,7 @@ func (s *DB) DeleteZoneConfig(zoneID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`DELETE FROM zone_module_config WHERE zone_id = ?`, zoneID)
+	_, err := s.db.Exec(`DELETE FROM zone_plugin_config WHERE zone_id = ?`, zoneID)
 	return err
 }
 
@@ -236,7 +236,7 @@ func (s *DB) GetAllZoneConfigs() (map[string]map[string]interface{}, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT zone_id, config_json FROM zone_module_config`)
+	rows, err := s.db.Query(`SELECT zone_id, config_json FROM zone_plugin_config`)
 	if err != nil {
 		return nil, err
 	}
@@ -278,8 +278,9 @@ func (s *DB) migrate() error {
 	}
 
 	migrations := []func(*sql.Tx) error{
-		migration1, // v0 → v1: settings + zone_module_config
+		migration1, // v0 → v1: settings + zone_plugin_config
 		migration2, // v1 → v2: pages + zones (layout editor)
+		migration3, // v2 → v3: rename zone_module_config → zone_plugin_config
 	}
 
 	for i := current; i < currentSchemaVersion; i++ {
@@ -315,7 +316,7 @@ func migration1(tx *sql.Tx) error {
 		);
 
 		-- Per-zone module configuration (replaces zone-configs.yaml)
-		CREATE TABLE IF NOT EXISTS zone_module_config (
+		CREATE TABLE IF NOT EXISTS zone_plugin_config (
 			zone_id     TEXT PRIMARY KEY,
 			config_json TEXT NOT NULL DEFAULT '{}'
 		);
@@ -347,6 +348,14 @@ func migration2(tx *sql.Tx) error {
 		);
 
 		CREATE INDEX IF NOT EXISTS zones_page_ord ON zones(page_id, ord);
+	`)
+	return err
+}
+
+// migration3 renames zone_module_config → zone_plugin_config (v2 → v3).
+func migration3(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		ALTER TABLE zone_plugin_config RENAME TO zone_plugin_config;
 	`)
 	return err
 }

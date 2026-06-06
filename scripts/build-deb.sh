@@ -38,6 +38,19 @@ CGO_ENABLED=1 go build -o "${BUILD_DIR}/usr/bin/nexus-open" \
 # Strip binary to reduce size
 strip "${BUILD_DIR}/usr/bin/nexus-open"
 
+# Build and install external plugins
+echo -e "${YELLOW}Building external plugins...${NC}"
+mkdir -p "${BUILD_DIR}/usr/lib/nexus-open/plugins"
+for mod in cpu-temp gpu-temp network weather cpu-load gpu-load; do
+    if [ -d "plugins/${mod}" ]; then
+        echo "  → plugins/${mod}"
+        (cd "plugins/${mod}" && go build -o "${mod}" .) || exit 1
+        cp "plugins/${mod}/${mod}" "${BUILD_DIR}/usr/lib/nexus-open/plugins/"
+        strip "${BUILD_DIR}/usr/lib/nexus-open/plugins/${mod}" 2>/dev/null || true
+    fi
+done
+echo -e "${GREEN}✓ Plugins built${NC}"
+
 # Copy control files
 echo -e "${YELLOW}Copying control files...${NC}"
 cp packaging/deb/DEBIAN/control "${BUILD_DIR}/DEBIAN/"

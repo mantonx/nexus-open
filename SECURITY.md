@@ -32,4 +32,4 @@ You can expect an acknowledgement within 48 hours and a resolution timeline with
 ## Notes
 
 - The API server binds to `127.0.0.1` by default. If you change this, you are responsible for adding appropriate authentication.
-- Module plugins are executed as child processes with the same privileges as the main process. Vet third-party plugins carefully.
+- Plugin plugins are executed as child processes with the same privileges as the main process. Vet third-party plugins carefully.

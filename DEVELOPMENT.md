@@ -35,7 +35,7 @@ When `NEXUS_MOCK_DEVICE=1` is set (default in `./dev.sh`):
 - No physical hardware required
 - No permission issues
 - Instant startup
-- Perfect for UI development and module testing
+- Perfect for UI development and plugin testing
 
 The mock device:
 - Accepts all frame data
@@ -49,7 +49,7 @@ The `dev.sh` script starts Air, which watches for Go code changes and automatica
 
 - **Backend**: Auto-reloads on `.go` file changes
 - **Frontend**: Flutter UI built and launched
-- **Modules**: Built before backend starts
+- **Plugins**: Built before backend starts
 
 ### Running Individual Components
 
@@ -104,9 +104,9 @@ nexus-next/
 ├── internal/
 │   ├── app/               # Application orchestration
 │   ├── device/            # Device abstraction (HID + Mock)
-│   ├── zone/              # Zone and module management
+│   ├── zone/              # Zone and plugin management
 │   └── api/               # REST API server
-├── modules/               # External modules (CPU, GPU, Weather, etc.)
+├── plugins/               # External plugins (CPU, GPU, Weather, etc.)
 ├── ui/                    # Flutter UI
 ├── configs/               # Configuration files
 └── scripts/               # Development scripts
@@ -114,9 +114,9 @@ nexus-next/
 
 ## Common Tasks
 
-### Adding a New Module
+### Adding a New Plugin
 
-See [modules/README.md](modules/README.md) for module development guide.
+See [plugins/README.md](plugins/README.md) for plugin development guide.
 
 ### Debugging
 

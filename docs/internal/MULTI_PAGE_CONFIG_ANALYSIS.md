@@ -2,7 +2,7 @@
 
 ## The Problem
 
-Multi-page layouts can have **multiple zones running the same module**:
+Multi-page layouts can have **multiple zones running the same plugin**:
 
 ```yaml
 pages:
@@ -10,13 +10,13 @@ pages:
     zones:
       - id: cpu           # Small CPU widget
         width: 160
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
 
   - name: "Performance"
     zones:
       - id: cpu-main      # Large CPU widget
         width: 240
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
 ```
 
 **Question**: Should `cpu` and `cpu-main` share config or have independent configs?
@@ -27,7 +27,7 @@ pages:
 
 ### Option A: Per-Zone Config (Fully Independent)
 
-**Each zone has its own config**, even if running the same module.
+**Each zone has its own config**, even if running the same plugin.
 
 **Config storage**:
 ```yaml
@@ -50,8 +50,8 @@ POST /api/zones/cpu-main/config {"unit":"imperial"}
 - ✅ No special handling for multi-page
 
 **Cons**:
-- ❌ Confusing UX - same module shows different values on different pages
-- ❌ User must configure same module multiple times
+- ❌ Confusing UX - same plugin shows different values on different pages
+- ❌ User must configure same plugin multiple times
 - ❌ Config duplication
 
 **Use case**:
@@ -66,35 +66,35 @@ User: "I have to set the weather location twice?"
 
 ---
 
-### Option B: Per-Module Config (Fully Shared)
+### Option B: Per-Plugin Config (Fully Shared)
 
-**All zones running the same module share one config**.
+**All zones running the same plugin share one config**.
 
 **Config storage**:
 ```yaml
 # zone-configs.yaml
 _module_configs:
-  "exec:./modules/cpu-temp/cpu-temp":
+  "exec:./plugins/cpu-temp/cpu-temp":
     unit: "metric"     # Applies to ALL CPU zones
-  "exec:./modules/gpu-temp/gpu-temp":
+  "exec:./plugins/gpu-temp/gpu-temp":
     unit: "imperial"   # Applies to ALL GPU zones
 ```
 
 **API**:
 ```bash
-POST /api/modules/cpu-temp/config {"unit":"metric"}
+POST /api/plugins/cpu-temp/config {"unit":"metric"}
 # Affects both 'cpu' and 'cpu-main' zones
 ```
 
 **Pros**:
-- ✅ Simple mental model - one config per module
+- ✅ Simple mental model - one config per plugin
 - ✅ No duplication
 - ✅ Consistent across all pages
 
 **Cons**:
 - ❌ No per-zone flexibility
-- ❌ Module path as config key is awkward
-- ❌ What about built-in modules? `builtin:clock` vs `builtin:clock24`?
+- ❌ Plugin path as config key is awkward
+- ❌ What about built-in plugins? `builtin:clock` vs `builtin:clock24`?
 
 **Use case**:
 - You want all CPU displays to show metric everywhere
@@ -103,12 +103,12 @@ POST /api/modules/cpu-temp/config {"unit":"metric"}
 **User experience**:
 ```
 User: "I set CPU to Celsius, why is the big CPU widget also Celsius?"
-Answer: "They're the same module, they share config"
+Answer: "They're the same plugin, they share config"
 ```
 
 ---
 
-### Option C: Hybrid (Module Defaults + Zone Overrides) **[RECOMMENDED]**
+### Option C: Hybrid (Plugin Defaults + Zone Overrides) **[RECOMMENDED]**
 
 **Shared by default, override per-zone when needed**.
 
@@ -116,7 +116,7 @@ Answer: "They're the same module, they share config"
 ```yaml
 # zone-configs.yaml
 _module_defaults:
-  "exec:./modules/cpu-temp/cpu-temp":
+  "exec:./plugins/cpu-temp/cpu-temp":
     unit: "metric"     # Default for all CPU zones
 
 _zone_overrides:
@@ -127,7 +127,7 @@ _zone_overrides:
 **API**:
 ```bash
 # Set default for ALL CPU zones
-POST /api/modules/cpu-temp/config {"unit":"metric"}
+POST /api/plugins/cpu-temp/config {"unit":"metric"}
 
 # Override specific zone
 POST /api/zones/cpu-main/config {"unit":"imperial"}
@@ -136,7 +136,7 @@ POST /api/zones/cpu-main/config {"unit":"imperial"}
 **Config resolution order**:
 1. Check `_zone_overrides[zoneID]`
 2. Fall back to `_module_defaults[modulePath]`
-3. Fall back to module's hardcoded default
+3. Fall back to plugin's hardcoded default
 
 **Pros**:
 - ✅ Best of both worlds
@@ -146,7 +146,7 @@ POST /api/zones/cpu-main/config {"unit":"imperial"}
 
 **Cons**:
 - ⚠️ More complex implementation
-- ⚠️ Two API endpoints (`/modules/:name/config` and `/zones/:id/config`)
+- ⚠️ Two API endpoints (`/plugins/:name/config` and `/zones/:id/config`)
 - ⚠️ Need to explain hierarchy to users
 
 **Use case**:
@@ -155,7 +155,7 @@ POST /api/zones/cpu-main/config {"unit":"imperial"}
 
 **User experience**:
 ```
-User: "Set all temps to Celsius" → POST /api/modules/cpu-temp/config
+User: "Set all temps to Celsius" → POST /api/plugins/cpu-temp/config
 User: "Make the big CPU widget Fahrenheit" → POST /api/zones/cpu-main/config
 ```
 
@@ -163,7 +163,7 @@ User: "Make the big CPU widget Fahrenheit" → POST /api/zones/cpu-main/config
 
 ## Comparison Table
 
-| Feature | Option A (Per-Zone) | Option B (Per-Module) | Option C (Hybrid) |
+| Feature | Option A (Per-Zone) | Option B (Per-Plugin) | Option C (Hybrid) |
 |---------|---------------------|----------------------|-------------------|
 | **Flexibility** | ⭐⭐⭐ | ⭐ | ⭐⭐⭐ |
 | **Simplicity** | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
@@ -197,9 +197,9 @@ User: "Make the big CPU widget Fahrenheit" → POST /api/zones/cpu-main/config
 ```yaml
 # ~/.config/nexus-open/zone-configs.yaml
 _module_defaults:
-  "exec:./modules/cpu-temp/cpu-temp":
+  "exec:./plugins/cpu-temp/cpu-temp":
     unit: "metric"
-  "exec:./modules/weather/weather":
+  "exec:./plugins/weather/weather":
     location: "Jersey City, NJ"
     unit: "imperial"
 
@@ -218,7 +218,7 @@ func (m *ZoneConfigManager) Get(zoneID, modulePath string) map[string]interface{
         return override
     }
 
-    // 2. Check module default
+    // 2. Check plugin default
     if defaults, exists := m.moduleDefaults[modulePath]; exists {
         return defaults
     }
@@ -230,12 +230,12 @@ func (m *ZoneConfigManager) Get(zoneID, modulePath string) map[string]interface{
 
 **API endpoints**:
 ```
-POST /api/modules/:moduleName/config     # Set module default
-GET  /api/modules/:moduleName/config     # Get module default
+POST /api/plugins/:moduleName/config     # Set plugin default
+GET  /api/plugins/:moduleName/config     # Get plugin default
 
 POST /api/zones/:zoneID/config           # Set zone override
 GET  /api/zones/:zoneID/config           # Get effective config (with fallback)
-DELETE /api/zones/:zoneID/config         # Remove override (fall back to module default)
+DELETE /api/zones/:zoneID/config         # Remove override (fall back to plugin default)
 ```
 
 ---
@@ -244,14 +244,14 @@ DELETE /api/zones/:zoneID/config         # Remove override (fall back to module 
 
 ### Example 1: Simple Case (No Overrides)
 
-**Goal**: All temperature modules show Celsius
+**Goal**: All temperature plugins show Celsius
 
 ```bash
-# Set module defaults
-POST /api/modules/cpu-temp/config {"unit":"metric"}
-POST /api/modules/gpu-temp/config {"unit":"metric"}
+# Set plugin defaults
+POST /api/plugins/cpu-temp/config {"unit":"metric"}
+POST /api/plugins/gpu-temp/config {"unit":"metric"}
 
-# Result: ALL zones running these modules show Celsius
+# Result: ALL zones running these plugins show Celsius
 # - cpu (Page 1) → 28°C
 # - cpu-main (Page 2) → 28°C
 # - gpu (Page 1) → 52°C
@@ -261,9 +261,9 @@ POST /api/modules/gpu-temp/config {"unit":"metric"}
 **Config file**:
 ```yaml
 _module_defaults:
-  "exec:./modules/cpu-temp/cpu-temp":
+  "exec:./plugins/cpu-temp/cpu-temp":
     unit: "metric"
-  "exec:./modules/gpu-temp/gpu-temp":
+  "exec:./plugins/gpu-temp/gpu-temp":
     unit: "metric"
 ```
 
@@ -276,9 +276,9 @@ _module_defaults:
 - Page 2 (performance detail) → Fahrenheit
 
 ```bash
-# Set module defaults (Celsius)
-POST /api/modules/cpu-temp/config {"unit":"metric"}
-POST /api/modules/gpu-temp/config {"unit":"metric"}
+# Set plugin defaults (Celsius)
+POST /api/plugins/cpu-temp/config {"unit":"metric"}
+POST /api/plugins/gpu-temp/config {"unit":"metric"}
 
 # Override performance page zones
 POST /api/zones/cpu-main/config {"unit":"imperial"}
@@ -292,9 +292,9 @@ POST /api/zones/gpu-main/config {"unit":"imperial"}
 **Config file**:
 ```yaml
 _module_defaults:
-  "exec:./modules/cpu-temp/cpu-temp":
+  "exec:./plugins/cpu-temp/cpu-temp":
     unit: "metric"
-  "exec:./modules/gpu-temp/gpu-temp":
+  "exec:./plugins/gpu-temp/gpu-temp":
     unit: "metric"
 
 _zone_overrides:
@@ -312,7 +312,7 @@ _zone_overrides:
 
 ```bash
 # Default location
-POST /api/modules/weather/config {"location":"New York, NY","unit":"imperial"}
+POST /api/plugins/weather/config {"location":"New York, NY","unit":"imperial"}
 
 # Override for west coast widget
 POST /api/zones/weather-west/config {"location":"San Francisco, CA"}
@@ -320,18 +320,18 @@ POST /api/zones/weather-west/config {"location":"San Francisco, CA"}
 # Result:
 # weather → New York, NY
 # weather-west → San Francisco, CA
-# Both use imperial units (inherited from module default)
+# Both use imperial units (inherited from plugin default)
 ```
 
 ---
 
 ## API Specification
 
-### Module Config Endpoints
+### Plugin Config Endpoints
 
-#### Set Module Default Config
+#### Set Plugin Default Config
 ```
-POST /api/modules/:moduleName/config
+POST /api/plugins/:moduleName/config
 Content-Type: application/json
 
 {
@@ -342,14 +342,14 @@ Content-Type: application/json
 Response: 200 OK
 {
   "status": "success",
-  "message": "Module config updated",
+  "message": "Plugin config updated",
   "affected_zones": ["cpu", "cpu-main"]
 }
 ```
 
-#### Get Module Default Config
+#### Get Plugin Default Config
 ```
-GET /api/modules/:moduleName/config
+GET /api/plugins/:moduleName/config
 
 Response: 200 OK
 {
@@ -385,7 +385,7 @@ GET /api/zones/:zoneID/config
 Response: 200 OK
 {
   "config": {
-    "unit": "imperial"  # Could be from override or module default
+    "unit": "imperial"  # Could be from override or plugin default
   },
   "source": "zone_override"  # or "module_default" or "module_hardcoded"
 }
@@ -398,7 +398,7 @@ DELETE /api/zones/:zoneID/config
 Response: 200 OK
 {
   "status": "success",
-  "message": "Zone override removed, falling back to module default"
+  "message": "Zone override removed, falling back to plugin default"
 }
 ```
 
@@ -415,7 +415,7 @@ Response: 200 OK
 func Migrate() {
     globalConfig := loadGlobalConfig()
 
-    // Create module defaults from global config
+    // Create plugin defaults from global config
     for _, modulePath := range getTemperatureModules() {
         setModuleDefault(modulePath, map[string]interface{}{
             "unit": globalConfig.Unit,
@@ -423,7 +423,7 @@ func Migrate() {
     }
 
     // Weather gets both location and unit
-    setModuleDefault("exec:./modules/weather/weather", map[string]interface{}{
+    setModuleDefault("exec:./plugins/weather/weather", map[string]interface{}{
         "location": globalConfig.Location,
         "unit": globalConfig.Unit,
     })

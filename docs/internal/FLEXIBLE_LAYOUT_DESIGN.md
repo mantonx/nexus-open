@@ -151,7 +151,7 @@ type ContentModel struct {
     GraphType    string
 }
 
-func parsePayload(payload module.Payload) ContentModel {
+func parsePayload(payload plugin.Payload) ContentModel {
     model := ContentModel{
         PrimaryLines: strings.Split(payload.Primary, "\n"),
         Secondary:    payload.Secondary,
@@ -321,7 +321,7 @@ func calculateLayout(model ContentModel, measurements Measurements, zoneWidth, z
 ### Step 4: Render (Simple!)
 
 ```go
-func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
+func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
     // Create canvas
     img := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
 
@@ -472,7 +472,7 @@ Flow:
 - [ ] Refactor `Render()` to use new pipeline
 - [ ] Remove old draw functions (drawCenteredPrimaryText, etc.)
 - [ ] Use calculated positions directly
-- [ ] Test with all current modules
+- [ ] Test with all current plugins
 
 ### Phase 5: Testing
 - [ ] Weather: Icon + temp + description

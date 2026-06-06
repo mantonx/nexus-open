@@ -473,7 +473,7 @@ class _LocationStep extends StatelessWidget {
                   style: Theme.of(context).textTheme.headlineMedium),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                'Used for the weather module. You can change this later.',
+                'Used for the weather plugin. You can change this later.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -513,7 +513,7 @@ class _DoneStep extends StatelessWidget {
       iconColor: Theme.of(context).colorScheme.success,
       title: 'All set!',
       body: 'Nexus Open is ready. Your display should be updating now.\n\n'
-          'Use the settings panel to customise modules, colors, and more.',
+          'Use the settings panel to customise plugins, colors, and more.',
       buttonLabel: 'Open settings',
       onNext: onFinish,
     );

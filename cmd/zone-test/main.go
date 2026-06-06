@@ -15,7 +15,7 @@ import (
 	"github.com/mantonx/nexus-next/internal/device"
 	"github.com/mantonx/nexus-next/internal/touch"
 	"github.com/mantonx/nexus-next/internal/zone"
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
 func main() {
@@ -136,7 +136,7 @@ func mockModuleUpdates(ctx context.Context, logger *slog.Logger, zm *zone.Manage
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	logger.Info("starting mock module updates")
+	logger.Info("starting mock plugin updates")
 
 	for {
 		select {
@@ -147,21 +147,21 @@ func mockModuleUpdates(ctx context.Context, logger *slog.Logger, zm *zone.Manage
 			zones := zm.GetZones()
 
 			for zoneID := range zones {
-				var payload module.Payload
+				var payload plugin.Payload
 
 				switch zoneID {
 				case "weather":
-					payload = module.Payload{
+					payload = plugin.Payload{
 						Primary:   fmt.Sprintf("%d°F", 65+time.Now().Second()%20),
 						Secondary: "Albany ☀️",
-						Severity:  module.SeverityOK,
+						Severity:  plugin.SeverityOK,
 						TTL:       5 * time.Minute,
 						Timestamp: time.Now(),
 					}
 
 				case "cpu", "cpu-main":
 					temp := 40 + time.Now().Second()%30
-					payload = module.Payload{
+					payload = plugin.Payload{
 						Primary:   fmt.Sprintf("%d°C", temp),
 						Secondary: "CPU Temp",
 						Severity:  getSeverity(float64(temp), 75, 90),
@@ -172,7 +172,7 @@ func mockModuleUpdates(ctx context.Context, logger *slog.Logger, zm *zone.Manage
 
 				case "gpu", "gpu-main":
 					temp := 50 + time.Now().Second()%40
-					payload = module.Payload{
+					payload = plugin.Payload{
 						Primary:   fmt.Sprintf("%d°C", temp),
 						Secondary: "GPU Temp",
 						Severity:  getSeverity(float64(temp), 75, 90),
@@ -182,29 +182,29 @@ func mockModuleUpdates(ctx context.Context, logger *slog.Logger, zm *zone.Manage
 					}
 
 				case "network", "network-main":
-					payload = module.Payload{
+					payload = plugin.Payload{
 						Primary:   fmt.Sprintf("↓%d MB/s", 10+time.Now().Second()%50),
 						Secondary: "Network",
-						Severity:  module.SeverityOK,
+						Severity:  plugin.SeverityOK,
 						Spark:     generateSparkline(8),
 						TTL:       2 * time.Second,
 						Timestamp: time.Now(),
 					}
 
 				case "clock":
-					payload = module.Payload{
+					payload = plugin.Payload{
 						Primary:   time.Now().Format("15:04"),
 						Secondary: time.Now().Format("Jan 02"),
-						Severity:  module.SeverityOK,
+						Severity:  plugin.SeverityOK,
 						TTL:       1 * time.Second,
 						Timestamp: time.Now(),
 					}
 
 				default:
-					payload = module.Payload{
+					payload = plugin.Payload{
 						Primary:   "Demo",
 						Secondary: zoneID,
-						Severity:  module.SeverityOK,
+						Severity:  plugin.SeverityOK,
 						TTL:       2 * time.Second,
 						Timestamp: time.Now(),
 					}
@@ -219,14 +219,14 @@ func mockModuleUpdates(ctx context.Context, logger *slog.Logger, zm *zone.Manage
 }
 
 // getSeverity returns severity based on temperature thresholds
-func getSeverity(temp, warnThreshold, critThreshold float64) module.Severity {
+func getSeverity(temp, warnThreshold, critThreshold float64) plugin.Severity {
 	if temp >= critThreshold {
-		return module.SeverityCrit
+		return plugin.SeverityCrit
 	}
 	if temp >= warnThreshold {
-		return module.SeverityWarn
+		return plugin.SeverityWarn
 	}
-	return module.SeverityOK
+	return plugin.SeverityOK
 }
 
 // generateSparkline generates random sparkline data

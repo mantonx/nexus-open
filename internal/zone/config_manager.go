@@ -36,7 +36,7 @@ func (m *ConfigManager) Get(zoneID, _ string) map[string]interface{} {
 
 // GetPluginDefault returns the default config for a plugin path.
 // Stored under the key "plugin:<pluginPath>" for namespace separation.
-// NOTE: Breaking change — DB keys were previously "module:<path>"; existing records are not migrated.
+// NOTE: DB keys were previously "module:<path>"; existing records are not migrated.
 func (m *ConfigManager) GetPluginDefault(pluginPath string) map[string]interface{} {
 	return m.Get("plugin:"+pluginPath, "")
 }
@@ -48,7 +48,7 @@ func (m *ConfigManager) GetZoneOverride(zoneID string) map[string]interface{} {
 
 // SetPluginDefault stores default config for a plugin path.
 // Stored under the key "plugin:<pluginPath>" for namespace separation.
-// NOTE: Breaking change — DB keys were previously "module:<path>"; existing records are not migrated.
+// NOTE: DB keys were previously "module:<path>"; existing records are not migrated.
 func (m *ConfigManager) SetPluginDefault(pluginPath string, cfg map[string]interface{}) error {
 	return m.store.SetZoneConfig("plugin:"+pluginPath, cfg)
 }

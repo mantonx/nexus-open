@@ -242,7 +242,7 @@ with orange stroke. Destructive: red fill, only for confirmations.
 
 ### 3.5 — `NexusFormField`
 
-Unifies `TextFormField` styling across modules tab and location tab. Uses a
+Unifies `TextFormField` styling across plugins tab and location tab. Uses a
 consistent `InputDecoration` with token-based border radius, padding, focus
 colour (orange), and error colour (semantic error). Eliminates duplicate
 `InputDecoration` definitions.
@@ -291,12 +291,12 @@ with `NexusSection`, replace status colours with `NexusStatusBadge`.
 - The 640×48 strip is now persistent (Phase 4.1), so the Preview tab becomes
   a "display settings" surface: background colour, text colour, brightness
 
-### 5.2 — Modules tab
+### 5.2 — Plugins tab
 
-- Replace expandable list with a 2×2 grid of `NexusCard` — all 4 modules
+- Replace expandable list with a 2×2 grid of `NexusCard` — all 4 plugins
   visible at a glance with their live status colour and current value
 - Expanding a card shows the config controls inline
-- Module status (ok/error/timeout) shown as a `NexusStatusBadge` on each card
+- Plugin status (ok/error/timeout) shown as a `NexusStatusBadge` on each card
 
 ### 5.3 — Display tab
 
@@ -352,7 +352,7 @@ Week 2 (components + layout):
 
 Week 3 (tab content + polish):
   5.1   Preview tab
-  5.2   Modules tab
+  5.2   Plugins tab
   5.3   Display tab
   5.4   Images tab
   5.5   Location tab

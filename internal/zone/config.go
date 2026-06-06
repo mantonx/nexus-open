@@ -42,7 +42,7 @@ type ZoneConfig struct {
 	RefreshMs    int        `yaml:"refresh_ms" json:"refresh_ms"`       // Sampling interval
 	Align        Alignment  `yaml:"align,omitempty" json:"align,omitempty"` // Text alignment
 	ThemeOverride *Theme    `yaml:"theme_override,omitempty" json:"theme_override,omitempty"` // Per-zone theme
-	Choices      []string   `yaml:"choices,omitempty" json:"choices,omitempty"` // Module choices for cycling
+	Choices      []string   `yaml:"choices,omitempty" json:"choices,omitempty"` // Plugin choices for cycling
 	OnTap        TapAction  `yaml:"on_tap,omitempty" json:"on_tap,omitempty"` // Tap action
 }
 
@@ -146,7 +146,7 @@ type TapAction string
 
 const (
 	TapActionNone  TapAction = "none"
-	TapActionCycle TapAction = "cycle" // Cycle through module choices
+	TapActionCycle TapAction = "cycle" // Cycle through plugin choices
 )
 
 // Validate checks if the configuration is valid
@@ -209,7 +209,7 @@ func (z *ZoneConfig) Validate() error {
 	}
 
 	if z.Plugin == "" {
-		return fmt.Errorf("zone module is required")
+		return fmt.Errorf("zone plugin is required")
 	}
 
 	if z.RefreshMs < 100 {

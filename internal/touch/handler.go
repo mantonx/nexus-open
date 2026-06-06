@@ -184,9 +184,9 @@ func (h *Handler) handleTap(event Event) {
 func (h *Handler) executeTapAction(z zone.ZoneConfig) {
 	switch z.OnTap {
 	case zone.TapActionCycle:
-		// Cycle the zone to its next module choice.
-		if err := h.zoneManager.CycleZoneModule(z.ID); err != nil {
-			h.logger.Warn("cycle zone module failed", "zone", z.ID, "error", err)
+		// Cycle the zone to its next plugin choice.
+		if err := h.zoneManager.CycleZonePlugin(z.ID); err != nil {
+			h.logger.Warn("cycle zone plugin failed", "zone", z.ID, "error", err)
 		}
 	case zone.TapActionNone, "":
 		// No action configured — silently ignore.

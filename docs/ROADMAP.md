@@ -10,11 +10,11 @@ for a full task-by-task record of what was done.
 
 ## What's in v1.0
 
-- Display rendering at 30 FPS with four live modules (CPU temp, GPU temp,
+- Display rendering at 30 FPS with four live plugins (CPU temp, GPU temp,
   network, weather)
 - Flutter settings UI with NavigationRail, dark mode, and live 640×48 preview
   via WebSocket
-- Per-module configuration (graph type, units) through the Modules tab
+- Per-plugin configuration (graph type, units) through the Plugins tab
 - Actionable USB error messages (permission denied, device busy, not found)
 - REST API with OpenAPI 3.0 spec at `/openapi.yaml`
 - System tray integration with Flutter readiness check
@@ -36,8 +36,8 @@ minor release:
   evaluated and rejected: all Dart-native wrappers require Java or force Dio/Chopper.
   `freezed` is the right fit for a small, stable, locally-controlled API.)
 - **6.2** — First-run onboarding overlay (Welcome → Connect → Location → Done)
-- **6.3** — Module error visibility: surface per-zone error state through the
-  API and in the Modules tab card
+- **6.3** — Plugin error visibility: surface per-zone error state through the
+  API and in the Plugins tab card
 - **7.2** — Flutter widget tests for `SettingsPage`, `PreviewTab`, `ModulesTab`
 - **4C.3** — Full 8px spacing grid and visual design system pass
 - **9.1** — App icon set (SVG source + 16/48/64/128/256px exports)
@@ -48,7 +48,7 @@ minor release:
 ### Packaging
 
 - **3.2** — AUR submission
-- **3.4** — Complete Flatpak metadata (Flutter UI module, icon, screenshots)
+- **3.4** — Complete Flatpak metadata (Flutter UI plugin, icon, screenshots)
 
 ---
 
@@ -58,7 +58,7 @@ minor release:
 - **Slideshow mode** — rotate through background images on a timer
 - **Auto-brightness** — time-of-day brightness schedule
 - **Auto-start toggle** — UI control for `systemctl --user enable nexus-open`
-- **Additional modules** — media player (now playing), disk usage, CPU load graph
+- **Additional plugins** — media player (now playing), disk usage, CPU load graph
 
 ---
 

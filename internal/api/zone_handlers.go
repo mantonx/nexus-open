@@ -24,7 +24,7 @@ func (s *Server) handlePluginConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert plugin name to full path (e.g., "cpu-temp" -> "exec:./modules/cpu-temp/cpu-temp")
+	// Convert plugin name to full path (e.g., "cpu-temp" -> "exec:./plugins/cpu-temp/cpu-temp")
 	pluginPath := pluginNameToPath(pluginName)
 
 	switch r.Method {
@@ -201,7 +201,7 @@ func (s *Server) handleZoneStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // pluginNameToPath converts a short plugin name to full path.
-// e.g., "cpu-temp" -> "exec:./modules/cpu-temp/cpu-temp"
+// e.g., "cpu-temp" -> "exec:./plugins/cpu-temp/cpu-temp"
 func pluginNameToPath(name string) string {
 	// Check if it's already a full path
 	if strings.HasPrefix(name, "exec:") || strings.HasPrefix(name, "builtin:") {
@@ -209,5 +209,5 @@ func pluginNameToPath(name string) string {
 	}
 
 	// Convert short name to full exec path
-	return "exec:./modules/" + name + "/" + name
+	return "exec:./plugins/" + name + "/" + name
 }

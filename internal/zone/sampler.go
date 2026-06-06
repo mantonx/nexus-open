@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/modules/builtin"
-	pluginhost "github.com/mantonx/nexus-next/internal/module/host"
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/internal/plugins/builtin"
+	pluginhost "github.com/mantonx/nexus-next/internal/plugin/host"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
-// ZoneStatus represents the current health of a single zone's module.
+// ZoneStatus represents the current health of a single zone's plugin.
 type ZoneStatus struct {
 	Status string // "ok" | "error" | "timeout" | "loading"
 	Error  string // non-empty when Status is "error" or "timeout"
@@ -25,8 +25,8 @@ type Sampler struct {
 	manager           *Manager
 	pluginHost        *pluginhost.Host
 	zoneCfg           *ConfigManager
-	modules           map[string]module.Plugin // zoneID -> plugin instance
-	builtins          map[string]module.Plugin // Built-in plugins by name
+	modules           map[string]plugin.Plugin // zoneID -> plugin instance
+	builtins          map[string]plugin.Plugin // Built-in plugins by name
 	cancelFuncs       map[string]context.CancelFunc
 	mu                sync.RWMutex
 	ctx               context.Context
@@ -41,7 +41,7 @@ type Sampler struct {
 	zoneErrorsMu      sync.RWMutex
 }
 
-// NewSampler creates a new module sampler
+// NewSampler creates a new plugin sampler
 func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zoneCfg *ConfigManager) *Sampler {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -50,8 +50,8 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 		manager:           manager,
 		zoneCfg:           zoneCfg,
 		pluginHost:        pluginhost.NewHost(logger),
-		modules:           make(map[string]module.Plugin),
-		builtins:          make(map[string]module.Plugin),
+		modules:           make(map[string]plugin.Plugin),
+		builtins:          make(map[string]plugin.Plugin),
 		cancelFuncs:       make(map[string]context.CancelFunc),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -72,9 +72,9 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 
 // Start begins sampling all modules configured in the zone manager
 func (s *Sampler) Start() error {
-	s.logger.Info("starting module sampler")
+	s.logger.Info("starting plugin sampler")
 
-	// Get all zones and their module configurations
+	// Get all zones and their plugin configurations
 	config := s.manager.GetConfig()
 	currentPage := s.manager.GetCurrentPage()
 
@@ -89,7 +89,7 @@ func (s *Sampler) Start() error {
 		if err := s.startZoneSampling(zoneConfig); err != nil {
 			s.logger.Error("failed to start zone sampling",
 				"zone_id", zoneConfig.ID,
-				"module", zoneConfig.Plugin,
+				"plugin", zoneConfig.Plugin,
 				"error", err)
 			// Continue with other zones
 		}
@@ -103,42 +103,42 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Parse module specification
-	moduleSpec := zoneConfig.Plugin
-	var mod module.Plugin
+	// Parse plugin specification
+	pluginSpec := zoneConfig.Plugin
+	var mod plugin.Plugin
 	var err error
 
-	if strings.HasPrefix(moduleSpec, "builtin:") {
-		// Built-in module
-		modName := strings.TrimPrefix(moduleSpec, "builtin:")
+	if strings.HasPrefix(pluginSpec, "builtin:") {
+		// Built-in plugin
+		modName := strings.TrimPrefix(pluginSpec, "builtin:")
 		var ok bool
 		mod, ok = s.builtins[modName]
 		if !ok {
-			return fmt.Errorf("unknown built-in module: %s", modName)
+			return fmt.Errorf("unknown built-in plugin: %s", modName)
 		}
-		s.logger.Info("using built-in module", "zone_id", zoneConfig.ID, "module", modName)
-	} else if strings.HasPrefix(moduleSpec, "exec:") {
-		// External plugin module
-		modPath := strings.TrimPrefix(moduleSpec, "exec:")
+		s.logger.Info("using built-in plugin", "zone_id", zoneConfig.ID, "plugin", modName)
+	} else if strings.HasPrefix(pluginSpec, "exec:") {
+		// External plugin
+		modPath := strings.TrimPrefix(pluginSpec, "exec:")
 		mod, err = s.pluginHost.LaunchPlugin(s.ctx, zoneConfig.ID, modPath)
 		if err != nil {
-			return fmt.Errorf("failed to launch module: %w", err)
+			return fmt.Errorf("failed to launch plugin: %w", err)
 		}
-		s.logger.Info("launched module", "zone_id", zoneConfig.ID, "path", modPath)
+		s.logger.Info("launched plugin", "zone_id", zoneConfig.ID, "path", modPath)
 	} else {
-		return fmt.Errorf("invalid module specification: %s", moduleSpec)
+		return fmt.Errorf("invalid plugin specification: %s", pluginSpec)
 	}
 
-	// Store module
+	// Store plugin
 	s.modules[zoneConfig.ID] = mod
 	s.zoneStartTimes[zoneConfig.ID] = time.Now()
 	s.firstSampleLogged[zoneConfig.ID] = false
-	s.pluginSpec[zoneConfig.ID] = moduleSpec
+	s.pluginSpec[zoneConfig.ID] = pluginSpec
 
-	// Send zone config to module (if available and module supports it)
+	// Send zone config to plugin (if plugin supports it)
 	if s.zoneCfg != nil {
-		if config := s.zoneCfg.Get(zoneConfig.ID, moduleSpec); config != nil {
-			if notifier, ok := module.SupportsPluginConfig(mod); ok {
+		if config := s.zoneCfg.Get(zoneConfig.ID, pluginSpec); config != nil {
+			if notifier, ok := plugin.SupportsPluginConfig(mod); ok {
 				if err := notifier.OnConfigChanged(config); err != nil {
 					s.logger.Warn("failed to apply initial zone config",
 						"zone_id", zoneConfig.ID,
@@ -160,7 +160,7 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	s.cancelFuncs[zoneConfig.ID] = cancel
 
 	// Apply initial configuration if available
-	s.applyInitialZoneConfig(zoneConfig.ID, moduleSpec, mod)
+	s.applyInitialZoneConfig(zoneConfig.ID, pluginSpec, mod)
 
 	s.wg.Add(1)
 	go s.sampleLoop(ctx, zoneConfig.ID, mod, time.Duration(zoneConfig.RefreshMs)*time.Millisecond)
@@ -168,8 +168,8 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	return nil
 }
 
-// sampleLoop periodically samples a module and updates the zone
-func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod module.Plugin, interval time.Duration) {
+// sampleLoop periodically samples a plugin and updates the zone
+func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plugin, interval time.Duration) {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(interval)
@@ -200,8 +200,8 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod module.Plug
 	}
 }
 
-// sampleOnce samples a module once and updates the zone
-func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod module.Plugin) {
+// sampleOnce samples a plugin once and updates the zone
+func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod plugin.Plugin) {
 	// Sample with timeout (longer for network-dependent modules like weather)
 	// Use parent context so cancellation is respected
 	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
@@ -209,7 +209,7 @@ func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod modul
 
 	// Create a channel to receive the result
 	type result struct {
-		payload module.Payload
+		payload plugin.Payload
 		err     error
 	}
 	resultCh := make(chan result, 1)
@@ -224,26 +224,26 @@ func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod modul
 		// Check if it's a timeout or cancellation
 		if parentCtx.Err() != nil {
 			// Parent context was cancelled (page change) - silently stop
-			s.logger.Debug("module sample cancelled", "zone_id", zoneID)
+			s.logger.Debug("plugin sample cancelled", "zone_id", zoneID)
 			return
 		}
 		// Timeout
-		s.logger.Warn("module sample timeout", "zone_id", zoneID)
-		s.setZoneStatus(zoneID, ZoneStatus{Status: "timeout", Error: "module slow to respond"})
-		s.manager.UpdatePayload(zoneID, module.Payload{
+		s.logger.Warn("plugin sample timeout", "zone_id", zoneID)
+		s.setZoneStatus(zoneID, ZoneStatus{Status: "timeout", Error: "plugin slow to respond"})
+		s.manager.UpdatePayload(zoneID, plugin.Payload{
 			Primary:   "Timeout",
-			Secondary: "Module slow",
-			Severity:  module.SeverityWarn,
+			Secondary: "Plugin slow",
+			Severity:  plugin.SeverityWarn,
 			Timestamp: time.Now(),
 		})
 	case res := <-resultCh:
 		if res.err != nil {
-			s.logger.Error("module sample failed", "zone_id", zoneID, "error", res.err)
+			s.logger.Error("plugin sample failed", "zone_id", zoneID, "error", res.err)
 			s.setZoneStatus(zoneID, ZoneStatus{Status: "error", Error: res.err.Error()})
-			s.manager.UpdatePayload(zoneID, module.Payload{
+			s.manager.UpdatePayload(zoneID, plugin.Payload{
 				Primary:   "Error",
 				Secondary: res.err.Error(),
-				Severity:  module.SeverityCrit,
+				Severity:  plugin.SeverityCrit,
 				Timestamp: time.Now(),
 			})
 			return
@@ -308,7 +308,7 @@ func (s *Sampler) recordFirstSample(zoneID string) {
 	}
 
 	latency := time.Since(start)
-	moduleSpec := s.pluginSpec[zoneID]
+	pluginSpec := s.pluginSpec[zoneID]
 	s.firstSampleLogged[zoneID] = true
 	if latency < 0 {
 		latency = 0
@@ -317,12 +317,12 @@ func (s *Sampler) recordFirstSample(zoneID string) {
 	s.logger.Info("zone first payload",
 		"zone_id", zoneID,
 		"latency_ms", latency.Milliseconds(),
-		"module", moduleSpec)
+		"plugin", pluginSpec)
 }
 
 // Stop stops all sampling
 func (s *Sampler) Stop() {
-	s.logger.Info("stopping module sampler")
+	s.logger.Info("stopping plugin sampler")
 
 	s.mu.Lock()
 	// Cancel all zone sampling loops
@@ -338,11 +338,11 @@ func (s *Sampler) Stop() {
 	// Wait for all goroutines to finish
 	s.wg.Wait()
 
-	// Stop all external module subprocesses
+	// Stop all external plugin subprocesses
 }
 
-// RestartZone stops and restarts sampling for a single zone with a new module spec.
-// Used when a tap action cycles the zone to its next module choice.
+// RestartZone stops and restarts sampling for a single zone with a new plugin spec.
+// Used when a tap action cycles the zone to its next plugin choice.
 func (s *Sampler) RestartZone(zoneConfig ZoneConfig) error {
 	s.mu.Lock()
 	if cancel, ok := s.cancelFuncs[zoneConfig.ID]; ok {
@@ -392,18 +392,18 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 	return nil
 }
 
-// applyInitialZoneConfig notifies a module of its current configuration before sampling starts.
-func (s *Sampler) applyInitialZoneConfig(zoneID, moduleSpec string, mod module.Plugin) {
+// applyInitialZoneConfig notifies a plugin of its current configuration before sampling starts.
+func (s *Sampler) applyInitialZoneConfig(zoneID, pluginSpec string, mod plugin.Plugin) {
 	if s.zoneCfg == nil {
 		return
 	}
 
-	notifier, ok := module.SupportsPluginConfig(mod)
+	notifier, ok := plugin.SupportsPluginConfig(mod)
 	if !ok {
 		return
 	}
 
-	config := s.zoneCfg.Get(zoneID, moduleSpec)
+	config := s.zoneCfg.Get(zoneID, pluginSpec)
 	if len(config) == 0 {
 		return
 	}
@@ -411,14 +411,14 @@ func (s *Sampler) applyInitialZoneConfig(zoneID, moduleSpec string, mod module.P
 	if err := notifier.OnConfigChanged(config); err != nil {
 		s.logger.Warn("failed to apply initial zone config",
 			"zone_id", zoneID,
-			"module", moduleSpec,
+			"plugin", pluginSpec,
 			"error", err)
 		return
 	}
 
 	s.logger.Info("applied initial zone config",
 		"zone_id", zoneID,
-		"module", moduleSpec,
+		"plugin", pluginSpec,
 		"config", config)
 }
 
@@ -436,23 +436,23 @@ func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
 
 	// Notify all loaded modules
 	for zoneID, mod := range s.modules {
-		if notifier, ok := module.SupportsPluginConfig(mod); ok {
+		if notifier, ok := plugin.SupportsPluginConfig(mod); ok {
 			if err := notifier.OnConfigChanged(config); err != nil {
-				s.logger.Error("module config notification failed",
+				s.logger.Error("plugin config notification failed",
 					"zone_id", zoneID,
-					"module", s.pluginSpec[zoneID],
+					"plugin", s.pluginSpec[zoneID],
 					"error", err)
 			} else {
-				s.logger.Debug("module config notified",
+				s.logger.Debug("plugin config notified",
 					"zone_id", zoneID,
-					"module", s.pluginSpec[zoneID])
+					"plugin", s.pluginSpec[zoneID])
 				notified++
 				zonesToResample = append(zonesToResample, zoneID)
 			}
 		} else {
-			s.logger.Debug("module does not support config notifications",
+			s.logger.Debug("plugin does not support config notifications",
 				"zone_id", zoneID,
-				"module", s.pluginSpec[zoneID])
+				"plugin", s.pluginSpec[zoneID])
 			skipped++
 		}
 	}
@@ -476,36 +476,36 @@ func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
 	}
 }
 
-// BroadcastZoneConfigChange broadcasts a config change to a specific zone's module.
+// BroadcastZoneConfigChange broadcasts a config change to a specific zone's plugin.
 // Returns an error if the zone doesn't exist or doesn't support config notifications.
 func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]interface{}) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Find the module for this zone
+	// Find the plugin for this zone
 	mod, exists := s.modules[zoneID]
 	if !exists {
 		return fmt.Errorf("zone %q not found", zoneID)
 	}
 
-	// Check if module supports config notifications
-	notifier, ok := module.SupportsPluginConfig(mod)
+	// Check if plugin supports config notifications
+	notifier, ok := plugin.SupportsPluginConfig(mod)
 	if !ok {
-		return fmt.Errorf("module for zone %q does not support config notifications", zoneID)
+		return fmt.Errorf("plugin for zone %q does not support config notifications", zoneID)
 	}
 
-	// Send config to module
+	// Send config to plugin
 	if err := notifier.OnConfigChanged(config); err != nil {
 		s.logger.Error("zone config notification failed",
 			"zone_id", zoneID,
-			"module", s.pluginSpec[zoneID],
+			"plugin", s.pluginSpec[zoneID],
 			"error", err)
 		return fmt.Errorf("config notification failed: %w", err)
 	}
 
 	s.logger.Info("zone config updated",
 		"zone_id", zoneID,
-		"module", s.pluginSpec[zoneID],
+		"plugin", s.pluginSpec[zoneID],
 		"config", config)
 
 	// Trigger immediate resampling

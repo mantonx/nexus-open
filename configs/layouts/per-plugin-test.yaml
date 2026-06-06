@@ -17,29 +17,29 @@ pages:
     zones:
       - id: weather
         width: 160
-        plugin: exec:modules/weather/weather
+        plugin: exec:plugins/weather/weather
         refresh_ms: 300000
         align: left
-        module_config:
+        plugin_config:
           location: "New York, NY"
           unit: "imperial"
 
       - id: cpu
         width: 160
-        plugin: exec:modules/cpu-temp/cpu-temp
+        plugin: exec:plugins/cpu-temp/cpu-temp
         refresh_ms: 2000
         align: center
-        module_config:
+        plugin_config:
           unit: "metric"  # Celsius
 
       - id: gpu
         width: 160
-        plugin: exec:modules/gpu-temp/gpu-temp
+        plugin: exec:plugins/gpu-temp/gpu-temp
         refresh_ms: 2000
         align: center
         theme_override:
           accent: "#FF6B6B"
-        module_config:
+        plugin_config:
           unit: "imperial"  # Fahrenheit
 
       - id: clock

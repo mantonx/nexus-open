@@ -27,7 +27,7 @@ pages:
     zones:
       - id: system.weather
         width: 160
-        plugin: exec:./modules/weather/weather
+        plugin: exec:./plugins/weather/weather
         refresh_ms: 300000  # 5 minutes
         align: left
         theme_override:
@@ -35,7 +35,7 @@ pages:
 
       - id: system.cpu
         width: 160
-        plugin: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
         refresh_ms: 2000
         align: left
         theme_override:
@@ -43,7 +43,7 @@ pages:
 
       - id: system.gpu
         width: 160
-        plugin: exec:./modules/gpu-temp/gpu-temp
+        plugin: exec:./plugins/gpu-temp/gpu-temp
         refresh_ms: 2000
         align: left
         theme_override:
@@ -51,7 +51,7 @@ pages:
 
       - id: system.network
         width: 160
-        plugin: exec:./modules/network/network
+        plugin: exec:./plugins/network/network
         refresh_ms: 2000
         align: left
         theme_override:
@@ -62,7 +62,7 @@ pages:
     zones:
       - id: performance.cpu
         width: 240
-        plugin: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
         refresh_ms: 1000
         align: center
         theme_override:
@@ -70,7 +70,7 @@ pages:
 
       - id: performance.gpu
         width: 240
-        plugin: exec:./modules/gpu-temp/gpu-temp
+        plugin: exec:./plugins/gpu-temp/gpu-temp
         refresh_ms: 1000
         align: center
         theme_override:
@@ -78,11 +78,60 @@ pages:
 
       - id: performance.network
         width: 160
-        plugin: exec:./modules/network/network
+        plugin: exec:./plugins/network/network
         refresh_ms: 1000
         align: right
 
-  # Page 3: Minimal Clock
+  # Page 3: Load Monitoring
+  - name: "Load"
+    zones:
+      - id: load.cpu
+        width: 160
+        plugin: exec:./plugins/cpu-load/cpu-load
+        refresh_ms: 1000
+        align: left
+        theme_override:
+          accent: "#38C878"
+        plugin_config:
+          source: "all"
+          graph_type: sparkline
+
+      - id: load.cpu-hybrid
+        width: 160
+        plugin: exec:./plugins/cpu-load/cpu-load
+        refresh_ms: 1000
+        align: left
+        theme_override:
+          accent: "#38C878"
+        plugin_config:
+          source: ["p-cores", "e-cores"]
+          graph_type: sparkline
+
+      - id: load.gpu
+        width: 160
+        plugin: exec:./plugins/gpu-load/gpu-load
+        refresh_ms: 1000
+        align: left
+        theme_override:
+          accent: "#FF6B35"
+        plugin_config:
+          source: gpu
+          graph_type: sparkline
+          show_vram: true
+
+      - id: load.gpu-mem
+        width: 160
+        plugin: exec:./plugins/gpu-load/gpu-load
+        refresh_ms: 1000
+        align: left
+        theme_override:
+          accent: "#FF6B35"
+        plugin_config:
+          source: memory
+          graph_type: sparkline
+          show_vram: false
+
+  # Page 4: Minimal Clock
   - name: "Clock"
     zones:
       - id: clock.time

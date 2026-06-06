@@ -2,7 +2,7 @@
 
 ## Overview
 
-The ConfigNotifier system enables modules to receive **immediate real-time configuration updates** via RPC, eliminating the need for file watching or polling. When a user updates configuration through the API, modules are notified instantly and can update their display within seconds.
+The ConfigNotifier system enables plugins to receive **immediate real-time configuration updates** via RPC, eliminating the need for file watching or polling. When a user updates configuration through the API, plugins are notified instantly and can update their display within seconds.
 
 ## How It Works
 
@@ -10,8 +10,8 @@ The ConfigNotifier system enables modules to receive **immediate real-time confi
 
 1. **User updates config** via API (`POST /api/config`)
 2. **API handler saves config** to file
-3. **API handler broadcasts config** to all loaded modules via `BroadcastConfigChange()`
-4. **Modules receive notification** through their `OnConfigChanged()` method
+3. **API handler broadcasts config** to all loaded plugins via `BroadcastConfigChange()`
+4. **Plugins receive notification** through their `OnConfigChanged()` method
 5. **Host triggers immediate sample** via trigger channels
 6. **Display updates immediately** (typically 2-3 seconds)
 
@@ -32,7 +32,7 @@ The ConfigNotifier system enables modules to receive **immediate real-time confi
                 ▼              ▼              ▼
          ┌──────────┐   ┌──────────┐   ┌──────────┐
          │ Weather  │   │ Network  │   │  Clock   │
-         │ Module   │   │ Module   │   │  Module  │
+         │ Plugin   │   │ Plugin   │   │  Plugin  │
          └──────────┘   └──────────┘   └──────────┘
               │               │               │
               └───────────────┴───────────────┘
@@ -90,15 +90,15 @@ configMap := map[string]interface{}{
 s.broadcaster.BroadcastConfigChange(configMap)
 ```
 
-**CRITICAL**: If you forget this step, modules will never receive the config value! The broadcast map must include ALL fields that modules need.
+**CRITICAL**: If you forget this step, plugins will never receive the config value! The broadcast map must include ALL fields that plugins need.
 
-### 3. Implement OnConfigChanged in Your Module
+### 3. Implement OnConfigChanged in Your Plugin
 
-**File**: `modules/your-module/main.go`
+**File**: `plugins/your-plugin/main.go`
 
 ```go
-// OnConfigChanged implements module.ConfigNotifier interface.
-// The module uses the "your_config_field" config.
+// OnConfigChanged implements plugin.ConfigNotifier interface.
+// The plugin uses the "your_config_field" config.
 func (m *YourModule) OnConfigChanged(config map[string]interface{}) error {
     m.mu.Lock()
     defer m.mu.Unlock()
@@ -114,7 +114,7 @@ func (m *YourModule) OnConfigChanged(config map[string]interface{}) error {
             m.cachedData = nil
             m.lastUpdate = time.Time{}
 
-            fmt.Printf("your-module: config changed from %q to %q\n", oldValue, m.configValue)
+            fmt.Printf("your-plugin: config changed from %q to %q\n", oldValue, m.configValue)
         }
     }
 
@@ -136,9 +136,9 @@ The host automatically triggers immediate `Sample()` calls after broadcasting co
 
 ```go
 func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
-    // ... notify all modules ...
+    // ... notify all plugins ...
 
-    // Trigger immediate resampling for modules that were notified
+    // Trigger immediate resampling for plugins that were notified
     for _, zoneID := range zonesToResample {
         if triggerCh, ok := s.triggerChannels[zoneID]; ok {
             select {
@@ -207,39 +207,39 @@ func (m *NetworkModule) OnConfigChanged(config map[string]interface{}) error {
 }
 ```
 
-### Pattern 3: No-Op Implementation (Module Doesn't Use Config)
+### Pattern 3: No-Op Implementation (Plugin Doesn't Use Config)
 
 ```go
 func (m *CPUTempModule) OnConfigChanged(config map[string]interface{}) error {
-    // CPU temperature module doesn't need configuration
+    // CPU temperature plugin doesn't need configuration
     return nil
 }
 ```
 
-**IMPORTANT**: Even if your module doesn't use config, you MUST implement this method to prevent RPC errors!
+**IMPORTANT**: Even if your plugin doesn't use config, you MUST implement this method to prevent RPC errors!
 
 ## Troubleshooting
 
-### Problem: Module doesn't receive config updates
+### Problem: Plugin doesn't receive config updates
 
 **Checklist**:
 1. ✅ Did you add the field to `internal/config/config.go`?
 2. ✅ Did you add the field to the broadcast map in `internal/api/handlers.go`?
-3. ✅ Did you implement `OnConfigChanged()` in your module?
-4. ✅ Did you rebuild your module binary?
+3. ✅ Did you implement `OnConfigChanged()` in your plugin?
+4. ✅ Did you rebuild your plugin binary?
 5. ✅ Did you restart the dev server to pick up the new binary?
 
 **Debug**: Add logging to see what config keys are received:
 ```go
 func (m *YourModule) OnConfigChanged(config map[string]interface{}) error {
-    fmt.Printf("module: OnConfigChanged called with keys: %v\n", getKeys(config))
+    fmt.Printf("plugin: OnConfigChanged called with keys: %v\n", getKeys(config))
     // ... rest of implementation ...
 }
 ```
 
 ### Problem: Display doesn't update immediately
 
-**Cause**: Module's `OnConfigChanged` is being called, but the display shows old data.
+**Cause**: Plugin's `OnConfigChanged` is being called, but the display shows old data.
 
 **Solution**: Make sure you're clearing cached data:
 ```go
@@ -257,7 +257,7 @@ The trigger channel system will call `Sample()` immediately, which will fetch fr
 
 **Cause**: Missing gob type registration.
 
-**Solution**: Already fixed in `pkg/module/plugin.go`:
+**Solution**: Already fixed in `pkg/plugin/plugin.go`:
 ```go
 func init() {
     gob.Register(map[string]interface{}{})
@@ -274,17 +274,17 @@ func init() {
 
 ### Why It's Fast
 
-1. **No polling**: Modules don't check files every N seconds
+1. **No polling**: Plugins don't check files every N seconds
 2. **Direct RPC**: Immediate notification via go-plugin RPC
 3. **Trigger channels**: Host immediately calls `Sample()` after notification
-4. **Smart caching**: Modules cache data and only refetch when config changes
+4. **Smart caching**: Plugins cache data and only refetch when config changes
 
 ### Avoid These Anti-Patterns
 
 ❌ **DON'T** fetch data in a goroutine in `OnConfigChanged`:
 ```go
 // BAD - Can cause deadlocks!
-func (m *Module) OnConfigChanged(config map[string]interface{}) error {
+func (m *Plugin) OnConfigChanged(config map[string]interface{}) error {
     m.mu.Lock()
     defer m.mu.Unlock()
 
@@ -300,7 +300,7 @@ func (m *Module) OnConfigChanged(config map[string]interface{}) error {
 ✅ **DO** just clear cache and let the trigger system call `Sample()`:
 ```go
 // GOOD - Simple and safe
-func (m *Module) OnConfigChanged(config map[string]interface{}) error {
+func (m *Plugin) OnConfigChanged(config map[string]interface{}) error {
     m.mu.Lock()
     defer m.mu.Unlock()
 
@@ -312,16 +312,16 @@ func (m *Module) OnConfigChanged(config map[string]interface{}) error {
 
 ## Examples in Codebase
 
-- **Weather Module**: [`modules/weather/main.go:139-165`](modules/weather/main.go#L139-L165)
-- **Network Module**: [`modules/network/main.go:220-242`](modules/network/main.go#L220-L242)
-- **Clock Module**: [`internal/modules/builtin/clock.go`](internal/modules/builtin/clock.go)
+- **Weather Plugin**: [`plugins/weather/main.go:139-165`](plugins/weather/main.go#L139-L165)
+- **Network Plugin**: [`plugins/network/main.go:220-242`](plugins/network/main.go#L220-L242)
+- **Clock Plugin**: [`internal/plugins/builtin/clock.go`](internal/plugins/builtin/clock.go)
 - **Sampler (Trigger System)**: [`internal/zone/sampler.go:322-372`](internal/zone/sampler.go#L322-L372)
 
-## Per-Module Configuration
+## Per-Plugin Configuration
 
-In addition to global configuration (via API), modules can receive **per-zone configuration** from the zone layout YAML file. This allows each zone to configure its module independently.
+In addition to global configuration (via API), plugins can receive **per-zone configuration** from the zone layout YAML file. This allows each zone to configure its plugin independently.
 
-### How Per-Module Config Works
+### How Per-Plugin Config Works
 
 1. **Define config in zone layout** (`configs/layouts/*.yaml`):
 ```yaml
@@ -330,24 +330,24 @@ pages:
     zones:
       - id: cpu
         width: 160
-        module: exec:./modules/cpu-temp/cpu-temp
+        plugin: exec:./plugins/cpu-temp/cpu-temp
         refresh_ms: 2000
         module_config:
           unit: "metric"  # CPU shows Celsius
 
       - id: gpu
         width: 160
-        module: exec:./modules/gpu-temp/gpu-temp
+        plugin: exec:./plugins/gpu-temp/gpu-temp
         refresh_ms: 2000
         module_config:
           unit: "imperial"  # GPU shows Fahrenheit
 ```
 
-2. **Sampler sends config on module load** (`internal/zone/sampler.go:127-140`):
+2. **Sampler sends config on plugin load** (`internal/zone/sampler.go:127-140`):
 ```go
-// Send module-specific config if available
+// Send plugin-specific config if available
 if zoneConfig.ModuleConfig != nil && len(zoneConfig.ModuleConfig) > 0 {
-    if notifier, ok := module.SupportsConfigNotification(mod); ok {
+    if notifier, ok := plugin.SupportsConfigNotification(mod); ok {
         if err := notifier.OnConfigChanged(zoneConfig.ModuleConfig); err != nil {
             // handle error
         }
@@ -355,19 +355,19 @@ if zoneConfig.ModuleConfig != nil && len(zoneConfig.ModuleConfig) > 0 {
 }
 ```
 
-3. **Module receives config** - Same `OnConfigChanged()` method as global config!
+3. **Plugin receives config** - Same `OnConfigChanged()` method as global config!
 
 ### Example: CPU in Celsius, GPU in Fahrenheit
 
 ```yaml
 zones:
   - id: cpu
-    module: exec:./modules/cpu-temp/cpu-temp
+    plugin: exec:./plugins/cpu-temp/cpu-temp
     module_config:
       unit: "metric"  # 28°C
 
   - id: gpu
-    module: exec:./modules/gpu-temp/gpu-temp
+    plugin: exec:./plugins/gpu-temp/gpu-temp
     module_config:
       unit: "imperial"  # 127°F
 ```
@@ -376,19 +376,19 @@ Result:
 - CPU zone displays: `28°C`
 - GPU zone displays: `127°F`
 
-Both modules use the same code - they just receive different config values!
+Both plugins use the same code - they just receive different config values!
 
-### Per-Module vs Global Config
+### Per-Plugin vs Global Config
 
-| Feature | Per-Module Config | Global Config |
+| Feature | Per-Plugin Config | Global Config |
 |---------|------------------|---------------|
 | **Defined in** | Zone layout YAML | Global config file |
-| **Scope** | Single zone/module | All modules |
+| **Scope** | Single zone/plugin | All plugins |
 | **Updated via** | Restart required | API (real-time) |
 | **Use case** | Different settings per zone | User preferences |
 | **Example** | CPU in °C, GPU in °F | All temps in °F |
 
-**Best Practice**: Use per-module config for zone-specific settings, global config for user preferences.
+**Best Practice**: Use per-plugin config for zone-specific settings, global config for user preferences.
 
 ## Summary
 
@@ -401,4 +401,4 @@ The ConfigNotifier system provides **immediate real-time configuration updates**
 
 Updates appear on the display in **seconds**, not minutes. No polling, no file watching, just instant RPC notifications.
 
-**Per-module configuration** enables fine-grained control - each zone can configure its module independently via the zone layout YAML.
+**Per-plugin configuration** enables fine-grained control - each zone can configure its plugin independently via the zone layout YAML.

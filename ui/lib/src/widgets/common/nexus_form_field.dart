@@ -4,7 +4,7 @@ import '../../theme/app_tokens.dart';
 /// Unified text input for the app.
 ///
 /// Replaces the duplicate [InputDecoration] definitions scattered across
-/// the modules tab and location tab. Styling comes entirely from the
+/// the plugins tab and location tab. Styling comes entirely from the
 /// theme's [InputDecorationTheme] — this widget just provides consistent
 /// label/hint/validation wiring.
 class NexusFormField extends StatelessWidget {

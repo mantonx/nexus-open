@@ -80,7 +80,7 @@ info:
     title: Nexus Open API
     description: |
         REST API for Nexus Open - an open-source iCUE Nexus companion app.
-        Provides endpoints for device control, configuration management, and zone/module interactions.
+        Provides endpoints for device control, configuration management, and zone/plugin interactions.
     contact:
         name: Team
         url: https://github.com/mantonx/nexus-next
@@ -331,6 +331,6 @@ tags:
     - name: Config
       description: Configuration management
     - name: Zone
-      description: Zone and module management
+      description: Zone and plugin management
     - name: Animation
       description: Animation control

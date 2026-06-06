@@ -289,13 +289,13 @@ The settings window opens but shows "Backend not responding".
 - Make sure the Go backend is running: `pgrep nexus-open`
 - If using a custom port, the UI always connects to `localhost:1985`. Run the backend on the default port or wait for the WebSocket support (Week 2).
 
-### Module shows blank
+### Plugin shows blank
 
 A zone displays nothing or a placeholder instead of data.
 
 - Confirm the plugin binary is built and present next to the `nexus-open` binary.
-- From the project root: `make modules` (or `cd modules/<name> && go build -o <name>`).
-- Check logs for `plugin error` or `module timeout` lines.
+- From the project root: `make plugins` (or `cd plugins/<name> && go build -o <name>`).
+- Check logs for `plugin error` or `plugin timeout` lines.
 
 ## Support
 

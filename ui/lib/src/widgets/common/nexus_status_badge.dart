@@ -4,7 +4,7 @@ import '../../theme/app_tokens.dart';
 /// Semantic status levels used throughout the app.
 enum NexusStatus { ok, warning, error, loading, unknown }
 
-/// A small pill badge that communicates module/connection/device status.
+/// A small pill badge that communicates plugin/connection/device status.
 ///
 /// Replaces all [Colors.green] / [Colors.orange] / [Colors.red] hardcoding.
 /// Colours come from the [AppSemanticColors] extension, so they adapt to

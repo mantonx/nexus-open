@@ -645,17 +645,17 @@ class _ZoneCard extends StatelessWidget {
     'builtin:placeholder',
     'builtin:clock',
     'builtin:clock24',
-    'exec:./modules/weather/weather',
-    'exec:./modules/cpu-temp/cpu-temp',
-    'exec:./modules/gpu-temp/gpu-temp',
-    'exec:./modules/network/network',
+    'exec:./plugins/weather/weather',
+    'exec:./plugins/cpu-temp/cpu-temp',
+    'exec:./plugins/gpu-temp/gpu-temp',
+    'exec:./plugins/network/network',
   ];
 
   static String _pluginLabel(String m) {
     if (m == 'builtin:placeholder') return 'Placeholder';
     if (m == 'builtin:clock') return 'Clock (12h)';
     if (m == 'builtin:clock24') return 'Clock (24h)';
-    if (m.startsWith('exec:./modules/')) {
+    if (m.startsWith('exec:./plugins/')) {
       final name = m.split('/')[2];
       return name.split('-').map((w) => w[0].toUpperCase() + w.substring(1)).join(' ');
     }

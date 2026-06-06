@@ -12,7 +12,7 @@ import (
 	"golang.org/x/image/font"
 
 	"github.com/mantonx/nexus-next/internal/fonts"
-	"github.com/mantonx/nexus-next/pkg/module"
+	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
 // Renderer renders a single zone from a Payload using fogleman/gg.
@@ -83,7 +83,7 @@ func (r *Renderer) reloadFaces() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 // Render renders a payload into a zone-sized RGBA image.
-func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
+func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
 	if err := payload.Validate(); err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
 	// severity override only for warn/crit states.
 	var textColor color.RGBA
 	switch payload.Severity {
-	case module.SeverityWarn, module.SeverityCrit:
+	case plugin.SeverityWarn, plugin.SeverityCrit:
 		textColor = r.severityColor(payload.Severity)
 	default:
 		textColor = accentColor
@@ -152,7 +152,7 @@ func (r *Renderer) drawTint(dc *gg.Context, accent, bg color.RGBA) {
 
 // drawGraph draws the Corsair-inspired graph: bottom-anchored gradient fill,
 // glow halo composited under a crisp 1.5px line.
-func (r *Renderer) drawGraph(dc *gg.Context, payload module.Payload, col color.RGBA) {
+func (r *Renderer) drawGraph(dc *gg.Context, payload plugin.Payload, col color.RGBA) {
 	data := payload.Spark
 	n := len(data)
 	if n < 2 {
@@ -374,10 +374,10 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 	W := float64(r.width)
 	H := float64(r.height)
 
-	// Split layout: used for all zones that have both a label and a graph.
-	// Label is left-anchored and vertically centred; value+icon are right-anchored.
-	// This gives the label a permanent home that never conflicts with graph or value.
-	if hasGraph && secondary != "" {
+	// Split layout: used when there is a label+graph, OR when the primary
+	// contains multiple lines (multi-source plugins). Multi-line primaries
+	// always use this path so both lines render at their fixed baselines.
+	if (hasGraph && secondary != "") || isMulti {
 		r.drawSplitLayout(dc, primary, isMulti, secondary, icon, tr, tg, tb, lr, lg, lb, W, H)
 		return
 	}
@@ -633,11 +633,11 @@ func (r *Renderer) truncate(text string, maxWidth float64, dc *gg.Context) strin
 }
 
 // severityColor maps payload severity to a text colour.
-func (r *Renderer) severityColor(sev module.Severity) color.RGBA {
+func (r *Renderer) severityColor(sev plugin.Severity) color.RGBA {
 	switch sev {
-	case module.SeverityWarn:
+	case plugin.SeverityWarn:
 		return color.RGBA{R: 255, G: 176, B: 32, A: 255}
-	case module.SeverityCrit:
+	case plugin.SeverityCrit:
 		return color.RGBA{R: 255, G: 68, B: 68, A: 255}
 	default:
 		return r.theme.GetFgColor()
@@ -693,9 +693,9 @@ type ContentModel struct {
 	PrimaryLines     []string
 	Secondary        string
 	GraphData        []float32
-	GraphType        module.GraphType
+	GraphType        plugin.GraphType
 	LineSpacing      int
-	LabelPosition    module.LabelPosition
+	LabelPosition    plugin.LabelPosition
 	LabelOffsetX     int
 	LabelOffsetY     int
 	NormalizeGraph   bool

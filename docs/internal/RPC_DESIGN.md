@@ -1,6 +1,6 @@
 # RPC Design Decision: net/rpc vs gRPC
 
-**Decision:** Use Go's `net/rpc` for module communication in v2.0
+**Decision:** Use Go's `net/rpc` for plugin communication in v2.0
 
 **Date:** 2025-10-12
 
@@ -8,7 +8,7 @@
 
 ## Context
 
-Nexus Open v2.0 uses a plugin architecture where modules (CPU, GPU, Weather, etc.) run as separate processes and communicate with the host via RPC. We needed to choose between:
+Nexus Open v2.0 uses a plugin architecture where plugins (CPU, GPU, Weather, etc.) run as separate processes and communicate with the host via RPC. We needed to choose between:
 
 1. **net/rpc** - Go's standard library RPC
 2. **gRPC** - Google's high-performance RPC framework
@@ -33,7 +33,7 @@ Nexus Open v2.0 uses a plugin architecture where modules (CPU, GPU, Weather, etc
 
 ### 3. Sufficient Performance
 Our workload characteristics:
-- Call frequency: 1-5 seconds per module
+- Call frequency: 1-5 seconds per plugin
 - Payload size: ~100 bytes (Primary, Secondary, Spark)
 - Total RPC calls: ~2-8 per second
 - **Conclusion:** net/rpc overhead is negligible
@@ -50,10 +50,10 @@ Our workload characteristics:
 
 ### What We Give Up with net/rpc:
 
-1. **Multi-language modules**
+1. **Multi-language plugins**
    - net/rpc is Go-only
-   - Cannot write modules in Python, Rust, etc.
-   - **Mitigation:** V2.0 focuses on Go modules, multi-language in v3.0+
+   - Cannot write plugins in Python, Rust, etc.
+   - **Mitigation:** V2.0 focuses on Go plugins, multi-language in v3.0+
 
 2. **Schema evolution**
    - Struct changes can break compatibility
@@ -75,7 +75,7 @@ net/rpc:  Sample() call = ~1-2ms
 gRPC:     Sample() call = ~0.5-1ms
 
 Difference: ~1ms per call
-Impact: 1ms × 8 modules = 8ms/second
+Impact: 1ms × 8 plugins = 8ms/second
 Verdict: Negligible for our use case
 ```
 
@@ -85,7 +85,7 @@ Verdict: Negligible for our use case
 - Optimized C implementation
 
 ### Why It Doesn't Matter:
-- We call modules every 1-5 seconds, not 1000x/sec
+- We call plugins every 1-5 seconds, not 1000x/sec
 - Payload is tiny (~100 bytes)
 - Network latency > encoding overhead (same process)
 
@@ -110,9 +110,9 @@ Verdict: Negligible for our use case
 
 ### When to Consider gRPC:
 
-1. **Community demand for multi-language modules**
-   - Users want to write modules in Python, Rust, etc.
-   - Example: ML-based modules in Python
+1. **Community demand for multi-language plugins**
+   - Users want to write plugins in Python, Rust, etc.
+   - Example: ML-based plugins in Python
 
 2. **Streaming requirements**
    - Real-time sensor data (>1Hz updates)
@@ -121,7 +121,7 @@ Verdict: Negligible for our use case
 
 3. **Performance bottleneck**
    - Profiling shows RPC is a bottleneck
-   - High-frequency modules (>10Hz)
+   - High-frequency plugins (>10Hz)
    - Large payload sizes (>1KB)
 
 ### Migration Strategy:

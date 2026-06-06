@@ -32,7 +32,7 @@ The current UI for Nexus Open feels like a prototype. This document outlines a c
 - ✅ Theme system with per-zone overrides
 - ✅ Smooth transitions with easing functions
 - ✅ Touch interaction with velocity-aware filtering
-- ✅ Module plugin system for extensibility
+- ✅ Plugin plugin system for extensibility
 
 ### Critical Issues
 - ❌ **Typography too small** (14pt primary, 11pt secondary) - not scannable
@@ -168,7 +168,7 @@ type Theme struct {
 
 **New rendering order:**
 ```go
-func (r *Renderer) Render(payload module.Payload) (*image.RGBA, error) {
+func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
     img := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
 
     // 1. Fill main background
@@ -214,7 +214,7 @@ func (r *Renderer) drawZoneBackground(img *image.RGBA) {
 }
 
 // drawBackgroundGraph renders graph as full-height atmospheric background
-func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphType module.GraphType, col color.RGBA) {
+func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphType plugin.GraphType, col color.RGBA) {
     // 1. Draw area fill at 15% opacity (atmospheric)
     // 2. Draw line at 40% opacity (visible but subtle)
     // 3. Full height (0 to 48px), respects padding
@@ -233,14 +233,14 @@ func (r *Renderer) drawSecondaryLabel(img *image.RGBA, text string, col color.RG
 }
 
 // shouldShowIcon determines if icon should be displayed
-func (r *Renderer) shouldShowIcon(payload module.Payload) bool {
+func (r *Renderer) shouldShowIcon(payload plugin.Payload) bool {
     // Show icon if:
     // - No graph data (len(Spark) == 0), OR
     // - Icon is semantically meaningful (weather condition, warning)
     hasGraph := len(payload.Spark) > 0
     isMeaningful := payload.Icon == "cloud" ||
                     payload.Icon == "cloud-rain" ||
-                    payload.Severity != module.SeverityOK
+                    payload.Severity != plugin.SeverityOK
 
     return !hasGraph || isMeaningful
 }
@@ -280,7 +280,7 @@ if iconFace, err := fontManager.GetFace("FontAwesome-Solid", 18); err == nil {
 
 #### 2.1 Background Graph Rendering
 ```go
-func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphType module.GraphType, col color.RGBA) {
+func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphType plugin.GraphType, col color.RGBA) {
     if len(data) == 0 {
         return
     }
@@ -310,11 +310,11 @@ func (r *Renderer) drawBackgroundGraph(img *image.RGBA, data []float32, graphTyp
 
     // Render based on graph type
     switch graphType {
-    case module.GraphTypeArea:
+    case plugin.GraphTypeArea:
         r.drawBackgroundAreaGraph(img, data, fillColor, lineColor, paddingH, paddingV, graphHeight, availableWidth)
-    case module.GraphTypeBar:
+    case plugin.GraphTypeBar:
         r.drawBackgroundBarGraph(img, data, fillColor, lineColor, paddingH, paddingV, graphHeight, availableWidth)
-    case module.GraphTypeLine:
+    case plugin.GraphTypeLine:
         r.drawBackgroundLineGraph(img, data, lineColor, paddingH, paddingV, graphHeight, availableWidth)
     default: // Sparkline
         r.drawBackgroundSparkline(img, data, fillColor, lineColor, paddingH, paddingV, graphHeight, availableWidth)
@@ -361,55 +361,55 @@ func (r *Renderer) drawBackgroundAreaGraph(img *image.RGBA, data []float32,
 }
 ```
 
-### Phase 3: Module Updates
+### Phase 3: Plugin Updates
 
-**Objective:** Update each module to leverage new design system
+**Objective:** Update each plugin to leverage new design system
 
-#### 3.1 Weather Module
-**File:** `modules/weather/main.go`
+#### 3.1 Weather Plugin
+**File:** `plugins/weather/main.go`
 
 ```go
 // Leverage background graph for temperature history
-return module.Payload{
+return plugin.Payload{
     Primary:   fmt.Sprintf("%d°%s", temp, unit),  // Large temp
     Secondary: location,                           // Small location
-    Severity:  module.SeverityOK,
+    Severity:  plugin.SeverityOK,
     Spark:     tempHistory,                        // Background graph
-    GraphType: module.GraphTypeArea,               // Atmospheric area
+    GraphType: plugin.GraphTypeArea,               // Atmospheric area
     Icon:      weatherIcon,                        // Cloud icon (meaningful)
     TTL:       5 * time.Minute,
     Timestamp: time.Now(),
 }, nil
 ```
 
-#### 3.2 CPU/GPU Temperature Modules
-**Files:** `modules/cpu-temp/main.go`, `modules/gpu-temp/main.go`
+#### 3.2 CPU/GPU Temperature Plugins
+**Files:** `plugins/cpu-temp/main.go`, `plugins/gpu-temp/main.go`
 
 ```go
 // Background graph shows thermal history
-return module.Payload{
+return plugin.Payload{
     Primary:   fmt.Sprintf("%d°%s", temp, unit),  // Large temp
     Secondary: "CPU Load 45%",                     // Context
     Severity:  severity,                           // Color-coded
     Spark:     tempHistory,                        // Background graph
-    GraphType: module.GraphTypeLine,               // Crisp line graph
+    GraphType: plugin.GraphTypeLine,               // Crisp line graph
     Icon:      "",                                 // No icon (graph tells story)
     TTL:       2 * time.Second,
     Timestamp: time.Now(),
 }, nil
 ```
 
-#### 3.3 Network Module
-**File:** `modules/network/main.go`
+#### 3.3 Network Plugin
+**File:** `plugins/network/main.go`
 
 ```go
 // Already updated to side-by-side format, add background
-return module.Payload{
+return plugin.Payload{
     Primary:   fmt.Sprintf("↓%s ↑%s", downStr, upStr),  // Both speeds
     Secondary: interfaceName,                            // eth0, wlan0, etc
-    Severity:  module.SeverityOK,
+    Severity:  plugin.SeverityOK,
     Spark:     downloadHistory,                          // Background sparkline
-    GraphType: module.GraphTypeSparkline,                // Fast line
+    GraphType: plugin.GraphTypeSparkline,                // Fast line
     Icon:      "",                                       // No icon needed
     TTL:       2 * time.Second,
     Timestamp: time.Now(),
@@ -508,8 +508,8 @@ return module.Payload{
 3. Test all graph types with new background treatment
 4. Verify text readability at all sizes
 
-### Module Testing
-1. Test each module with new renderer
+### Plugin Testing
+1. Test each plugin with new renderer
 2. Verify graph background doesn't obscure text
 3. Test icon visibility logic
 4. Validate severity color changes
@@ -534,9 +534,9 @@ return module.Payload{
 - **Fallback:** Dynamic font sizing based on content length
 
 ### Medium Risk
-**Breaking existing modules**
-- **Mitigation:** Update modules incrementally, test each one
-- **Fallback:** Module compatibility layer for old rendering style
+**Breaking existing plugins**
+- **Mitigation:** Update plugins incrementally, test each one
+- **Fallback:** Plugin compatibility layer for old rendering style
 
 **Performance regression**
 - **Mitigation:** Profile after each phase, optimize hot paths
@@ -571,7 +571,7 @@ return module.Payload{
 ### Week 1: Core Redesign
 - **Day 1-2:** Theme updates, renderer rewrite
 - **Day 3-4:** Background graph implementation
-- **Day 5:** Module updates and testing
+- **Day 5:** Plugin updates and testing
 
 ### Week 2: Polish & Refinement
 - **Day 1-2:** Animated transitions
@@ -593,11 +593,11 @@ return module.Payload{
 - `internal/zone/renderer.go` - Complete rewrite (548 lines)
 - `internal/zone/compositor.go` - Zone background support
 
-### Modules
-- `modules/weather/main.go` - Graph integration
-- `modules/cpu-temp/main.go` - Graph integration
-- `modules/gpu-temp/main.go` - Graph integration
-- `modules/network/main.go` - Already updated
+### Plugins
+- `plugins/weather/main.go` - Graph integration
+- `plugins/cpu-temp/main.go` - Graph integration
+- `plugins/gpu-temp/main.go` - Graph integration
+- `plugins/network/main.go` - Already updated
 
 ### Documentation
 - `docs/UI_REDESIGN.md` - This document

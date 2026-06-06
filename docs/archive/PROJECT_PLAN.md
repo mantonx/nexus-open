@@ -221,7 +221,7 @@ app := app.New(
 **Tasks:**
 1. ✅ Delete Wails artifacts (`frontend/`, `app.go`, `wails.json`) - 47 files, 5,195 lines removed
 2. ✅ Create new directory structure (`cmd/`, `internal/`, `pkg/`)
-3. ✅ Set up Go modules properly
+3. ✅ Set up Go plugins properly
 4. ✅ Add structured logging (slog)
 5. ✅ Create app container with DI pattern
 6. ✅ Remove global variables → move to app struct
@@ -987,7 +987,7 @@ sudo usermod -a -G plugdev $USER
 - [ui/lib/main.dart](ui/lib/main.dart) - Flutter entry point
 
 ### Dependencies
-**Go Modules:**
+**Go Plugins:**
 - github.com/google/gousb (USB)
 - github.com/spf13/viper (config)
 - github.com/shirou/gopsutil (system info)

@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help build build-debug build-release build-ui build-all test test-race coverage clean clean-ui install uninstall run run-tray dev deb appimage rpm generate-api models all
+.PHONY: help build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev deb appimage rpm generate-api models all
 
 # Configuration
 APP_NAME := nexus-open
@@ -32,7 +32,8 @@ help:
 	@echo "Development:"
 	@echo "  make build         - Build Go backend only (with debug info)"
 	@echo "  make build-ui      - Build Flutter UI only"
-	@echo "  make build-all     - Build both backend and UI"
+	@echo "  make build-plugins - Build all external plugins"
+	@echo "  make build-all     - Build backend, UI, and all plugins"
 	@echo "  make build-release - Build optimized release binary (stripped)"
 	@echo "  make run           - Build and run Go backend only"
 	@echo "  make run-tray      - Build and run bundled app with system tray"
@@ -96,8 +97,19 @@ build-ui: $(BIN_DIR)
 	@ln -sf nexus-open-ui-bundle/ui $(BIN_DIR)/nexus-open-ui
 	@echo "✓ Flutter UI built: $(BIN_DIR)/nexus-open-ui"
 
-# Build both backend and UI
-build-all: build build-ui
+# Build all external plugins
+build-plugins:
+	@echo "Building external plugins..."
+	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load; do \
+		if [ -d plugins/$$mod ]; then \
+			echo "  → plugins/$$mod"; \
+			(cd plugins/$$mod && go build -o $$mod .) || exit 1; \
+		fi; \
+	done
+	@echo "✓ Plugins built"
+
+# Build backend, UI, and all plugins
+build-all: build build-ui build-plugins
 	@echo "✓ Complete build finished!"
 	@ls -lh $(BIN_DIR)/
 
@@ -205,6 +217,9 @@ clean:
 	@rm -rf $(BIN_DIR) $(BUILD_DIR) $(DIST_DIR)
 	@rm -f coverage.out coverage.html
 	@rm -f $(APP_NAME) $(APP_NAME)-*
+	@for p in cpu-temp gpu-temp network weather cpu-load gpu-load; do \
+		rm -f plugins/$$p/$$p; \
+	done
 	@echo "✓ Cleaned"
 
 # Clean Flutter UI build artifacts

@@ -86,7 +86,7 @@ The `renderer.go` file (1,270 lines) uses hand-rolled pixel loops for everything
 
 - **Compositor** (`compositor.go`): rewritten, clean. Background image + GIF
   pipeline is correct. Zone compositing is correct. Keep as-is.
-- **Plugin system**: working, modules sampling correctly.
+- **Plugin system**: working, plugins sampling correctly.
 - **Wire format** (WS broadcast): works, stay PNG for WebSocket path.
 - **App wiring** (`app.go`): `SetBackground` wired correctly.
 
