@@ -249,7 +249,7 @@ func (a *App) initialize() error {
 
 	// 5. Create zone manager — loads from DB, falling back to YAML on first run.
 	if a.layoutPath == "" {
-		a.layoutPath = "configs/layouts/multi-page.yaml"
+		a.layoutPath = resolveLayoutPath()
 	}
 	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, a.store, a.layoutPath)
 	if err != nil {
@@ -493,4 +493,31 @@ func (a *App) stop() error { return nil }
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// resolveLayoutPath finds the fallback zone layout YAML using the same
+// priority order as plugin resolution: XDG user install > system package
+// install (/usr/share) > dev repo path relative to the executable.
+func resolveLayoutPath() string {
+	const layoutFile = "configs/layouts/multi-page.yaml"
+
+	xdgData := os.Getenv("XDG_DATA_HOME")
+	if xdgData == "" {
+		xdgData = filepath.Join(os.Getenv("HOME"), ".local", "share")
+	}
+	candidates := []string{
+		filepath.Join(xdgData, "nexus-open", layoutFile),
+		filepath.Join("/usr/share/nexus-open", layoutFile),
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(filepath.Dir(exe), "..", layoutFile), // dev: repo root
+		)
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return layoutFile // last resort: relative path (dev CWD)
 }

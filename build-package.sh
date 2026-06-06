@@ -71,12 +71,12 @@ build_binary() {
 # on Ubuntu 22.04, 24.04, and Debian 12. Binaries built on Arch link against
 # glibc 2.38+ which is too new for Ubuntu 22.04.
 build_binary_ubuntu() {
-    info "Building Go daemon inside Ubuntu 22.04 (glibc 2.35 target)..."
+    info "Building Go daemon inside Ubuntu 24.04 (minimum supported distro)..."
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     docker run --rm \
         -v "$REPO_DIR:/src" \
         -w /src \
-        ubuntu:22.04 bash -c "
+        ubuntu:24.04 bash -c "
             set -e
             apt-get update -qq
             apt-get install -y --no-install-recommends \
@@ -90,7 +90,7 @@ build_binary_ubuntu() {
                 -ldflags \"-X main.version=${PKG_VERSION} -X main.commit=${COMMIT}\" \
                 -o nexus-open ./cmd/nexus-open
         "
-    ok "Built: $DAEMON_BIN (glibc 2.35 compatible)"
+    ok "Built: $DAEMON_BIN (Ubuntu 24.04 target)"
 }
 
 # ── staging area ──────────────────────────────────────────────────────────────
@@ -118,6 +118,13 @@ WRAPPER
     else
         warn "Flutter UI not built — package will be daemon-only"
         warn "Build with: cd ui && flutter build linux --release"
+    fi
+
+    # Layout configs (fallback YAML for first-run zone seeding)
+    if [[ -d "$REPO_DIR/configs" ]]; then
+        mkdir -p "$STAGING_DIR/usr/share/nexus-open"
+        cp -r "$REPO_DIR/configs" "$STAGING_DIR/usr/share/nexus-open/"
+        ok "Included layout configs"
     fi
 
     # systemd user service
@@ -167,8 +174,9 @@ fpm_common() {
 # ── deb ───────────────────────────────────────────────────────────────────────
 
 build_deb() {
-    # Build the binary inside Ubuntu 22.04 so it links against glibc 2.35,
-    # making it compatible with Ubuntu 22.04, 24.04 and Debian 12.
+    # Build inside Ubuntu 24.04 (minimum supported) so the binary links
+    # against glibc 2.39 / glib 2.80 — the oldest we support.
+    # Ubuntu 22.04 and Debian 12 require the Flatpak due to glib < 2.75.
     build_binary_ubuntu
     build_staging  # re-stage with the freshly built binary
     info "Building .deb..."
@@ -176,6 +184,10 @@ build_deb() {
     fpm_common deb \
         --depends "libusb-1.0-0 (>= 2:1.0.21)" \
         --depends "libayatana-appindicator3-1" \
+        --depends "libgtk-3-0" \
+        --depends "libgl1" \
+        --depends "libegl1" \
+        --depends "libgles2" \
         --after-install "$POSTINST" \
         --before-remove "$PRERM" \
         --deb-systemd-enable \
@@ -193,6 +205,10 @@ build_rpm() {
     fpm_common rpm \
         --depends "libusb1" \
         --depends "libayatana-appindicator3" \
+        --depends "gtk3" \
+        --depends "mesa-libGL" \
+        --depends "mesa-libEGL" \
+        --depends "mesa-libGLES" \
         --rpm-summary "$PKG_DESCRIPTION" \
         --after-install "$POSTINST" \
         --before-remove "$PRERM"
@@ -208,6 +224,8 @@ build_pacman() {
     fpm_common pacman \
         --depends "libusb" \
         --depends "libayatana-appindicator" \
+        --depends "gtk3" \
+        --depends "mesa" \
         --after-install "$POSTINST" \
         --before-remove "$PRERM"
     PACMAN_FILE=$(ls -t "$OUT_DIR"/${PKG_NAME}-*.pkg.tar.* 2>/dev/null | head -1)
@@ -216,52 +234,89 @@ build_pacman() {
 
 # ── docker test ───────────────────────────────────────────────────────────────
 
+# run_runtime_test IMAGE INSTALL_BLOCK FLUTTER_DEPS_BLOCK
+# Shared test body: install package, verify daemon API, verify Flutter Xvfb.
+# INSTALL_BLOCK and FLUTTER_DEPS_BLOCK are shell snippets injected verbatim.
+run_runtime_test() {
+    local image="$1" install_block="$2" flutter_deps_block="$3"
+    local ui_path="/usr/lib/nexus-open/ui"
+
+    docker run --rm \
+        -v "$OUT_DIR:/pkgs:ro" \
+        "$image" bash -c "
+            set -e
+
+            # ── install ──────────────────────────────────────────────────────
+            ${install_block}
+
+            # ── binary sanity ────────────────────────────────────────────────
+            ldd /usr/bin/nexus-open | grep 'not found' && { echo 'MISSING LIBS'; exit 1; } || echo 'daemon libs OK'
+            /usr/bin/nexus-open --version
+
+            # ── daemon API (mock device, headless) ───────────────────────────
+            NEXUS_MOCK_DEVICE=1 /usr/bin/nexus-open &
+            DAEMON_PID=\$!
+            for i in \$(seq 1 15); do
+                curl -sf http://localhost:1985/api/health 2>/dev/null | grep -q '\"status\":\"ok\"' && break
+                sleep 1
+            done
+            curl -sf http://localhost:1985/api/health | grep -q '\"status\":\"ok\"' \
+                && echo 'DAEMON_API_OK' || { echo 'DAEMON_API_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+            kill \$DAEMON_PID 2>/dev/null; wait \$DAEMON_PID 2>/dev/null || true
+
+            # ── Flutter UI (Xvfb + Mesa llvmpipe) ───────────────────────────
+            ${flutter_deps_block} 2>&1 | tail -2
+            Xvfb :99 -screen 0 1024x768x24 &
+            sleep 1
+            DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+            WAYLAND_DISPLAY= NEXUS_START_MINIMIZED=0 \
+                ${ui_path} > /tmp/flutter.log 2>&1 &
+            UI_PID=\$!
+            sleep 6
+            if kill -0 \$UI_PID 2>/dev/null; then
+                echo 'FLUTTER_ALIVE'; kill \$UI_PID
+            else
+                echo 'FLUTTER_CRASHED'; tail -20 /tmp/flutter.log; exit 1
+            fi
+        " 2>&1 | grep -Ev '^(>|Warning|.*keysym|.*xkbcomp|Errors from)'
+}
+
 test_deb() {
     local deb_file="$1"
     local deb_base; deb_base="$(basename "$deb_file")"
 
-    for distro in ubuntu:22.04 ubuntu:24.04 debian:12; do
+    # Ubuntu 22.04 and Debian 12 require the Flatpak — glib 2.74/2.72 < 2.75.
+    for distro in ubuntu:24.04; do
         info "Testing .deb in ${distro}..."
-        docker run --rm \
-            -v "$OUT_DIR:/pkgs:ro" \
-            "$distro" bash -c "
-                set -e
-                apt-get update -qq
-                apt-get install -y --no-install-recommends \
-                    file libusb-1.0-0 libayatana-appindicator3-1 2>&1 | tail -2
-                dpkg -i /pkgs/${deb_base}
-                echo '=== Binary check ===' && file /usr/bin/nexus-open
-                echo '=== ldd ===' && ldd /usr/bin/nexus-open | grep 'not found' || echo 'all libs satisfied'
-                echo '=== --version ===' && /usr/bin/nexus-open --version
-            " && ok "${distro} .deb test passed" || warn "${distro} .deb test FAILED"
+        run_runtime_test "$distro" \
+            "apt-get update -qq
+             apt-get install -y --no-install-recommends curl
+             dpkg -i /pkgs/${deb_base} || apt-get install -y -f --no-install-recommends" \
+            "apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1 libegl-mesa0 libegl1 libgles2" \
+            && ok "${distro} .deb test passed" || warn "${distro} .deb test FAILED"
     done
 }
 
 test_rpm() {
     local rpm_file="$1"
+    local rpm_base; rpm_base="$(basename "$rpm_file")"
+
     info "Testing .rpm in Fedora 40..."
-    docker run --rm \
-        -v "$OUT_DIR:/pkgs:ro" \
-        fedora:40 bash -c "
-            set -e
-            dnf install -y libusb libayatana-appindicator3 2>&1 | tail -3
-            rpm -ivh /pkgs/$(basename "$rpm_file") 2>&1
-            echo '=== Installed files ===' && rpm -ql nexus-open
-            echo '=== --version ===' && /usr/bin/nexus-open --version
-        " && ok "Fedora 40 .rpm test passed" || warn "Fedora 40 .rpm test FAILED"
+    run_runtime_test "fedora:40" \
+        "dnf install -y /pkgs/${rpm_base}" \
+        "dnf install -y xorg-x11-server-Xvfb mesa-dri-drivers mesa-libGL mesa-libEGL mesa-libGLES" \
+        && ok "Fedora 40 .rpm test passed" || warn "Fedora 40 .rpm test FAILED"
 }
 
 test_pacman() {
     local pkg_file="$1"
+    local pkg_base; pkg_base="$(basename "$pkg_file")"
+
     info "Testing .pacman in Arch Linux..."
-    docker run --rm \
-        -v "$OUT_DIR:/pkgs:ro" \
-        archlinux:latest bash -c "
-            set -e
-            pacman -Sy --noconfirm libusb libayatana-appindicator 2>&1 | tail -3
-            pacman -U --noconfirm /pkgs/$(basename "$pkg_file") 2>&1
-            echo '=== --version ===' && /usr/bin/nexus-open --version
-        " && ok "Arch .pacman test passed" || warn "Arch .pacman test FAILED"
+    run_runtime_test "archlinux:latest" \
+        "pacman -Sy --noconfirm && pacman -U --noconfirm /pkgs/${pkg_base}" \
+        "pacman -S --noconfirm xorg-server-xvfb mesa" \
+        && ok "Arch .pacman test passed" || warn "Arch .pacman test FAILED"
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -293,7 +348,7 @@ echo ""
 # rpm and pacman use a native binary (the host distro's glibc is fine for
 # Fedora/Arch users who will have a recent glibc).
 if $BUILD_RPM || $BUILD_PACMAN; then
-    [[ -f "$DAEMON_BIN" ]] || build_binary
+    build_binary
     build_staging
     $BUILD_RPM    && build_rpm
     $BUILD_PACMAN && build_pacman

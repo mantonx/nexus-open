@@ -72,6 +72,10 @@ sudo snap restart nexus-open
 
 ### Debian/Ubuntu (DEB Package)
 
+> **Minimum requirement: Ubuntu 24.04 or later.**
+> Ubuntu 22.04 and Debian 12 ship glib < 2.75 which Flutter requires.
+> Use the **Flatpak** above on those distros instead.
+
 Download the latest `.deb` package from the [releases page](https://github.com/mantonx/nexus-next/releases):
 
 ```bash
