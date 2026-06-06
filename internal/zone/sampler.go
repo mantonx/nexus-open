@@ -91,7 +91,7 @@ func (s *Sampler) Start() error {
 				"zone_id", zoneConfig.ID,
 				"plugin", zoneConfig.Plugin,
 				"error", err)
-			// Continue with other zones
+			s.markZoneLaunchFailed(zoneConfig.ID, err)
 		}
 	}
 
@@ -168,7 +168,14 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	return nil
 }
 
-// sampleLoop periodically samples a plugin and updates the zone
+const (
+	crashBackoffInit = 1 * time.Second
+	crashBackoffMax  = 30 * time.Second
+)
+
+// sampleLoop periodically samples a plugin and updates the zone.
+// For exec: plugins it also detects subprocess crashes and relaunches with
+// exponential backoff (1s → 2s → 4s → … capped at 30s, reset on success).
 func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plugin, interval time.Duration) {
 	defer s.wg.Done()
 
@@ -177,27 +184,96 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 
 	s.logger.Debug("starting sample loop", "zone_id", zoneID, "interval", interval)
 
-	// Sample immediately
+	// Sample immediately on start.
 	s.sampleOnce(ctx, zoneID, mod)
 
-	// Get the trigger channel for this zone
+	// Get the trigger channel for this zone.
 	s.mu.RLock()
 	triggerCh := s.triggerChannels[zoneID]
 	s.mu.RUnlock()
+
+	// isExec is true for subprocess plugins — only those can crash.
+	s.mu.RLock()
+	isExec := strings.HasPrefix(s.pluginSpec[zoneID], "exec:")
+	s.mu.RUnlock()
+
+	backoff := crashBackoffInit
 
 	for {
 		select {
 		case <-ctx.Done():
 			s.logger.Debug("sample loop stopped", "zone_id", zoneID)
 			return
+
 		case <-ticker.C:
 			s.sampleOnce(ctx, zoneID, mod)
+
+			if isExec && !s.pluginHost.IsAlive(zoneID) {
+				mod = s.handlePluginCrash(ctx, zoneID, &backoff)
+				if mod == nil {
+					return // context cancelled during restart
+				}
+			} else {
+				backoff = crashBackoffInit // reset on healthy tick
+			}
+
 		case <-triggerCh:
-			// Immediate sample triggered (e.g., by config change)
 			s.logger.Debug("immediate sample triggered", "zone_id", zoneID)
 			s.sampleOnce(ctx, zoneID, mod)
 		}
 	}
+}
+
+// handlePluginCrash evicts the dead subprocess and relaunches it after a
+// backoff delay. Returns the new plugin.Plugin on success, or nil if the
+// context was cancelled before the plugin could be restarted.
+func (s *Sampler) handlePluginCrash(ctx context.Context, zoneID string, backoff *time.Duration) plugin.Plugin {
+	s.logger.Warn("plugin subprocess exited unexpectedly, scheduling restart",
+		"zone_id", zoneID,
+		"backoff", backoff.String())
+
+	s.pluginHost.Evict(zoneID)
+	s.markZoneLaunchFailed(zoneID, fmt.Errorf("plugin crashed; restarting in %s", backoff.String()))
+
+	// Wait for backoff period or cancellation.
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-time.After(*backoff):
+	}
+
+	// Grow backoff for next crash, capped at max.
+	*backoff *= 2
+	if *backoff > crashBackoffMax {
+		*backoff = crashBackoffMax
+	}
+
+	// Re-read the plugin path from the spec stored at start time.
+	s.mu.RLock()
+	spec := s.pluginSpec[zoneID]
+	s.mu.RUnlock()
+
+	modPath := strings.TrimPrefix(spec, "exec:")
+	mod, err := s.pluginHost.LaunchPlugin(ctx, zoneID, modPath)
+	if err != nil {
+		s.logger.Error("plugin restart failed", "zone_id", zoneID, "error", err)
+		s.markZoneLaunchFailed(zoneID, err)
+		// Return a nil mod so the caller exits — the zone stays in error state
+		// until the user reloads or a page change triggers RestartForPage.
+		return nil
+	}
+
+	// Update the modules map so BroadcastConfigChange finds the new instance.
+	s.mu.Lock()
+	s.modules[zoneID] = mod
+	s.mu.Unlock()
+
+	s.logger.Info("plugin restarted successfully", "zone_id", zoneID, "path", modPath)
+	s.setZoneStatus(zoneID, ZoneStatus{Status: "loading"})
+
+	// Prime the new process with an immediate sample.
+	s.sampleOnce(ctx, zoneID, mod)
+	return mod
 }
 
 // sampleOnce samples a plugin once and updates the zone
@@ -270,6 +346,18 @@ func (s *Sampler) setZoneStatus(zoneID string, status ZoneStatus) {
 	s.zoneErrorsMu.Lock()
 	s.zoneErrors[zoneID] = status
 	s.zoneErrorsMu.Unlock()
+}
+
+// markZoneLaunchFailed records an error status and pushes a visible error
+// payload so the display shows something useful instead of staying blank.
+func (s *Sampler) markZoneLaunchFailed(zoneID string, err error) {
+	s.setZoneStatus(zoneID, ZoneStatus{Status: "error", Error: err.Error()})
+	s.manager.UpdatePayload(zoneID, plugin.Payload{ //nolint:errcheck
+		Primary:   "Error",
+		Secondary: err.Error(),
+		Severity:  plugin.SeverityCrit,
+		Timestamp: time.Now(),
+	})
 }
 
 // ZoneStatus returns the last known health status for a zone.
@@ -386,6 +474,7 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 			s.logger.Error("failed to restart zone sampling",
 				"zone_id", zoneConfig.ID,
 				"error", err)
+			s.markZoneLaunchFailed(zoneConfig.ID, err)
 		}
 	}
 

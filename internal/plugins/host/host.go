@@ -42,6 +42,10 @@ func NewHost(logger *slog.Logger) *Host {
 	}
 }
 
+// launchTimeout is the maximum time allowed for a plugin subprocess to start
+// and complete its RPC handshake. Plugins that hang at startup are killed.
+const launchTimeout = 10 * time.Second
+
 // LaunchPlugin starts an external plugin subprocess and returns the Plugin
 // interface. If the plugin is already running, the existing instance is returned.
 func (h *Host) LaunchPlugin(ctx context.Context, id, path string) (plugin.Plugin, error) {
@@ -51,6 +55,20 @@ func (h *Host) LaunchPlugin(ctx context.Context, id, path string) (plugin.Plugin
 	if existing, ok := h.clients[id]; ok {
 		h.logger.Debug("reusing running plugin", "id", id, "path", path)
 		return existing.plugin, nil
+	}
+
+	// Validate binary exists and is executable before attempting launch.
+	// go-plugin's error messages for a missing binary are opaque; this gives
+	// a clear, actionable error up front.
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("plugin binary not found: %s", path)
+		}
+		return nil, fmt.Errorf("plugin binary inaccessible: %w", err)
+	}
+	if info.Mode()&0o111 == 0 {
+		return nil, fmt.Errorf("plugin binary not executable: %s", path)
 	}
 
 	client := goplugin.NewClient(&goplugin.ClientConfig{
@@ -67,38 +85,60 @@ func (h *Host) LaunchPlugin(ctx context.Context, id, path string) (plugin.Plugin
 		}),
 	})
 
-	rpcClient, err := client.Client()
-	if err != nil {
-		client.Kill()
-		return nil, fmt.Errorf("failed to connect to plugin: %w", err)
+	// Connect with a timeout — a plugin that hangs during startup would
+	// otherwise block sampler initialisation indefinitely.
+	type connectResult struct {
+		mod  plugin.Plugin
+		desc plugin.Descriptor
+		err  error
 	}
+	ch := make(chan connectResult, 1)
+	go func() {
+		rpcClient, err := client.Client()
+		if err != nil {
+			ch <- connectResult{err: fmt.Errorf("rpc connect: %w", err)}
+			return
+		}
+		raw, err := rpcClient.Dispense("plugin")
+		if err != nil {
+			ch <- connectResult{err: fmt.Errorf("dispense: %w", err)}
+			return
+		}
+		mod, ok := raw.(plugin.Plugin)
+		if !ok {
+			ch <- connectResult{err: fmt.Errorf("plugin does not implement the Plugin interface")}
+			return
+		}
+		desc, err := mod.Describe()
+		if err != nil {
+			ch <- connectResult{err: fmt.Errorf("describe: %w", err)}
+			return
+		}
+		ch <- connectResult{mod: mod, desc: desc}
+	}()
 
-	raw, err := rpcClient.Dispense("plugin")
-	if err != nil {
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			client.Kill()
+			return nil, r.err
+		}
+		h.clients[id] = &pluginClient{client: client, plugin: r.mod, path: path}
+		h.logger.Info("plugin launched",
+			"id", id,
+			"name", r.desc.Name,
+			"version", r.desc.Version,
+			"path", path)
+		return r.mod, nil
+
+	case <-time.After(launchTimeout):
 		client.Kill()
-		return nil, fmt.Errorf("failed to dispense plugin: %w", err)
-	}
+		return nil, fmt.Errorf("plugin launch timed out after %v: %s", launchTimeout, path)
 
-	mod, ok := raw.(plugin.Plugin)
-	if !ok {
+	case <-ctx.Done():
 		client.Kill()
-		return nil, fmt.Errorf("plugin does not implement the Plugin interface")
+		return nil, fmt.Errorf("plugin launch cancelled: %s", path)
 	}
-
-	desc, err := mod.Describe()
-	if err != nil {
-		client.Kill()
-		return nil, fmt.Errorf("plugin describe failed: %w", err)
-	}
-
-	h.clients[id] = &pluginClient{client: client, plugin: mod, path: path}
-	h.logger.Info("plugin launched",
-		"id", id,
-		"name", desc.Name,
-		"version", desc.Version,
-		"path", path)
-
-	return mod, nil
 }
 
 // GetPlugin returns a previously launched plugin, or an error if not running.
@@ -111,6 +151,30 @@ func (h *Host) GetPlugin(id string) (plugin.Plugin, error) {
 		return nil, fmt.Errorf("plugin not running: %s", id)
 	}
 	return c.plugin, nil
+}
+
+// IsAlive reports whether the plugin subprocess is still running.
+func (h *Host) IsAlive(id string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	c, ok := h.clients[id]
+	if !ok {
+		return false
+	}
+	return !c.client.Exited()
+}
+
+// Evict removes a plugin's record so LaunchPlugin will start a fresh process.
+// Call this after detecting a crash before attempting relaunch.
+func (h *Host) Evict(id string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if c, ok := h.clients[id]; ok {
+		c.client.Kill()
+		delete(h.clients, id)
+	}
 }
 
 // StopPlugin terminates a running external plugin.
