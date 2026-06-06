@@ -44,9 +44,6 @@ SERVICE_FILE="$REPO_DIR/packaging/systemd/nexus-open.service"
 POSTINST="$REPO_DIR/packaging/deb/DEBIAN/postinst"
 PRERM="$REPO_DIR/packaging/deb/DEBIAN/prerm"
 
-FPM="$HOME/.local/share/gem/ruby/3.4.0/bin/fpm"
-[[ -x "$FPM" ]] || FPM="$(command -v fpm 2>/dev/null)" || { echo "fpm not found — gem install fpm"; exit 1; }
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 info()  { echo "  $*"; }
@@ -370,6 +367,9 @@ if $TEST_DEB_ONLY || $TEST_RPM_ONLY || $TEST_PACMAN_ONLY; then
 fi
 
 # ── build mode ────────────────────────────────────────────────────────────────
+FPM="$HOME/.local/share/gem/ruby/3.4.0/bin/fpm"
+[[ -x "$FPM" ]] || FPM="$(command -v fpm 2>/dev/null)" || { echo "fpm not found — gem install fpm"; exit 1; }
+
 echo "Building Nexus Open v${PKG_VERSION} packages..."
 echo ""
 
