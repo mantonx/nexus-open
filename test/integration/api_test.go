@@ -78,7 +78,7 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(baseURL + "/api/health")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -117,7 +117,7 @@ func postJSON(t *testing.T, url string, body any) *http.Response {
 
 func decodeJSON(t *testing.T, resp *http.Response, dst any) {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
 		t.Fatalf("decode JSON: %v", err)
 	}
@@ -591,7 +591,7 @@ func TestWebSocket_MultipleClients(t *testing.T) {
 	_ = wsjson.Read(ctx, conn2, &m)
 
 	// Trigger a broadcast.
-	postJSON(t, base+"/api/window/show", nil).Body.Close()
+	_ = postJSON(t, base+"/api/window/show", nil).Body.Close()
 
 	// Both clients should receive the broadcast.
 	var msg1, msg2 map[string]any

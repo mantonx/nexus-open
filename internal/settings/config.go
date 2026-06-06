@@ -284,7 +284,7 @@ func getOrDefault(m map[string]string, key, def string) string {
 
 func parseFloat(s string) float64 {
 	var f float64
-	fmt.Sscanf(s, "%f", &f)
+	_, _ = fmt.Sscanf(s, "%f", &f)
 	return f
 }
 

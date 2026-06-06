@@ -35,7 +35,7 @@ func newTestServerWithStore(t *testing.T) (*Server, *store.DB) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	srv := newTestServer(t)
 	srv.SetLayoutStore(db)
@@ -48,7 +48,7 @@ func newTestZoneCfgManager(t *testing.T) *zone.ConfigManager {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return zone.NewConfigManager(db, nil)
 }
 

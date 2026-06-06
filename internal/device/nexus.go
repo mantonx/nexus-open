@@ -87,11 +87,11 @@ func (n *NexusDevice) connectOnce(ctx context.Context) error {
 
 	// Close any stale handles from a previous partial connect before reopening.
 	if n.device != nil {
-		n.device.Close()
+		_ = n.device.Close()
 		n.device = nil
 	}
 	if n.touchDevice != nil {
-		n.touchDevice.Close()
+		_ = n.touchDevice.Close()
 		n.touchDevice = nil
 	}
 

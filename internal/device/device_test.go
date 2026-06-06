@@ -72,7 +72,7 @@ func TestMockDevice_SendFrameInvalidSize(t *testing.T) {
 	mock := NewMockDevice()
 	ctx := context.Background()
 
-	mock.Connect(ctx)
+	_ = mock.Connect(ctx)
 
 	// Try to send invalid frame
 	invalidFrame := make([]byte, 100)
@@ -97,7 +97,7 @@ func TestMockDevice_TouchEvents(t *testing.T) {
 	mock := NewMockDevice()
 	ctx := context.Background()
 
-	mock.Connect(ctx)
+	_ = mock.Connect(ctx)
 
 	// Simulate touch events
 	mock.SimulateTouch(0, true, 100*time.Millisecond)
@@ -144,7 +144,7 @@ func TestMockDevice_Health(t *testing.T) {
 	}
 
 	// Health check when connected
-	mock.Connect(ctx)
+	_ = mock.Connect(ctx)
 	err = mock.Health()
 	if err != nil {
 		t.Errorf("Health() failed when connected: %v", err)
@@ -155,7 +155,7 @@ func TestMockDevice_Disconnect(t *testing.T) {
 	mock := NewMockDevice()
 	ctx := context.Background()
 
-	mock.Connect(ctx)
+	_ = mock.Connect(ctx)
 	if !mock.IsConnected() {
 		t.Fatal("Device should be connected")
 	}

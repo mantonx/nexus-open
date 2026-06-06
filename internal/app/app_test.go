@@ -123,7 +123,7 @@ func TestApp_MultipleShutdowns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	go app.Run(ctx)
+	go func() { _ = app.Run(ctx) }()
 	time.Sleep(200 * time.Millisecond)
 
 	// First shutdown
@@ -176,7 +176,7 @@ func TestApp_ContextCancellation(t *testing.T) {
 	}
 
 	// Clean shutdown
-	app.Shutdown()
+	_ = app.Shutdown()
 }
 
 func TestApp_Options(t *testing.T) {

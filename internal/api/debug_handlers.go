@@ -79,12 +79,12 @@ func (s *Server) handleDebugSwipe(w http.ResponseWriter, r *http.Request) {
 		// Drag phase: feed incremental progress up to release_at, then finalize.
 		for i := 1; i <= releaseStep; i++ {
 			progress := float32(i) / float32(req.Steps)
-			s.swipeSim.UpdateLiveSwipe(progress, isLeft)
+			_ = s.swipeSim.UpdateLiveSwipe(progress, isLeft)
 			time.Sleep(stepInterval)
 		}
 		// Finalize at release_at progress — matches real finger lifting mid-swipe.
 		releaseProgress := float32(releaseStep) / float32(req.Steps)
-		s.swipeSim.FinalizeLiveSwipe(releaseProgress, req.Velocity, isLeft)
+		_ = s.swipeSim.FinalizeLiveSwipe(releaseProgress, req.Velocity, isLeft)
 	}()
 
 	s.respondSuccess(w, "Swipe simulation started", map[string]interface{}{

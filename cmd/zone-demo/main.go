@@ -108,7 +108,7 @@ func main() {
 		logger.Error("failed to create output file", "error", err)
 		os.Exit(1)
 	}
-	defer outFile.Close()
+	defer func() { _ = outFile.Close() }()
 
 	if err := png.Encode(outFile, frame); err != nil {
 		logger.Error("failed to encode PNG", "error", err)

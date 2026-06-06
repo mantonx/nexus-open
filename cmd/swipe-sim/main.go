@@ -134,7 +134,7 @@ func main() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[%3d] POST error: %v\n", n+1, err)
 		} else {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			fmt.Printf("[%3d] %-5s  triggered\n", n+1, direction)
 		}
 
