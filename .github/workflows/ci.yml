@@ -35,6 +35,7 @@ jobs:
               - 'build-package.sh'
               - 'packaging/**'
               - 'configs/**'
+              - '.github/workflows/ci.yml'
 
   lint:
     name: Lint
