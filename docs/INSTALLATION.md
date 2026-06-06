@@ -146,17 +146,27 @@ sudo usermod -a -G plugdev $USER
 
 ### Prerequisites
 
-- Go 1.23 or later
+- Go 1.25 or later
 - libusb-1.0-dev
+- libayatana-appindicator3-dev (for system tray)
 - Flutter 3.24+ (optional, for GUI)
 - Git
 
 ### Install Dependencies
 
 **Debian/Ubuntu:**
+
+> **Note:** Ubuntu 24.04's `golang-go` package is Go 1.22, which is too old.
+> Install Go from [go.dev/dl](https://go.dev/dl/) instead:
+>
+> ```bash
+> curl -sSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+> echo 'export PATH=/usr/local/go/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
+> ```
+
 ```bash
 sudo apt update
-sudo apt install golang-go libusb-1.0-0-dev git
+sudo apt install libusb-1.0-0-dev libayatana-appindicator3-dev pkg-config gcc git
 ```
 
 **Arch Linux:**
