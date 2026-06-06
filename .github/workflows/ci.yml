@@ -52,7 +52,7 @@ jobs:
         run: go test -race -coverprofile=coverage.out ./...
 
       - name: Coverage summary
-        run: go tool cover -func=coverage.out | grep total:
+        run: go tool cover -func=coverage.out | grep 'total:'
 
   flutter:
     name: Flutter
