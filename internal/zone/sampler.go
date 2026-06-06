@@ -37,7 +37,6 @@ type Sampler struct {
 	zoneStartTimes    map[string]time.Time
 	firstSampleLogged map[string]bool
 	pluginSpec        map[string]string
-	firstSampleMu     sync.Mutex
 	triggerChannels   map[string]chan struct{} // zoneID -> trigger channel for immediate sampling
 	zoneErrors        map[string]ZoneStatus   // zoneID -> last known status
 	zoneErrorsMu      sync.RWMutex
@@ -405,8 +404,8 @@ func (s *Sampler) AllZoneStatuses() map[string]ZoneStatus {
 }
 
 func (s *Sampler) recordFirstSample(zoneID string) {
-	s.firstSampleMu.Lock()
-	defer s.firstSampleMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if s.firstSampleLogged[zoneID] {
 		return
