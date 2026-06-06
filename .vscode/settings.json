@@ -78,7 +78,10 @@
   },
   "[go]": {
     "editor.codeActionsOnSave": {
-      "source.fixAll.eslint": "explicit"
+      "source.organizeImports": "explicit"
     }
   },
+  "go.lintTool": "golangci-lint",
+  "go.lintFlags": ["--fast"],
+  "go.lintOnSave": "file",
 }
