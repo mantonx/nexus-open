@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type App struct {
 	configPath string
 	apiPort    int
 	layoutPath string
+	pluginsDir string
 
 	// Components
 	store        *store.DB
@@ -257,8 +259,32 @@ func (a *App) initialize() error {
 		"pages", len(a.zoneManager.GetConfig().Pages),
 		"current_page", a.zoneManager.GetConfig().Pages[0].Name)
 
-	// 6. Create module sampler
-	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager, a.zoneCfg)
+	// 6. Resolve plugins directory.
+	// Priority: explicit flag > XDG data dir install > sibling to executable (dev).
+	if a.pluginsDir == "" {
+		exePath, err := os.Executable()
+		if err == nil {
+			sibling := filepath.Join(filepath.Dir(exePath), "plugins")
+			xdgData := filepath.Join(os.Getenv("XDG_DATA_HOME"), "nexus-open", "plugins")
+			if os.Getenv("XDG_DATA_HOME") == "" {
+				xdgData = filepath.Join(os.Getenv("HOME"), ".local", "share", "nexus-open", "plugins")
+			}
+			switch {
+			case dirExists(sibling):
+				a.pluginsDir = sibling
+			case dirExists(xdgData):
+				a.pluginsDir = xdgData
+			default:
+				// Fall back to sibling even if absent — binary validation will
+				// surface a clear error per zone rather than failing at startup.
+				a.pluginsDir = sibling
+			}
+		}
+	}
+	a.logger.Info("plugins directory", "path", a.pluginsDir)
+
+	// 7. Create module sampler
+	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager, a.zoneCfg, a.pluginsDir)
 	a.logger.Info("zone sampler created")
 
 	// Register page change callback: restart sampler and broadcast new page state.
@@ -463,3 +489,8 @@ func (a *App) renderLoop() {
 // stop is no longer used — shutdown logic moved to Shutdown() to ensure
 // goroutines exit before the HID handle is closed.
 func (a *App) stop() error { return nil }
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}

@@ -32,3 +32,12 @@ func WithLayoutPath(path string) Option {
 		a.layoutPath = path
 	}
 }
+
+// WithPluginsDir sets the directory where exec: plugin binaries are found.
+// Defaults to a sibling plugins/ directory next to the running executable,
+// or ~/.local/lib/nexus-open/plugins when running from a system install.
+func WithPluginsDir(path string) Option {
+	return func(a *App) {
+		a.pluginsDir = path
+	}
+}

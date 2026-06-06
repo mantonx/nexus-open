@@ -73,7 +73,7 @@ func newTestSampler(t *testing.T, cfg *Config, host pluginhost.PluginHost) *Samp
 		cancel:     cancel,
 	}
 
-	s := NewSampler(ctx, logger, manager, nil)
+	s := NewSampler(ctx, logger, manager, nil, "")
 	s.pluginHost = host
 	return s
 }
@@ -133,7 +133,7 @@ func TestSampler_CrashRestart_EvictsAndRelaunches(t *testing.T) {
 		cancel:     cancel,
 	}
 
-	s := NewSampler(ctx, logger, manager, nil)
+	s := NewSampler(ctx, logger, manager, nil, "")
 	s.pluginHost = host
 
 	// Override backoff constants via the zone being exec: — the loop will check
@@ -196,7 +196,7 @@ func TestSampler_CrashRestart_StatusBecomesError(t *testing.T) {
 		cancel:     cancel,
 	}
 
-	s := NewSampler(ctx, logger, manager, nil)
+	s := NewSampler(ctx, logger, manager, nil, "")
 	s.pluginHost = host
 
 	if err := s.startZoneSampling(execZoneConfig("z2")); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ type Sampler struct {
 	manager           *Manager
 	pluginHost        pluginhost.PluginHost
 	zoneCfg           *ConfigManager
+	pluginsDir        string // absolute path where exec: plugins live
 	modules           map[string]plugin.Plugin // zoneID -> plugin instance
 	builtins          map[string]plugin.Plugin // Built-in plugins by name
 	cancelFuncs       map[string]context.CancelFunc
@@ -41,14 +43,17 @@ type Sampler struct {
 	zoneErrorsMu      sync.RWMutex
 }
 
-// NewSampler creates a new plugin sampler
-func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zoneCfg *ConfigManager) *Sampler {
+// NewSampler creates a new plugin sampler. pluginsDir is the absolute path to
+// the directory containing exec: plugin binaries. Pass "" to use the default
+// (sibling plugins/ directory next to the running executable).
+func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zoneCfg *ConfigManager, pluginsDir string) *Sampler {
 	ctx, cancel := context.WithCancel(ctx)
 
 	s := &Sampler{
 		logger:            logger,
 		manager:           manager,
 		zoneCfg:           zoneCfg,
+		pluginsDir:        pluginsDir,
 		pluginHost:        pluginhost.NewHost(logger),
 		modules:           make(map[string]plugin.Plugin),
 		builtins:          make(map[string]plugin.Plugin),
@@ -68,6 +73,20 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 	s.builtins["placeholder"] = builtin.NewPlaceholder("Loading...")
 
 	return s
+}
+
+// resolvePluginPath converts an exec: spec like "exec:./plugins/cpu-temp/cpu-temp"
+// into an absolute path using pluginsDir. Paths that are already absolute are
+// returned unchanged. The "./plugins/" prefix is treated as a conventional
+// relative marker; everything after it is appended to pluginsDir.
+func (s *Sampler) resolvePluginPath(spec string) string {
+	rel := strings.TrimPrefix(spec, "exec:")
+	if filepath.IsAbs(rel) {
+		return rel
+	}
+	// Strip the conventional ./plugins/ prefix and anchor to pluginsDir.
+	stripped := strings.TrimPrefix(rel, "./plugins/")
+	return filepath.Join(s.pluginsDir, stripped)
 }
 
 // Start begins sampling all modules configured in the zone manager
@@ -119,7 +138,7 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 		s.logger.Info("using built-in plugin", "zone_id", zoneConfig.ID, "plugin", modName)
 	} else if strings.HasPrefix(pluginSpec, "exec:") {
 		// External plugin
-		modPath := strings.TrimPrefix(pluginSpec, "exec:")
+		modPath := s.resolvePluginPath(pluginSpec)
 		mod, err = s.pluginHost.LaunchPlugin(s.ctx, zoneConfig.ID, modPath)
 		if err != nil {
 			return fmt.Errorf("failed to launch plugin: %w", err)
@@ -255,7 +274,7 @@ func (s *Sampler) handlePluginCrash(ctx context.Context, zoneID string, backoff 
 	spec := s.pluginSpec[zoneID]
 	s.mu.RUnlock()
 
-	modPath := strings.TrimPrefix(spec, "exec:")
+	modPath := s.resolvePluginPath(spec)
 	mod, err := s.pluginHost.LaunchPlugin(ctx, zoneID, modPath)
 	if err != nil {
 		s.logger.Error("plugin restart failed", "zone_id", zoneID, "error", err)
