@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
-LIB_DIR="$HOME/.local/lib/nexus-open"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nexus-open"
 APP_DIR="$HOME/.local/share/applications"
 AUTOSTART_DIR="$HOME/.config/autostart"
 ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
@@ -36,7 +36,7 @@ Run 'go build -o nexus-open ./cmd/nexus-open' first."
 do_remove() {
     info "Removing Nexus Open..."
     rm -f  "$BIN_DIR/nexus-open"
-    rm -rf "$LIB_DIR"
+    rm -rf "$DATA_DIR"
     rm -f  "$APP_DIR/nexus-open.desktop"
     rm -f  "$AUTOSTART_DIR/nexus-open-autostart.desktop"
     rm -f  "$ICON_DIR/nexus-open.png"
@@ -62,8 +62,8 @@ do_udev() {
 do_install() {
     require_binary "$DAEMON_BIN"
 
-    info "Installing to $BIN_DIR and $LIB_DIR..."
-    mkdir -p "$BIN_DIR" "$LIB_DIR/plugins" "$APP_DIR" "$AUTOSTART_DIR" "$ICON_DIR"
+    info "Installing to $BIN_DIR and $DATA_DIR..."
+    mkdir -p "$BIN_DIR" "$DATA_DIR/plugins" "$APP_DIR" "$AUTOSTART_DIR" "$ICON_DIR"
 
     # Daemon binary
     install -m755 "$DAEMON_BIN" "$BIN_DIR/nexus-open"
@@ -72,8 +72,8 @@ do_install() {
     # Flutter UI binary + its data bundle
     if [[ -f "$UI_BIN" ]]; then
         UI_BUNDLE_DIR="$(dirname "$UI_BIN")"
-        cp -r "$UI_BUNDLE_DIR/." "$LIB_DIR/"
-        ok "Installed UI bundle → $LIB_DIR"
+        cp -r "$UI_BUNDLE_DIR/." "$DATA_DIR/"
+        ok "Installed UI bundle → $DATA_DIR"
     else
         warn "Flutter UI release binary not found — tray 'Show' will not work."
         warn "Build it with: cd ui && flutter build linux --release"
@@ -81,8 +81,8 @@ do_install() {
 
     # Plugins
     if [[ -d "$PLUGINS_DIR" ]]; then
-        cp -r "$PLUGINS_DIR/." "$LIB_DIR/plugins/"
-        ok "Installed plugins → $LIB_DIR/plugins/"
+        cp -r "$PLUGINS_DIR/." "$DATA_DIR/plugins/"
+        ok "Installed plugins → $DATA_DIR/plugins/"
     else
         warn "No plugins/ directory found — zones will show errors."
     fi
