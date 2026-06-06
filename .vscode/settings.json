@@ -84,4 +84,16 @@
   "go.lintTool": "golangci-lint",
   "go.lintFlags": ["--fast"],
   "go.lintOnSave": "file",
+  "dart.showInspectorNotificationsForWidgetErrors": false,
+  "dart.analysisExcludedFolders": [
+    ".dart_tool",
+    "ui/build"
+  ],
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    }
+  }
 }
