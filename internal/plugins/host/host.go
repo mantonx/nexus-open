@@ -20,6 +20,14 @@ import (
 	"github.com/mantonx/nexus-next/pkg/plugin"
 )
 
+// PluginHost is the interface Sampler uses to manage external plugin processes.
+// Declared here so callers can substitute a fake in tests.
+type PluginHost interface {
+	LaunchPlugin(ctx context.Context, id, path string) (plugin.Plugin, error)
+	IsAlive(id string) bool
+	Evict(id string)
+}
+
 // Host manages the lifecycle of external (subprocess) plugins.
 type Host struct {
 	logger  *slog.Logger

@@ -23,7 +23,7 @@ type ZoneStatus struct {
 type Sampler struct {
 	logger            *slog.Logger
 	manager           *Manager
-	pluginHost        *pluginhost.Host
+	pluginHost        pluginhost.PluginHost
 	zoneCfg           *ConfigManager
 	modules           map[string]plugin.Plugin // zoneID -> plugin instance
 	builtins          map[string]plugin.Plugin // Built-in plugins by name
