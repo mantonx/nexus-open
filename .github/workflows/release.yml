@@ -34,6 +34,10 @@ jobs:
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++-12-dev
 
+      - name: Generate code (freezed / json_serializable)
+        working-directory: ui
+        run: dart run build_runner build --delete-conflicting-outputs
+
       - name: Build Flutter UI
         working-directory: ui
         run: flutter build linux --release
