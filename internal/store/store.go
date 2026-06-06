@@ -353,9 +353,18 @@ func migration2(tx *sql.Tx) error {
 }
 
 // migration3 renames zone_module_config → zone_plugin_config (v2 → v3).
+// Databases created after migration1 was updated already have zone_plugin_config,
+// so this is a no-op for them; only legacy DBs with zone_module_config need renaming.
 func migration3(tx *sql.Tx) error {
-	_, err := tx.Exec(`
-		ALTER TABLE zone_plugin_config RENAME TO zone_plugin_config;
-	`)
+	var n int
+	if err := tx.QueryRow(
+		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='zone_module_config'`,
+	).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return nil
+	}
+	_, err := tx.Exec(`ALTER TABLE zone_module_config RENAME TO zone_plugin_config`)
 	return err
 }
