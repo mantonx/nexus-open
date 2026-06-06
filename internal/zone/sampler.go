@@ -1,3 +1,4 @@
+// Package zone manages display zones, plugin sampling, and page transitions.
 package zone
 
 import (
