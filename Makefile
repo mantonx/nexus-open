@@ -54,8 +54,8 @@ help:
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean         - Remove build artifacts"
-	@echo "  make install       - Install to /usr/local/bin (requires sudo)"
-	@echo "  make uninstall     - Remove from /usr/local/bin (requires sudo)"
+	@echo "  make install       - Install to ~/.local/bin and restart service"
+	@echo "  make uninstall     - Stop service and remove from ~/.local/bin"
 	@echo ""
 	@echo "Version: $(VERSION) (commit: $(COMMIT))"
 
@@ -198,17 +198,25 @@ all: deb appimage rpm
 	@echo "✓ All packages built successfully!"
 	@ls -lh $(DIST_DIR)/
 
-# Install to system
-install: build-release
-	@echo "Installing $(APP_NAME) to /usr/local/bin..."
-	@sudo cp $(BIN_DIR)/$(APP_NAME) /usr/local/bin/
-	@sudo chmod 755 /usr/local/bin/$(APP_NAME)
-	@echo "✓ Installed to /usr/local/bin/$(APP_NAME)"
+# Install to user service location and restart the systemd service.
+# The service runs from ~/.local/bin/nexus-open -- not /usr/local/bin.
+INSTALL_BIN := $(HOME)/.local/bin/$(APP_NAME)
+SYSTEMD_UNIT := app-nexus\x2dopen\x2dautostart@autostart.service
 
-# Uninstall from system
+install: build-release
+	@echo "Stopping service..."
+	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
+	@echo "Installing $(APP_NAME) to $(INSTALL_BIN)..."
+	@cp $(BIN_DIR)/$(APP_NAME) $(INSTALL_BIN)
+	@chmod 755 $(INSTALL_BIN)
+	@echo "Restarting service..."
+	@systemctl --user start "$(SYSTEMD_UNIT)"
+	@echo "✓ Installed and restarted"
+
+# Uninstall from user bin
 uninstall:
-	@echo "Removing $(APP_NAME) from /usr/local/bin..."
-	@sudo rm -f /usr/local/bin/$(APP_NAME)
+	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
+	@rm -f $(INSTALL_BIN)
 	@echo "✓ Uninstalled"
 
 # Clean build artifacts
