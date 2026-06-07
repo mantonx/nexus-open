@@ -46,7 +46,9 @@ func TestPluginCatalog_ReturnsCatalog(t *testing.T) {
 					RefreshMs: 1000,
 					Schema: plugin.ConfigSchema{
 						Fields: []plugin.ConfigField{
-							{Key: "clock_format", Label: "Format", Type: plugin.FieldTypeEnum, Default: "12h"},
+							{Key: "clock_face", Label: "Face style", Type: plugin.FieldTypeEnum, Default: "digital"},
+							{Key: "clock_format", Label: "Hour format", Type: plugin.FieldTypeEnum, Default: "12h"},
+							{Key: "blink_colon", Label: "Blink colon", Type: plugin.FieldTypeBool, Default: true},
 						},
 					},
 				},
@@ -87,8 +89,8 @@ func TestPluginCatalog_ReturnsCatalog(t *testing.T) {
 	desc, _ := entries[0]["descriptor"].(map[string]any)
 	schema, _ := desc["config_schema"].(map[string]any)
 	fields, _ := schema["fields"].([]any)
-	if len(fields) != 1 {
-		t.Errorf("clock schema fields: want 1, got %d", len(fields))
+	if len(fields) != 3 {
+		t.Errorf("clock schema fields: want 3, got %d", len(fields))
 	}
 }
 

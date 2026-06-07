@@ -39,8 +39,9 @@ type Sampler struct {
 	zoneStartTimes    map[string]time.Time
 	firstSampleLogged map[string]bool
 	pluginSpec        map[string]string
-	triggerChannels   map[string]chan struct{} // zoneID -> trigger channel for immediate sampling
-	zoneErrors        map[string]ZoneStatus   // zoneID -> last known status
+	zoneWidths        map[string]int            // zoneID -> pixel width, for injecting into Configure
+	triggerChannels   map[string]chan struct{}   // zoneID -> trigger channel for immediate sampling
+	zoneErrors        map[string]ZoneStatus     // zoneID -> last known status
 	zoneErrorsMu      sync.RWMutex
 }
 
@@ -64,6 +65,7 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 		zoneStartTimes:    make(map[string]time.Time),
 		firstSampleLogged: make(map[string]bool),
 		pluginSpec:        make(map[string]string),
+		zoneWidths:        make(map[string]int),
 		triggerChannels:   make(map[string]chan struct{}),
 		zoneErrors:        make(map[string]ZoneStatus),
 	}
@@ -177,9 +179,10 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	s.zoneStartTimes[zoneConfig.ID] = time.Now()
 	s.firstSampleLogged[zoneConfig.ID] = false
 	s.pluginSpec[zoneConfig.ID] = pluginSpec
+	s.zoneWidths[zoneConfig.ID] = zoneConfig.Width
 
 	// Apply stored zone config to the plugin before sampling starts.
-	s.applyInitialZoneConfig(zoneConfig.ID, pluginSpec, mod)
+	s.applyInitialZoneConfig(zoneConfig, pluginSpec, mod)
 
 	// Create trigger channel for immediate sampling
 	s.triggerChannels[zoneConfig.ID] = make(chan struct{}, 1)
@@ -607,26 +610,31 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 }
 
 // applyInitialZoneConfig delivers the stored zone config to the plugin before sampling starts.
-func (s *Sampler) applyInitialZoneConfig(zoneID, pluginSpec string, mod plugin.Plugin) {
+// Zone pixel dimensions are injected under the reserved "_zone_width" / "_zone_height" keys
+// so plugins like the analog clock can size their RawFrame output correctly.
+func (s *Sampler) applyInitialZoneConfig(zoneConfig ZoneConfig, pluginSpec string, mod plugin.Plugin) {
 	if s.zoneCfg == nil {
 		return
 	}
 
-	cfg := s.zoneCfg.Get(zoneID, pluginSpec)
+	cfg := s.zoneCfg.Get(zoneConfig.ID, pluginSpec)
 	if len(cfg) == 0 {
-		return
+		cfg = make(map[string]any)
 	}
+
+	cfg["_zone_width"] = zoneConfig.Width
+	cfg["_zone_height"] = DisplayHeight
 
 	if err := mod.Configure(cfg); err != nil {
 		s.logger.Warn("failed to apply initial zone config",
-			"zone_id", zoneID,
+			"zone_id", zoneConfig.ID,
 			"plugin", pluginSpec,
 			"error", err)
 		return
 	}
 
 	s.logger.Info("applied initial zone config",
-		"zone_id", zoneID,
+		"zone_id", zoneConfig.ID,
 		"plugin", pluginSpec,
 		"config", cfg)
 }
@@ -668,6 +676,11 @@ func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]any
 	mod, exists := s.modules[zoneID]
 	if !exists {
 		return fmt.Errorf("zone %q not found", zoneID)
+	}
+
+	if w, ok := s.zoneWidths[zoneID]; ok {
+		config["_zone_width"] = w
+		config["_zone_height"] = DisplayHeight
 	}
 
 	if err := mod.Configure(config); err != nil {

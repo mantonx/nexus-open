@@ -201,6 +201,19 @@ class PluginFieldOption {
       );
 }
 
+class PluginConfigShowIf {
+  final String key;
+  final String notEq;
+  const PluginConfigShowIf({required this.key, required this.notEq});
+  factory PluginConfigShowIf.fromJson(Map<String, dynamic> j) =>
+      PluginConfigShowIf(key: j['key'] as String, notEq: j['not_eq'] as String);
+
+  bool isVisible(Map<String, dynamic> currentConfig) {
+    final v = currentConfig[key];
+    return v?.toString() != notEq;
+  }
+}
+
 class PluginConfigField {
   final String key;
   final String label;
@@ -210,6 +223,7 @@ class PluginConfigField {
   final int? min;
   final int? max;
   final String? help;
+  final PluginConfigShowIf? showIf;
 
   const PluginConfigField({
     required this.key,
@@ -220,6 +234,7 @@ class PluginConfigField {
     this.min,
     this.max,
     this.help,
+    this.showIf,
   });
 
   factory PluginConfigField.fromJson(Map<String, dynamic> j) =>
@@ -234,6 +249,9 @@ class PluginConfigField {
         min: (j['min'] as num?)?.toInt(),
         max: (j['max'] as num?)?.toInt(),
         help: j['help'] as String?,
+        showIf: j['show_if'] == null
+            ? null
+            : PluginConfigShowIf.fromJson(j['show_if'] as Map<String, dynamic>),
       );
 }
 

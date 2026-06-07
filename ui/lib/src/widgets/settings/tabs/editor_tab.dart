@@ -1172,16 +1172,18 @@ class _Configuration extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             Divider(height: 1, color: cs.outline),
             const SizedBox(height: AppSpacing.md),
-            ...fields.map((field) => _SchemaField(
-              field: field,
-              currentValue: z.config[field.key],
-              onChanged: (v) => onPatch(z.id, {
-                'plugin_config': {
-                  ...z.config,
-                  field.key: v,
-                },
-              }),
-            )),
+            ...fields
+              .where((field) => field.showIf?.isVisible(z.config) ?? true)
+              .map((field) => _SchemaField(
+                field: field,
+                currentValue: z.config[field.key],
+                onChanged: (v) => onPatch(z.id, {
+                  'plugin_config': {
+                    ...z.config,
+                    field.key: v,
+                  },
+                }),
+              )),
           ],
         ],
       ),
@@ -1340,23 +1342,32 @@ class _EnumField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final effective = options.contains(value) ? value : options.first;
     return SizedBox(
       height: 28,
-      child: DropdownButtonFormField<String>(
-        initialValue: effective,
-        isDense: true,
-        decoration: const InputDecoration(
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          border: OutlineInputBorder(),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.outline),
+          borderRadius: BorderRadius.circular(4),
         ),
-        style: Theme.of(context).textTheme.bodySmall,
-        items: options.map((o) => DropdownMenuItem(
-          value: o,
-          child: Text(labels[o] ?? o),
-        )).toList(),
-        onChanged: (v) { if (v != null) onChanged(v); },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: effective,
+              isDense: true,
+              style: theme.textTheme.bodySmall?.copyWith(color: cs.onSurface),
+              dropdownColor: cs.surface,
+              items: options.map((o) => DropdownMenuItem(
+                value: o,
+                child: Text(labels[o] ?? o),
+              )).toList(),
+              onChanged: (v) { if (v != null) onChanged(v); },
+            ),
+          ),
+        ),
       ),
     );
   }

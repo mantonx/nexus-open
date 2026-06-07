@@ -21,16 +21,24 @@ type FieldOption struct {
 	Label string `json:"label"`
 }
 
+// ShowIfCondition hides a field unless another field's current value matches.
+// Both key and not_eq may be set: field is visible when cfg[Key] != NotEq.
+type ShowIfCondition struct {
+	Key   string `json:"key"`
+	NotEq string `json:"not_eq"`
+}
+
 // ConfigField describes one configurable parameter of a plugin.
 type ConfigField struct {
-	Key     string        `json:"key"`
-	Label   string        `json:"label"`
-	Type    FieldType     `json:"type"`
-	Default any           `json:"default,omitempty"`
-	Options []FieldOption `json:"options,omitempty"` // enum only
-	Min     *int          `json:"min,omitempty"`     // int only
-	Max     *int          `json:"max,omitempty"`     // int only
-	Help    string        `json:"help,omitempty"`
+	Key     string           `json:"key"`
+	Label   string           `json:"label"`
+	Type    FieldType        `json:"type"`
+	Default any              `json:"default,omitempty"`
+	Options []FieldOption    `json:"options,omitempty"` // enum only
+	Min     *int             `json:"min,omitempty"`     // int only
+	Max     *int             `json:"max,omitempty"`     // int only
+	Help    string           `json:"help,omitempty"`
+	ShowIf  *ShowIfCondition `json:"show_if,omitempty"`
 }
 
 // ConfigSchema is the full schema for a plugin's configurable fields.
@@ -119,6 +127,12 @@ type Payload struct {
 	// 0 = fully transparent, 100 = fully opaque
 	// If not set, uses theme default (typically low for subtlety)
 	GraphLineOpacity int `json:"graph_line_opacity,omitempty"`
+
+	// RawFrame - Pre-rendered RGBA pixel data (width×height×4 bytes, row-major).
+	// When set, the renderer skips all text/graph layout and blits these pixels
+	// directly. Width and height must match the zone dimensions exactly.
+	// Primary may be empty when RawFrame is set.
+	RawFrame []byte `json:"raw_frame,omitempty"`
 }
 
 // Severity levels for visual indication
@@ -150,7 +164,7 @@ const (
 
 // Validate checks if the payload meets requirements
 func (p *Payload) Validate() error {
-	if p.Primary == "" {
+	if p.Primary == "" && len(p.RawFrame) == 0 {
 		return ErrEmptyPrimary
 	}
 

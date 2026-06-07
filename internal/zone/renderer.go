@@ -141,6 +141,13 @@ func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
 		return nil, err
 	}
 
+	// Pre-rendered frame: blit raw RGBA pixels directly, skipping all layout.
+	if len(payload.RawFrame) == r.width*r.height*4 {
+		img := image.NewRGBA(image.Rect(0, 0, r.width, r.height))
+		copy(img.Pix, payload.RawFrame)
+		return img, nil
+	}
+
 	dc := gg.NewContext(r.width, r.height)
 
 	// Layer 1: solid background.

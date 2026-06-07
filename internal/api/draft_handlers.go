@@ -269,6 +269,15 @@ func (s *Server) draftPatchZone(w http.ResponseWriter, r *http.Request, draft *z
 		s.respondError(w, "Draft update failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Live-preview: push plugin config to the running sampler immediately so
+	// the device display updates without requiring a commit first.
+	if patch.PluginConfig != nil && s.zoneNotifier != nil {
+		if err := s.zoneNotifier.BroadcastZoneConfigChange(zoneID, patch.PluginConfig); err != nil {
+			s.logger.Warn("live preview config push failed", "zone_id", zoneID, "error", err)
+		}
+	}
+
 	s.respondSuccess(w, "Zone updated in draft", nil)
 }
 
