@@ -23,39 +23,72 @@ trap '_cleanup' EXIT
 _cleanup() {
   rm -f "$DRIVE_LOG" "$URL_FILE" /tmp/nexus-shot-done-*
   if [[ -n "$BACKEND_PID" ]]; then
-    echo "  ▶  Stopping backend (PID $BACKEND_PID)..."
+    echo "  ▶  Stopping dev backend (PID $BACKEND_PID)..."
     kill "$BACKEND_PID" 2>/dev/null || true
     wait "$BACKEND_PID" 2>/dev/null || true
+  fi
+  # Remove tour binary — it lives next to the installed plugins and shouldn't persist.
+  rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/nexus-open/nexus-open-tour"
+  if [[ "$STOPPED_SYSTEMD" == "1" ]]; then
+    echo "  ▶  Restarting installed nexus-open service..."
+    systemctl --user start "$SYSTEMD_UNIT" 2>/dev/null && echo "  ✓  Service restarted" || echo "  ⚠  Failed to restart service — run: systemctl --user start nexus-open"
   fi
 }
 
 # ── Optional: start Go backend with mock device ───────────────────────────────
+SYSTEMD_UNIT="app-nexus\\x2dopen\\x2dautostart@autostart.service"
+STOPPED_SYSTEMD=0
+
 if [[ "${NEXUS_WITH_BACKEND:-0}" == "1" ]]; then
-  # Refuse to start if something is already on port 1985 — avoids a silent
-  # bind failure where the health check passes against the old process.
+  # If the installed daemon owns port 1985, stop it temporarily so our dev
+  # binary can bind. We restart it after the tour via the EXIT trap.
   if curl -sf http://localhost:1985/api/health >/dev/null 2>&1; then
-    echo "✗  Port 1985 is already in use."
-    echo "   Stop the existing backend first, then re-run with NEXUS_WITH_BACKEND=1."
-    echo "   (To run without managing the backend, omit NEXUS_WITH_BACKEND=1 and"
-    echo "    start it manually before running this script.)"
-    exit 1
+    echo "▶  Stopping installed nexus-open service for tour..."
+    if systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null; then
+      STOPPED_SYSTEMD=1
+      echo "   ✓  Service stopped"
+    else
+      echo "✗  Port 1985 is in use and could not stop the service."
+      echo "   Stop it manually first: systemctl --user stop nexus-open"
+      exit 1
+    fi
+    # Kill any stale nexus-open* processes that may still hold the port
+    # (e.g. dev binaries started manually and not cleanly shut down).
+    pkill -TERM -f 'nexus-open' 2>/dev/null || true
+    # Wait for port to fully clear — systemd stop returns before the socket is released.
+    echo "   Waiting for port 1985 to clear..."
+    for i in $(seq 1 20); do
+      curl -sf http://localhost:1985/api/health >/dev/null 2>&1 || break
+      [[ $i -eq 20 ]] && { echo "✗  Port 1985 still in use after 10s — aborting."; exit 1; }
+      sleep 0.5
+    done
+    sleep 0.5  # extra margin after the port disappears
   fi
 
   echo "▶  Building Go backend..."
   cd "$REPO_ROOT"
-  go build -o /tmp/nexus-open-tour ./cmd/nexus-open
+  # Build into the installed data dir so the sibling plugins/ directory is found
+  # automatically — the binary resolves exec: plugins relative to its own location.
+  TOUR_BIN="${XDG_DATA_HOME:-$HOME/.local/share}/nexus-open/nexus-open-tour"
+  go build -o "$TOUR_BIN" ./cmd/nexus-open
 
   echo "▶  Starting backend (NEXUS_MOCK_DEVICE=1)..."
-  NEXUS_MOCK_DEVICE=1 /tmp/nexus-open-tour --port 1985 &>/tmp/nexus-backend-tour.log &
+  NEXUS_MOCK_DEVICE=1 "$TOUR_BIN" &>/tmp/nexus-backend-tour.log &
   BACKEND_PID=$!
 
-  echo "   Waiting for backend health check..."
-  for i in $(seq 1 20); do
+  echo "   Waiting for dev backend health check (PID $BACKEND_PID)..."
+  for i in $(seq 1 30); do
+    # Only accept a response if our dev backend process is still alive.
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+      echo "   ✗  Backend process exited early. Log:"
+      cat /tmp/nexus-backend-tour.log
+      exit 1
+    fi
     if curl -sf http://localhost:1985/api/health >/dev/null 2>&1; then
       echo "   ✓  Backend ready (attempt $i)"
       break
     fi
-    if [[ $i -eq 20 ]]; then
+    if [[ $i -eq 30 ]]; then
       echo "   ✗  Backend failed to start. Log:"
       cat /tmp/nexus-backend-tour.log
       exit 1

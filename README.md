@@ -4,7 +4,7 @@ Open-source Linux controller for the Corsair iCUE Nexus display device.
 
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Go](https://img.shields.io/badge/go-1.23+-00ADD8)
+![Go](https://img.shields.io/badge/go-1.25+-00ADD8)
 ![Flutter](https://img.shields.io/badge/flutter-3.24+-02569B)
 
 ## Overview
@@ -59,7 +59,7 @@ The refactoring from Wails to Flutter is complete! See [PROJECT_PLAN.md](PROJECT
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.25+
 - Flutter 3.24+
 - libusb-1.0-dev
 - Corsair iCUE Nexus device (VID: 0x1b1c, PID: 0x1b8e)

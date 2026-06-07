@@ -19,7 +19,7 @@ UI_BUILD_DIR := $(UI_DIR)/build/linux/x64/release/bundle
 
 # Build flags
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)
-GOFLAGS := -trimpath
+GOFLAGS  := -trimpath
 GO_BUILD := CGO_ENABLED=1 go build
 
 # Default target

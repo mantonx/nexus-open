@@ -3,8 +3,6 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/settings_state.dart';
-import '../../../services/nexus_api_service.dart';
-import '../../../services/ws_service.dart';
 import '../../../theme/app_tokens.dart';
 import '../../common/common.dart';
 
@@ -16,21 +14,6 @@ class DisplayTab extends StatefulWidget {
 }
 
 class _DisplayTabState extends State<DisplayTab> {
-  double _brightness = 75;
-  final _api = NexusApiService();
-
-  Future<void> _setBrightness(double value) async {
-    try {
-      await _api.setBrightness(value.round());
-    } catch (_) {}
-  }
-
-  @override
-  void dispose() {
-    _api.dispose();
-    super.dispose();
-  }
-
   void _pickColor(
     BuildContext context,
     Color initial,
@@ -50,10 +33,7 @@ class _DisplayTabState extends State<DisplayTab> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
-    final ws = context.watch<WsService>();
     final cs = Theme.of(context).colorScheme;
-    final theme = Theme.of(context);
-    final connected = ws.isConnected;
 
     return ListView(
       padding: AppSpacing.paddingMd,
@@ -85,62 +65,6 @@ class _DisplayTabState extends State<DisplayTab> {
                   settings.backgroundColorValue,
                   'Background colour',
                   settings.setBackgroundColor,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-
-        // ── Colour preview ───────────────────────────────────────────────
-        NexusSection(
-          title: 'Colour Preview',
-          description: 'How text will appear on the 640×48 display.',
-          child: _DevicePreview(
-            textColor: settings.textColorValue,
-            backgroundColor: settings.backgroundColorValue,
-            brightness: _brightness,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-
-        // ── Brightness ───────────────────────────────────────────────────
-        NexusSection(
-          title: 'Brightness',
-          description: 'Physical display brightness (0–100).',
-          titleSpacing: AppSpacing.sm,
-          trailing: connected
-              ? null
-              : const NexusStatusBadge(
-                  status: NexusStatus.warning, label: 'Device required'),
-          child: Row(
-            children: [
-              Icon(Icons.brightness_low,
-                  size: AppIconSize.md,
-                  color: connected ? cs.onSurface : cs.onSurfaceVariant),
-              Expanded(
-                child: Slider(
-                  value: _brightness,
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  label: '${_brightness.round()}%',
-                  onChanged: connected
-                      ? (v) => setState(() => _brightness = v)
-                      : null,
-                  onChangeEnd: connected ? _setBrightness : null,
-                ),
-              ),
-              Icon(Icons.brightness_high,
-                  size: AppIconSize.md,
-                  color: connected ? cs.onSurface : cs.onSurfaceVariant),
-              const SizedBox(width: AppSpacing.sm),
-              SizedBox(
-                width: 40,
-                child: Text(
-                  '${_brightness.round()}%',
-                  style: theme.textTheme.labelLarge,
-                  textAlign: TextAlign.end,
                 ),
               ),
             ],
@@ -275,219 +199,6 @@ class _SettingRow extends StatelessWidget {
   }
 }
 
-// ── Hardware display preview ──────────────────────────────────────────────────
-// Replicates the Corsair iCUE Nexus physical appearance:
-//   - Black textured plastic housing (6.07" × 1.38" × 0.63")
-//   - Glossy surround larger than the active display (display is recessed)
-//   - Mounting slots on both ends
-
-class _DevicePreview extends StatelessWidget {
-  const _DevicePreview({
-    required this.textColor,
-    required this.backgroundColor,
-    this.brightness = 75,
-  });
-
-  final Color textColor;
-  final Color backgroundColor;
-  final double brightness;
-
-  static const _housingHighlight = Color(0xFF242428);
-  static const _glossySurround = Color(0xFF0A0A0C);
-  static const _mountingSlot = Color(0xFF1A1A1E);
-  static const _displayBorder = Color(0xFF1C1C20);
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final w = constraints.maxWidth;
-              return Container(
-                width: w,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0xFF1A1A1C),
-                      Color(0xFF0E0E10),
-                      Color(0xFF121214),
-                    ],
-                    stops: [0.0, 0.4, 1.0],
-                  ),
-                  borderRadius: const BorderRadius.all(Radius.circular(4)),
-                  border: Border.all(color: _housingHighlight, width: 0.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.75),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.4),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 0, vertical: 10),
-                  child: Row(
-                    children: [
-                      const _MountingEnd(slot: _mountingSlot),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: _glossySurround,
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Colors.white.withValues(alpha: 0.05),
-                                Colors.transparent,
-                              ],
-                            ),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 8),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border:
-                                  Border.all(color: _displayBorder, width: 1),
-                              borderRadius: BorderRadius.circular(1),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.9),
-                                  blurRadius: 6,
-                                  spreadRadius: 1,
-                                ),
-                              ],
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(1),
-                              child: Stack(
-                                children: [
-                                  Opacity(
-                                    opacity:
-                                        (brightness / 100).clamp(0.0, 1.0),
-                                    child: Container(
-                                      height: 48,
-                                      color: backgroundColor,
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        '14:30  25°C  New York',
-                                        style: TextStyle(
-                                          color: textColor,
-                                          fontFamily: 'monospace',
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w600,
-                                          letterSpacing: 1.5,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: CustomPaint(
-                                        painter: _ScanlinePainter()),
-                                  ),
-                                  Positioned.fill(
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        gradient: LinearGradient(
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.centerRight,
-                                          colors: [
-                                            Colors.white
-                                                .withValues(alpha: 0.06),
-                                            Colors.transparent,
-                                          ],
-                                          stops: const [0.0, 0.4],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const _MountingEnd(slot: _mountingSlot),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Corsair iCUE Nexus  ·  640 × 48',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: AppColors.textMuted,
-                  letterSpacing: 0.6,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MountingEnd extends StatelessWidget {
-  const _MountingEnd({required this.slot});
-  final Color slot;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 14,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _slot(slot),
-          const SizedBox(height: 10),
-          _slot(slot),
-        ],
-      ),
-    );
-  }
-
-  Widget _slot(Color color) => Container(
-        width: 4,
-        height: 14,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.6),
-              blurRadius: 2,
-              offset: const Offset(1, 1),
-            ),
-          ],
-        ),
-      );
-}
-
-class _ScanlinePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.07)
-      ..strokeWidth = 0.5;
-    for (double y = 0; y < size.height; y += 2) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_ScanlinePainter _) => false;
-}
-
 // ── Colour row ────────────────────────────────────────────────────────────────
 
 class _ColorRow extends StatelessWidget {
@@ -505,10 +216,6 @@ class _ColorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = Theme.of(context).colorScheme;
-    final luminance = color.computeLuminance();
-    final swatchText = luminance > 0.5 ? Colors.black87 : Colors.white70;
-    final hexStr =
-        '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
@@ -518,28 +225,18 @@ class _ColorRow extends StatelessWidget {
             child: Text(label, style: theme.textTheme.bodyLarge),
           ),
           Semantics(
-            label: '$label swatch, current value $hexStr, tap to change',
+            label: '$label colour swatch, tap to change',
             button: true,
             child: InkWell(
               onTap: onTap,
               borderRadius: AppRadius.smBr,
               child: Container(
-                width: 80,
+                width: 48,
                 height: 36,
                 decoration: BoxDecoration(
                   color: color,
                   borderRadius: AppRadius.smBr,
                   border: Border.all(color: cs.outline),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  hexStr,
-                  style: TextStyle(
-                    color: swatchText,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: 'monospace',
-                  ),
                 ),
               ),
             ),

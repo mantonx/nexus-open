@@ -29,7 +29,7 @@ class DisplayConfig with _$DisplayConfig {
 @freezed
 class NexusConfig with _$NexusConfig {
   const factory NexusConfig({
-    @Default('') String location,
+    @Default('Jersey City') String location,
     @JsonKey(name: 'time_format') @Default('24h') String timeFormat,
     @Default('imperial') String unit,
     @JsonKey(name: 'background_color') @Default('#000000') String backgroundColor,
@@ -113,13 +113,16 @@ class LayoutZone {
 
   factory LayoutZone.fromJson(Map<String, dynamic> j) => LayoutZone(
         id: j['id'] as String,
-        pageId: (j['page_id'] as num).toInt(),
-        ord: (j['ord'] as num).toInt(),
-        widthPx: (j['width_px'] as num).toInt(),
+        // Draft API uses 'width'; DB API uses 'width_px'. Accept both.
+        pageId: (j['page_id'] as num?)?.toInt() ?? 0,
+        ord: (j['ord'] as num?)?.toInt() ?? 0,
+        widthPx: ((j['width_px'] ?? j['width']) as num?)?.toInt() ?? 0,
         plugin: j['plugin'] as String? ?? 'builtin:placeholder',
         refreshMs: (j['refresh_ms'] as num?)?.toInt() ?? 2000,
         align: j['align'] as String? ?? 'center',
-        config: (j['config'] as Map<String, dynamic>?) ?? {},
+        config: (j['plugin_config'] as Map<String, dynamic>?)
+            ?? (j['config'] as Map<String, dynamic>?)
+            ?? {},
         themeOverride: (j['theme_override'] as Map<String, dynamic>?) ?? {},
       );
 
@@ -171,9 +174,10 @@ class LayoutPage {
   });
 
   factory LayoutPage.fromJson(Map<String, dynamic> j) => LayoutPage(
-        id: (j['id'] as num).toInt(),
-        name: j['name'] as String,
-        ord: (j['ord'] as num).toInt(),
+        // Draft pages have no 'id' or 'ord' — default to 0.
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: j['name'] as String? ?? '',
+        ord: (j['ord'] as num?)?.toInt() ?? 0,
         zones: ((j['zones'] as List<dynamic>?) ?? [])
             .map((z) => LayoutZone.fromJson(z as Map<String, dynamic>))
             .toList(),
@@ -181,6 +185,105 @@ class LayoutPage {
 
   int get totalWidth => zones.fold(0, (sum, z) => sum + z.widthPx);
   bool get isValid => totalWidth == 640;
+}
+
+// ── Plugin catalog ───────────────────────────────────────────────────────────
+
+class PluginFieldOption {
+  final String value;
+  final String label;
+  const PluginFieldOption({required this.value, required this.label});
+  factory PluginFieldOption.fromJson(Map<String, dynamic> j) =>
+      PluginFieldOption(
+        value: j['value'] as String,
+        label: j['label'] as String? ?? j['value'] as String,
+      );
+}
+
+class PluginConfigField {
+  final String key;
+  final String label;
+  final String type; // "string"|"enum"|"int"|"bool"|"color"
+  final dynamic defaultValue;
+  final List<PluginFieldOption> options;
+  final int? min;
+  final int? max;
+  final String? help;
+
+  const PluginConfigField({
+    required this.key,
+    required this.label,
+    required this.type,
+    this.defaultValue,
+    this.options = const [],
+    this.min,
+    this.max,
+    this.help,
+  });
+
+  factory PluginConfigField.fromJson(Map<String, dynamic> j) =>
+      PluginConfigField(
+        key: j['key'] as String,
+        label: j['label'] as String? ?? j['key'] as String,
+        type: j['type'] as String? ?? 'string',
+        defaultValue: j['default'],
+        options: ((j['options'] as List<dynamic>?) ?? [])
+            .map((o) => PluginFieldOption.fromJson(o as Map<String, dynamic>))
+            .toList(),
+        min: (j['min'] as num?)?.toInt(),
+        max: (j['max'] as num?)?.toInt(),
+        help: j['help'] as String?,
+      );
+}
+
+class PluginDescriptor {
+  final String id;
+  final String name;
+  final String description;
+  final String version;
+  final List<PluginConfigField> schemaFields;
+
+  const PluginDescriptor({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.version,
+    required this.schemaFields,
+  });
+
+  factory PluginDescriptor.fromJson(Map<String, dynamic> j) {
+    final schema = j['config_schema'] as Map<String, dynamic>?;
+    final fields = ((schema?['fields'] as List<dynamic>?) ?? [])
+        .map((f) => PluginConfigField.fromJson(f as Map<String, dynamic>))
+        .toList();
+    return PluginDescriptor(
+      id: j['id'] as String? ?? '',
+      name: j['name'] as String? ?? '',
+      description: j['description'] as String? ?? '',
+      version: j['version'] as String? ?? '',
+      schemaFields: fields,
+    );
+  }
+}
+
+class PluginCatalogEntry {
+  final String id;
+  final String kind; // "builtin" | "exec"
+  final PluginDescriptor descriptor;
+
+  const PluginCatalogEntry({
+    required this.id,
+    required this.kind,
+    required this.descriptor,
+  });
+
+  factory PluginCatalogEntry.fromJson(Map<String, dynamic> j) =>
+      PluginCatalogEntry(
+        id: j['id'] as String? ?? '',
+        kind: j['kind'] as String? ?? 'builtin',
+        descriptor: PluginDescriptor.fromJson(
+            (j['descriptor'] as Map<String, dynamic>?) ?? {}),
+      );
 }
 
 // ── ApiSuccess ───────────────────────────────────────────────────────────────

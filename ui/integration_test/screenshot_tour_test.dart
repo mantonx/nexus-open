@@ -64,25 +64,34 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1200));
     }
 
-    // ── Settings tabs ─────────────────────────────────────────────────────────
-    final tabs = [
-      ('Live Hardware Preview', 'tab_preview'),
-      ('Layout Editor',         'tab_layout'),
-      ('Display & Colors',      'tab_display'),
-      ('Location',              'tab_location'),
-      ('Plugins',               'tab_plugins'),
-      ('Images',                'tab_images'),
-    ];
+    // ── Settings tabs (3-mode rail: Editor / Global / Device) ────────────────
+    // Extra settle time for Editor tab — it fires getDraft() + getPluginCatalog()
+    // concurrently on load, which may take a moment against a real backend.
+    await tester.pumpAndSettle(const Duration(seconds: 3));
+    await _screenshot(tester, 'tab_editor');
 
-    for (final (tooltip, name) in tabs) {
-      final navItem = find.byTooltip(tooltip);
-      if (navItem.evaluate().isNotEmpty) {
-        await tester.tap(navItem);
-        await tester.pump(const Duration(milliseconds: 800));
+    // Global tab — wraps Display, Images, Location sub-tabs
+    final globalNav = find.byTooltip('Global Settings');
+    if (globalNav.evaluate().isNotEmpty) {
+      await tester.tap(globalNav);
+      await tester.pumpAndSettle(const Duration(milliseconds: 800));
+    }
+    await _screenshot(tester, 'tab_global');
+
+    // Navigate Global sub-tabs: Display → Images → Location
+    for (final (label, name) in [
+      ('Display',  'tab_display'),
+      ('Images',   'tab_images'),
+      ('Location', 'tab_location'),
+    ]) {
+      final subTab = find.text(label);
+      if (subTab.evaluate().isNotEmpty) {
+        await tester.tap(subTab);
+        await tester.pumpAndSettle(const Duration(milliseconds: 600));
       }
       await _screenshot(tester, name);
 
-      // Scroll down to capture below-the-fold content, then reset
+      // Scroll to capture below-the-fold content
       final listFinder = find.byType(ListView);
       if (listFinder.evaluate().isNotEmpty) {
         await tester.drag(listFinder.first, const Offset(0, -400));
@@ -92,27 +101,9 @@ void main() {
         await tester.pump(const Duration(milliseconds: 200));
       }
 
-      // ── Module card expand ────────────────────────────────────────────────
-      if (name == 'tab_plugins') {
-        final configureBtns = find.text('Configure');
-        if (configureBtns.evaluate().isNotEmpty) {
-          await tester.tap(configureBtns.first);
-          await tester.pump(const Duration(milliseconds: 400));
-          await _screenshot(tester, 'tab_plugins_expanded');
-          final collapseBtns = find.text('Collapse');
-          if (collapseBtns.evaluate().isNotEmpty) {
-            await tester.tap(collapseBtns.first);
-            await tester.pump(const Duration(milliseconds: 200));
-          }
-        }
-      }
-
-      // ── Colour picker dialog ──────────────────────────────────────────────
+      // ── Colour picker dialog (Display sub-tab) ──────────────────────────
       if (name == 'tab_display') {
-        // The swatch has a Semantics label containing "Text colour swatch"
-        final swatchFinder = find.bySemanticsLabel(
-          RegExp(r'Text colour swatch'),
-        );
+        final swatchFinder = find.bySemanticsLabel(RegExp(r'Text colour swatch'));
         if (swatchFinder.evaluate().isNotEmpty) {
           await tester.tap(swatchFinder.first);
           await tester.pump(const Duration(milliseconds: 400));
@@ -125,21 +116,32 @@ void main() {
       }
     }
 
+    // Device tab
+    final deviceNav = find.byTooltip('Device & Health');
+    if (deviceNav.evaluate().isNotEmpty) {
+      await tester.tap(deviceNav);
+      await tester.pumpAndSettle(const Duration(milliseconds: 800));
+    }
+    await _screenshot(tester, 'tab_device');
+
     // ── Light mode ────────────────────────────────────────────────────────────
-    // Toggle to light mode via the rail footer button
     final lightModeBtn = find.byTooltip('Light mode');
     if (lightModeBtn.evaluate().isNotEmpty) {
       await tester.tap(lightModeBtn);
       await tester.pump(const Duration(milliseconds: 400));
 
-      // Tour all tabs in light mode, starting from Display
-      for (final (tooltip, name) in tabs) {
+      // Tour the three rail modes in light mode
+      for (final (tooltip, name) in [
+        ('Layout Editor',  'light_tab_editor'),
+        ('Global Settings','light_tab_global'),
+        ('Device & Health','light_tab_device'),
+      ]) {
         final navItem = find.byTooltip(tooltip);
         if (navItem.evaluate().isNotEmpty) {
           await tester.tap(navItem);
           await tester.pump(const Duration(milliseconds: 500));
         }
-        await _screenshot(tester, 'light_$name');
+        await _screenshot(tester, name);
       }
 
       // Restore dark mode

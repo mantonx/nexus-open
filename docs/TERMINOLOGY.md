@@ -7,7 +7,7 @@ This document defines the official terminology for Nexus Open v2.0+.
 ## Core Concepts
 
 ### Plugin
-A **plugin** is a plugin that provides data to be displayed in a zone. Plugins implement a simple interface with two methods: `Describe()` (metadata) and `Sample()` (current data).
+A **plugin** is a data provider that supplies content to be displayed in a zone. Plugins implement a three-method interface: `Describe()` (metadata + config schema), `Configure()` (apply user settings), and `Sample()` (current data).
 
 **Examples:**
 - Clock plugin (displays current time)
@@ -130,6 +130,7 @@ nexus-open layout reload            # Hot reload layout
 // Plugin interface
 type Plugin interface {
     Describe() (Descriptor, error)
+    Configure(cfg map[string]any) error
     Sample() (Payload, error)
 }
 
@@ -158,7 +159,31 @@ pages:
 ```
 
 ### In User Documentation
-> "Plugins are plugins that provide data to your display. You can use built-in plugins like Clock and Debug, or install community plugins from the Plugin Browser. Advanced users can write their own plugins in any language."
+> "Plugins supply data to your display. You can use built-in plugins like Clock and Debug, or install community plugins from the Plugin Browser. Advanced users can write their own plugins in any language."
+
+---
+
+## Config Surface Hierarchy
+
+Nexus Open has three distinct configuration layers, each with its own storage and lifecycle:
+
+| Layer | API | Storage | Who Edits |
+|-------|-----|---------|-----------|
+| **Global config** | `GET/POST /api/config` | SQLite `settings` table | Flutter settings → Global tab |
+| **Layout (committed)** | `GET /api/layout` | SQLite `pages`+`zones` tables | Committed by draft confirm |
+| **Draft layout** | `GET/PUT /api/layout/draft` | In-memory (`DraftManager`) | Flutter Editor tab; auto-discards on idle/disconnect |
+
+### How the draft flow works
+
+1. Flutter opens the Editor tab → `GET /api/layout/draft` creates an in-memory draft from the committed layout.
+2. Zone add/remove/patch calls update the draft and immediately reload the hardware display for live preview.
+3. Clicking **Confirm** calls `POST /api/layout/commit`, which persists the draft to SQLite and discards the draft.
+4. Clicking **Discard** (or navigating away / closing the WebSocket) calls `POST /api/layout/discard`, which reloads the committed layout onto the hardware.
+
+### Plugin config vs zone config
+
+- **Plugin config** (`/api/zones/:id/config`) stores per-zone plugin parameters (e.g., temperature units, city name). These write directly; no draft is involved.
+- **Zone config** (the draft zone's `plugin_config` field) stores the same data when building a new zone through the Editor. On commit, plugin config is persisted alongside the zone.
 
 ---
 
@@ -182,5 +207,5 @@ pages:
 
 ---
 
-**Last Updated:** 2025-10-12
-**Version:** 2.0.0-alpha
+**Last Updated:** 2026-06-07
+**Version:** 2.0.0

@@ -342,6 +342,107 @@ class NexusApiService {
     }
   }
 
+  // ── Plugin catalog ─────────────────────────────────────────────────────────
+
+  /// Fetch the plugin catalog (all available plugins with their schemas).
+  Future<List<PluginCatalogEntry>> getPluginCatalog() async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/plugins')).timeout(timeout);
+    if (r.statusCode != 200) {
+      throw ApiException('Failed to load plugin catalog', statusCode: r.statusCode);
+    }
+    final list = json.decode(r.body) as List<dynamic>;
+    return list
+        .map((e) => PluginCatalogEntry.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  // ── Draft layout ────────────────────────────────────────────────────────────
+
+  /// Open or fetch the current draft layout.
+  Future<List<LayoutPage>> getDraft() async {
+    final r = await _client.get(Uri.parse('$baseUrl/api/layout/draft')).timeout(timeout);
+    if (r.statusCode != 200) {
+      throw ApiException('Failed to get draft', statusCode: r.statusCode);
+    }
+    final body = json.decode(r.body) as Map<String, dynamic>;
+    final layout = body['layout'] as Map<String, dynamic>?;
+    if (layout == null) return [];
+    final pages = (layout['pages'] as List<dynamic>?) ?? [];
+    return pages.map((e) => LayoutPage.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Add a zone to the draft on a given page.
+  Future<String> addDraftZone({
+    required int pageIndex,
+    required String plugin,
+    int refreshMs = 1000,
+  }) async {
+    final r = await _client
+        .post(
+          Uri.parse('$baseUrl/api/layout/draft/zones'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'page_index': pageIndex,
+            'plugin': plugin,
+            'refresh_ms': refreshMs,
+          }),
+        )
+        .timeout(timeout);
+    if (r.statusCode != 200) {
+      final body = json.decode(r.body) as Map<String, dynamic>;
+      throw ApiException(
+        body['message'] as String? ?? 'Failed to add zone',
+        statusCode: r.statusCode,
+      );
+    }
+    final body = json.decode(r.body) as Map<String, dynamic>;
+    return (body['data'] as Map?)?['id'] as String? ?? '';
+  }
+
+  /// Remove a zone from the draft.
+  Future<void> deleteDraftZone(String zoneId) async {
+    final r = await _client
+        .delete(Uri.parse('$baseUrl/api/layout/draft/zones/$zoneId'))
+        .timeout(timeout);
+    if (r.statusCode != 200) {
+      throw ApiException('Failed to delete draft zone', statusCode: r.statusCode);
+    }
+  }
+
+  /// Update fields on a zone in the draft.
+  Future<void> patchDraftZone(String zoneId, Map<String, dynamic> patch) async {
+    final r = await _client
+        .patch(
+          Uri.parse('$baseUrl/api/layout/draft/zones/$zoneId'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(patch),
+        )
+        .timeout(timeout);
+    if (r.statusCode != 200) {
+      throw ApiException('Failed to patch draft zone', statusCode: r.statusCode);
+    }
+  }
+
+  /// Commit the draft to the store (makes changes durable).
+  Future<void> commitDraft() async {
+    final r = await _client
+        .post(Uri.parse('$baseUrl/api/layout/commit'))
+        .timeout(timeout);
+    if (r.statusCode != 200) {
+      throw ApiException('Failed to commit draft', statusCode: r.statusCode);
+    }
+  }
+
+  /// Discard the draft (reverts device to committed state).
+  Future<void> discardDraft() async {
+    final r = await _client
+        .post(Uri.parse('$baseUrl/api/layout/discard'))
+        .timeout(timeout);
+    if (r.statusCode != 200) {
+      throw ApiException('Failed to discard draft', statusCode: r.statusCode);
+    }
+  }
+
   void dispose() => _client.close();
 }
 

@@ -327,18 +327,16 @@ func (s *Server) handleDeviceInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	firmware, err := s.device.GetFirmwareVersion()
-	if err != nil {
-		s.logger.Error("failed to get firmware version", "error", err)
-		s.respondError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	info := map[string]interface{}{
-		"firmware":  firmware,
+		"firmware":  "N/A",
 		"vendorId":  "0x1b1c",
 		"productId": "0x1b8e",
-		"model":     "iCUE Nexus",
+		"model":     "Corsair iCUE Nexus",
+	}
+
+	// Best-effort firmware version — not fatal if unavailable.
+	if firmware, err := s.device.GetFirmwareVersion(); err == nil {
+		info["firmware"] = firmware
 	}
 
 	// Surface the last connect error as a human-readable action hint.

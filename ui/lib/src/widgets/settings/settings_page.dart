@@ -8,12 +8,9 @@ import '../../services/nexus_api_service.dart';
 import '../../services/ws_service.dart';
 import '../../theme/app_tokens.dart';
 import '../common/common.dart';
-import 'tabs/hardware_preview_tab.dart';
-import 'tabs/images_tab.dart';
-import 'tabs/layout_editor_tab.dart';
-import 'tabs/location_tab.dart';
-import 'tabs/plugins_tab.dart';
-import 'tabs/preview_tab.dart';
+import 'tabs/editor_tab.dart';
+import 'tabs/global_tab.dart';
+import 'tabs/device_tab.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -25,18 +22,13 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   int _selectedIndex = 0;
   StreamSubscription? _wsSub;
-  String? _deviceModel;
-  String? _deviceFirmware;
-  NexusConfig? _savedConfig;
+  bool _hasDraftChanges = false;
+  bool _draftBusy = false;
 
-  // Navigation destinations — icon only, labels shown as tooltips
   static const _destinations = [
-    (icon: Icons.preview_outlined,          selected: Icons.preview,           label: 'Preview',  tooltip: 'Live Hardware Preview'),
-    (icon: Icons.dashboard_customize_outlined, selected: Icons.dashboard_customize, label: 'Layout', tooltip: 'Layout Editor'),
-    (icon: Icons.display_settings_outlined, selected: Icons.display_settings,  label: 'Display',  tooltip: 'Display & Colors'),
-    (icon: Icons.location_on_outlined,      selected: Icons.location_on,       label: 'Location', tooltip: 'Location'),
-    (icon: Icons.tune_outlined,             selected: Icons.tune,              label: 'Plugins',  tooltip: 'Plugins'),
-    (icon: Icons.image_outlined,            selected: Icons.image,             label: 'Images',   tooltip: 'Images'),
+    (icon: Icons.dashboard_customize_outlined, selected: Icons.dashboard_customize, label: 'Editor',  tooltip: 'Layout Editor'),
+    (icon: Icons.tune_outlined,               selected: Icons.tune,                label: 'Global',   tooltip: 'Global Settings'),
+    (icon: Icons.developer_board_outlined,    selected: Icons.developer_board,     label: 'Device',   tooltip: 'Device & Health'),
   ];
 
   @override
@@ -44,31 +36,7 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<SettingsState>().loadFromBackend();
-      if (mounted) {
-        setState(() => _savedConfig = context.read<SettingsState>().config);
-        _fetchDeviceInfo();
-      }
     });
-  }
-
-  Future<void> _fetchDeviceInfo() async {
-    try {
-      final api = NexusApiService();
-      final info = await api.getDeviceInfo();
-      api.dispose();
-      if (mounted) {
-        setState(() {
-        _deviceModel = info.model;
-        _deviceFirmware = info.firmware;
-      });
-      }
-    } catch (_) {}
-  }
-
-  bool get _hasUnsavedChanges {
-    final current = context.read<SettingsState>().config;
-    if (_savedConfig == null || current == null) return false;
-    return current.toJson().toString() != _savedConfig!.toJson().toString();
   }
 
   @override
@@ -76,10 +44,25 @@ class _SettingsPageState extends State<SettingsPage> {
     super.didChangeDependencies();
     _wsSub?.cancel();
     _wsSub = context.read<WsService>().events.listen((event) {
-      if (event is WsDisconnectedEvent && mounted) {
+      if (!mounted) return;
+      if (event is WsDisconnectedEvent) {
         context.read<SettingsState>().setConnected(false);
-      } else if (event is WsConnectedEvent && mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            content: Text('Device disconnected'),
+            duration: Duration(seconds: 3),
+          ));
+      } else if (event is WsConnectedEvent) {
         context.read<SettingsState>().loadFromBackend();
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            content: Text('Device connected'),
+            duration: Duration(seconds: 3),
+          ));
+      } else if (event is WsDraftStateEvent) {
+        setState(() => _hasDraftChanges = event.active);
       }
     });
   }
@@ -90,149 +73,275 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  Future<void> _handleSave() async {
-    final s = context.read<SettingsState>();
-    await s.saveToBackend();
-    if (!mounted) return;
-    final ok = s.errorMessage == null;
-    if (ok) setState(() => _savedConfig = s.config);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
-          ? 'Settings saved'
-          : 'Save failed: ${s.errorMessage}'),
-    ));
+  Future<void> _commitDraft() async {
+    setState(() => _draftBusy = true);
+    try {
+      final api = NexusApiService();
+      await api.commitDraft();
+      api.dispose();
+      if (mounted) setState(() => _hasDraftChanges = false);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Commit failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _draftBusy = false);
+    }
   }
 
-  Future<bool> _confirmDiscard() async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Unsaved changes'),
-          content: const Text('Discard changes and close?'),
-          actions: [
-            NexusButton.ghost(
-                label: 'Keep editing',
-                onPressed: () => Navigator.pop(ctx, false)),
-            NexusButton.destructive(
-                label: 'Discard',
-                onPressed: () => Navigator.pop(ctx, true)),
-          ],
-        ),
-      ) ?? false;
+  Future<void> _discardDraft() async {
+    setState(() => _draftBusy = true);
+    try {
+      final api = NexusApiService();
+      await api.discardDraft();
+      api.dispose();
+      if (mounted) setState(() => _hasDraftChanges = false);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Discard failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _draftBusy = false);
+    }
+  }
 
-  Widget _buildPage(SettingsState s) {
+  Widget _buildPage() {
     switch (_selectedIndex) {
-      case 0: return const HardwarePreviewTab();
-      case 1: return const LayoutEditorTab();
-      case 2: return const PreviewTab();
-      case 3: return LocationTab(
-        onLocationSelected: (loc) => s.updateConfig(location: loc),
-        initialLocation: s.location,
-      );
-      case 4: return const PluginsTab();
-      case 5: return const ImagesTab();
+      case 0: return const EditorTab();
+      case 1: return const GlobalTab();
+      case 2: return const DeviceTab();
       default: return const SizedBox.shrink();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsState>();
     final ws = context.watch<WsService>();
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    return PopScope(
-      canPop: !_hasUnsavedChanges,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (!didPop && _hasUnsavedChanges) {
-          final nav = Navigator.of(context);
-          if (await _confirmDiscard() && mounted) nav.pop();
-        }
-      },
-      child: Scaffold(
-        body: Column(
-          children: [
-            // ── Connection loss banner ──────────────────────────────────────
-            if (!ws.isConnected)
-              Container(
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHigh,
-                  border: Border(
-                    left:   BorderSide(color: cs.warning, width: 3),
-                    bottom: BorderSide(color: cs.outline, width: 1),
-                  ),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.xs + 2,
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.cloud_off_outlined,
-                        size: AppIconSize.sm, color: cs.warning),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        'Backend disconnected — changes cannot be saved',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                    NexusButton.ghost(
-                      label: 'Retry',
-                      onPressed: () => settings.loadFromBackend(),
-                    ),
-                  ],
+    return Scaffold(
+      body: Column(
+        children: [
+          // ── Disconnection banner ──────────────────────────────────────────
+          if (!ws.isConnected)
+            Container(
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHigh,
+                border: Border(
+                  left:   BorderSide(color: cs.warning, width: 3),
+                  bottom: BorderSide(color: cs.outline, width: 1),
                 ),
               ),
-
-            Expanded(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.xs + 2,
+              ),
               child: Row(
                 children: [
-                  // ── NavigationRail ──────────────────────────────────────
-                  _NexusRail(
-                    selectedIndex: _selectedIndex,
-                    onDestinationSelected: (i) =>
-                        setState(() => _selectedIndex = i),
-                    destinations: _destinations,
-                    deviceModel: _deviceModel,
-                    deviceFirmware: _deviceFirmware,
-                    isConnected: ws.isConnected,
-                    themeMode: settings.themeMode,
-                    isLoading: settings.isLoading,
-                    canSave: !settings.isLoading && ws.isConnected,
-                    onSave: _handleSave,
-                    onToggleTheme: () => settings.setThemeMode(
-                      settings.themeMode == ThemeMode.dark
-                          ? ThemeMode.light
-                          : ThemeMode.dark,
+                  Icon(Icons.cloud_off_outlined, size: AppIconSize.sm, color: cs.warning),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'Backend disconnected — changes cannot be saved',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
                     ),
                   ),
-
-                  // ── Content area ────────────────────────────────────────
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: CustomPaint(painter: _DotGridPainter()),
-                        ),
-                        AnimatedSwitcher(
-                          duration: AppDuration.normal,
-                          child: KeyedSubtree(
-                            key: ValueKey(_selectedIndex),
-                            child: _buildPage(settings),
-                          ),
-                        ),
-                      ],
-                    ),
+                  NexusButton.ghost(
+                    label: 'Retry',
+                    onPressed: () => context.read<SettingsState>().loadFromBackend(),
                   ),
                 ],
               ),
             ),
-          ],
+
+          // ── Preview strip ─────────────────────────────────────────────────
+          _PreviewStrip(hasDraft: _hasDraftChanges),
+
+          // ── Main body ────────────────────────────────────────────────────
+          Expanded(
+            child: Row(
+              children: [
+                // NavigationRail
+                _NexusRail(
+                  selectedIndex: _selectedIndex,
+                  onDestinationSelected: (i) => setState(() => _selectedIndex = i),
+                  destinations: _destinations,
+                  isConnected: ws.isConnected,
+                  themeMode: context.watch<SettingsState>().themeMode,
+                  onToggleTheme: () {
+                    final s = context.read<SettingsState>();
+                    s.setThemeMode(s.themeMode == ThemeMode.dark
+                        ? ThemeMode.light
+                        : ThemeMode.dark);
+                  },
+                ),
+
+                // Content
+                Expanded(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: CustomPaint(painter: _DotGridPainter())),
+                      AnimatedSwitcher(
+                        duration: AppDuration.normal,
+                        child: KeyedSubtree(
+                          key: ValueKey(_selectedIndex),
+                          child: _buildPage(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Draft / confirm bar ──────────────────────────────────────────
+          AnimatedSize(
+            duration: AppDuration.normal,
+            curve: Curves.easeInOut,
+            child: _hasDraftChanges
+                ? _DraftBar(busy: _draftBusy, onCommit: _commitDraft, onDiscard: _discardDraft)
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Preview strip ─────────────────────────────────────────────────────────────
+
+class _PreviewStrip extends StatefulWidget {
+  const _PreviewStrip({required this.hasDraft});
+  final bool hasDraft;
+
+  @override
+  State<_PreviewStrip> createState() => _PreviewStripState();
+}
+
+class _PreviewStripState extends State<_PreviewStrip> {
+  Uint8List? _lastFrame;
+  StreamSubscription? _sub;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sub?.cancel();
+    _sub = context.read<WsService>().events.listen((event) {
+      if (event is WsFrameEvent && mounted) {
+        setState(() => _lastFrame = event.pngBytes);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = widget.hasDraft
+        ? AppColors.hardwareAccent
+        : AppColors.hardwareAccent.withValues(alpha: 0.35);
+
+    return Container(
+      height: 48 + 8, // 48px display + 4px padding top/bottom
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppColors.darkBg,
+        border: Border(
+          bottom: BorderSide(color: borderColor, width: widget.hasDraft ? 2 : 1),
         ),
+      ),
+      child: Center(
+        child: Container(
+          width: 640,
+          height: 48,
+          decoration: BoxDecoration(
+            color: Colors.black,
+            borderRadius: AppRadius.xsBr,
+            border: Border.all(color: borderColor, width: widget.hasDraft ? 2 : 1),
+            boxShadow: widget.hasDraft
+                ? [BoxShadow(color: AppColors.hardwareAccent.withValues(alpha: 0.25), blurRadius: 10, spreadRadius: 1)]
+                : null,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: _lastFrame != null
+              ? Image.memory(_lastFrame!, fit: BoxFit.fill, gaplessPlayback: true)
+              : const ColoredBox(color: Colors.black),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Draft / confirm bar ───────────────────────────────────────────────────────
+
+class _DraftBar extends StatelessWidget {
+  const _DraftBar({
+    required this.busy,
+    required this.onCommit,
+    required this.onDiscard,
+  });
+
+  final bool busy;
+  final VoidCallback onCommit;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainer,
+        border: Border(top: BorderSide(color: AppColors.hardwareAccent.withValues(alpha: 0.4), width: 1)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.hardwareAccent,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              'Unsaved changes — live on device',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+          if (busy)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent),
+            )
+          else ...[
+            NexusButton.ghost(label: 'Discard', onPressed: onDiscard),
+            const SizedBox(width: AppSpacing.sm),
+            NexusButton.primary(label: 'Confirm', onPressed: onCommit),
+          ],
+        ],
       ),
     );
   }
@@ -245,27 +354,16 @@ class _NexusRail extends StatelessWidget {
     required this.selectedIndex,
     required this.onDestinationSelected,
     required this.destinations,
-    required this.deviceModel,
-    required this.deviceFirmware,
     required this.isConnected,
     required this.themeMode,
-    required this.isLoading,
-    required this.canSave,
-    required this.onSave,
     required this.onToggleTheme,
   });
 
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
-  final List<({IconData icon, IconData selected, String label, String tooltip})>
-      destinations;
-  final String? deviceModel;
-  final String? deviceFirmware;
+  final List<({IconData icon, IconData selected, String label, String tooltip})> destinations;
   final bool isConnected;
   final ThemeMode themeMode;
-  final bool isLoading;
-  final bool canSave;
-  final VoidCallback onSave;
   final VoidCallback onToggleTheme;
 
   @override
@@ -277,44 +375,27 @@ class _NexusRail extends StatelessWidget {
       width: 72,
       decoration: BoxDecoration(
         color: cs.railBackground,
-        border: Border(
-          right: BorderSide(color: cs.outline, width: 1),
-        ),
+        border: Border(right: BorderSide(color: cs.outline, width: 1)),
       ),
       child: Column(
         children: [
-          // ── App header ─────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(
                 AppSpacing.sm, AppSpacing.md, AppSpacing.sm, AppSpacing.sm),
             child: Column(
               children: [
-                // App wordmark — amber glow ties rail to hardware housing colour.
                 Text(
                   'NEXUS',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: AppColors.hardwareAccent,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 3,
-                    shadows: [
-                      Shadow(
-                        color: AppColors.hardwareAccent.withValues(alpha: 0.7),
-                        blurRadius: 10,
-                      ),
-                    ],
+                    shadows: [Shadow(color: AppColors.hardwareAccent.withValues(alpha: 0.7), blurRadius: 10)],
                   ),
                 ),
-                const SizedBox(height: AppSpacing.xs),
-                // ── 640×48 live display strip ─────────────────────────
-                const _DisplayStrip(),
-                const SizedBox(height: AppSpacing.xs),
-                // Connection status
+                const SizedBox(height: AppSpacing.sm),
                 Semantics(
-                  label: isConnected
-                      ? (deviceModel != null
-                          ? 'Connected: $deviceModel'
-                          : 'Connected')
-                      : 'Disconnected',
+                  label: isConnected ? 'Connected' : 'Disconnected',
                   child: NexusStatusBadge.dot(
                     status: isConnected ? NexusStatus.ok : NexusStatus.warning,
                   ),
@@ -326,15 +407,13 @@ class _NexusRail extends StatelessWidget {
           const Divider(height: 1, thickness: 1),
           const SizedBox(height: AppSpacing.xs),
 
-          // ── Destinations ───────────────────────────────────────────────
           ...destinations.asMap().entries.map((e) {
             final i = e.key;
             final d = e.value;
             final isSelected = i == selectedIndex;
 
             return Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.xs, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: 2),
               child: Tooltip(
                 message: d.tooltip,
                 preferBelow: false,
@@ -346,15 +425,11 @@ class _NexusRail extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? AppColors.accent.withValues(alpha: 0.08)
-                          : Colors.transparent,
+                      color: isSelected ? AppColors.accent.withValues(alpha: 0.08) : Colors.transparent,
                       borderRadius: AppRadius.smBr,
                       border: Border(
                         left: BorderSide(
-                          color: isSelected
-                              ? AppColors.accent
-                              : Colors.transparent,
+                          color: isSelected ? AppColors.accent : Colors.transparent,
                           width: 2,
                         ),
                       ),
@@ -364,18 +439,14 @@ class _NexusRail extends StatelessWidget {
                         Icon(
                           isSelected ? d.selected : d.icon,
                           size: AppIconSize.md,
-                          color: isSelected
-                              ? AppColors.accent
-                              : Colors.white.withValues(alpha: 0.45),
+                          color: isSelected ? AppColors.accent : Colors.white.withValues(alpha: 0.45),
                         ),
                         const SizedBox(height: 3),
                         Text(
                           d.label,
                           style: theme.textTheme.labelSmall?.copyWith(
                             fontSize: 9,
-                            color: isSelected
-                                ? AppColors.accent
-                                : Colors.white.withValues(alpha: 0.45),
+                            color: isSelected ? AppColors.accent : Colors.white.withValues(alpha: 0.45),
                           ),
                         ),
                       ],
@@ -389,62 +460,18 @@ class _NexusRail extends StatelessWidget {
           const Spacer(),
           const Divider(height: 1, thickness: 1),
 
-          // ── Footer actions ─────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-            child: Column(
-              children: [
-                // Theme toggle
-                Semantics(
-                  label: themeMode == ThemeMode.dark
-                      ? 'Switch to light mode'
-                      : 'Switch to dark mode',
-                  button: true,
-                  child: Tooltip(
-                    message: themeMode == ThemeMode.dark
-                        ? 'Light mode'
-                        : 'Dark mode',
-                    child: IconButton(
-                      icon: Icon(
-                        themeMode == ThemeMode.dark
-                            ? Icons.light_mode_outlined
-                            : Icons.dark_mode_outlined,
-                        size: AppIconSize.md,
-                        color: Colors.white.withValues(alpha: 0.55),
-                      ),
-                      onPressed: onToggleTheme,
-                    ),
-                  ),
+            child: Tooltip(
+              message: themeMode == ThemeMode.dark ? 'Light mode' : 'Dark mode',
+              child: IconButton(
+                icon: Icon(
+                  themeMode == ThemeMode.dark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                  size: AppIconSize.md,
+                  color: Colors.white.withValues(alpha: 0.55),
                 ),
-                // Save
-                Semantics(
-                  label: isLoading ? 'Saving…' : 'Save settings',
-                  button: true,
-                  enabled: canSave,
-                  child: Tooltip(
-                    message: canSave ? 'Save settings' : 'Not connected',
-                    child: IconButton(
-                      icon: isLoading
-                          ? const SizedBox(
-                              width: AppIconSize.md,
-                              height: AppIconSize.md,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.accent,
-                              ),
-                            )
-                          : Icon(
-                              Icons.save_outlined,
-                              size: AppIconSize.md,
-                              color: canSave
-                                  ? AppColors.accent
-                                  : Colors.white.withValues(alpha: 0.25),
-                            ),
-                      onPressed: canSave ? onSave : null,
-                    ),
-                  ),
-                ),
-              ],
+                onPressed: onToggleTheme,
+              ),
             ),
           ),
         ],
@@ -471,66 +498,4 @@ class _DotGridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_DotGridPainter _) => false;
-}
-
-// ── Persistent 640×48 display strip ──────────────────────────────────────────
-// Sits in the rail header, visible on every section.
-
-class _DisplayStrip extends StatefulWidget {
-  const _DisplayStrip();
-
-  @override
-  State<_DisplayStrip> createState() => _DisplayStripState();
-}
-
-class _DisplayStripState extends State<_DisplayStrip> {
-  Uint8List? _lastFrame;
-  StreamSubscription? _sub;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _sub?.cancel();
-    _sub = context.read<WsService>().events.listen((event) {
-      if (event is WsFrameEvent && mounted) {
-        setState(() => _lastFrame = event.pngBytes);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      // Scale to fit the 72px rail. Aspect ratio is 640:48 ≈ 13.3:1
-      // At 64px wide that gives ~4.8px height — too thin. Use 56px wide, 8px tall.
-      width: 56,
-      height: 8,
-      decoration: BoxDecoration(
-        color: AppColors.darkBg,
-        borderRadius: AppRadius.xsBr,
-        border: Border.all(
-          color: _lastFrame != null
-              ? AppColors.hardwareAccent.withValues(alpha: 0.5)
-              : cs.outline,
-          width: 1,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: _lastFrame != null
-          ? Image.memory(
-              _lastFrame!,
-              fit: BoxFit.fill,
-              gaplessPlayback: true,
-            )
-          : const SizedBox.shrink(),
-    );
-  }
 }

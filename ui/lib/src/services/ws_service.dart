@@ -52,6 +52,12 @@ class WsConnectedEvent extends WsEvent {}
 
 class WsDisconnectedEvent extends WsEvent {}
 
+class WsDraftStateEvent extends WsEvent {
+  final bool active;
+  final String? reason; // "idle_timeout" if auto-discarded
+  WsDraftStateEvent({required this.active, this.reason});
+}
+
 /// Persistent WebSocket connection to ws://localhost:1985/api/ws.
 ///
 /// Reconnects with exponential backoff on disconnect. Exposes a single
@@ -131,6 +137,12 @@ class WsService extends ChangeNotifier {
             pages: (d['pages'] as List<dynamic>)
                 .map((p) => WsPageInfo.fromJson(p as Map<String, dynamic>))
                 .toList(),
+          ));
+        case 'draft_state':
+          final d = data as Map<String, dynamic>? ?? {};
+          _controller.add(WsDraftStateEvent(
+            active: d['active'] as bool? ?? false,
+            reason: d['reason'] as String?,
           ));
       }
     } catch (_) {

@@ -172,7 +172,8 @@ model, and make YAML round-trip complete.
 
 ---
 
-### Phase 1 — Plugin config schema contract
+### Phase 1 — Plugin config schema contract ✅ COMPLETE (2026-06-07)
+
 **Goal:** plugins declare their configurable fields; the host exposes a catalog;
 Flutter can render a form from the schema.
 
@@ -257,7 +258,8 @@ Flutter can render a form from the schema.
 
 ---
 
-### Phase 2 — Zone model v2
+### Phase 2 — Zone model v2 ✅ COMPLETE (2026-06-07)
+
 **Goal:** enforce the 6-zone cap, auto-redistribute widths, and expose clean
 zone CRUD that keeps the 640px invariant without manual arithmetic.
 
@@ -292,7 +294,8 @@ zone CRUD that keeps the 640px invariant without manual arithmetic.
 
 ---
 
-### Phase 3 — Live draft + confirm
+### Phase 3 — Live draft + confirm ✅ COMPLETE (2026-06-07)
+
 **Goal:** mutations update a draft (rendered live on device) without touching
 the committed store until the user explicitly confirms.
 
@@ -335,7 +338,8 @@ the committed store until the user explicitly confirms.
 
 ---
 
-### Phase 4 — Flutter UI consolidation
+### Phase 4 — Flutter UI consolidation ✅ COMPLETE (2026-06-07)
+
 **Goal:** replace the 6-tab settings page with a preview-first, canvas+inspector
 editor wired to the new API.
 
@@ -418,7 +422,8 @@ Rail: Editor | Global | Device
 
 ---
 
-### Phase 5 — Catalog polish, migration, docs
+### Phase 5 — Catalog polish, migration, docs ✅ COMPLETE (2026-06-07)
+
 **Goal:** complete schema coverage, finish terminology, update docs.
 
 **Changes:**

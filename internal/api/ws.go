@@ -75,7 +75,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = conn.CloseNow() }()
 
 	ch := s.hub.subscribe()
-	defer s.hub.unsubscribe(ch)
+	defer func() {
+		s.hub.unsubscribe(ch)
+		// If no clients remain and a draft is active, revert to committed state.
+		s.hub.mu.Lock()
+		noClients := len(s.hub.clients) == 0
+		s.hub.mu.Unlock()
+		if noClients && s.draft != nil && s.draft.HasDraft() {
+			committed := s.layoutReloader.GetConfig()
+			s.draft.Discard(committed)
+		}
+	}()
 
 	ctx := conn.CloseRead(r.Context())
 

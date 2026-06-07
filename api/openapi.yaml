@@ -323,6 +323,146 @@ paths:
                                         type: string
                                         description: Status of the operation
                                         example: success
+    /api/layout/draft:
+        get:
+            tags:
+                - Layout
+            summary: Get or open draft layout
+            description: Returns the current draft, opening a new one from the committed config if none is active.
+            operationId: getDraft
+            responses:
+                "200":
+                    description: Draft layout
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    active:
+                                        type: boolean
+                                    layout:
+                                        type: object
+                "503":
+                    description: Draft manager not available
+        put:
+            tags:
+                - Layout
+            summary: Replace draft layout
+            description: Replaces the entire draft with the provided config and previews it live on device.
+            operationId: putDraft
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            description: Full zone.Config
+            responses:
+                "200":
+                    description: Draft updated
+                "422":
+                    description: Invalid layout
+    /api/layout/draft/zones:
+        post:
+            tags:
+                - Layout
+            summary: Add zone to draft
+            description: Appends a zone to the specified page in the draft and redistributes widths.
+            operationId: addDraftZone
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                page_index:
+                                    type: integer
+                                plugin:
+                                    type: string
+                                refresh_ms:
+                                    type: integer
+            responses:
+                "200":
+                    description: Zone added
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    data:
+                                        properties:
+                                            id:
+                                                type: string
+                "422":
+                    description: Zone cap exceeded or width redistribution impossible
+    /api/layout/draft/zones/{id}:
+        delete:
+            tags:
+                - Layout
+            summary: Remove zone from draft
+            operationId: deleteDraftZone
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            responses:
+                "200":
+                    description: Zone removed
+                "404":
+                    description: Zone not found in draft
+        patch:
+            tags:
+                - Layout
+            summary: Update zone fields in draft
+            operationId: patchDraftZone
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                plugin:
+                                    type: string
+                                refresh_ms:
+                                    type: integer
+                                width:
+                                    type: integer
+                                align:
+                                    type: string
+                                plugin_config:
+                                    type: object
+            responses:
+                "200":
+                    description: Zone updated
+                "404":
+                    description: Zone not found in draft
+    /api/layout/commit:
+        post:
+            tags:
+                - Layout
+            summary: Commit draft to store
+            description: Persists the current draft to the database. The device display is already showing the draft; commit just makes it durable.
+            operationId: commitDraft
+            responses:
+                "200":
+                    description: Draft committed
+                "409":
+                    description: No active draft
+    /api/layout/discard:
+        post:
+            tags:
+                - Layout
+            summary: Discard draft
+            description: Reverts the live display and in-memory draft to the last committed state.
+            operationId: discardDraft
+            responses:
+                "200":
+                    description: Draft discarded
 servers:
     - url: http://localhost:1985
 tags:
@@ -332,5 +472,7 @@ tags:
       description: Configuration management
     - name: Zone
       description: Zone and plugin management
+    - name: Layout
+      description: Layout editor — draft + commit workflow
     - name: Animation
       description: Animation control

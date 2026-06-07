@@ -188,7 +188,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 	s.logger.Debug("starting sample loop", "zone_id", zoneID, "interval", interval)
 
 	// Sample immediately on start.
-	s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck // initial sample; can't restart here
+	s.sampleOnce(ctx, zoneID, mod, interval) //nolint:errcheck // initial sample; can't restart here
 
 	// Get the trigger channel for this zone.
 	s.mu.RLock()
@@ -209,12 +209,12 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 			return
 
 		case <-ticker.C:
-			dead := s.sampleOnce(ctx, zoneID, mod)
+			dead := s.sampleOnce(ctx, zoneID, mod, interval)
 
 			// Treat a hung (timeout) plugin the same as a crashed one: evict
 			// and restart. IsAlive also catches crashes the timeout path misses.
 			if isExec && (dead || !s.pluginHost.IsAlive(zoneID)) {
-				mod = s.handlePluginCrash(ctx, zoneID, &backoff)
+				mod = s.handlePluginCrash(ctx, zoneID, &backoff, interval)
 				if mod == nil {
 					return // context cancelled during restart
 				}
@@ -224,7 +224,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 
 		case <-triggerCh:
 			s.logger.Debug("immediate sample triggered", "zone_id", zoneID)
-			s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck // trigger path; crash caught next tick
+			s.sampleOnce(ctx, zoneID, mod, interval) //nolint:errcheck // trigger path; crash caught next tick
 		}
 	}
 }
@@ -232,7 +232,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 // handlePluginCrash evicts the dead subprocess and relaunches it after a
 // backoff delay. Returns the new plugin.Plugin on success, or nil if the
 // context was cancelled before the plugin could be restarted.
-func (s *Sampler) handlePluginCrash(ctx context.Context, zoneID string, backoff *time.Duration) plugin.Plugin {
+func (s *Sampler) handlePluginCrash(ctx context.Context, zoneID string, backoff *time.Duration, interval time.Duration) plugin.Plugin {
 	s.logger.Warn("plugin subprocess exited unexpectedly, scheduling restart",
 		"zone_id", zoneID,
 		"backoff", backoff.String())
@@ -278,15 +278,29 @@ func (s *Sampler) handlePluginCrash(ctx context.Context, zoneID string, backoff 
 
 	// Prime the new process with an immediate sample (crash on this prime
 	// is caught by IsAlive on the next regular tick).
-	s.sampleOnce(ctx, zoneID, mod) //nolint:errcheck
+	s.sampleOnce(ctx, zoneID, mod, interval) //nolint:errcheck
 	return mod
 }
 
 // sampleOnce samples a plugin once and updates the zone.
 // Returns true if the plugin should be treated as dead (timeout or hard error)
 // and the caller should evict and restart it.
-func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod plugin.Plugin) (dead bool) {
-	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+// sampleTimeout returns a per-zone deadline: half the refresh interval, clamped
+// to [5s, 30s]. Fast zones keep the original 5s ceiling; slow zones (e.g. the
+// 5-minute weather zone) get enough headroom for real network calls.
+func sampleTimeout(interval time.Duration) time.Duration {
+	t := interval / 2
+	if t < 5*time.Second {
+		t = 5 * time.Second
+	}
+	if t > 30*time.Second {
+		t = 30 * time.Second
+	}
+	return t
+}
+
+func (s *Sampler) sampleOnce(parentCtx context.Context, zoneID string, mod plugin.Plugin, interval time.Duration) (dead bool) {
+	ctx, cancel := context.WithTimeout(parentCtx, sampleTimeout(interval))
 	defer cancel()
 
 	type result struct {

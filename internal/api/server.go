@@ -76,6 +76,7 @@ type LayoutStore interface {
 	DeleteZone(id string) error
 	ReorderZones(pageID int64, order []string) error
 	HasLayout() (bool, error)
+	ImportLayout(pages []store.StoredPage, zonesByPage map[int64][]store.StoredZone) error
 }
 
 type LayoutReloader interface {
@@ -93,12 +94,13 @@ type Server struct {
 	device          DeviceController
 	zoneNotifier    ZoneConfigNotifier
 	zoneStatus      ZoneStatusProvider
-	swipeSim        SwipeSimulator       // for /api/debug/swipe
-	navigator       Navigator            // for /api/navigate/page
-	layoutStore     LayoutStore          // for /api/layout/*
-	layoutReloader  LayoutReloader       // for live reloads after layout edits
+	swipeSim        SwipeSimulator        // for /api/debug/swipe
+	navigator       Navigator             // for /api/navigate/page
+	layoutStore     LayoutStore           // for /api/layout/*
+	layoutReloader  LayoutReloader        // for live reloads after layout edits
 	pluginCatalog   PluginCatalogProvider // for /api/plugins
-	windowState     string               // "shown" or "hidden"
+	draft           *DraftManager         // live draft session
+	windowState     string                // "shown" or "hidden"
 	windowStateCh   chan string
 	hub             *hub
 	lastConnectErr  error
@@ -206,6 +208,7 @@ func (s *Server) SetLayoutStore(ls LayoutStore) {
 // SetLayoutReloader wires in the zone manager for live layout reloads.
 func (s *Server) SetLayoutReloader(lr LayoutReloader) {
 	s.layoutReloader = lr
+	s.draft = NewDraftManager(lr, s.hub.Broadcast)
 }
 
 // SetPluginCatalog wires in the sampler for GET /api/plugins.
@@ -267,6 +270,14 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/layout/zones", s.handleCreateZone)
 	mux.HandleFunc("/api/layout/zones/reorder", s.handleReorderZones)
 	mux.HandleFunc("/api/layout/zones/", s.handleLayoutZone)
+
+	// Draft endpoints — live preview before committing to the store
+	mux.HandleFunc("GET /api/layout/draft", s.handleGetDraft)
+	mux.HandleFunc("PUT /api/layout/draft", s.handlePutDraft)
+	mux.HandleFunc("POST /api/layout/draft/zones", s.handleDraftZones)
+	mux.HandleFunc("/api/layout/draft/zones/", s.handleDraftZone)
+	mux.HandleFunc("POST /api/layout/commit", s.handleCommitDraft)
+	mux.HandleFunc("POST /api/layout/discard", s.handleDiscardDraft)
 
 	// Debug endpoints — swipe simulation for tuning transition parameters
 	mux.HandleFunc("/api/debug/swipe", s.handleDebugSwipe)
