@@ -163,7 +163,7 @@ jobs:
 
       - name: Build Flutter UI
         run: |
-          VERSION=$(git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
+          VERSION=$(git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
           cd ui && flutter build linux --release --dart-define=APP_VERSION="$VERSION"
 
       - name: Upload Flutter bundle
@@ -289,7 +289,7 @@ jobs:
       - name: Build Flutter UI (fallback)
         if: needs.flutter.result == 'skipped'
         run: |
-          VERSION=$(git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
+          VERSION=$(git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
           cd ui && dart run build_runner build --delete-conflicting-outputs
           flutter build linux --release --dart-define=APP_VERSION="$VERSION"
 
@@ -349,10 +349,13 @@ jobs:
         include:
           - label: ubuntu-24.04
             flag: --test-deb
+            image: ubuntu:24.04
           - label: fedora-40
             flag: --test-rpm
+            image: fedora:40
           - label: arch
             flag: --test-pacman
+            image: archlinux:latest
     steps:
       - uses: actions/checkout@v4
 
@@ -361,6 +364,14 @@ jobs:
         with:
           name: packages
           path: dist/
+
+      - name: Pull Docker image (with retry)
+        run: |
+          for i in 1 2 3; do
+            docker pull ${{ matrix.image }} && break
+            echo "Pull attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
 
       - name: Runtime test (${{ matrix.label }})
         run: ./build-package.sh ${{ matrix.flag }}

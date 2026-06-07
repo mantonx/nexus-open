@@ -25,7 +25,11 @@ cd "$REPO_DIR"
 # ── config ────────────────────────────────────────────────────────────────────
 
 PKG_NAME="nexus-open"
-PKG_VERSION="$(git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")"
+# In CI, omit --dirty so downloaded artifacts don't poison the version string.
+_DIRTY_FLAG="--dirty"
+[[ "${CI:-}" == "true" ]] && _DIRTY_FLAG=""
+PKG_VERSION="$(git describe --tags --match 'v*' --always ${_DIRTY_FLAG} 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")"
+unset _DIRTY_FLAG
 PKG_ARCH="amd64"
 PKG_DESCRIPTION="Linux controller for Corsair iCUE Nexus display"
 PKG_URL="https://github.com/mantonx/nexus-next"
