@@ -157,6 +157,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Download packages
         uses: actions/download-artifact@v8
@@ -164,16 +166,14 @@ jobs:
           name: release-packages
           path: dist/
 
-      - name: Extract CHANGELOG notes
+      - name: Install git-cliff
+        uses: kenji-miyake/setup-git-cliff@v2
+
+      - name: Generate release notes
         run: |
           VERSION="${{ needs.build.outputs.version }}"
-          if [ -f CHANGELOG.md ]; then
-            awk "/^## \[?${VERSION}\]?/{found=1; next} found && /^## /{exit} found{print}" \
-              CHANGELOG.md > /tmp/release-notes.md
-          fi
-          if [ ! -s /tmp/release-notes.md ]; then
-            echo "Release v${VERSION}" > /tmp/release-notes.md
-          fi
+          git-cliff --tag "v${VERSION}" --unreleased --strip all \
+            > /tmp/release-notes.md
           cat /tmp/release-notes.md
 
       - name: Create GitHub Release

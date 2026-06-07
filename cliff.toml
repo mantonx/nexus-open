@@ -1,0 +1,50 @@
+[changelog]
+header = """
+# Changelog
+
+All notable changes to Nexus Open are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).\n
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | trim_start_matches(pat="feat: ") | trim_start_matches(pat="feat(") | trim_start_matches(pat="fix: ") | trim_start_matches(pat="perf: ") | trim_start_matches(pat="refactor: ") | upper_first | trim }}\
+{% if commit.breaking %} **[BREAKING]**{% endif %}
+{%- endfor %}
+{% endfor %}\n
+"""
+footer = """
+{% for release in releases %}\
+{% if release.version %}\
+[{{ release.version | trim_start_matches(pat="v") }}]: \
+https://github.com/mantonx/nexus-open/releases/tag/{{ release.version }}
+{% endif %}\
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = false
+filter_unconventional = false
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^test", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^dev", skip = true },
+  { message = "^docs", skip = true },
+  { message = "^release", skip = true },
+  { message = "^chore", skip = true },
+]
+filter_commits = true
+tag_pattern = "v[0-9]*"
+sort_commits = "newest"

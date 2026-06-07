@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev deb appimage rpm generate-api models all
+.PHONY: help build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev deb appimage rpm generate-api models all changelog
 
 # Configuration
 APP_NAME := nexus-open
@@ -251,6 +251,23 @@ vet:
 	@echo "Running go vet..."
 	@go vet ./...
 	@echo "✓ No issues found"
+
+# Generate or preview CHANGELOG from git history
+# Usage:
+#   make changelog          — update CHANGELOG.md in place
+#   make changelog TAG=v0.1.0  — preview notes for a specific (future) tag
+changelog:
+	@if ! command -v git-cliff > /dev/null; then \
+		echo "git-cliff not found — install with: cargo install git-cliff"; exit 1; \
+	fi
+	@if [ -n "$(TAG)" ]; then \
+		echo "Previewing release notes for $(TAG)..."; \
+		git-cliff --tag "$(TAG)" --unreleased --strip all; \
+	else \
+		echo "Updating CHANGELOG.md..."; \
+		git-cliff -o CHANGELOG.md; \
+		echo "✓ CHANGELOG.md updated"; \
+	fi
 
 # Tidy dependencies
 tidy:
