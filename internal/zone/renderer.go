@@ -23,20 +23,44 @@ type Renderer struct {
 	height  int
 	align   Alignment
 
-	primaryFace   font.Face // 24pt, HintingFull
-	multiLineFace font.Face // 12pt, HintingFull
-	secondaryFace font.Face // 9pt, HintingFull
+	primaryFace   font.Face // scaled primary pt, HintingFull
+	multiLineFace font.Face // scaled multi-line pt, HintingFull
+	secondaryFace font.Face // scaled secondary pt, HintingFull
 	iconFace      font.Face // FontAwesome fallback (may be nil)
 
 	primarySize   float64
 	secondarySize float64
+
+	// Layout baselines pre-scaled to zone width (set in NewRenderer / reloadFaces).
+	padL       float64
+	padR       float64
+	labelY     float64 // secondary label baseline
+	valueY     float64 // primary value baseline (split layout)
+	valueYSolo float64 // primary value baseline (single-line, no label)
+	iconSize   float64 // icon font size
+	multiSize  float64 // multi-line font size
 }
 
 // UpdateTheme replaces the renderer's theme for all subsequent Render calls.
 func (r *Renderer) UpdateTheme(theme Theme) {
 	r.theme = theme
+	scale := math.Min(1.0, float64(r.width)/refZoneWidth)
+	basePrimary := float64(theme.FontSizePrimary)
+	if basePrimary == 0 {
+		basePrimary = 24
+	}
+	baseSecondary := float64(theme.FontSizeSecondary)
+	if baseSecondary == 0 {
+		baseSecondary = 9
+	}
+	r.primarySize = math.Max(10, math.Round(basePrimary*scale))
+	r.secondarySize = math.Max(7, math.Round(baseSecondary*scale))
 	r.reloadFaces()
 }
+
+// refZoneWidth is the zone width at which font sizes and baselines were originally
+// tuned (4 zones across a 640px display). Narrower zones scale down proportionally.
+const refZoneWidth = 160.0
 
 // NewRenderer creates a new zone renderer.
 func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alignment) *Renderer {
@@ -47,14 +71,31 @@ func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alig
 		height: height,
 		align:  align,
 	}
-	r.primarySize = float64(theme.FontSizePrimary)
-	if r.primarySize == 0 {
-		r.primarySize = 24
+
+	// Scale font sizes down for narrow zones; never scale up beyond the theme value.
+	basePrimary := float64(theme.FontSizePrimary)
+	if basePrimary == 0 {
+		basePrimary = 24
 	}
-	r.secondarySize = float64(theme.FontSizeSecondary)
-	if r.secondarySize == 0 {
-		r.secondarySize = 9
+	baseSecondary := float64(theme.FontSizeSecondary)
+	if baseSecondary == 0 {
+		baseSecondary = 9
 	}
+
+	scale := math.Min(1.0, float64(width)/refZoneWidth)
+	r.primarySize = math.Max(10, math.Round(basePrimary*scale))
+	r.secondarySize = math.Max(7, math.Round(baseSecondary*scale))
+	r.multiSize = math.Max(8, math.Round(12*scale))
+	r.iconSize = math.Max(10, math.Round(18*scale))
+
+	// Baselines tuned to the 48px zone height, scaled with zone width.
+	// At refZoneWidth: padL=8, padR=6, labelY=12, valueY=36, valueYSolo=27.
+	r.padL = math.Max(4, math.Round(8*scale))
+	r.padR = math.Max(3, math.Round(6*scale))
+	r.labelY = math.Round(float64(height) * 0.25)
+	r.valueY = math.Round(float64(height) * 0.75)
+	r.valueYSolo = math.Round(float64(height) * 0.5625) // ~27/48
+
 	r.reloadFaces()
 	return r
 }
@@ -72,10 +113,22 @@ func (r *Renderer) reloadFaces() {
 	}
 
 	r.primaryFace = load(r.primarySize)
-	r.multiLineFace = load(12)
-	r.secondaryFace = load(11) // 11pt for labels — better hinting than 9pt at this display height
 
-	if face, err := fm.GetFace("FontAwesome-Solid", 18); err == nil {
+	multiSize := r.multiSize
+	if multiSize == 0 {
+		multiSize = 12
+	}
+	r.multiLineFace = load(multiSize)
+
+	// Secondary label: use at least 13pt for legibility; scale up from secondarySize.
+	secLabelSize := math.Max(13, r.secondarySize+2)
+	r.secondaryFace = load(secLabelSize)
+
+	iconSize := r.iconSize
+	if iconSize == 0 {
+		iconSize = 18
+	}
+	if face, err := fm.GetFace("FontAwesome-Solid", iconSize); err == nil {
 		r.iconFace = face
 	}
 }
@@ -353,8 +406,8 @@ func blendAlpha(dst, src *image.RGBA, opacity float64) {
 func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 	secondary, icon string, textColor color.RGBA, hasGraph bool) {
 
-	const padL = 8.0
-	const padR = 6.0
+	padL := r.padL
+	padR := r.padR
 
 	tr := float64(textColor.R) / 255
 	tg := float64(textColor.G) / 255
@@ -398,15 +451,15 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 		}
 		label := r.truncateSpaced(dc, secondary, W-padL-padR, 1.0)
 		dc.SetRGB(lr, lg, lb)
-		r.drawSpaced(dc, label, padL, 12, 1.0)
+		r.drawSpaced(dc, label, padL, r.labelY, 1.0)
 		if r.primaryFace != nil {
 			dc.SetFontFace(r.primaryFace)
 		}
 	}
 
-	valueBaseline := 36.0
+	valueBaseline := r.valueY
 	if secondary == "" {
-		valueBaseline = 27.0
+		valueBaseline = r.valueYSolo
 	}
 
 	x := padL
@@ -418,7 +471,8 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 			dc.SetFontFace(r.iconFace)
 			dc.SetRGB(tr, tg, tb)
 			dc.DrawString(glyph, x, valueBaseline)
-			x += 26
+			gw, _ := dc.MeasureString(glyph)
+			x += gw + 2
 			if r.primaryFace != nil {
 				dc.SetFontFace(r.primaryFace)
 			}
@@ -501,14 +555,10 @@ func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti boo
 	tr, tg, tb, lr, lg, lb float64,
 	W, H float64) {
 
-	const padL = 8.0
-	const padR = 6.0
-
-	// Layout constants — all tuned to the 48px zone height.
-	// graphTop=32 → graph occupies bottom 16px, leaving 32px for label+value.
-	// Label near top at y=11, value at y=24 (centred in the 32px content area).
-	const labelY = 11.0
-	const valueY = 24.0
+	padL := r.padL
+	padR := r.padR
+	labelY := r.labelY
+	valueY := r.valueY
 
 	// All split-layout zones: label top-left, icon+value centred below.
 	if r.secondaryFace != nil {
@@ -519,14 +569,18 @@ func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti boo
 	r.drawSpaced(dc, label, padL, labelY, 1.0)
 
 	if isMulti {
-		// Network: two speed lines right-anchored below label.
+		// Network: two speed lines right-anchored, spaced within the lower half.
 		if r.multiLineFace != nil {
 			dc.SetFontFace(r.multiLineFace)
 		}
 		rightX := W - padR - 8
-		baselines := []float64{20.0, 30.0}
+		// Place two lines evenly in the lower 60% of the zone height.
+		spacing := (H - labelY) / 3
+		baselines := []float64{labelY + spacing, labelY + spacing*2}
 		for i, line := range primary {
-			if i >= 2 { break }
+			if i >= 2 {
+				break
+			}
 			text := r.truncate(line, W-padL-padR, dc)
 			dc.SetRGB(tr, tg, tb)
 			dc.DrawStringAnchored(text, rightX, baselines[i], 1.0, 0)
