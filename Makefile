@@ -54,8 +54,8 @@ help:
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean         - Remove build artifacts"
-	@echo "  make install       - Install to ~/.local/bin and restart service"
-	@echo "  make uninstall     - Stop service and remove from ~/.local/bin"
+	@echo "  make install       - Build and install backend + UI, restart service"
+	@echo "  make uninstall     - Stop service and remove installed binary"
 	@echo ""
 	@echo "Version: $(VERSION) (commit: $(COMMIT))"
 
@@ -199,21 +199,27 @@ all: deb appimage rpm
 	@ls -lh $(DIST_DIR)/
 
 # Install to user service location and restart the systemd service.
-# The service runs from ~/.local/bin/nexus-open -- not /usr/local/bin.
-INSTALL_BIN := $(HOME)/.local/bin/$(APP_NAME)
-SYSTEMD_UNIT := app-nexus\x2dopen\x2dautostart@autostart.service
+# The service runs from ~/.local/bin/nexus-open and the UI from
+# ~/.local/share/nexus-open/ui.real -- both must be updated together.
+INSTALL_BIN    := $(HOME)/.local/bin/$(APP_NAME)
+INSTALL_DATA   := $(HOME)/.local/share/$(APP_NAME)
+SYSTEMD_UNIT   := app-nexus\x2dopen\x2dautostart@autostart.service
 
-install: build-release
+install: build-release build-ui
 	@echo "Stopping service..."
 	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
-	@echo "Installing $(APP_NAME) to $(INSTALL_BIN)..."
+	@echo "Installing backend to $(INSTALL_BIN)..."
 	@cp $(BIN_DIR)/$(APP_NAME) $(INSTALL_BIN)
 	@chmod 755 $(INSTALL_BIN)
+	@echo "Installing Flutter UI to $(INSTALL_DATA)..."
+	@cp $(UI_DIR)/build/linux/x64/release/bundle/ui $(INSTALL_DATA)/ui.real
+	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/lib/. $(INSTALL_DATA)/lib/
+	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/data/. $(INSTALL_DATA)/data/
 	@echo "Restarting service..."
 	@systemctl --user start "$(SYSTEMD_UNIT)"
 	@echo "✓ Installed and restarted"
 
-# Uninstall from user bin
+# Uninstall from user locations
 uninstall:
 	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
 	@rm -f $(INSTALL_BIN)
