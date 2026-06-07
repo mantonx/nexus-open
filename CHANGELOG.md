@@ -76,6 +76,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Replace setup-git-cliff action with direct cargo install + cache
 - Skip fpm check in --test-only mode (test jobs don't need fpm)
 - Add always() to package-test if condition to prevent skip propagation
 - Run package-test whenever package-build succeeds, regardless of skipped deps
