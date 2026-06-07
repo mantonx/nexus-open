@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
 
 jobs:
   # ── Build Go binary + Flutter UI, produce all three package formats ──────────
@@ -41,8 +46,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: /var/cache/apt/archives
-          key: apt-ubuntu-24.04-release-build-v1
-          restore-keys: apt-ubuntu-24.04-release-build-
+          key: apt-ubuntu-24.04-flutter-build-v1
+          restore-keys: apt-ubuntu-24.04-flutter-build-
 
       - name: Install build dependencies
         run: |
@@ -99,13 +104,14 @@ jobs:
         with:
           name: release-packages
           path: dist/
-          retention-days: 1
+          retention-days: 7
 
   # ── Runtime tests — gate the release on all three distros passing ────────────
   test:
     name: Runtime Test (${{ matrix.label }})
     runs-on: ubuntu-24.04
     needs: build
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -118,7 +124,7 @@ jobs:
             image: fedora:40
           - label: arch
             flag: --test-pacman
-            image: archlinux:latest
+            image: archlinux@sha256:a9a1e6db522cf5f8018c920d035e2bfbf8e39c485ee737ce0388990898f2f042
     steps:
       - uses: actions/checkout@v6
 
@@ -151,7 +157,7 @@ jobs:
   # ── Publish — only runs when all runtime tests pass ──────────────────────────
   publish:
     name: Publish Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build, test]
     permissions:
       contents: write
@@ -166,17 +172,11 @@ jobs:
           name: release-packages
           path: dist/
 
-      - name: Cache git-cliff binary
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin/git-cliff
-          key: git-cliff-2.13.1-${{ runner.os }}
-
       - name: Install git-cliff
         run: |
-          if [ ! -x "$HOME/.cargo/bin/git-cliff" ]; then
-            cargo install git-cliff --version 2.13.1 --locked
-          fi
+          curl -sSL https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz --strip-components=1 -C /usr/local/bin git-cliff-2.13.1-x86_64-unknown-linux-musl/git-cliff
+          git-cliff --version
 
       - name: Generate release notes
         run: |

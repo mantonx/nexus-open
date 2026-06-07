@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Detect which parts of the repo changed so expensive jobs can be skipped.
   changes:
@@ -15,6 +19,7 @@ jobs:
       go: ${{ steps.filter.outputs.go }}
       flutter: ${{ steps.filter.outputs.flutter }}
       packaging: ${{ steps.filter.outputs.packaging }}
+      openapi: ${{ steps.filter.outputs.openapi }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
@@ -36,6 +41,11 @@ jobs:
               - 'packaging/**'
               - 'configs/**'
               - '.github/workflows/ci.yml'
+            openapi:
+              - 'cmd/nexus-open/**'
+              - 'internal/api/**'
+              - 'internal/settings/**'
+              - 'api/openapi.yaml'
 
   lint:
     name: Lint
@@ -177,7 +187,7 @@ jobs:
     name: OpenAPI Drift
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.openapi == 'true'
     steps:
       - uses: actions/checkout@v6
 
@@ -343,6 +353,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: package-build
     if: always() && needs.package-build.result == 'success'
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -355,7 +366,7 @@ jobs:
             image: fedora:40
           - label: arch
             flag: --test-pacman
-            image: archlinux:latest
+            image: archlinux@sha256:a9a1e6db522cf5f8018c920d035e2bfbf8e39c485ee737ce0388990898f2f042
     steps:
       - uses: actions/checkout@v6
 
