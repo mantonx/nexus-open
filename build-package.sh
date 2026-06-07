@@ -233,13 +233,21 @@ build_pacman() {
 
 # run_runtime_test IMAGE INSTALL_BLOCK FLUTTER_DEPS_BLOCK
 # Shared test body: install package, verify daemon API, verify Flutter Xvfb.
-# INSTALL_BLOCK and FLUTTER_DEPS_BLOCK are shell snippets injected verbatim.
+# INSTALL_BLOCK       — shell snippet to install the package
+# FLUTTER_DEPS_BLOCK  — shell snippet to install Xvfb + Mesa deps
+# UNINSTALL_BLOCK     — shell snippet to remove the package
+# SCREENSHOT_PKG      — package name that provides scrot (for screenshot)
+# LABEL               — distro label used in screenshot filename
 run_runtime_test() {
     local image="$1" install_block="$2" flutter_deps_block="$3"
+    local uninstall_block="$4" screenshot_pkg="$5" label="$6"
     local ui_path="/usr/lib/nexus-open/ui"
+    local shots_dir="$REPO_DIR/test-screenshots"
+    mkdir -p "$shots_dir"
 
     docker run --rm \
         -v "$OUT_DIR:/pkgs:ro" \
+        -v "$shots_dir:/screenshots" \
         "$image" bash -c "
             set -e
 
@@ -250,6 +258,14 @@ run_runtime_test() {
             ldd /usr/bin/nexus-open | grep 'not found' && { echo 'MISSING LIBS'; exit 1; } || echo 'daemon libs OK'
             /usr/bin/nexus-open --version
 
+            # ── packaging files ──────────────────────────────────────────────
+            test -f /usr/lib/udev/rules.d/99-corsair-nexus.rules \
+                && echo 'UDEV_RULES_OK' || { echo 'UDEV_RULES_MISSING'; exit 1; }
+            test -f /usr/share/applications/nexus-open.desktop \
+                && echo 'DESKTOP_FILE_OK' || { echo 'DESKTOP_FILE_MISSING'; exit 1; }
+            test -f /usr/lib/systemd/user/nexus-open.service \
+                && echo 'SYSTEMD_SERVICE_OK' || { echo 'SYSTEMD_SERVICE_MISSING'; exit 1; }
+
             # ── daemon API (mock device, headless) ───────────────────────────
             NEXUS_MOCK_DEVICE=1 /usr/bin/nexus-open &
             DAEMON_PID=\$!
@@ -258,23 +274,43 @@ run_runtime_test() {
                 sleep 1
             done
             curl -sf http://localhost:1985/api/health | grep -q '\"status\":\"ok\"' \
-                && echo 'DAEMON_API_OK' || { echo 'DAEMON_API_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+                && echo 'DAEMON_API_health_OK' || { echo 'DAEMON_API_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+            curl -sf http://localhost:1985/api/config | grep -q 'background_color' \
+                && echo 'DAEMON_API_config_OK' || { echo 'DAEMON_API_config_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+            curl -sf http://localhost:1985/api/device/info | grep -q 'firmware' \
+                && echo 'DAEMON_API_device_OK' || { echo 'DAEMON_API_device_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
             kill \$DAEMON_PID 2>/dev/null; wait \$DAEMON_PID 2>/dev/null || true
 
-            # ── Flutter UI (Xvfb + Mesa llvmpipe) ───────────────────────────
+            # ── Flutter UI (Xvfb + Mesa llvmpipe + screenshot) ───────────────
             ${flutter_deps_block} 2>&1 | tail -2
-            Xvfb :99 -screen 0 1024x768x24 &
+            Xvfb :99 -screen 0 1280x800x24 &
             sleep 1
             DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
             WAYLAND_DISPLAY= NEXUS_START_MINIMIZED=0 \
                 ${ui_path} > /tmp/flutter.log 2>&1 &
             UI_PID=\$!
-            sleep 6
+            sleep 8
             if kill -0 \$UI_PID 2>/dev/null; then
-                echo 'FLUTTER_ALIVE'; kill \$UI_PID
+                echo 'FLUTTER_ALIVE'
+                # screenshot — install scrot if available, fall back to import (ImageMagick)
+                ${screenshot_pkg} 2>&1 | tail -1 || true
+                if command -v scrot &>/dev/null; then
+                    DISPLAY=:99 scrot /screenshots/${label}.png 2>/dev/null && echo 'SCREENSHOT_OK' || echo 'SCREENSHOT_FAILED'
+                elif command -v import &>/dev/null; then
+                    DISPLAY=:99 import -window root /screenshots/${label}.png 2>/dev/null && echo 'SCREENSHOT_OK' || echo 'SCREENSHOT_FAILED'
+                else
+                    echo 'SCREENSHOT_SKIPPED (no scrot or import)'
+                fi
+                kill \$UI_PID
             else
                 echo 'FLUTTER_CRASHED'; tail -20 /tmp/flutter.log; exit 1
             fi
+
+            # ── clean uninstall ──────────────────────────────────────────────
+            ${uninstall_block}
+            test -f /usr/bin/nexus-open \
+                && { echo 'UNINSTALL_FAILED: daemon binary still present'; exit 1; } \
+                || echo 'UNINSTALL_OK'
         " 2>&1 | grep -Ev '^(>|Warning|.*keysym|.*xkbcomp|Errors from)'
 }
 
@@ -284,12 +320,16 @@ test_deb() {
 
     # Ubuntu 22.04 and Debian 12 require the Flatpak — glib 2.74/2.72 < 2.75.
     for distro in ubuntu:24.04; do
+        local label; label="$(echo "$distro" | tr ':/' '-')"
         info "Testing .deb in ${distro}..."
         run_runtime_test "$distro" \
             "apt-get update -qq
              apt-get install -y --no-install-recommends curl
              dpkg -i /pkgs/${deb_base} || apt-get install -y -f --no-install-recommends" \
-            "apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1 libegl-mesa0 libegl1 libgles2" \
+            "apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri libgl1 libegl-mesa0 libegl1 libgles2 scrot" \
+            "apt-get purge -y nexus-open && apt-get autoremove -y" \
+            "apt-get install -y --no-install-recommends scrot 2>/dev/null || true" \
+            "$label" \
             && ok "${distro} .deb test passed" || warn "${distro} .deb test FAILED"
     done
 }
@@ -301,7 +341,10 @@ test_rpm() {
     info "Testing .rpm in Fedora 40..."
     run_runtime_test "fedora:40" \
         "dnf install -y /pkgs/${rpm_base}" \
-        "dnf install -y xorg-x11-server-Xvfb mesa-dri-drivers mesa-libGL mesa-libEGL mesa-libGLES" \
+        "dnf install -y xorg-x11-server-Xvfb mesa-dri-drivers mesa-libGL mesa-libEGL mesa-libGLES scrot" \
+        "dnf remove -y nexus-open" \
+        "dnf install -y scrot 2>/dev/null || true" \
+        "fedora-40" \
         && ok "Fedora 40 .rpm test passed" || warn "Fedora 40 .rpm test FAILED"
 }
 
@@ -312,7 +355,10 @@ test_pacman() {
     info "Testing .pacman in Arch Linux..."
     run_runtime_test "archlinux:latest" \
         "pacman -Sy --noconfirm && pacman -U --noconfirm /pkgs/${pkg_base}" \
-        "pacman -S --noconfirm xorg-server-xvfb mesa" \
+        "pacman -S --noconfirm xorg-server-xvfb mesa scrot" \
+        "pacman -R --noconfirm nexus-open" \
+        "pacman -S --noconfirm scrot 2>/dev/null || true" \
+        "arch" \
         && ok "Arch .pacman test passed" || warn "Arch .pacman test FAILED"
 }
 

@@ -283,3 +283,12 @@ jobs:
 
       - name: Runtime test (${{ matrix.label }})
         run: ./build-package.sh ${{ matrix.flag }}
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-${{ matrix.label }}
+          path: test-screenshots/
+          if-no-files-found: warn
+          retention-days: 7
