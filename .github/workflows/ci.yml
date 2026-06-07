@@ -16,8 +16,8 @@ jobs:
       flutter: ${{ steps.filter.outputs.flutter }}
       packaging: ${{ steps.filter.outputs.packaging }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -43,17 +43,17 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache apt packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-go-deps-v1
           restore-keys: apt-${{ runner.os }}-go-deps-
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -62,7 +62,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: v2.12.2
 
@@ -72,17 +72,17 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache apt packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-go-deps-v1
           restore-keys: apt-${{ runner.os }}-go-deps-
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -108,16 +108,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.flutter == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
 
       - name: Cache pub dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pub-cache
           key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
@@ -128,7 +128,7 @@ jobs:
         run: flutter pub get
 
       - name: Cache build_runner output
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ui/.dart_tool/build
           key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
@@ -147,7 +147,7 @@ jobs:
         run: flutter test --no-pub
 
       - name: Cache apt packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/apt/archives
           key: apt-ubuntu-24.04-flutter-build-v1
@@ -167,7 +167,7 @@ jobs:
           cd ui && flutter build linux --release --dart-define=APP_VERSION="$VERSION"
 
       - name: Upload Flutter bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flutter-bundle
           path: ui/build/linux/x64/release/bundle/
@@ -179,17 +179,17 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache apt packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-go-deps-v1
           restore-keys: apt-${{ runner.os }}-go-deps-
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
@@ -198,7 +198,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
 
       - name: Cache go-openapi binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/go/bin/go-openapi
           key: go-openapi-v0.32.3-${{ runner.os }}
@@ -242,28 +242,28 @@ jobs:
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download Flutter bundle
         # Only download when the flutter job actually ran and produced an artifact.
         # When only Go files changed, flutter job is skipped — build-package.sh
         # uses the pre-built bundle from a previous run via the Flutter build cache below.
         if: needs.flutter.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: flutter-bundle
           path: ui/build/linux/x64/release/bundle/
 
       - name: Set up Flutter (fallback when flutter job was skipped)
         if: needs.flutter.result == 'skipped'
-        uses: subosito/flutter-action@v2
+        uses: subosito/flutter-action@v2.23.0
         with:
           channel: stable
           cache: true
 
       - name: Cache pub dependencies (fallback)
         if: needs.flutter.result == 'skipped'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pub-cache
           key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
@@ -271,7 +271,7 @@ jobs:
 
       - name: Cache build_runner output (fallback)
         if: needs.flutter.result == 'skipped'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ui/.dart_tool/build
           key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
@@ -294,7 +294,7 @@ jobs:
           flutter build linux --release --dart-define=APP_VERSION="$VERSION"
 
       - name: Cache apt packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /var/cache/apt/archives
           key: apt-ubuntu-24.04-pkg-build-v1
@@ -308,13 +308,13 @@ jobs:
             rpm libarchive-tools
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25.x"
           cache: true
 
       - name: Cache fpm gem
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/gem
           key: gem-fpm-ubuntu-24.04-2.2.1
@@ -330,7 +330,7 @@ jobs:
         run: ./build-package.sh --deb --rpm --pacman
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages
           path: dist/
@@ -357,10 +357,10 @@ jobs:
             flag: --test-pacman
             image: archlinux:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: packages
           path: dist/
@@ -378,7 +378,7 @@ jobs:
 
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: screenshot-${{ matrix.label }}
           path: test-screenshots/
