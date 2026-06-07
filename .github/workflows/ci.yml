@@ -104,7 +104,7 @@ jobs:
 
   flutter:
     name: Flutter
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: changes
     if: needs.changes.outputs.flutter == 'true'
     steps:
@@ -120,8 +120,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ hashFiles('ui/pubspec.lock') }}
-          restore-keys: pub-${{ runner.os }}-
+          key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
+          restore-keys: pub-ubuntu-24.04-
 
       - name: Install Flutter dependencies
         working-directory: ui
@@ -131,8 +131,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ui/.dart_tool/build
-          key: build-runner-${{ runner.os }}-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
-          restore-keys: build-runner-${{ runner.os }}-
+          key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
+          restore-keys: build-runner-ubuntu-24.04-
 
       - name: Generate code (freezed / json_serializable)
         working-directory: ui
@@ -145,6 +145,33 @@ jobs:
       - name: Flutter test
         working-directory: ui
         run: flutter test --no-pub
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-ubuntu-24.04-flutter-build-v1
+          restore-keys: apt-ubuntu-24.04-flutter-build-
+
+      - name: Install Flutter Linux build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
+
+      - name: Build Flutter UI
+        run: |
+          VERSION=$(git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
+          cd ui && flutter build linux --release --dart-define=APP_VERSION="$VERSION"
+
+      - name: Upload Flutter bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-bundle
+          path: ui/build/linux/x64/release/bundle/
+          retention-days: 1
 
   openapi-drift:
     name: OpenAPI Drift
@@ -170,8 +197,17 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
 
+      - name: Cache go-openapi binary
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/go-openapi
+          key: go-openapi-v0.32.3-${{ runner.os }}
+
       - name: Install go-openapi
-        run: go install github.com/go-openapi/runtime/cmd/go-openapi@latest 2>/dev/null || true
+        run: |
+          if [ ! -x "$HOME/go/bin/go-openapi" ]; then
+            go install github.com/go-openapi/runtime/cmd/go-openapi@v0.32.3 2>/dev/null || true
+          fi
 
       - name: Regenerate spec
         run: |
@@ -208,50 +244,68 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Flutter
+      - name: Download Flutter bundle
+        # Only download when the flutter job actually ran and produced an artifact.
+        # When only Go files changed, flutter job is skipped — build-package.sh
+        # uses the pre-built bundle from a previous run via the Flutter build cache below.
+        if: needs.flutter.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: flutter-bundle
+          path: ui/build/linux/x64/release/bundle/
+
+      - name: Set up Flutter (fallback when flutter job was skipped)
+        if: needs.flutter.result == 'skipped'
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
-      - name: Cache pub dependencies
+      - name: Cache pub dependencies (fallback)
+        if: needs.flutter.result == 'skipped'
         uses: actions/cache@v4
         with:
           path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ hashFiles('ui/pubspec.lock') }}
-          restore-keys: pub-${{ runner.os }}-
+          key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
+          restore-keys: pub-ubuntu-24.04-
 
-      - name: Cache apt packages
+      - name: Cache build_runner output (fallback)
+        if: needs.flutter.result == 'skipped'
         uses: actions/cache@v4
         with:
-          path: /var/cache/apt/archives
-          key: apt-${{ runner.os }}-flutter-build-v1
-          restore-keys: apt-${{ runner.os }}-flutter-build-
+          path: ui/.dart_tool/build
+          key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
+          restore-keys: build-runner-ubuntu-24.04-
 
-      - name: Install Flutter Linux build dependencies
+      - name: Install Flutter Linux build dependencies (fallback)
+        if: needs.flutter.result == 'skipped'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++-12-dev \
-            libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev \
-            rpm libarchive-tools
+            libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
 
-      - name: Cache build_runner output
-        uses: actions/cache@v4
-        with:
-          path: ui/.dart_tool/build
-          key: build-runner-${{ runner.os }}-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
-          restore-keys: build-runner-${{ runner.os }}-
-
-      - name: Generate code (freezed / json_serializable)
-        working-directory: ui
-        run: dart run build_runner build --delete-conflicting-outputs
-
-      - name: Build Flutter UI
+      - name: Build Flutter UI (fallback)
+        if: needs.flutter.result == 'skipped'
         run: |
           VERSION=$(git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
-          cd ui && flutter build linux --release --dart-define=APP_VERSION="$VERSION"
+          cd ui && dart run build_runner build --delete-conflicting-outputs
+          flutter build linux --release --dart-define=APP_VERSION="$VERSION"
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-ubuntu-24.04-pkg-build-v1
+          restore-keys: apt-ubuntu-24.04-pkg-build-
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev \
+            rpm libarchive-tools
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -263,8 +317,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.local/share/gem
-          key: gem-fpm-${{ runner.os }}-${{ hashFiles('.ruby-version') }}-v2.2.1
-          restore-keys: gem-fpm-${{ runner.os }}-
+          key: gem-fpm-ubuntu-24.04-2.2.1
+          restore-keys: gem-fpm-ubuntu-24.04-
 
       - name: Install fpm
         run: |
