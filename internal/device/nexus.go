@@ -1,9 +1,8 @@
-// Package device provides Nexus device implementation using HID API.
+// Package device provides Nexus device implementation using direct libusb access.
 package device
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,31 +10,25 @@ import (
 	"time"
 
 	"github.com/mantonx/nexus-next/internal/touch"
-
-	"github.com/karalabe/hid"
 )
 
-// NexusDevice implements the Device interface using HID API
-// This provides access to touch input, brightness, and animations
+// NexusDevice implements the Device interface via direct libusb transfers.
 type NexusDevice struct {
 	logger *slog.Logger
 	config ConnectionConfig
 
-	// HID device handles — kept separate so display writes and touch reads
-	// don't share a handle and cause USB resets under sustained load.
-	device      *hid.Device // interface 0: display (frame writes, brightness)
-	touchDevice *hid.Device // interface 1: touch/keyboard input
-	deviceInfo  *hid.DeviceInfo
-	mu          sync.RWMutex
-	connected   bool
+	handle    *usbHandle
+	mu        sync.RWMutex // guards connected, handle
+	writeMu   sync.Mutex   // serialises concurrent frame + brightness writes
+	connected bool
+
 	touchReader *touch.HIDTouchReader
 
-	// Reconnection
 	reconnecting  bool
 	stopReconnect chan struct{}
 }
 
-// NewNexusDevice creates a new HID-based Nexus device
+// NewNexusDevice creates a new Nexus device.
 func NewNexusDevice(logger *slog.Logger, config ConnectionConfig) *NexusDevice {
 	return &NexusDevice{
 		logger:        logger,
@@ -44,9 +37,7 @@ func NewNexusDevice(logger *slog.Logger, config ConnectionConfig) *NexusDevice {
 	}
 }
 
-// Connect establishes HID connection to the device.
-// On startup it retries up to 3 times (2s apart) to handle devices briefly
-// held by a previous process (e.g. a stale lock after a crash).
+// Connect establishes a USB connection to the device, retrying up to 3 times.
 func (n *NexusDevice) Connect(ctx context.Context) error {
 	const maxAttempts = 3
 	const retryDelay = 2 * time.Second
@@ -61,12 +52,11 @@ func (n *NexusDevice) Connect(ctx context.Context) error {
 			case <-time.After(retryDelay):
 			}
 		}
-		lastErr = n.connectOnce(ctx)
+		lastErr = n.connectOnce()
 		if lastErr == nil {
 			return nil
 		}
-		// Don't retry for errors that retrying won't fix
-		if errors.Is(lastErr, ErrDeviceNotFound) || errors.Is(lastErr, ErrPermissionDenied) {
+		if isNotRetryable(lastErr) {
 			return lastErr
 		}
 		n.logger.Warn("device connect attempt failed", "attempt", attempt, "error", lastErr)
@@ -74,168 +64,115 @@ func (n *NexusDevice) Connect(ctx context.Context) error {
 	return lastErr
 }
 
-// connectOnce performs a single connection attempt (no retry).
-func (n *NexusDevice) connectOnce(ctx context.Context) error {
+func isNotRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "permission") ||
+		strings.Contains(msg, "access denied")
+}
+
+func (n *NexusDevice) connectOnce() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Already connected — don't open duplicate handles.
-	// Opening a second handle to the same device resets the USB stack.
-	if n.connected && n.device != nil {
+	if n.connected && n.handle != nil {
 		return nil
 	}
 
-	// Close any stale handles from a previous partial connect before reopening.
-	if n.device != nil {
-		_ = n.device.Close()
-		n.device = nil
-	}
-	if n.touchDevice != nil {
-		_ = n.touchDevice.Close()
-		n.touchDevice = nil
+	if n.handle != nil {
+		n.handle.close()
+		n.handle = nil
 	}
 
-	// Enumerate HID devices to find iCUE Nexus
-	devices := hid.Enumerate(n.config.VendorID, n.config.ProductID)
-	if len(devices) == 0 {
-		return ErrDeviceNotFound
+	h, mfr, prod, err := usbOpen(uint16(n.config.VendorID), uint16(n.config.ProductID))
+	if err != nil {
+		return classifyOpenError(err)
 	}
 
-	// Log all interfaces found
-	n.logger.Info("HID interfaces found", "count", len(devices))
-	for i, dev := range devices {
-		n.logger.Info("HID interface",
-			"index", i,
-			"path", dev.Path,
-			"interface", dev.Interface,
-			"usage_page", fmt.Sprintf("0x%04x", dev.UsagePage),
-			"usage", fmt.Sprintf("0x%04x", dev.Usage))
-	}
-
-	// The Nexus exposes two HID interfaces:
-	//   interface 0 — display (frame writes, brightness)
-	//   interface 1 — touch/keyboard input
-	// Open them separately so display writes and touch reads never share a
-	// handle — simultaneous read+write on one handle causes USB resets.
-	sortInterfacesByPreference(devices) // interface 0 first
-
-	// Open interface 0 for both display writes and touch reads. The Nexus uses
-	// a proprietary protocol where touch packets arrive on the same interface
-	// as frame writes — interface 1 does not carry touch data.
-	// We serialise reads and writes via the device mutex to prevent contention.
-	var displayDev *hid.Device
-	var lastErr error
-
-	for i := range devices {
-		if devices[i].Interface != 0 {
-			continue
-		}
-		dev, err := devices[i].Open()
-		if err != nil {
-			lastErr = classifyOpenError(err)
-			n.logger.Debug("failed to open display interface", "error", lastErr)
-			continue
-		}
-		displayDev = dev
-		n.deviceInfo = &devices[i]
-		n.logger.Info("successfully opened HID interface",
-			"index", i,
-			"path", devices[i].Path,
-			"interface", devices[i].Interface)
-		break
-	}
-
-	if displayDev == nil {
-		if lastErr != nil {
-			return fmt.Errorf("failed to open display interface: %w", lastErr)
-		}
-		return fmt.Errorf("failed to open display interface")
-	}
-
-	n.device = displayDev
-	n.touchDevice = nil // touch uses same handle as display
+	n.handle = h
 	n.connected = true
 
-	// Clear any frozen frame from a previous session immediately on connect,
-	// before the render loop sends the first real frame.
-	n.clearDisplay(displayDev)
+	n.clearDisplay()
 
-	n.touchReader = touch.NewHIDTouchReader(displayDev, n.logger)
+	n.touchReader = touch.NewHIDTouchReader(h, n.logger)
 
-	n.logger.Info("HID device connected",
+	n.logger.Info("USB device connected",
 		"vendor_id", n.config.VendorID,
 		"product_id", n.config.ProductID,
-		"manufacturer", n.deviceInfo.Manufacturer,
-		"product", n.deviceInfo.Product)
+		"manufacturer", mfr,
+		"product", prod)
 
-	// Start reconnection monitoring
 	if !n.reconnecting {
 		n.reconnecting = true
+		n.stopReconnect = make(chan struct{}) // fresh channel each connect cycle
 		go n.monitorConnection()
 	}
 
 	return nil
 }
 
-// Disconnect closes the HID device connection
+// Disconnect closes the USB device connection.
 func (n *NexusDevice) Disconnect() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Stop reconnection monitoring
 	if n.reconnecting {
 		close(n.stopReconnect)
 		n.reconnecting = false
 	}
 
-	if n.device != nil {
-		if err := n.device.Close(); err != nil {
-			n.logger.Warn("error closing display HID handle", "error", err)
-		}
-		n.device = nil
-	}
-	if n.touchDevice != nil {
-		if err := n.touchDevice.Close(); err != nil {
-			n.logger.Warn("error closing touch HID handle", "error", err)
-		}
-		n.touchDevice = nil
+	if n.handle != nil {
+		n.handle.close()
+		n.handle = nil
 	}
 
 	n.connected = false
-	n.logger.Info("HID device disconnected")
-
+	n.logger.Info("USB device disconnected")
 	return nil
 }
 
-// IsConnected returns whether the device is connected
+// IsConnected returns whether the device is currently connected.
 func (n *NexusDevice) IsConnected() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.connected
 }
 
-// SendFrame sends a frame to the device using HID writes
-func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
+// Health returns an error if the device is not connected.
+func (n *NexusDevice) Health() error {
 	n.mu.RLock()
-	if !n.connected || n.device == nil {
-		n.mu.RUnlock()
+	defer n.mu.RUnlock()
+	if !n.connected {
 		return ErrDeviceDisconnected
 	}
-	device := n.device
+	return nil
+}
+
+// SendFrame sends a rendered frame to the device display.
+func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
+	n.mu.RLock()
+	connected, h := n.connected, n.handle
 	n.mu.RUnlock()
 
-	// Validate frame size (640x48x4 = 122,880 bytes RGBA)
+	if !connected || h == nil {
+		return ErrDeviceDisconnected
+	}
+
 	if len(data) != FrameSize {
 		return fmt.Errorf("%w: expected %d bytes, got %d", ErrInvalidFrame, FrameSize, len(data))
 	}
 
-	// Send frame in chunks using HID protocol
-	// Using NexusTool's protocol: 0x40 with variable payload length
 	const chunkSize = 1024
 	const headerSize = 8
 	const maxPayload = chunkSize - headerSize
 
 	totalChunks := (len(data) + maxPayload - 1) / maxPayload
+
+	n.writeMu.Lock()
+	defer n.writeMu.Unlock()
 
 	for chunkNum := 0; chunkNum < totalChunks; chunkNum++ {
 		start := chunkNum * maxPayload
@@ -243,42 +180,31 @@ func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
 		if end > len(data) {
 			end = len(data)
 		}
-
 		payloadLen := end - start
-		isLast := chunkNum == totalChunks-1
 
-		// Build chunk packet
 		packet := make([]byte, chunkSize)
-		packet[0] = 0x02 // Endpoint 2
-		packet[1] = 0x05 // Command: Send Image
-		packet[2] = 0x40 // Protocol variant (NexusTool uses this)
-		if isLast {
-			packet[3] = 0x01 // Last chunk flag
-		} else {
-			packet[3] = 0x00
+		packet[0] = 0x02
+		packet[1] = 0x05
+		packet[2] = 0x40
+		if chunkNum == totalChunks-1 {
+			packet[3] = 0x01
 		}
-		packet[4] = byte(chunkNum & 0xFF)        // Chunk number low
-		packet[5] = byte((chunkNum >> 8) & 0xFF) // Chunk number high
-		packet[6] = byte(payloadLen & 0xFF)      // Payload length low
-		packet[7] = byte((payloadLen >> 8) & 0xFF) // Payload length high
+		packet[4] = byte(chunkNum & 0xFF)
+		packet[5] = byte((chunkNum >> 8) & 0xFF)
+		packet[6] = byte(payloadLen & 0xFF)
+		packet[7] = byte((payloadLen >> 8) & 0xFF)
 
-		// Copy payload (convert RGBA to BGRA for device)
 		for i := 0; i < payloadLen; i += 4 {
 			if start+i+3 < len(data) {
-				// Swap R and B for BGR format
-				packet[headerSize+i] = data[start+i+2]     // B
-				packet[headerSize+i+1] = data[start+i+1]   // G
-				packet[headerSize+i+2] = data[start+i]     // R
-				packet[headerSize+i+3] = data[start+i+3]   // A
+				packet[headerSize+i] = data[start+i+2]   // B
+				packet[headerSize+i+1] = data[start+i+1] // G
+				packet[headerSize+i+2] = data[start+i]   // R
+				packet[headerSize+i+3] = data[start+i+3] // A
 			}
 		}
 
-		// Write via HID
-		_, err := device.Write(packet)
-		if err != nil {
-			n.logger.Error("HID write failed", "chunk", chunkNum, "error", err)
-			// Mark disconnected so monitorConnection triggers a reconnect
-			// rather than continuing to hammer a dead handle.
+		if err := h.writeFrame(packet); err != nil {
+			n.logger.Error("USB write failed", "chunk", chunkNum, "error", err)
 			n.mu.Lock()
 			n.connected = false
 			n.mu.Unlock()
@@ -289,7 +215,7 @@ func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
 	return nil
 }
 
-// ReadTouch reads touch events from the HID device
+// ReadTouch reads touch events from the device.
 func (n *NexusDevice) ReadTouch(ctx context.Context) ([]touch.Event, error) {
 	n.mu.RLock()
 	if !n.connected || n.touchReader == nil {
@@ -302,37 +228,24 @@ func (n *NexusDevice) ReadTouch(ctx context.Context) ([]touch.Event, error) {
 	return reader.Read(ctx)
 }
 
-// Health checks the device connection health
-func (n *NexusDevice) Health() error {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	if !n.connected {
-		return ErrDeviceDisconnected
-	}
-
-	return nil
-}
-
-// SetBrightness sets the display brightness (0-100)
+// SetBrightness sets the display brightness (0–100).
 func (n *NexusDevice) SetBrightness(brightness int) error {
-	n.mu.RLock()
-	if !n.connected || n.device == nil {
-		n.mu.RUnlock()
-		return ErrDeviceDisconnected
-	}
-	device := n.device
-	n.mu.RUnlock()
-
 	if brightness < 0 || brightness > 100 {
 		return fmt.Errorf("brightness must be 0-100, got %d", brightness)
 	}
 
-	// Use simple NexusTool protocol: [3, 1, brightness]
-	report := []byte{3, 1, byte(brightness)}
+	n.mu.RLock()
+	connected, h := n.connected, n.handle
+	n.mu.RUnlock()
 
-	_, err := device.Write(report) // HID uses Write for feature reports too
-	if err != nil {
+	if !connected || h == nil {
+		return ErrDeviceDisconnected
+	}
+
+	n.writeMu.Lock()
+	defer n.writeMu.Unlock()
+
+	if err := h.setBrightness(brightness); err != nil {
 		return fmt.Errorf("failed to set brightness: %w", err)
 	}
 
@@ -340,66 +253,15 @@ func (n *NexusDevice) SetBrightness(brightness int) error {
 	return nil
 }
 
-// GetFirmwareVersion queries the device firmware version
+// GetFirmwareVersion is not yet implemented via raw libusb.
 func (n *NexusDevice) GetFirmwareVersion() (string, error) {
-	n.mu.RLock()
-	if !n.connected || n.device == nil {
-		n.mu.RUnlock()
-		return "", ErrDeviceDisconnected
-	}
-	device := n.device
-	n.mu.RUnlock()
-
-	// Read Feature Report 5 (64 bytes)
-	report := make([]byte, 64)
-	report[0] = 5 // Report ID
-
-	bytesRead, err := device.Read(report)
-	if err != nil {
-		return "", fmt.Errorf("failed to read feature report: %w", err)
-	}
-
-	// Firmware string starts at byte 6, null-terminated
-	if bytesRead < 7 {
-		return "", fmt.Errorf("feature report too short: %d bytes", bytesRead)
-	}
-
-	// Find null terminator
-	end := 6
-	for end < bytesRead && report[end] != 0 {
-		end++
-	}
-
-	raw := report[6:end]
-
-	// Check if bytes are printable ASCII before treating as a string
-	printable := true
-	for _, b := range raw {
-		if b < 0x20 || b > 0x7e {
-			printable = false
-			break
-		}
-	}
-
-	var firmware string
-	if printable && len(raw) > 0 {
-		firmware = string(raw)
-	} else {
-		// Format raw bytes as hex pairs (e.g. "01.01")
-		parts := make([]string, len(raw))
-		for i, b := range raw {
-			parts[i] = fmt.Sprintf("%02x", b)
-		}
-		firmware = strings.Join(parts, ".")
-	}
-
-	n.logger.Debug("firmware version", "version", firmware)
-	return firmware, nil
+	return "", fmt.Errorf("GetFirmwareVersion not implemented")
 }
 
-// clearDisplay sends a blank (black) frame directly to a HID device handle.
-// Used on connect and shutdown to clear stale content from the previous session.
-func (n *NexusDevice) clearDisplay(dev *hid.Device) {
+func (n *NexusDevice) clearDisplay() {
+	if n.handle == nil {
+		return
+	}
 	const (
 		chunkSize  = 1024
 		headerSize = 8
@@ -425,26 +287,25 @@ func (n *NexusDevice) clearDisplay(dev *hid.Device) {
 		packet[5] = byte((chunkNum >> 8) & 0xFF)
 		packet[6] = byte(payloadLen & 0xFF)
 		packet[7] = byte((payloadLen >> 8) & 0xFF)
-		if _, err := dev.Write(packet); err != nil {
-			n.logger.Debug("clearDisplay write failed", "chunk", chunkNum, "error", err)
+		if err := n.handle.writeFrame(packet); err != nil {
+			n.logger.Warn("clearDisplay write failed", "chunk", chunkNum, "error", err)
 			return
 		}
 	}
 }
 
-// monitorConnection monitors for device disconnection and attempts reconnection.
-// While connected it polls every second. On disconnect it uses exponential
-// backoff (1s→2s→4s…→30s) to avoid hammering the USB subsystem when the
-// device is absent for an extended period.
 func (n *NexusDevice) monitorConnection() {
 	const (
-		pollInterval    = 1 * time.Second
-		maxBackoff      = 30 * time.Second
-		failuresNeeded  = 2 // consecutive health failures before reconnecting
+		pollInterval = 1 * time.Second
+		maxBackoff   = 30 * time.Second
+		// Pause between closing a failed handle and attempting to reopen.
+		// Gives the device firmware time to reset its USB state before we
+		// claim the interface again — prevents the rapid open/close storm
+		// that can leave the device in a state requiring a physical replug.
+		settleDelay = 2 * time.Second
 	)
 
 	backoff := pollInterval
-	consecutiveFails := 0
 
 	for {
 		select {
@@ -453,36 +314,35 @@ func (n *NexusDevice) monitorConnection() {
 		case <-time.After(backoff):
 		}
 
-		if err := n.Health(); err == nil {
-			// Device is healthy — reset everything and poll at normal rate.
+		if n.Health() == nil {
 			backoff = pollInterval
-			consecutiveFails = 0
 			continue
 		}
 
-		consecutiveFails++
-		if consecutiveFails < failuresNeeded {
-			// Don't act on a single transient failure — wait for the next poll.
-			n.logger.Debug("device health check failed, waiting for confirmation",
-				"consecutive_fails", consecutiveFails)
-			continue
+		n.logger.Warn("device disconnected, attempting reconnect", "retry_in", backoff)
+
+		// Close the stale handle and let the device settle before reopening.
+		n.mu.Lock()
+		if n.handle != nil {
+			n.handle.close()
+			n.handle = nil
+		}
+		n.mu.Unlock()
+
+		select {
+		case <-n.stopReconnect:
+			return
+		case <-time.After(settleDelay):
 		}
 
-		n.logger.Warn("device disconnected, attempting reconnect",
-			"retry_in", backoff)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		reconnErr := n.Connect(ctx)
-		cancel()
-
-		if reconnErr != nil {
+		// Single attempt — monitorConnection's backoff handles the retry cadence.
+		// Using Connect's internal 3-attempt loop here would cause up to 3 rapid
+		// opens per monitorConnection cycle, defeating the settle delay.
+		if reconnErr := n.connectOnce(); reconnErr != nil {
 			n.logger.Debug("reconnect attempt failed, will retry",
 				"error", reconnErr,
 				"next_retry_in", min(backoff*2, maxBackoff))
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
-			}
+			backoff = min(backoff*2, maxBackoff)
 		} else {
 			n.logger.Info("device reconnected successfully")
 			backoff = pollInterval

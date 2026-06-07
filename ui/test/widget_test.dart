@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:open_next/src/models/settings_state.dart';
 import 'package:open_next/src/services/nexus_api_service.dart';
 import 'package:open_next/src/services/ws_service.dart';
-import 'package:open_next/src/widgets/settings/tabs/preview_tab.dart';
+import 'package:open_next/src/widgets/settings/tabs/display_tab.dart';
 import 'package:open_next/src/widgets/settings/tabs/plugins_tab.dart';
 // AppTheme is intentionally not imported here — google_fonts 5.1.0 has a
 // compile-time incompatibility with Dart 3.11 in test mode. Tests use a
@@ -147,13 +147,8 @@ void main() {
     });
   });
 
-  group('PreviewTab', () {
-    // PreviewTab is now the Display Colours tab — the live preview strip
-    // moved to the persistent _DisplayStrip in the NavigationRail.
-
+  group('DisplayTab', () {
     setUp(() {
-      // SettingsState._initialize() uses SharedPreferences; mock it so the
-      // plugin channel doesn't throw MissingPluginException in widget tests.
       SharedPreferences.setMockInitialValues({});
     });
 
@@ -163,12 +158,11 @@ void main() {
       await settings.loadFromBackend();
 
       await tester.pumpWidget(_wrap(
-        const Scaffold(body: PreviewTab()),
+        const Scaffold(body: DisplayTab()),
         settings: settings,
       ));
       await tester.pump();
 
-      // NexusSection renders its title via title.toUpperCase()
       expect(find.text('DISPLAY COLOURS'), findsOneWidget);
     });
 
@@ -178,7 +172,7 @@ void main() {
       await settings.loadFromBackend();
 
       await tester.pumpWidget(_wrap(
-        const Scaffold(body: PreviewTab()),
+        const Scaffold(body: DisplayTab()),
         settings: settings,
       ));
       await tester.pump();

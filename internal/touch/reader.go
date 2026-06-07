@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"math"
 	"time"
-
-	"github.com/karalabe/hid"
 )
 
 // ===== One-Euro filter for velocity-aware smoothing =====
@@ -137,10 +135,15 @@ func (w *velWindow) velocity() float64 {
 	return math.Abs(weightedSum / weightTotal)
 }
 
+// TouchDevice is satisfied by any USB handle that can read touch packets.
+type TouchDevice interface {
+	ReadTouch(buf []byte, timeoutMs uint) (int, error)
+}
+
 // ===== HIDTouchReader: HID packet parsing + gesture engine =====
 
 type HIDTouchReader struct {
-	device *hid.Device
+	device TouchDevice
 	logger *slog.Logger
 
 	// Coordinate normalization
@@ -163,8 +166,8 @@ type HIDTouchReader struct {
 	maxRawSeen  int // tracks highest raw X seen — logged on first swipe to validate rawMax
 }
 
-// NewHIDTouchReader creates a new HID touch reader with velocity-aware smoothing
-func NewHIDTouchReader(device *hid.Device, logger *slog.Logger) *HIDTouchReader {
+// NewHIDTouchReader creates a new touch reader.
+func NewHIDTouchReader(device TouchDevice, logger *slog.Logger) *HIDTouchReader {
 	return &HIDTouchReader{
 		device:      device,
 		logger:      logger,
@@ -178,6 +181,9 @@ func NewHIDTouchReader(device *hid.Device, logger *slog.Logger) *HIDTouchReader 
 		},
 	}
 }
+
+// NewUSBTouchReader is an alias for NewHIDTouchReader.
+var NewUSBTouchReader = NewHIDTouchReader
 
 // normalize converts raw touch coordinate to screen pixels
 func (t *HIDTouchReader) normalize(raw int) float64 {
@@ -201,12 +207,12 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 		return nil, fmt.Errorf("HID device not initialized")
 	}
 
-	// Read HID report (blocking)
-	buffer := make([]byte, 64)
-	bytesRead, err := t.device.Read(buffer)
+	// Read touch report. EP 0x81 on interface 0 has wMaxPacketSize=512.
+	buffer := make([]byte, 512)
+	bytesRead, err := t.device.ReadTouch(buffer, 0)
 	if err != nil {
-		t.logger.Debug("HID read error", "error", err)
-		return []Event{}, fmt.Errorf("HID read: %w", err)
+		t.logger.Warn("touch read error", "error", err)
+		return []Event{}, fmt.Errorf("touch read: %w", err)
 	}
 
 	if bytesRead < 8 {
