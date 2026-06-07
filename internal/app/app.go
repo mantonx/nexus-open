@@ -491,6 +491,7 @@ func (a *App) renderLoop() {
 	a.logger.Info("render loop started", "fps", targetFPS)
 
 	var frameCount int
+	var lastSentPix []byte
 	wsHub := a.apiServer.Hub()
 
 	// Pool the flate compressor internals via EncoderBufferPool so the
@@ -510,10 +511,19 @@ func (a *App) renderLoop() {
 				continue
 			}
 
-			// Send to device if connected
+			// Send to device if connected and the frame has changed.
+			// Skipping identical frames eliminates all 121 USB bulk transfers
+			// per tick at idle — the dominant cost when content is static.
 			if a.device.IsConnected() {
-				if err := a.device.SendFrame(a.ctx, frame.Pix); err != nil {
-					a.logger.Debug("failed to send frame", "error", err)
+				if !bytes.Equal(frame.Pix, lastSentPix) {
+					if err := a.device.SendFrame(a.ctx, frame.Pix); err != nil {
+						a.logger.Debug("failed to send frame", "error", err)
+					} else {
+						if len(lastSentPix) != len(frame.Pix) {
+							lastSentPix = make([]byte, len(frame.Pix))
+						}
+						copy(lastSentPix, frame.Pix)
+					}
 				}
 			}
 
