@@ -25,15 +25,17 @@ void main() async {
 
   windowManager.waitUntilReadyToShow(
     const WindowOptions(
-      size: Size(800, 600),
+      size: Size(1280, 800),
+      minimumSize: Size(1280, 800),
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
       title: 'Nexus Open',
     ),
     () async {
+      await windowManager.maximize();
       if (startMinimized) {
-        await windowManager.hide();
+        await windowManager.minimize();
       } else {
         await windowManager.show();
         await windowManager.focus();
