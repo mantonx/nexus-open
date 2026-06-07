@@ -70,6 +70,7 @@ type LayoutStore interface {
 	UpdatePage(id int64, name string, ord int) error
 	DeletePage(id int64) error
 	ReorderPages(order []int64) error
+	GetZonePageID(zoneID string) (int64, error)
 	CreateZone(z store.StoredZone) error
 	UpdateZone(z store.StoredZone) error
 	DeleteZone(id string) error

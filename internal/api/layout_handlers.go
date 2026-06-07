@@ -211,13 +211,28 @@ func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
 		z.Align = "center"
 	}
 
+	// Enforce zone cap before inserting.
+	existing, err := s.layoutStore.GetZonesForPage(z.PageID)
+	if err != nil {
+		s.respondError(w, "Failed to read page zones: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(existing) >= zone.MaxZonesPerPage {
+		s.respondError(w,
+			fmt.Sprintf("page already has %d zones (maximum %d)", len(existing), zone.MaxZonesPerPage),
+			http.StatusUnprocessableEntity)
+		return
+	}
+
 	if err := s.layoutStore.CreateZone(z); err != nil {
 		s.respondError(w, "Failed to create zone: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Don't validate width on create — pages are built up incrementally.
-	// Validation runs on updates to catch edits that break the 640px invariant.
+	if err := s.redistributePageWidths(z.PageID); err != nil {
+		s.logger.Warn("failed to redistribute widths after zone create", "error", err)
+	}
+
 	s.triggerLayoutReload()
 	s.respondSuccess(w, "Zone created", map[string]any{"id": z.ID})
 }
@@ -287,9 +302,17 @@ func (s *Server) handleLayoutZone(w http.ResponseWriter, r *http.Request) {
 		s.respondSuccess(w, "Zone updated", nil)
 
 	case http.MethodDelete:
+		// Resolve pageID before deleting so we can redistribute afterward.
+		pageIDForDelete, _ := s.layoutStore.GetZonePageID(zoneID)
+
 		if err := s.layoutStore.DeleteZone(zoneID); err != nil {
 			s.respondError(w, "Failed to delete zone: "+err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if pageIDForDelete != 0 {
+			if err := s.redistributePageWidths(pageIDForDelete); err != nil {
+				s.logger.Warn("failed to redistribute widths after zone delete", "error", err)
+			}
 		}
 		s.triggerLayoutReload()
 		s.respondSuccess(w, "Zone deleted", nil)
@@ -379,6 +402,34 @@ func storeToZoneConfig(
 	}
 
 	return cfg
+}
+
+// redistributePageWidths fetches all zones for a page, computes equal widths,
+// and writes the new widths back. Called after zone add/remove so the 640px
+// invariant is maintained without requiring manual pixel arithmetic.
+func (s *Server) redistributePageWidths(pageID int64) error {
+	rows, err := s.layoutStore.GetZonesForPage(pageID)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+
+	// Build a zone.Page so we can call RedistributeWidths.
+	p := zone.Page{Name: "tmp"}
+	for _, z := range rows {
+		p.Zones = append(p.Zones, zone.ZoneConfig{ID: z.ID, Width: z.WidthPx})
+	}
+	if err := p.RedistributeWidths(zone.DisplayWidthPx, zone.MinZoneWidthPx); err != nil {
+		return err
+	}
+
+	// Write back only the changed widths.
+	for i, z := range rows {
+		z.WidthPx = p.Zones[i].Width
+		if err := s.layoutStore.UpdateZone(z); err != nil {
+			return fmt.Errorf("update zone %s: %w", z.ID, err)
+		}
+	}
+	return nil
 }
 
 // validatePageWidth checks that zones for a page still sum to 640px.

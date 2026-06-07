@@ -1,6 +1,7 @@
 package zone
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -123,6 +124,62 @@ func TestThemeColors(t *testing.T) {
 	accentColor := theme.GetAccentColor()
 	if accentColor.R != 0x00 || accentColor.G != 0xC8 || accentColor.B != 0xFF {
 		t.Errorf("Accent color incorrect: got R=%d G=%d B=%d", accentColor.R, accentColor.G, accentColor.B)
+	}
+}
+
+func TestPage_MaxZonesEnforced(t *testing.T) {
+	zones := make([]ZoneConfig, MaxZonesPerPage+1)
+	for i := range zones {
+		zones[i] = ZoneConfig{ID: fmt.Sprintf("z%d", i), Width: 80, Plugin: "builtin:clock", RefreshMs: 1000}
+	}
+	// Force widths to sum to 640 for the over-cap test.
+	zones[0].Width = 640 - 80*MaxZonesPerPage
+	p := Page{Name: "Test", Zones: zones}
+	if err := p.Validate(); err == nil {
+		t.Error("expected error for page with more than MaxZonesPerPage zones")
+	}
+}
+
+func TestPage_RedistributeWidths(t *testing.T) {
+	tests := []struct {
+		name    string
+		n       int
+		total   int
+		floor   int
+		want    []int
+		wantErr bool
+	}{
+		{name: "1 zone",  n: 1, total: 640, floor: 80, want: []int{640}},
+		{name: "2 zones", n: 2, total: 640, floor: 80, want: []int{320, 320}},
+		{name: "3 zones", n: 3, total: 640, floor: 80, want: []int{214, 213, 213}},
+		{name: "6 zones", n: 6, total: 640, floor: 80, want: []int{107, 107, 107, 107, 106, 106}},
+		{name: "floor collision", n: 9, total: 640, floor: 80, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Page{Name: "p"}
+			for i := range tt.n {
+				p.Zones = append(p.Zones, ZoneConfig{ID: fmt.Sprintf("z%d", i)})
+			}
+			err := p.RedistributeWidths(tt.total, tt.floor)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("RedistributeWidths() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			sum := 0
+			for i, z := range p.Zones {
+				sum += z.Width
+				if z.Width != tt.want[i] {
+					t.Errorf("zone[%d] width = %d, want %d", i, z.Width, tt.want[i])
+				}
+			}
+			if sum != tt.total {
+				t.Errorf("total width = %d, want %d", sum, tt.total)
+			}
+		})
 	}
 }
 

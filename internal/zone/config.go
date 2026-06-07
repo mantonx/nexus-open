@@ -6,6 +6,15 @@ import (
 	"image/color"
 )
 
+const (
+	// MaxZonesPerPage is the maximum number of zones allowed on a single page.
+	MaxZonesPerPage = 6
+	// DisplayWidthPx is the total pixel width of the Nexus display strip.
+	DisplayWidthPx = 640
+	// MinZoneWidthPx is the minimum pixel width of any zone.
+	MinZoneWidthPx = 80
+)
+
 // Config represents the complete layout configuration
 type Config struct {
 	Name    string  `yaml:"name" json:"name"`       // Layout name
@@ -185,6 +194,10 @@ func (p *Page) Validate() error {
 		return fmt.Errorf("at least one zone is required")
 	}
 
+	if len(p.Zones) > MaxZonesPerPage {
+		return fmt.Errorf("page has %d zones, maximum is %d", len(p.Zones), MaxZonesPerPage)
+	}
+
 	totalWidth := 0
 	for i, zone := range p.Zones {
 		if err := zone.Validate(); err != nil {
@@ -193,11 +206,33 @@ func (p *Page) Validate() error {
 		totalWidth += zone.Width
 	}
 
-	// Zones must tile to exactly 640px
-	if totalWidth != 640 {
-		return fmt.Errorf("zone widths must sum to 640, got %d", totalWidth)
+	if totalWidth != DisplayWidthPx {
+		return fmt.Errorf("zone widths must sum to %d, got %d", DisplayWidthPx, totalWidth)
 	}
 
+	return nil
+}
+
+// RedistributeWidths sets every zone's width to an equal share of totalPx,
+// respecting the floorPx minimum. Remainder pixels are distributed one each
+// to the leading zones so the total always equals totalPx exactly.
+// Returns an error if the zones cannot fit within totalPx at floorPx each.
+func (p *Page) RedistributeWidths(totalPx, floorPx int) error {
+	n := len(p.Zones)
+	if n == 0 {
+		return nil
+	}
+	if n*floorPx > totalPx {
+		return fmt.Errorf("cannot fit %d zones at %dpx floor into %dpx total", n, floorPx, totalPx)
+	}
+	base := totalPx / n
+	extra := totalPx % n
+	for i := range p.Zones {
+		p.Zones[i].Width = base
+		if i < extra {
+			p.Zones[i].Width++
+		}
+	}
 	return nil
 }
 

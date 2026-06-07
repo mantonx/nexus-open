@@ -132,6 +132,15 @@ func (s *DB) GetZonesForPage(pageID int64) ([]StoredZone, error) {
 	return zones, rows.Err()
 }
 
+// GetZonePageID returns the page_id for a zone. Returns 0 if not found.
+func (s *DB) GetZonePageID(zoneID string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var pageID int64
+	err := s.db.QueryRow(`SELECT page_id FROM zones WHERE id = ?`, zoneID).Scan(&pageID)
+	return pageID, err
+}
+
 // GetZonePluginConfig returns the plugin config for a single zone from
 // zones.config_json. Returns nil if the zone has no stored config.
 func (s *DB) GetZonePluginConfig(zoneID string) (map[string]any, error) {

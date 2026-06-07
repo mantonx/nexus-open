@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+
 	"github.com/mantonx/nexus-next/internal/api"
 	"github.com/mantonx/nexus-next/internal/device"
 	config "github.com/mantonx/nexus-next/internal/settings"
@@ -72,6 +73,7 @@ func newTestServerWithStore(t *testing.T) (*api.Server, *store.DB, string) {
 
 	srv := api.NewServer(fmt.Sprintf(":%d", port), cfg, mockDev, logger)
 	srv.SetZoneConfigManager(zoneCfg)
+	srv.SetLayoutStore(s)
 
 	go func() {
 		_ = srv.Start()
@@ -379,6 +381,121 @@ func TestZoneConfig_SetGetDelete(t *testing.T) {
 	_ = delResp.Body.Close()
 	if delResp.StatusCode != 200 {
 		t.Errorf("DELETE zone config: expected 200, got %d", delResp.StatusCode)
+	}
+}
+
+// ── Zone cap + redistribution ─────────────────────────────────────────────────
+
+func TestZoneCap_RejectsSeventhZone(t *testing.T) {
+	_, db, base := newTestServerWithStore(t)
+
+	pageID, err := db.CreatePage("Test", 0)
+	if err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+
+	// Add 6 zones (the maximum) directly via the DB.
+	for i := range 6 {
+		if err := db.CreateZone(store.StoredZone{
+			ID: fmt.Sprintf("z%d", i), PageID: pageID, Ord: i,
+			WidthPx: 640 / 6, Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
+		}); err != nil {
+			t.Fatalf("CreateZone %d: %v", i, err)
+		}
+	}
+
+	// A 7th zone via the API must be rejected with 422.
+	resp := postJSON(t, base+"/api/layout/zones", map[string]any{
+		"id": "z6", "page_id": pageID, "width_px": 80,
+		"plugin": "builtin:clock", "refresh_ms": 1000, "align": "center",
+	})
+	_ = resp.Body.Close()
+	if resp.StatusCode != 422 {
+		t.Errorf("expected 422 for 7th zone, got %d", resp.StatusCode)
+	}
+}
+
+func TestZoneRedistribute_AfterCreate(t *testing.T) {
+	_, db, base := newTestServerWithStore(t)
+
+	pageID, err := db.CreatePage("Test", 0)
+	if err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+
+	// Seed one zone spanning the full width.
+	if err := db.CreateZone(store.StoredZone{
+		ID: "z0", PageID: pageID, Ord: 0, WidthPx: 640,
+		Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
+	}); err != nil {
+		t.Fatalf("seed zone: %v", err)
+	}
+
+	// Add a second zone via the API — should trigger redistribution.
+	resp := postJSON(t, base+"/api/layout/zones", map[string]any{
+		"id": "z1", "page_id": pageID, "width_px": 80,
+		"plugin": "builtin:clock", "refresh_ms": 1000, "align": "center",
+	})
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("POST zone: expected 200, got %d", resp.StatusCode)
+	}
+
+	zones, _ := db.GetZonesForPage(pageID)
+	total := 0
+	for _, z := range zones {
+		total += z.WidthPx
+	}
+	if total != 640 {
+		t.Errorf("widths after add: want sum=640, got %d", total)
+	}
+	// Both zones should be equal (320 each).
+	for _, z := range zones {
+		if z.WidthPx != 320 {
+			t.Errorf("zone %s: want width=320, got %d", z.ID, z.WidthPx)
+		}
+	}
+}
+
+func TestZoneRedistribute_AfterDelete(t *testing.T) {
+	_, db, base := newTestServerWithStore(t)
+
+	pageID, err := db.CreatePage("Test", 0)
+	if err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+
+	// Seed three equal zones.
+	for i := range 3 {
+		if err := db.CreateZone(store.StoredZone{
+			ID: fmt.Sprintf("z%d", i), PageID: pageID, Ord: i,
+			WidthPx: 640 / 3, Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
+		}); err != nil {
+			t.Fatalf("seed zone %d: %v", i, err)
+		}
+	}
+
+	// Delete the last zone via the API — remaining two should get 320 each.
+	req, _ := http.NewRequest("DELETE", base+"/api/layout/zones/z2", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("DELETE zone: expected 200, got %d", resp.StatusCode)
+	}
+
+	zones, _ := db.GetZonesForPage(pageID)
+	if len(zones) != 2 {
+		t.Fatalf("want 2 zones after delete, got %d", len(zones))
+	}
+	total := 0
+	for _, z := range zones {
+		total += z.WidthPx
+	}
+	if total != 640 {
+		t.Errorf("widths after delete: want sum=640, got %d", total)
 	}
 }
 
