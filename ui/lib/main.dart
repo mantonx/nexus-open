@@ -25,8 +25,8 @@ void main() async {
 
   windowManager.waitUntilReadyToShow(
     const WindowOptions(
-      size: Size(1280, 800),
-      minimumSize: Size(1280, 800),
+      size: Size(1400, 800),
+      minimumSize: Size(1400, 800),
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
