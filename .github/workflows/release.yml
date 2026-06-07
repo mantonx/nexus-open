@@ -166,8 +166,17 @@ jobs:
           name: release-packages
           path: dist/
 
+      - name: Cache git-cliff binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/git-cliff
+          key: git-cliff-2.13.1-${{ runner.os }}
+
       - name: Install git-cliff
-        uses: kenji-miyake/setup-git-cliff@v2
+        run: |
+          if [ ! -x "$HOME/.cargo/bin/git-cliff" ]; then
+            cargo install git-cliff --version 2.13.1 --locked
+          fi
 
       - name: Generate release notes
         run: |
