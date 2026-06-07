@@ -5,7 +5,7 @@ import (
 	"image"
 	"time"
 
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // UpdatePayload updates the rendered data for a zone and invalidates the page cache.

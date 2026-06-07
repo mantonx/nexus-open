@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	pluginhost "github.com/mantonx/nexus-next/internal/plugins/host"
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	pluginhost "github.com/mantonx/nexus-open/internal/plugins/host"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // ── fakes ─────────────────────────────────────────────────────────────────────

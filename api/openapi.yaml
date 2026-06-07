@@ -83,7 +83,7 @@ info:
         Provides endpoints for device control, configuration management, and zone/plugin interactions.
     contact:
         name: Team
-        url: https://github.com/mantonx/nexus-next
+        url: https://github.com/mantonx/nexus-open
     version: 2.0.0
 paths:
     /api/config:

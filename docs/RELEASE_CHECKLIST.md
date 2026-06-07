@@ -164,7 +164,7 @@ This document outlines the steps to create and publish a new release.
 ### GitHub Release
 
 - [ ] **Create GitHub release**
-  - Go to: https://github.com/mantonx/nexus-next/releases/new
+  - Go to: https://github.com/mantonx/nexus-open/releases/new
   - Tag: v1.0.0
   - Title: "Nexus Open v1.0.0"
   - Description: Copy from CHANGELOG.md
@@ -309,7 +309,7 @@ If critical issues are discovered:
 
 ## Release Contacts
 
-- **GitHub**: https://github.com/mantonx/nexus-next
+- **GitHub**: https://github.com/mantonx/nexus-open
 - **AUR**: https://aur.archlinux.org/packages/nexus-open
 - **Flathub**: https://flathub.org/apps/com.github.nexusopen.NexusOpen
 - **Snap**: https://snapcraft.io/nexus-open

@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/mantonx/nexus-next/internal/store"
+	"github.com/mantonx/nexus-open/internal/store"
 )
 
 // LayoutImporter can atomically replace the full layout in the database.

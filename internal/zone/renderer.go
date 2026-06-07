@@ -11,8 +11,8 @@ import (
 	"github.com/fogleman/gg"
 	"golang.org/x/image/font"
 
-	"github.com/mantonx/nexus-next/internal/fonts"
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/internal/fonts"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // Renderer renders a single zone from a Payload using fogleman/gg.

@@ -85,7 +85,7 @@ Nexus Open is a Linux desktop application that controls the Corsair iCUE Nexus d
 
 ### File Structure
 ```
-nexus-next/
+nexus-open/
 ├── main.go (59 lines)          # Entry point, mostly commented code
 ├── app.go (141 lines)          # Wails bindings (TO DELETE)
 ├── go.mod                      # Dependencies

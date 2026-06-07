@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mantonx/nexus-next/internal/device"
-	config "github.com/mantonx/nexus-next/internal/settings"
+	"github.com/mantonx/nexus-open/internal/device"
+	config "github.com/mantonx/nexus-open/internal/settings"
 )
 
 func newTestConfig(t *testing.T) *config.Manager {

@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/zone"
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/internal/zone"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 func main() {

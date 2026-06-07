@@ -1,4 +1,4 @@
-module github.com/mantonx/nexus-next
+module github.com/mantonx/nexus-open
 
 go 1.25.0
 

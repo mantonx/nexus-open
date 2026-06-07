@@ -5,7 +5,7 @@ import (
 	"image"
 	"time"
 
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // initializePage sets up zones and renderers for the current page.

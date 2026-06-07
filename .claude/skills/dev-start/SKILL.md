@@ -39,7 +39,7 @@ sleep 1
 ### 2. Start the Go backend
 
 ```bash
-cd /home/fictional/Projects/nexus-next
+cd /home/fictional/Projects/nexus-open
 NEXUS_MOCK_DEVICE=1 ./nexus-open &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
@@ -63,7 +63,7 @@ go build -o nexus-open ./cmd/nexus-open
 ### 3. Launch the Flutter UI
 
 ```bash
-DISPLAY=:1 /home/fictional/Projects/nexus-next/ui/build/linux/x64/debug/bundle/ui &
+DISPLAY=:1 /home/fictional/Projects/nexus-open/ui/build/linux/x64/debug/bundle/ui &
 UI_PID=$!
 echo "UI PID: $UI_PID"
 sleep 2

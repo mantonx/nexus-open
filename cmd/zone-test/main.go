@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/device"
-	"github.com/mantonx/nexus-next/internal/touch"
-	"github.com/mantonx/nexus-next/internal/zone"
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/internal/device"
+	"github.com/mantonx/nexus-open/internal/touch"
+	"github.com/mantonx/nexus-open/internal/zone"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 func main() {

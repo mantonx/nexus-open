@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/touch"
+	"github.com/mantonx/nexus-open/internal/touch"
 )
 
 // NexusDevice implements the Device interface via direct libusb transfers.

@@ -86,7 +86,7 @@ modules:
       - install -Dm644 packaging/udev/99-corsair-nexus.rules /app/share/nexus-open/99-corsair-nexus.rules
     sources:
       - type: git
-        url: https://github.com/mantonx/nexus-next.git
+        url: https://github.com/mantonx/nexus-open.git
         tag: v1.0.0
         # For local testing, use:
         # - type: dir
@@ -100,6 +100,6 @@ modules:
   #     - cp -r build/linux/x64/release/bundle /app/lib/nexus-open-ui
   #   sources:
   #     - type: git
-  #       url: https://github.com/mantonx/nexus-next.git
+  #       url: https://github.com/mantonx/nexus-open.git
   #       tag: v1.0.0
   #       path: ui

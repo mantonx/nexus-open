@@ -15,7 +15,7 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"github.com/shirou/gopsutil/cpu"
 
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // cpuInfo holds the topology attributes of one logical CPU, read once at startup.

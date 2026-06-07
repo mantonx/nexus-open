@@ -135,7 +135,7 @@ connected. Usually means the test finished too fast. Re-run.
 **Build fails with "Permission denied" on bundle/ui** — the bundle was
 previously built as root. Fix with:
 ```bash
-sudo chown -R $USER ~/Projects/nexus-next/ui/build
+sudo chown -R $USER ~/Projects/nexus-open/ui/build
 ```
 
 **flutter drive reuses a stale app instance** — if an old `flutter run`

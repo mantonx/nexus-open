@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/mantonx/nexus-next/internal/zone"
+	"github.com/mantonx/nexus-open/internal/zone"
 )
 
 // handleGetDraft returns the current draft, opening one from the committed

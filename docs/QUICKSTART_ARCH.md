@@ -20,7 +20,7 @@ yay -S flutter
 ### 1. Navigate to the project directory
 
 ```bash
-cd /home/fictional/Projects/nexus-next
+cd /home/fictional/Projects/nexus-open
 ```
 
 ### 2. Run tests (optional but recommended)
@@ -146,7 +146,7 @@ cp packaging/systemd/nexus-open.service ~/.config/systemd/user/
 # Edit ExecStart path if needed
 nano ~/.config/systemd/user/nexus-open.service
 # Change: ExecStart=/usr/bin/nexus-open
-# To: ExecStart=/home/fictional/Projects/nexus-next/nexus-open
+# To: ExecStart=/home/fictional/Projects/nexus-open/nexus-open
 
 # Enable and start service
 systemctl --user daemon-reload
@@ -360,4 +360,4 @@ Once you've tested and it's working:
 - Check logs: `journalctl --user -u nexus-open.service -f`
 - Run with debug: `./nexus-open -debug`
 - See full installation guide: [docs/INSTALLATION.md](INSTALLATION.md)
-- Report issues: [GitHub Issues](https://github.com/mantonx/nexus-next/issues)
+- Report issues: [GitHub Issues](https://github.com/mantonx/nexus-open/issues)

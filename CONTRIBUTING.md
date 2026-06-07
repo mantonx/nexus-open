@@ -12,8 +12,8 @@ Thanks for taking an interest in contributing! This is a hardware interfacing pr
 
 ```bash
 # Prerequisites: Go 1.24+, Flutter 3.24+, libusb-1.0-dev
-git clone https://github.com/mantonx/nexus-next.git
-cd nexus-next
+git clone https://github.com/mantonx/nexus-open.git
+cd nexus-open
 
 # Run without hardware (mock device mode)
 NEXUS_MOCK_DEVICE=1 make run
@@ -62,4 +62,4 @@ Build your plugin binary and reference it from a layout YAML under `configs/layo
 
 ## Questions
 
-Open a [GitHub Discussion](https://github.com/mantonx/nexus-next/discussions) for design questions or anything that doesn't fit an issue.
+Open a [GitHub Discussion](https://github.com/mantonx/nexus-open/discussions) for design questions or anything that doesn't fit an issue.

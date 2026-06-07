@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/mantonx/nexus-next/internal/store"
+	"github.com/mantonx/nexus-open/internal/store"
 )
 
 // Manager handles configuration loading, validation, and watching.

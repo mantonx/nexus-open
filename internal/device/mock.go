@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/touch"
+	"github.com/mantonx/nexus-open/internal/touch"
 )
 
 // MockDevice is a mock implementation of Device for testing.

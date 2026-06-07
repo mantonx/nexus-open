@@ -9,10 +9,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/device"
-	settings "github.com/mantonx/nexus-next/internal/settings"
-	"github.com/mantonx/nexus-next/internal/store"
-	"github.com/mantonx/nexus-next/internal/zone"
+	"github.com/mantonx/nexus-open/internal/device"
+	settings "github.com/mantonx/nexus-open/internal/settings"
+	"github.com/mantonx/nexus-open/internal/store"
+	"github.com/mantonx/nexus-open/internal/zone"
 )
 
 // DeviceController provides an interface for controlling device features.

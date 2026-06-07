@@ -3,7 +3,7 @@ package builtin
 import (
 	"time"
 
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // PlaceholderPlugin displays a placeholder message (for loading/errors)

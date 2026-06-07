@@ -18,8 +18,8 @@ import (
 	"github.com/nfnt/resize"
 	"gopkg.in/yaml.v3"
 
-	"github.com/mantonx/nexus-next/internal/store"
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/internal/store"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // liveSwipePreviewThreshold is the drag progress at which the target page

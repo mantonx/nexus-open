@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/api"
-	"github.com/mantonx/nexus-next/internal/device"
-	settings "github.com/mantonx/nexus-next/internal/settings"
-	"github.com/mantonx/nexus-next/internal/store"
-	"github.com/mantonx/nexus-next/internal/touch"
-	"github.com/mantonx/nexus-next/internal/zone"
+	"github.com/mantonx/nexus-open/internal/api"
+	"github.com/mantonx/nexus-open/internal/device"
+	settings "github.com/mantonx/nexus-open/internal/settings"
+	"github.com/mantonx/nexus-open/internal/store"
+	"github.com/mantonx/nexus-open/internal/touch"
+	"github.com/mantonx/nexus-open/internal/zone"
 )
 
 // App is the main application container that holds all dependencies.

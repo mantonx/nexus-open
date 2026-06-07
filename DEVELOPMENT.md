@@ -99,7 +99,7 @@ If you want to use the physical device:
 ## Project Structure
 
 ```
-nexus-next/
+nexus-open/
 ├── cmd/nexus-open/        # Main application entry point
 ├── internal/
 │   ├── app/               # Application orchestration

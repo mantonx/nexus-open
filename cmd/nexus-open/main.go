@@ -10,7 +10,7 @@
 // openapi:meta tag Config --- Configuration management
 // openapi:meta tag Zone --- Zone and module management
 // openapi:meta tag Animation --- Animation control
-// openapi:meta contact https://github.com/mantonx/nexus-next Nexus Team
+// openapi:meta contact https://github.com/mantonx/nexus-open Nexus Team
 package main
 
 import (
@@ -27,9 +27,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/mantonx/nexus-next/internal/app"
-	"github.com/mantonx/nexus-next/internal/tray"
-	"github.com/mantonx/nexus-next/internal/udev"
+	"github.com/mantonx/nexus-open/internal/app"
+	"github.com/mantonx/nexus-open/internal/tray"
+	"github.com/mantonx/nexus-open/internal/udev"
 )
 
 var (

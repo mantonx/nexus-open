@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/zone"
+	"github.com/mantonx/nexus-open/internal/zone"
 )
 
 // draftIdleTimeout is how long an open draft persists without any activity

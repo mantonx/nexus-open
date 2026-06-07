@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/fogleman/gg"
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // ClockFace controls the visual style of the clock zone.

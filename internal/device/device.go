@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/touch"
+	"github.com/mantonx/nexus-open/internal/touch"
 )
 
 // Device represents a Nexus display device with USB communication capabilities.

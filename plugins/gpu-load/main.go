@@ -17,7 +17,7 @@ import (
 
 	goplugin "github.com/hashicorp/go-plugin"
 
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 const (

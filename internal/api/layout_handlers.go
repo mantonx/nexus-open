@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mantonx/nexus-next/internal/store"
-	"github.com/mantonx/nexus-next/internal/zone"
+	"github.com/mantonx/nexus-open/internal/store"
+	"github.com/mantonx/nexus-open/internal/zone"
 )
 
 // handleGetLayout returns the full layout: all pages with their zones.

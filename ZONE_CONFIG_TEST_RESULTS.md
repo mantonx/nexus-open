@@ -113,8 +113,8 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 ## Architecture Verification
 
 ### ✅ Code Structure
-- **Zone Config Manager**: `/home/fictional/Projects/nexus-next/internal/zoneconfig/manager.go`
-- **API Handlers**: `/home/fictional/Projects/nexus-next/internal/api/zone_handlers.go`
+- **Zone Config Manager**: `/home/fictional/Projects/nexus-open/internal/zoneconfig/manager.go`
+- **API Handlers**: `/home/fictional/Projects/nexus-open/internal/api/zone_handlers.go`
 - **Integration**: Properly wired through `internal/app/app.go`
 - **Config Resolution**: Zone override → Plugin default → nil (correct precedence)
 
@@ -158,7 +158,7 @@ curl -X DELETE http://localhost:1985/api/zones/weather/config
 
 ## Test Automation
 
-**Test Script**: `/home/fictional/Projects/nexus-next/test-zone-config.sh`
+**Test Script**: `/home/fictional/Projects/nexus-open/test-zone-config.sh`
 - Comprehensive automated test suite
 - 13 test cases covering all functionality
 - Color-coded pass/fail output

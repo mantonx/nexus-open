@@ -433,7 +433,7 @@ Rail: Editor | Global | Device
 2. `docs/TERMINOLOGY.md`: finish the Instrument → Plugin cleanup table; add the
    "Config surface hierarchy" section from Phase 0.
 
-3. `README.md`: fix quick-start (still references `nexus-next` repo name). Add
+3. `README.md`: fix quick-start (still references `nexus-open` repo name). Add
    a GIF or screenshot at the top.
 
 4. `DEVICE_SETUP.md`: verify all steps still apply post-v2.
@@ -495,7 +495,7 @@ and host FPS; surface in Device mode (Phase 4).
 ### Adoption (high ROI, no feature work)
 - **Cut a tagged v1.0 release.** `release.yml` is tag-triggered but no tags have
   been pushed. `git tag v1.0.0 && git push --tags` unblocks the CI release flow.
-- **Fix README quick-start.** The `cd nexus-next` line and the Support link
+- **Fix README quick-start.** The `cd nexus-open` line and the Support link
   point at the old repo name.
 - **Add a GIF or screenshot** of the strip in motion to the top of README.
   Worth more for discoverability than the next several features.

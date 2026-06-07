@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/mantonx/nexus-next/internal/store"
-	"github.com/mantonx/nexus-next/internal/zone"
+	"github.com/mantonx/nexus-open/internal/store"
+	"github.com/mantonx/nexus-open/internal/zone"
 )
 
 // ── storeToZoneConfig ─────────────────────────────────────────────────────────

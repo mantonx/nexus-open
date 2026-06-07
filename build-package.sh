@@ -32,7 +32,7 @@ PKG_VERSION="$(git describe --tags --match 'v*' --always ${_DIRTY_FLAG} 2>/dev/n
 unset _DIRTY_FLAG
 PKG_ARCH="amd64"
 PKG_DESCRIPTION="Linux controller for Corsair iCUE Nexus display"
-PKG_URL="https://github.com/mantonx/nexus-next"
+PKG_URL="https://github.com/mantonx/nexus-open"
 PKG_MAINTAINER="Matt <matthew.panton@gmail.com>"
 PKG_LICENSE="MIT"
 

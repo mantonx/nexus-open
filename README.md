@@ -69,8 +69,8 @@ The refactoring from Wails to Flutter is complete! See [PROJECT_PLAN.md](PROJECT
 
 ```bash
 # Clone repository
-git clone https://github.com/mantonx/nexus-next.git
-cd nexus-next
+git clone https://github.com/mantonx/nexus-open.git
+cd nexus-open
 
 # Build Go backend (using Make)
 make build                 # Development build (with debug info)
@@ -301,7 +301,7 @@ A zone displays nothing or a placeholder instead of data.
 
 - **Installation:** [docs/INSTALLATION.md](docs/INSTALLATION.md)
 - **Device setup:** [DEVICE_SETUP.md](DEVICE_SETUP.md)
-- **Issues:** [GitHub Issues](https://github.com/mantonx/nexus-next/issues)
+- **Issues:** [GitHub Issues](https://github.com/mantonx/nexus-open/issues)
 - **API Documentation:** See REST API endpoints section above
 - **Development:** [PROJECT_PLAN.md](PROJECT_PLAN.md)
 

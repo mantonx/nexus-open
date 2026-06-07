@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mantonx/nexus-next/internal/plugins/builtin"
-	pluginhost "github.com/mantonx/nexus-next/internal/plugins/host"
-	"github.com/mantonx/nexus-next/pkg/plugin"
+	"github.com/mantonx/nexus-open/internal/plugins/builtin"
+	pluginhost "github.com/mantonx/nexus-open/internal/plugins/host"
+	"github.com/mantonx/nexus-open/pkg/plugin"
 )
 
 // ZoneStatus represents the current health of a single zone's plugin.

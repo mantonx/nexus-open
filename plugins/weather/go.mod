@@ -2,11 +2,11 @@ module nexus-weather
 
 go 1.25.2
 
-replace github.com/mantonx/nexus-next => ../..
+replace github.com/mantonx/nexus-open => ../..
 
 require (
 	github.com/hashicorp/go-plugin v1.8.0
-	github.com/mantonx/nexus-next v0.0.0-20260605212857-bd16564f204a
+	github.com/mantonx/nexus-open v0.0.0-20260605212857-bd16564f204a
 )
 
 require (

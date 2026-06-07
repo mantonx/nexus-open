@@ -7,7 +7,7 @@ package zone
 import (
 	"log/slog"
 
-	"github.com/mantonx/nexus-next/internal/store"
+	"github.com/mantonx/nexus-open/internal/store"
 )
 
 // ConfigManager manages zone-specific plugin configurations.

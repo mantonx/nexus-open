@@ -11,9 +11,9 @@ import (
 
 	"log/slog"
 
-	"github.com/mantonx/nexus-next/internal/device"
-	"github.com/mantonx/nexus-next/internal/store"
-	config "github.com/mantonx/nexus-next/internal/settings"
+	"github.com/mantonx/nexus-open/internal/device"
+	"github.com/mantonx/nexus-open/internal/store"
+	config "github.com/mantonx/nexus-open/internal/settings"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────

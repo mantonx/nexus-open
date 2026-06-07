@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"github.com/mantonx/nexus-next/internal/assets"
-	"github.com/mantonx/nexus-next/internal/device"
-	"github.com/mantonx/nexus-next/internal/settings"
+	"github.com/mantonx/nexus-open/internal/assets"
+	"github.com/mantonx/nexus-open/internal/device"
+	"github.com/mantonx/nexus-open/internal/settings"
 )
 
 // ErrorResponse represents an API error response.

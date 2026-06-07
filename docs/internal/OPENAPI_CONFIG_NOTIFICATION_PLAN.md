@@ -246,7 +246,7 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 // @version 2.0
 // @description API for Nexus Open - iCUE Nexus companion app
 // @contact.name Nexus Team
-// @contact.url https://github.com/mantonx/nexus-next
+// @contact.url https://github.com/mantonx/nexus-open
 
 // @host localhost:1985
 // @BasePath /
