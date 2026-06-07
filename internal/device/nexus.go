@@ -17,10 +17,12 @@ type NexusDevice struct {
 	logger *slog.Logger
 	config ConnectionConfig
 
-	handle    *usbHandle
-	mu        sync.RWMutex // guards connected, handle
-	writeMu   sync.Mutex   // serialises concurrent frame + brightness writes
-	connected bool
+	handle       *usbHandle
+	mu           sync.RWMutex // guards connected, handle
+	writeMu      sync.Mutex   // serialises concurrent frame + brightness writes
+	connected    bool
+	manufacturer string
+	product      string
 
 	touchReader *touch.HIDTouchReader
 
@@ -94,6 +96,8 @@ func (n *NexusDevice) connectOnce() error {
 
 	n.handle = h
 	n.connected = true
+	n.manufacturer = mfr
+	n.product = prod
 
 	n.clearDisplay()
 
@@ -256,6 +260,26 @@ func (n *NexusDevice) SetBrightness(brightness int) error {
 // GetFirmwareVersion is not yet implemented via raw libusb.
 func (n *NexusDevice) GetFirmwareVersion() (string, error) {
 	return "", fmt.Errorf("GetFirmwareVersion not implemented")
+}
+
+// DeviceInfo holds static information read from the USB device at connect time.
+type DeviceInfo struct {
+	Manufacturer string
+	Product      string
+	VendorID     uint16
+	ProductID    uint16
+}
+
+// GetDeviceInfo returns the manufacturer, product, and USB IDs read at connect time.
+func (n *NexusDevice) GetDeviceInfo() DeviceInfo {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return DeviceInfo{
+		Manufacturer: n.manufacturer,
+		Product:      n.product,
+		VendorID:     uint16(n.config.VendorID),
+		ProductID:    uint16(n.config.ProductID),
+	}
 }
 
 func (n *NexusDevice) clearDisplay() {

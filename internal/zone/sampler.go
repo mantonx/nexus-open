@@ -76,18 +76,41 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 	return s
 }
 
-// resolvePluginPath converts an exec: spec like "exec:./plugins/cpu-temp/cpu-temp"
-// into an absolute path using pluginsDir. Paths that are already absolute are
-// returned unchanged. The "./plugins/" prefix is treated as a conventional
-// relative marker; everything after it is appended to pluginsDir.
+// normalizePluginID converts legacy path-form exec IDs to the canonical short form.
+//
+//	exec:./plugins/cpu-temp/cpu-temp  →  exec:cpu-temp
+//	exec:cpu-temp                     →  exec:cpu-temp  (unchanged)
+//	builtin:clock                     →  builtin:clock  (unchanged)
+func NormalizePluginID(id string) string {
+	if !strings.HasPrefix(id, "exec:") {
+		return id
+	}
+	rel := strings.TrimPrefix(id, "exec:")
+	rel = strings.TrimPrefix(rel, "./plugins/")
+	// rel is now either "cpu-temp/cpu-temp" or "cpu-temp"
+	name := filepath.Base(rel)
+	return "exec:" + name
+}
+
+// resolvePluginPath converts an exec: spec into an absolute binary path.
+// Handles all three forms:
+//
+//	exec:cpu-temp                       → <pluginsDir>/cpu-temp/cpu-temp
+//	exec:./plugins/cpu-temp/cpu-temp    → <pluginsDir>/cpu-temp/cpu-temp
+//	exec:/absolute/path/to/binary       → /absolute/path/to/binary
 func (s *Sampler) resolvePluginPath(spec string) string {
 	rel := strings.TrimPrefix(spec, "exec:")
 	if filepath.IsAbs(rel) {
 		return rel
 	}
-	// Strip the conventional ./plugins/ prefix and anchor to pluginsDir.
-	stripped := strings.TrimPrefix(rel, "./plugins/")
-	return filepath.Join(s.pluginsDir, stripped)
+	// Strip the conventional ./plugins/ prefix if present.
+	rel = strings.TrimPrefix(rel, "./plugins/")
+	// rel is now either "cpu-temp/cpu-temp" or just "cpu-temp".
+	// If it contains no separator, it is the short form: expand to name/name.
+	if !strings.Contains(rel, "/") {
+		rel = rel + "/" + rel
+	}
+	return filepath.Join(s.pluginsDir, rel)
 }
 
 // Start begins sampling all modules configured in the zone manager
@@ -123,8 +146,8 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Parse plugin specification
-	pluginSpec := zoneConfig.Plugin
+	// Parse plugin specification, normalising legacy path forms to the short canonical form.
+	pluginSpec := NormalizePluginID(zoneConfig.Plugin)
 	var mod plugin.Plugin
 	var err error
 

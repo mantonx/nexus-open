@@ -82,8 +82,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		noClients := len(s.hub.clients) == 0
 		s.hub.mu.Unlock()
 		if noClients && s.draft != nil && s.draft.HasDraft() {
-			committed := s.layoutReloader.GetConfig()
-			s.draft.Discard(committed)
+			s.draft.Discard()
 		}
 	}()
 

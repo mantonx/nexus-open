@@ -64,10 +64,31 @@ func simpleConfig() *zone.Config {
 	}
 }
 
+// seedStore writes cfg into db so OpenDraft (which reads from DB) has data.
+func seedStore(t *testing.T, db *store.DB, cfg *zone.Config) {
+	t.Helper()
+	for pi, p := range cfg.Pages {
+		pageID, err := db.CreatePage(p.Name, pi)
+		if err != nil {
+			t.Fatalf("seed page: %v", err)
+		}
+		for zi, z := range p.Zones {
+			if err := db.CreateZone(store.StoredZone{
+				ID: z.ID, PageID: pageID, Plugin: z.Plugin,
+				WidthPx: z.Width, RefreshMs: z.RefreshMs, Ord: zi,
+			}); err != nil {
+				t.Fatalf("seed zone: %v", err)
+			}
+		}
+	}
+}
+
 func newDraftTestServer(t *testing.T) (*Server, *mockReloader) {
 	t.Helper()
-	srv := newTestServer(t)
-	mr := &mockReloader{cfg: simpleConfig()}
+	srv, db := newTestServerWithStore(t)
+	cfg := simpleConfig()
+	seedStore(t, db, cfg)
+	mr := &mockReloader{cfg: cfg}
 	srv.SetLayoutReloader(mr)
 	return srv, mr
 }
@@ -192,9 +213,7 @@ func TestDraft_AddZone(t *testing.T) {
 }
 
 func TestDraft_AddZone_CapEnforced(t *testing.T) {
-	srv, mr := newDraftTestServer(t)
-
-	// Set up a committed config with 6 zones already.
+	// Build a full-page config (MaxZonesPerPage zones) and load it into the draft directly.
 	full := &zone.Config{
 		Name: "Full", Version: "1.0", Theme: zone.DefaultTheme(),
 		Pages: []zone.Page{{Name: "p"}},
@@ -205,11 +224,15 @@ func TestDraft_AddZone_CapEnforced(t *testing.T) {
 			Plugin: "builtin:clock", RefreshMs: 1000,
 		})
 	}
-	// Fix rounding: make total exactly 640.
 	if err := full.Pages[0].RedistributeWidths(zone.DisplayWidthPx, zone.MinZoneWidthPx); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	mr.cfg = full
+
+	srv, _ := newDraftTestServer(t)
+	// Bypass OpenDraft — seed the in-memory draft directly with the full config.
+	if err := srv.draft.UpdateDraft(full); err != nil {
+		t.Fatalf("seed draft: %v", err)
+	}
 
 	body := bytes.NewBufferString(`{"page_index":0,"plugin":"builtin:debug","refresh_ms":500}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/layout/draft/zones", body)
@@ -247,7 +270,7 @@ func TestDraft_DeleteZone(t *testing.T) {
 
 func TestDraft_DeleteZone_NotFound(t *testing.T) {
 	srv, _ := newDraftTestServer(t)
-	srv.draft.OpenDraft(simpleConfig())
+	srv.draft.UpdateDraft(simpleConfig()) //nolint:errcheck
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/layout/draft/zones/nope", nil)
 	w := httptest.NewRecorder()
@@ -260,7 +283,7 @@ func TestDraft_DeleteZone_NotFound(t *testing.T) {
 
 func TestDraft_PatchZone(t *testing.T) {
 	srv, _ := newDraftTestServer(t)
-	srv.draft.OpenDraft(simpleConfig())
+	srv.draft.UpdateDraft(simpleConfig()) //nolint:errcheck
 
 	plugin := "builtin:debug"
 	body, _ := json.Marshal(map[string]any{"plugin": plugin})
@@ -280,7 +303,7 @@ func TestDraft_PatchZone(t *testing.T) {
 
 func TestDraft_Discard(t *testing.T) {
 	srv, _ := newDraftTestServer(t)
-	srv.draft.OpenDraft(simpleConfig())
+	srv.draft.UpdateDraft(simpleConfig()) //nolint:errcheck
 
 	req := httptest.NewRequest(http.MethodPost, "/api/layout/discard", nil)
 	w := httptest.NewRecorder()

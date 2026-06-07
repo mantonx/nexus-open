@@ -280,3 +280,39 @@ func (p *Page) ComputeOffsets() {
 		x += p.Zones[i].Width
 	}
 }
+
+// CopyConfig returns a deep copy of cfg without JSON round-tripping.
+// Only the two reference types in ZoneConfig need explicit copying:
+//   - PluginConfig map[string]any  — shallow map copy (values are JSON scalars)
+//   - ThemeOverride *Theme         — copy the pointed-to struct
+func CopyConfig(cfg *Config) *Config {
+	if cfg == nil {
+		return nil
+	}
+	out := *cfg // copy all value fields (Name, Version, Theme, Nav)
+	out.Pages = make([]Page, len(cfg.Pages))
+	for i, p := range cfg.Pages {
+		np := Page{Name: p.Name}
+		np.Zones = make([]ZoneConfig, len(p.Zones))
+		for j, z := range p.Zones {
+			nz := z // copy all value fields
+			if z.PluginConfig != nil {
+				nz.PluginConfig = make(map[string]any, len(z.PluginConfig))
+				for k, v := range z.PluginConfig {
+					nz.PluginConfig[k] = v
+				}
+			}
+			if z.ThemeOverride != nil {
+				t := *z.ThemeOverride
+				nz.ThemeOverride = &t
+			}
+			if z.Choices != nil {
+				nz.Choices = make([]string, len(z.Choices))
+				copy(nz.Choices, z.Choices)
+			}
+			np.Zones[j] = nz
+		}
+		out.Pages[i] = np
+	}
+	return &out
+}

@@ -50,6 +50,7 @@ class DeviceInfo with _$DeviceInfo {
   const factory DeviceInfo({
     @Default('iCUE Nexus') String model,
     @Default('') String firmware,
+    @Default('') String manufacturer,
     @JsonKey(name: 'vendorId') @Default('0x1b1c') String vendorId,
     @JsonKey(name: 'productId') @Default('0x1b8e') String productId,
     @JsonKey(name: 'connect_error') String? connectError,

@@ -284,7 +284,10 @@ func newDraftServerWithImportStore(t *testing.T) (*Server, *mockImportStore) {
 	srv := newTestServer(t)
 	srv.SetLayoutStore(ms)
 
-	reloader := &mockReloader{cfg: simpleConfig()}
+	cfg := simpleConfig()
+	seedStore(t, realDB, cfg)
+
+	reloader := &mockReloader{cfg: cfg}
 	srv.SetLayoutReloader(reloader)
 	return srv, ms
 }

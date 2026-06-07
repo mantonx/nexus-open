@@ -302,6 +302,9 @@ func (a *App) initialize() error {
 	// Register zone sampler as status provider so /api/zones/:id/status works.
 	a.apiServer.SetZoneStatusProvider(a.zoneSampler)
 
+	// Register zone sampler as plugin catalog provider so /api/plugins works.
+	a.apiServer.SetPluginCatalog(a.zoneSampler)
+
 	// Wire zone manager for swipe simulation, navigation, and layout editing.
 	a.apiServer.SetSwipeSimulator(a.zoneManager)
 	a.apiServer.SetNavigator(a.zoneManager)

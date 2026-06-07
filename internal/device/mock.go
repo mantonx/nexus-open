@@ -195,3 +195,13 @@ func (m *MockDevice) GetFirmwareVersion() (string, error) {
 
 	return "1.0.0-mock", nil
 }
+
+// GetDeviceInfo returns mock device info.
+func (m *MockDevice) GetDeviceInfo() DeviceInfo {
+	return DeviceInfo{
+		Manufacturer: "Corsair",
+		Product:      "iCUE Nexus (mock)",
+		VendorID:     0x1b1c,
+		ProductID:    0x1b8e,
+	}
+}

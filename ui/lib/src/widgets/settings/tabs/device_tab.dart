@@ -1,11 +1,9 @@
-// Device tab — connection status, firmware, brightness, per-zone health.
+// Device tab — connection status, firmware info, per-zone health.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../../../services/nexus_api_service.dart';
-import '../../../services/ws_service.dart';
 import '../../../theme/app_tokens.dart';
 import '../../common/common.dart';
 
@@ -20,7 +18,6 @@ class _DeviceTabState extends State<DeviceTab> {
   DeviceInfo? _info;
   bool _loading = true;
   String? _error;
-  double _brightness = 75;
   final _api = NexusApiService();
   Timer? _pollTimer;
 
@@ -47,19 +44,10 @@ class _DeviceTabState extends State<DeviceTab> {
     }
   }
 
-  Future<void> _setBrightness(double v) async {
-    try {
-      await _api.setBrightness(v.round());
-    } catch (_) {}
-  }
-
   @override
   Widget build(BuildContext context) {
-    final ws = context.watch<WsService>();
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final connected = ws.isConnected;
-
     return ListView(
       padding: AppSpacing.paddingMd,
       children: [
@@ -81,10 +69,14 @@ class _DeviceTabState extends State<DeviceTab> {
             title: 'Device',
             child: Column(
               children: [
+                if (_info!.manufacturer.isNotEmpty)
+                  _InfoRow(label: 'Manufacturer', value: _info!.manufacturer),
                 _InfoRow(label: 'Model', value: _info!.model),
                 _InfoRow(label: 'Firmware', value: _info!.firmware),
                 if (_info!.vendorId.isNotEmpty)
                   _InfoRow(label: 'Vendor ID', value: _info!.vendorId),
+                if (_info!.productId.isNotEmpty)
+                  _InfoRow(label: 'Product ID', value: _info!.productId),
               ],
             ),
           ),
@@ -106,35 +98,6 @@ class _DeviceTabState extends State<DeviceTab> {
             ),
           ],
         ],
-
-        const SizedBox(height: AppSpacing.md),
-
-        // ── Brightness ────────────────────────────────────────────────────
-        NexusSection(
-          title: 'Brightness',
-          description: 'Physical display brightness (0–100).',
-          trailing: connected
-              ? null
-              : const NexusStatusBadge(status: NexusStatus.warning, label: 'Device required'),
-          child: Row(
-            children: [
-              const Icon(Icons.brightness_low, size: AppIconSize.sm),
-              Expanded(
-                child: Slider(
-                  value: _brightness,
-                  min: 0,
-                  max: 100,
-                  divisions: 20,
-                  label: _brightness.round().toString(),
-                  activeColor: AppColors.accent,
-                  onChanged: connected ? (v) => setState(() => _brightness = v) : null,
-                  onChangeEnd: connected ? _setBrightness : null,
-                ),
-              ),
-              const Icon(Icons.brightness_high, size: AppIconSize.sm),
-            ],
-          ),
-        ),
       ],
     );
   }

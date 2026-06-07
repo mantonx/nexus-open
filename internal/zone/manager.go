@@ -39,7 +39,7 @@ type Manager struct {
 	configPath string
 	db         *store.DB // nil when running from YAML only (e.g. cmd binaries)
 	currentPage int
-	themeMu    sync.RWMutex // guards config.Theme live updates
+	configMu   sync.RWMutex // guards m.config pointer reads/writes
 
 	// Zone state
 	zones      map[string]*Zone
@@ -245,7 +245,9 @@ func (m *Manager) ReloadFromConfig(config *Config) error {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
+	m.configMu.Lock()
 	m.config = config
+	m.configMu.Unlock()
 
 	// Clamp currentPage to new page count.
 	if m.currentPage >= len(config.Pages) {

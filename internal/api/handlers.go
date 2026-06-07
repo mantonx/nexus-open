@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 
@@ -327,14 +328,16 @@ func (s *Server) handleDeviceInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	di := s.device.GetDeviceInfo()
 	info := map[string]interface{}{
-		"firmware":  "N/A",
-		"vendorId":  "0x1b1c",
-		"productId": "0x1b8e",
-		"model":     "Corsair iCUE Nexus",
+		"firmware":     "N/A",
+		"vendorId":     fmt.Sprintf("0x%04x", di.VendorID),
+		"productId":    fmt.Sprintf("0x%04x", di.ProductID),
+		"model":        di.Product,
+		"manufacturer": di.Manufacturer,
 	}
 
-	// Best-effort firmware version — not fatal if unavailable.
+	// Best-effort firmware version — not implemented in libusb path.
 	if firmware, err := s.device.GetFirmwareVersion(); err == nil {
 		info["firmware"] = firmware
 	}

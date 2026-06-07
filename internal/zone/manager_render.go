@@ -27,10 +27,15 @@ func (m *Manager) UpdatePayload(zoneID string, payload plugin.Payload) error {
 
 	m.payloads[zoneID] = &payload
 
+	// Snapshot config pointer once under read-lock before walking pages.
+	m.configMu.RLock()
+	cfg := m.config
+	m.configMu.RUnlock()
+
 	// Invalidate cached frames for every page that contains this zone.
 	m.pageCacheMu.Lock()
 	invalidated := make([]int, 0, 2)
-	for pageIndex, page := range m.config.Pages {
+	for pageIndex, page := range cfg.Pages {
 		for _, zoneCfg := range page.Zones {
 			if zoneCfg.ID == zoneID {
 				if _, ok := m.pageCache[pageIndex]; ok {
@@ -58,7 +63,7 @@ func (m *Manager) UpdatePayload(zoneID string, payload plugin.Payload) error {
 // Per-zone ThemeOverrides (accent colour, font size, etc.) are re-merged on top
 // of the incoming global theme so they are never stomped by a settings save.
 func (m *Manager) UpdateTheme(theme Theme) {
-	m.themeMu.Lock()
+	m.configMu.Lock()
 	m.config.Theme = theme
 	for id, r := range m.renderers {
 		zoneTheme := theme
@@ -67,7 +72,7 @@ func (m *Manager) UpdateTheme(theme Theme) {
 		}
 		r.UpdateTheme(zoneTheme)
 	}
-	m.themeMu.Unlock()
+	m.configMu.Unlock()
 
 	// Invalidate the entire page cache — stale frames would show the old theme.
 	m.pageCacheMu.Lock()
@@ -77,9 +82,9 @@ func (m *Manager) UpdateTheme(theme Theme) {
 
 // RenderFrame renders the current frame (transition or live zones composited).
 func (m *Manager) RenderFrame() (*image.RGBA, error) {
-	m.themeMu.RLock()
+	m.configMu.RLock()
 	theme := m.config.Theme
-	m.themeMu.RUnlock()
+	m.configMu.RUnlock()
 
 	m.transitionMu.RLock()
 	if m.transition.Active && !m.transition.IsComplete() {
@@ -142,9 +147,9 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 			"success", success)
 	}()
 
-	m.themeMu.RLock()
+	m.configMu.RLock()
 	theme := m.config.Theme
-	m.themeMu.RUnlock()
+	m.configMu.RUnlock()
 
 	m.payloadsMu.RLock()
 	defer m.payloadsMu.RUnlock()
@@ -209,11 +214,15 @@ func (m *Manager) renderZoneImages(theme Theme) (*image.RGBA, error) {
 // renderPageFrame renders any page by index using current payloads.
 // Used to warm the cache for pages that aren't currently displayed.
 func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
-	if pageIndex < 0 || pageIndex >= len(m.config.Pages) {
+	m.configMu.RLock()
+	cfg := m.config
+	m.configMu.RUnlock()
+
+	if pageIndex < 0 || pageIndex >= len(cfg.Pages) {
 		return nil, fmt.Errorf("invalid page index: %d", pageIndex)
 	}
 
-	srcPage := m.config.Pages[pageIndex]
+	srcPage := cfg.Pages[pageIndex]
 	page := srcPage
 	page.Zones = make([]ZoneConfig, len(srcPage.Zones))
 	copy(page.Zones, srcPage.Zones)
@@ -230,7 +239,7 @@ func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
 		if r, ok := m.renderers[zoneConfig.ID]; ok {
 			renderer = r
 		} else {
-			theme := m.config.Theme
+			theme := cfg.Theme
 			if zoneConfig.ThemeOverride != nil {
 				theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
 			}
@@ -245,10 +254,6 @@ func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
 		}
 	}
 
-	m.themeMu.RLock()
-	theme := m.config.Theme
-	m.themeMu.RUnlock()
-
-	compositor := NewCompositor(m.logger, theme, &page)
-	return compositor.Composite(zoneImages, theme)
+	compositor := NewCompositor(m.logger, cfg.Theme, &page)
+	return compositor.Composite(zoneImages, cfg.Theme)
 }

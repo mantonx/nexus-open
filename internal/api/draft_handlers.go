@@ -11,19 +11,22 @@ import (
 )
 
 // handleGetDraft returns the current draft, opening one from the committed
-// config if none is active.
+// DB state if none is active.
 // GET /api/layout/draft
 func (s *Server) handleGetDraft(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.draft == nil || s.layoutReloader == nil {
+	if s.draft == nil {
 		s.respondError(w, "Draft manager not available", http.StatusServiceUnavailable)
 		return
 	}
-	committed := s.layoutReloader.GetConfig()
-	draft := s.draft.OpenDraft(committed)
+	draft, err := s.draft.OpenDraft()
+	if err != nil {
+		s.respondError(w, "Failed to open draft: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	s.respondJSON(w, map[string]any{"active": true, "layout": draft}, http.StatusOK)
 }
 
@@ -44,9 +47,20 @@ func (s *Server) handlePutDraft(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := cfg.Validate(); err != nil {
-		s.respondError(w, "Invalid layout: "+err.Error(), http.StatusUnprocessableEntity)
-		return
+	// Validate width sums for non-empty pages — empty pages are allowed in draft
+	// but zones within a page must sum to the display width.
+	for _, p := range cfg.Pages {
+		if len(p.Zones) == 0 {
+			continue
+		}
+		total := 0
+		for _, z := range p.Zones {
+			total += z.Width
+		}
+		if total != zone.DisplayWidthPx {
+			s.respondError(w, fmt.Sprintf("zone widths must sum to %d, got %d", zone.DisplayWidthPx, total), http.StatusUnprocessableEntity)
+			return
+		}
 	}
 	if err := s.draft.UpdateDraft(&cfg); err != nil {
 		s.respondError(w, "Draft update failed: "+err.Error(), http.StatusInternalServerError)
@@ -62,15 +76,16 @@ func (s *Server) handleDraftZones(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.draft == nil || s.layoutReloader == nil {
+	if s.draft == nil {
 		s.respondError(w, "Draft manager not available", http.StatusServiceUnavailable)
 		return
 	}
 
 	var req struct {
-		PageIndex int    `json:"page_index"`
-		Plugin    string `json:"plugin"`
-		RefreshMs int    `json:"refresh_ms"`
+		PageIndex      int    `json:"page_index"`
+		Plugin         string `json:"plugin"`
+		RefreshMs      int    `json:"refresh_ms"`
+		InsertBeforeID string `json:"insert_before_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -84,8 +99,11 @@ func (s *Server) handleDraftZones(w http.ResponseWriter, r *http.Request) {
 		req.RefreshMs = 1000
 	}
 
-	committed := s.layoutReloader.GetConfig()
-	draft := s.draft.OpenDraft(committed)
+	draft, err := s.draft.OpenDraft()
+	if err != nil {
+		s.respondError(w, "Failed to open draft: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	if req.PageIndex < 0 || req.PageIndex >= len(draft.Pages) {
 		s.respondError(w, fmt.Sprintf("page_index %d out of range", req.PageIndex), http.StatusBadRequest)
@@ -98,11 +116,27 @@ func (s *Server) handleDraftZones(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newID := uuid.NewString()
-	page.Zones = append(page.Zones, zone.ZoneConfig{
+	newZone := zone.ZoneConfig{
 		ID:        newID,
-		Plugin:    req.Plugin,
+		Plugin:    zone.NormalizePluginID(req.Plugin),
 		RefreshMs: req.RefreshMs,
-	})
+	}
+	if req.InsertBeforeID != "" {
+		insertAt := -1
+		for i, z := range page.Zones {
+			if z.ID == req.InsertBeforeID {
+				insertAt = i
+				break
+			}
+		}
+		if insertAt >= 0 {
+			page.Zones = append(page.Zones[:insertAt], append([]zone.ZoneConfig{newZone}, page.Zones[insertAt:]...)...)
+		} else {
+			page.Zones = append(page.Zones, newZone)
+		}
+	} else {
+		page.Zones = append(page.Zones, newZone)
+	}
 	if err := page.RedistributeWidths(zone.DisplayWidthPx, zone.MinZoneWidthPx); err != nil {
 		s.respondError(w, "Width redistribution failed: "+err.Error(), http.StatusUnprocessableEntity)
 		return
@@ -119,27 +153,28 @@ func (s *Server) handleDraftZones(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/layout/draft/zones/:id
 // PATCH  /api/layout/draft/zones/:id
 func (s *Server) handleDraftZone(w http.ResponseWriter, r *http.Request) {
-	if s.draft == nil || s.layoutReloader == nil {
+	if s.draft == nil {
 		s.respondError(w, "Draft manager not available", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Extract zone ID from path: /api/layout/draft/zones/{id}
 	path := r.URL.Path
 	const prefix = "/api/layout/draft/zones/"
 	if !strings.HasPrefix(path, prefix) {
 		s.respondError(w, "Not found", http.StatusNotFound)
 		return
 	}
-	zoneID := strings.TrimPrefix(path, prefix)
-	zoneID = strings.TrimSuffix(zoneID, "/")
+	zoneID := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
 	if zoneID == "" {
 		s.respondError(w, "Zone ID required", http.StatusBadRequest)
 		return
 	}
 
-	committed := s.layoutReloader.GetConfig()
-	draft := s.draft.OpenDraft(committed)
+	draft, err := s.draft.OpenDraft()
+	if err != nil {
+		s.respondError(w, "Failed to open draft: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodDelete:
@@ -261,7 +296,6 @@ func (s *Server) handleCommitDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reload from the newly committed DB state so the manager has fresh IDs.
 	s.triggerLayoutReload()
 	s.hub.Broadcast(WSMessage{Type: "committed_state", Data: map[string]any{"committed": true}})
 	s.respondSuccess(w, "Draft committed", nil)
@@ -278,8 +312,57 @@ func (s *Server) handleDiscardDraft(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, "Draft manager not available", http.StatusServiceUnavailable)
 		return
 	}
-
-	committed := s.layoutReloader.GetConfig()
-	s.draft.Discard(committed)
+	s.draft.Discard()
 	s.respondSuccess(w, "Draft discarded", nil)
+}
+
+// handleDraftReorderZones reorders zones within a page of the current draft.
+// POST /api/layout/draft/zones/reorder  body: {"page_index": 0, "order": ["id-a","id-b"]}
+func (s *Server) handleDraftReorderZones(w http.ResponseWriter, r *http.Request) {
+	if s.draft == nil {
+		s.respondError(w, "Draft manager not available", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		PageIndex int      `json:"page_index"`
+		Order     []string `json:"order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	draft, err := s.draft.OpenDraft()
+	if err != nil {
+		s.respondError(w, "Failed to open draft: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if req.PageIndex < 0 || req.PageIndex >= len(draft.Pages) {
+		s.respondError(w, fmt.Sprintf("page_index %d out of range", req.PageIndex), http.StatusBadRequest)
+		return
+	}
+	page := &draft.Pages[req.PageIndex]
+	byID := make(map[string]zone.ZoneConfig, len(page.Zones))
+	for _, z := range page.Zones {
+		byID[z.ID] = z
+	}
+	reordered := make([]zone.ZoneConfig, 0, len(req.Order))
+	for _, id := range req.Order {
+		if z, ok := byID[id]; ok {
+			reordered = append(reordered, z)
+		}
+	}
+	page.Zones = reordered
+	if err := s.draft.UpdateDraft(draft); err != nil {
+		s.respondError(w, "Draft update failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.respondSuccess(w, "Draft zones reordered", nil)
+}
+
+func normalizeConfigPluginIDs(cfg *zone.Config) {
+	for i := range cfg.Pages {
+		for j := range cfg.Pages[i].Zones {
+			cfg.Pages[i].Zones[j].Plugin = zone.NormalizePluginID(cfg.Pages[i].Zones[j].Plugin)
+		}
+	}
 }

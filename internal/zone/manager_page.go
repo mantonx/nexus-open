@@ -92,8 +92,11 @@ func mergeTheme(base, override Theme) Theme {
 	return result
 }
 
-// GetConfig returns the current configuration.
+// GetConfig returns the current configuration pointer. The pointer is stable
+// for the duration of the current config — callers must not mutate it.
 func (m *Manager) GetConfig() *Config {
+	m.configMu.RLock()
+	defer m.configMu.RUnlock()
 	return m.config
 }
 
@@ -362,9 +365,9 @@ func (m *Manager) preRenderPage(pageIndex int) {
 		zoneImages[zoneConfig.ID] = img
 	}
 
-	m.themeMu.RLock()
+	m.configMu.RLock()
 	theme := m.config.Theme
-	m.themeMu.RUnlock()
+	m.configMu.RUnlock()
 
 	compositor := NewCompositor(m.logger, theme, &page)
 	frame, err := compositor.Composite(zoneImages, theme)

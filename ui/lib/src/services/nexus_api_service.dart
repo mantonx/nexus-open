@@ -327,6 +327,13 @@ class NexusApiService {
     if (r.statusCode != 200) throw ApiException('Failed to reorder zones', statusCode: r.statusCode);
   }
 
+  Future<void> reorderDraftZones(int pageIndex, List<String> order) async {
+    final r = await _client.post(Uri.parse('$baseUrl/api/layout/draft/zones/reorder'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'page_index': pageIndex, 'order': order})).timeout(timeout);
+    if (r.statusCode != 200) throw ApiException('Failed to reorder draft zones', statusCode: r.statusCode);
+  }
+
   /// Navigate directly to a page index.
   Future<void> navigatePage(int pageIndex) async {
     final response = await _client
@@ -376,27 +383,30 @@ class NexusApiService {
     required int pageIndex,
     required String plugin,
     int refreshMs = 1000,
+    String? insertBeforeId,
   }) async {
+    final body = <String, dynamic>{
+      'page_index': pageIndex,
+      'plugin': plugin,
+      'refresh_ms': refreshMs,
+    };
+    if (insertBeforeId != null) body['insert_before_id'] = insertBeforeId;
     final r = await _client
         .post(
           Uri.parse('$baseUrl/api/layout/draft/zones'),
           headers: {'Content-Type': 'application/json'},
-          body: json.encode({
-            'page_index': pageIndex,
-            'plugin': plugin,
-            'refresh_ms': refreshMs,
-          }),
+          body: json.encode(body),
         )
         .timeout(timeout);
     if (r.statusCode != 200) {
-      final body = json.decode(r.body) as Map<String, dynamic>;
+      final errBody = json.decode(r.body) as Map<String, dynamic>;
       throw ApiException(
-        body['message'] as String? ?? 'Failed to add zone',
+        errBody['message'] as String? ?? 'Failed to add zone',
         statusCode: r.statusCode,
       );
     }
-    final body = json.decode(r.body) as Map<String, dynamic>;
-    return (body['data'] as Map?)?['id'] as String? ?? '';
+    final respBody = json.decode(r.body) as Map<String, dynamic>;
+    return (respBody['data'] as Map?)?['id'] as String? ?? '';
   }
 
   /// Remove a zone from the draft.

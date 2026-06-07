@@ -38,6 +38,7 @@ type Device interface {
 	// HID Feature Report methods (may not be supported by all devices)
 	SetBrightness(brightness int) error
 	GetFirmwareVersion() (string, error)
+	GetDeviceInfo() DeviceInfo
 }
 
 // ConnectionConfig holds configuration for device connection.

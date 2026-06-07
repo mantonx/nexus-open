@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mantonx/nexus-next/internal/device"
 	settings "github.com/mantonx/nexus-next/internal/settings"
 	"github.com/mantonx/nexus-next/internal/store"
 	"github.com/mantonx/nexus-next/internal/zone"
@@ -18,6 +19,7 @@ import (
 type DeviceController interface {
 	SetBrightness(brightness int) error
 	GetFirmwareVersion() (string, error)
+	GetDeviceInfo() device.DeviceInfo
 	IsConnected() bool
 }
 
@@ -208,7 +210,9 @@ func (s *Server) SetLayoutStore(ls LayoutStore) {
 // SetLayoutReloader wires in the zone manager for live layout reloads.
 func (s *Server) SetLayoutReloader(lr LayoutReloader) {
 	s.layoutReloader = lr
-	s.draft = NewDraftManager(lr, s.hub.Broadcast)
+	if s.layoutStore != nil {
+		s.draft = NewDraftManager(s.layoutStore, lr, s.hub.Broadcast)
+	}
 }
 
 // SetPluginCatalog wires in the sampler for GET /api/plugins.
@@ -275,6 +279,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/layout/draft", s.handleGetDraft)
 	mux.HandleFunc("PUT /api/layout/draft", s.handlePutDraft)
 	mux.HandleFunc("POST /api/layout/draft/zones", s.handleDraftZones)
+	mux.HandleFunc("/api/layout/draft/zones/reorder", s.handleDraftReorderZones)
 	mux.HandleFunc("/api/layout/draft/zones/", s.handleDraftZone)
 	mux.HandleFunc("POST /api/layout/commit", s.handleCommitDraft)
 	mux.HandleFunc("POST /api/layout/discard", s.handleDiscardDraft)

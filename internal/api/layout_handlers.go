@@ -102,6 +102,9 @@ func (s *Server) handleLayoutPages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.triggerLayoutReload()
+	if s.draft != nil {
+		s.draft.Discard()
+	}
 	s.respondSuccess(w, "Page created", map[string]any{"id": id, "name": req.Name, "ord": req.Ord})
 }
 
@@ -173,6 +176,9 @@ func (s *Server) handleLayoutPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.triggerLayoutReload()
+		if s.draft != nil {
+			s.draft.Discard()
+		}
 		s.respondSuccess(w, "Page deleted", nil)
 
 	default:
@@ -391,7 +397,9 @@ func storeToZoneConfig(
 			}
 			page.Zones = append(page.Zones, zc)
 		}
-		cfg.Pages = append(cfg.Pages, page)
+		if len(page.Zones) > 0 {
+			cfg.Pages = append(cfg.Pages, page)
+		}
 	}
 
 	if len(cfg.Pages) == 0 {

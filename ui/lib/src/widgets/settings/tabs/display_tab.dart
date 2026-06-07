@@ -3,6 +3,8 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/settings_state.dart';
+import '../../../services/nexus_api_service.dart';
+import '../../../services/ws_service.dart';
 import '../../../theme/app_tokens.dart';
 import '../../common/common.dart';
 
@@ -14,6 +16,21 @@ class DisplayTab extends StatefulWidget {
 }
 
 class _DisplayTabState extends State<DisplayTab> {
+  double _brightness = 75;
+  final _api = NexusApiService();
+
+  @override
+  void dispose() {
+    _api.dispose();
+    super.dispose();
+  }
+
+  Future<void> _setBrightness(double v) async {
+    try {
+      await _api.setBrightness(v.round());
+    } catch (_) {}
+  }
+
   void _pickColor(
     BuildContext context,
     Color initial,
@@ -33,11 +50,41 @@ class _DisplayTabState extends State<DisplayTab> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
+    final ws = context.watch<WsService>();
     final cs = Theme.of(context).colorScheme;
+    final connected = ws.isConnected;
 
     return ListView(
       padding: AppSpacing.paddingMd,
       children: [
+        // ── Brightness ───────────────────────────────────────────────────
+        NexusSection(
+          title: 'Brightness',
+          description: 'Physical display brightness (0–100).',
+          trailing: connected
+              ? null
+              : const NexusStatusBadge(status: NexusStatus.warning, label: 'Device required'),
+          child: Row(
+            children: [
+              const Icon(Icons.brightness_low, size: AppIconSize.sm),
+              Expanded(
+                child: Slider(
+                  value: _brightness,
+                  min: 0,
+                  max: 100,
+                  divisions: 20,
+                  label: _brightness.round().toString(),
+                  activeColor: AppColors.accent,
+                  onChanged: connected ? (v) => setState(() => _brightness = v) : null,
+                  onChangeEnd: connected ? _setBrightness : null,
+                ),
+              ),
+              const Icon(Icons.brightness_high, size: AppIconSize.sm),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+
         // ── Display colours ──────────────────────────────────────────────
         NexusSection(
           title: 'Display Colours',
