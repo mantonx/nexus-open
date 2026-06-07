@@ -6,7 +6,7 @@ pkgdesc="Linux controller for Corsair iCUE Nexus display device"
 arch=('x86_64')
 url="https://github.com/mantonx/nexus-next"
 license=('MIT')
-depends=('libusb' 'libayatana-appindicator')
+depends=('libayatana-appindicator')
 optdepends=('flutter: for GUI configuration interface')
 makedepends=('go>=1.23' 'git' 'libayatana-appindicator')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")

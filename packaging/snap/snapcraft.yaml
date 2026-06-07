@@ -69,10 +69,6 @@ parts:
     build-packages:
       - gcc
       - pkg-config
-      - libusb-1.0-0-dev
-
-    stage-packages:
-      - libusb-1.0-0
 
     override-build: |
       # Build the Go application

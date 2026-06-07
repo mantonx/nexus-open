@@ -123,17 +123,6 @@ See [Flathub submission guidelines](https://docs.flathub.org/docs/for-app-author
 
 ## Updating the Manifest
 
-### Updating Dependencies
-
-When libusb version changes:
-
-```bash
-# Get new SHA256 hash
-wget https://github.com/libusb/libusb/releases/download/v1.0.27/libusb-1.0.27.tar.bz2
-sha256sum libusb-1.0.27.tar.bz2
-# Update sha256 in manifest
-```
-
 ### Updating App Version
 
 1. Update `tag:` in the manifest to new version

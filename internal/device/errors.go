@@ -3,7 +3,7 @@ package device
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"syscall"
 )
 
 // Additional sentinel errors for actionable UI messages.
@@ -31,16 +31,15 @@ func NewDeviceError(op string, err error) error {
 	return &DeviceError{Op: op, Err: err}
 }
 
-// classifyOpenError maps a raw libusb open error to a structured sentinel.
+// classifyOpenError maps a usbfs open error to a structured sentinel.
 func classifyOpenError(err error) error {
 	if err == nil {
 		return nil
 	}
-	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "permission denied") || strings.Contains(msg, "access denied"):
+	case errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM):
 		return fmt.Errorf("%w: %v", ErrPermissionDenied, err)
-	case strings.Contains(msg, "busy") || strings.Contains(msg, "resource busy") || strings.Contains(msg, "already open"):
+	case errors.Is(err, syscall.EBUSY):
 		return fmt.Errorf("%w: %v", ErrDeviceBusy, err)
 	default:
 		return err

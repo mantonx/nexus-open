@@ -3,7 +3,7 @@ Version: 1.0.0
 Section: utils
 Priority: optional
 Architecture: amd64
-Depends: libusb-1.0-0 (>= 2:1.0.21), libayatana-appindicator3-1, libgtk-3-0, libgl1, libegl1, libgles2
+Depends: libayatana-appindicator3-1, libgtk-3-0, libgl1, libegl1, libgles2
 Maintainer: Matt <matthew.panton@gmail.com>
 Homepage: https://github.com/mantonx/nexus-next
 Description: Linux controller for Corsair iCUE Nexus display

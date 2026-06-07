@@ -155,29 +155,14 @@ func (n *NexusDevice) Health() error {
 	return nil
 }
 
-// SendFrame sends a rendered frame to the device display.
-func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
-	n.mu.RLock()
-	connected, h := n.connected, n.handle
-	n.mu.RUnlock()
-
-	if !connected || h == nil {
-		return ErrDeviceDisconnected
-	}
-
-	if len(data) != FrameSize {
-		return fmt.Errorf("%w: expected %d bytes, got %d", ErrInvalidFrame, FrameSize, len(data))
-	}
-
+// sendFrameToHandle writes data to h as 1024-byte chunked packets.
+// Callers must hold writeMu. No connection-state checks are performed.
+func sendFrameToHandle(h *usbHandle, data []byte) error {
 	const chunkSize = 1024
 	const headerSize = 8
 	const maxPayload = chunkSize - headerSize
 
 	totalChunks := (len(data) + maxPayload - 1) / maxPayload
-
-	n.writeMu.Lock()
-	defer n.writeMu.Unlock()
-
 	for chunkNum := 0; chunkNum < totalChunks; chunkNum++ {
 		start := chunkNum * maxPayload
 		end := start + maxPayload
@@ -208,12 +193,35 @@ func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
 		}
 
 		if err := h.writeFrame(packet); err != nil {
-			n.logger.Error("USB write failed", "chunk", chunkNum, "error", err)
-			n.mu.Lock()
-			n.connected = false
-			n.mu.Unlock()
-			return fmt.Errorf("failed to write chunk %d: %w", chunkNum, err)
+			return fmt.Errorf("chunk %d: %w", chunkNum, err)
 		}
+	}
+	return nil
+}
+
+// SendFrame sends a rendered frame to the device display.
+func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
+	n.mu.RLock()
+	connected, h := n.connected, n.handle
+	n.mu.RUnlock()
+
+	if !connected || h == nil {
+		return ErrDeviceDisconnected
+	}
+
+	if len(data) != FrameSize {
+		return fmt.Errorf("%w: expected %d bytes, got %d", ErrInvalidFrame, FrameSize, len(data))
+	}
+
+	n.writeMu.Lock()
+	defer n.writeMu.Unlock()
+
+	if err := sendFrameToHandle(h, data); err != nil {
+		n.logger.Error("USB write failed", "error", err)
+		n.mu.Lock()
+		n.connected = false
+		n.mu.Unlock()
+		return err
 	}
 
 	return nil
@@ -286,35 +294,9 @@ func (n *NexusDevice) clearDisplay() {
 	if n.handle == nil {
 		return
 	}
-	const (
-		chunkSize  = 1024
-		headerSize = 8
-		maxPayload = chunkSize - headerSize
-	)
 	blank := make([]byte, FrameSize)
-	totalChunks := (len(blank) + maxPayload - 1) / maxPayload
-	for chunkNum := 0; chunkNum < totalChunks; chunkNum++ {
-		start := chunkNum * maxPayload
-		end := start + maxPayload
-		if end > len(blank) {
-			end = len(blank)
-		}
-		payloadLen := end - start
-		packet := make([]byte, chunkSize)
-		packet[0] = 0x02
-		packet[1] = 0x05
-		packet[2] = 0x40
-		if chunkNum == totalChunks-1 {
-			packet[3] = 0x01
-		}
-		packet[4] = byte(chunkNum & 0xFF)
-		packet[5] = byte((chunkNum >> 8) & 0xFF)
-		packet[6] = byte(payloadLen & 0xFF)
-		packet[7] = byte((payloadLen >> 8) & 0xFF)
-		if err := n.handle.writeFrame(packet); err != nil {
-			n.logger.Warn("clearDisplay write failed", "chunk", chunkNum, "error", err)
-			return
-		}
+	if err := sendFrameToHandle(n.handle, blank); err != nil {
+		n.logger.Warn("clearDisplay failed", "error", err)
 	}
 }
 

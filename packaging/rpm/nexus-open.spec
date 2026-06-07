@@ -8,10 +8,8 @@ URL:            https://github.com/mantonx/nexus-next
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  golang >= 1.23
-BuildRequires:  libusb1-devel
 BuildRequires:  systemd-devel
 BuildRequires:  libayatana-appindicator3-devel
-Requires:       libusb1
 Requires:       libayatana-appindicator3
 
 %description
