@@ -45,6 +45,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-go-deps-v1
+          restore-keys: apt-${{ runner.os }}-go-deps-
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -66,6 +73,13 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-go-deps-v1
+          restore-keys: apt-${{ runner.os }}-go-deps-
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -140,6 +154,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-go-deps-v1
+          restore-keys: apt-${{ runner.os }}-go-deps-
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -200,13 +221,21 @@ jobs:
           key: pub-${{ runner.os }}-${{ hashFiles('ui/pubspec.lock') }}
           restore-keys: pub-${{ runner.os }}-
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-flutter-build-v1
+          restore-keys: apt-${{ runner.os }}-flutter-build-
+
       - name: Install Flutter Linux build dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++-12-dev \
-            libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
+            libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev \
+            rpm libarchive-tools
 
       - name: Cache build_runner output
         uses: actions/cache@v4
@@ -242,9 +271,6 @@ jobs:
           echo "GEM_HOME=$HOME/.local/share/gem" >> "$GITHUB_ENV"
           echo "$HOME/.local/share/gem/bin" >> "$GITHUB_PATH"
           GEM_HOME="$HOME/.local/share/gem" gem install fpm --no-document
-
-      - name: Install RPM and pacman tools
-        run: sudo apt-get install -y rpm libarchive-tools
 
       - name: Build packages (deb + rpm + pacman)
         run: ./build-package.sh --deb --rpm --pacman
