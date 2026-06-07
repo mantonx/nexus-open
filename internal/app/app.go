@@ -206,15 +206,6 @@ func (a *App) initialize() error {
 	// 3. Build zone config manager from the same store.
 	a.zoneCfg = zone.NewConfigManager(a.store, a.logger)
 
-	// On first run also import legacy zone-configs.yaml.
-	if a.store.IsFirstRun() {
-		if dir, e := os.UserConfigDir(); e == nil {
-			legacyZone := dir + "/nexus-open/zone-configs.yaml"
-			if err := a.zoneCfg.ImportFromYAML(legacyZone); err != nil {
-				a.logger.Warn("zone config: yaml import failed (continuing)", "error", err)
-			}
-		}
-	}
 	a.logger.Info("zone config manager initialized")
 
 	// 3. Create device connection

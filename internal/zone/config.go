@@ -35,15 +35,16 @@ type ZoneInfo struct {
 
 // ZoneConfig represents configuration for a single zone
 type ZoneConfig struct {
-	ID           string     `yaml:"id" json:"id"`                       // Unique zone identifier
-	Width        int        `yaml:"width" json:"width"`                 // Zone width in pixels
-	X            int        `yaml:"x,omitempty" json:"x,omitempty"`     // X offset (auto-computed if 0)
-	Plugin       string     `yaml:"plugin" json:"plugin"`               // Plugin endpoint (builtin:name or exec:path)
-	RefreshMs    int        `yaml:"refresh_ms" json:"refresh_ms"`       // Sampling interval
-	Align        Alignment  `yaml:"align,omitempty" json:"align,omitempty"` // Text alignment
-	ThemeOverride *Theme    `yaml:"theme_override,omitempty" json:"theme_override,omitempty"` // Per-zone theme
-	Choices      []string   `yaml:"choices,omitempty" json:"choices,omitempty"` // Plugin choices for cycling
-	OnTap        TapAction  `yaml:"on_tap,omitempty" json:"on_tap,omitempty"` // Tap action
+	ID            string         `yaml:"id" json:"id"`                                           // Unique zone identifier
+	Width         int            `yaml:"width" json:"width"`                                     // Zone width in pixels
+	X             int            `yaml:"x,omitempty" json:"x,omitempty"`                         // X offset (auto-computed if 0)
+	Plugin        string         `yaml:"plugin" json:"plugin"`                                   // Plugin endpoint (builtin:name or exec:path)
+	RefreshMs     int            `yaml:"refresh_ms" json:"refresh_ms"`                           // Sampling interval
+	Align         Alignment      `yaml:"align,omitempty" json:"align,omitempty"`                 // Text alignment
+	ThemeOverride *Theme         `yaml:"theme_override,omitempty" json:"theme_override,omitempty"` // Per-zone theme
+	PluginConfig  map[string]any `yaml:"plugin_config,omitempty" json:"plugin_config,omitempty"` // Per-zone plugin configuration
+	Choices       []string       `yaml:"choices,omitempty" json:"choices,omitempty"`             // Plugin choices for cycling
+	OnTap         TapAction      `yaml:"on_tap,omitempty" json:"on_tap,omitempty"`               // Tap action
 }
 
 // Theme represents visual styling

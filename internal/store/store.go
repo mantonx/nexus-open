@@ -19,7 +19,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,7 +28,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 // DB is the application's SQLite store. All methods are safe for concurrent use.
 type DB struct {
@@ -185,86 +184,7 @@ func (s *DB) SetSettings(settings map[string]string) error {
 	return tx.Commit()
 }
 
-// ── Zone plugin config ────────────────────────────────────────────────────────
-
-// GetZoneConfig returns the stored plugin config for zoneID, or nil.
-func (s *DB) GetZoneConfig(zoneID string) (map[string]interface{}, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var raw string
-	err := s.db.QueryRow(
-		`SELECT config_json FROM zone_plugin_config WHERE zone_id = ?`, zoneID,
-	).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	var m map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-// SetZoneConfig upserts the plugin config for zoneID.
-func (s *DB) SetZoneConfig(zoneID string, cfg map[string]interface{}) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	raw, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-
-	_, err = s.db.Exec(
-		`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
-		 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
-		zoneID, string(raw),
-	)
-	return err
-}
-
-// DeleteZoneConfig removes the stored config for zoneID.
-func (s *DB) DeleteZoneConfig(zoneID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	_, err := s.db.Exec(`DELETE FROM zone_plugin_config WHERE zone_id = ?`, zoneID)
-	return err
-}
-
-// GetAllZoneConfigs returns all stored zone configs.
-func (s *DB) GetAllZoneConfigs() (map[string]map[string]interface{}, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	rows, err := s.db.Query(`SELECT zone_id, config_json FROM zone_plugin_config`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	result := make(map[string]map[string]interface{})
-	for rows.Next() {
-		var zoneID, raw string
-		if err := rows.Scan(&zoneID, &raw); err != nil {
-			return nil, err
-		}
-		var m map[string]interface{}
-		if err := json.Unmarshal([]byte(raw), &m); err != nil {
-			s.logger.Warn("store: malformed zone config", "zone_id", zoneID, "error", err)
-			continue
-		}
-		result[zoneID] = m
-	}
-	return result, rows.Err()
-}
-
-// ── Schema migrations ─────────────────────────────────────────────────────────
+// ── Schema migrations ───────────────────────────��─────────────────────────────
 
 func (s *DB) migrate() error {
 	// Bootstrap: create schema_version if this is a brand new file.
@@ -288,6 +208,7 @@ func (s *DB) migrate() error {
 		migration2, // v1 → v2: pages + zones (layout editor)
 		migration3, // v2 → v3: rename zone_module_config → zone_plugin_config
 		migration4, // v3 → v4: rewrite exec:./modules/ → exec:./plugins/ after directory rename
+		migration5, // v4 → v5: consolidate zone_plugin_config into zones.config_json; rename zones.module → zones.plugin
 	}
 
 	for i := current; i < currentSchemaVersion; i++ {
@@ -386,4 +307,60 @@ func migration4(tx *sql.Tx) error {
 		WHERE module LIKE 'exec:./modules/%'
 	`)
 	return err
+}
+
+// migration5 consolidates per-zone plugin config into a single location (v4 → v5).
+//
+// Before this migration two tables both held per-zone plugin config:
+//   - zones.config_json   (written by the layout API)
+//   - zone_plugin_config  (written by the zone config manager and sampler)
+//
+// They could diverge silently. This migration merges them: any row in
+// zone_plugin_config that has a non-empty config is merged into
+// zones.config_json (zones wins on conflict since it is the newer store),
+// then zone_plugin_config is dropped.
+//
+// It also renames the zones.module column to zones.plugin to match the Go
+// struct field name (StoredZone.Plugin) and the plugin: terminology used
+// everywhere since the v1.0 rename.
+func migration5(tx *sql.Tx) error {
+	// Merge zone_plugin_config rows into zones.config_json where the zone
+	// exists but zones.config_json is still the empty default '{}'. Rows
+	// where zones.config_json already has content are left untouched (the
+	// layout API value is considered authoritative).
+	if _, err := tx.Exec(`
+		UPDATE zones
+		SET config_json = (
+			SELECT zpc.config_json
+			FROM zone_plugin_config zpc
+			WHERE zpc.zone_id = zones.id
+			  AND zpc.config_json != '{}'
+			  AND zpc.config_json != 'null'
+		)
+		WHERE id IN (
+			SELECT zpc.zone_id
+			FROM zone_plugin_config zpc
+			WHERE zpc.config_json != '{}'
+			  AND zpc.config_json != 'null'
+		)
+		AND (config_json = '{}' OR config_json = 'null' OR config_json = '')
+	`); err != nil {
+		return fmt.Errorf("migration5: merge zone_plugin_config: %w", err)
+	}
+
+	// Drop the now-redundant table. zone_plugin_config entries that used the
+	// "plugin:" key prefix (plugin-level defaults stored by SetPluginDefault)
+	// are not migrated — that feature is superseded by the Phase 1 config
+	// schema declared in Descriptor.ConfigSchema.
+	if _, err := tx.Exec(`DROP TABLE IF EXISTS zone_plugin_config`); err != nil {
+		return fmt.Errorf("migration5: drop zone_plugin_config: %w", err)
+	}
+
+	// Rename zones.module → zones.plugin. SQLite supports RENAME COLUMN
+	// since 3.25.0 (2018-09-15); modernc.org/sqlite bundles a recent version.
+	if _, err := tx.Exec(`ALTER TABLE zones RENAME COLUMN module TO plugin`); err != nil {
+		return fmt.Errorf("migration5: rename module column: %w", err)
+	}
+
+	return nil
 }

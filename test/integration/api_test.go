@@ -30,8 +30,13 @@ import (
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // newTestServer creates a Server bound to a random localhost port and returns
-// both the server and its base URL. The caller must call ts.Close() to stop it.
+// the server, its base URL, and the backing store (for seeding test data).
 func newTestServer(t *testing.T) (*api.Server, string) {
+	srv, _, base := newTestServerWithStore(t)
+	return srv, base
+}
+
+func newTestServerWithStore(t *testing.T) (*api.Server, *store.DB, string) {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -90,7 +95,7 @@ func newTestServer(t *testing.T) (*api.Server, string) {
 		_ = srv.Shutdown(ctx)
 	})
 
-	return srv, baseURL
+	return srv, s, baseURL
 }
 
 func get(t *testing.T, url string) *http.Response {
@@ -332,55 +337,24 @@ func TestBrightness_OutOfRange(t *testing.T) {
 	}
 }
 
-// ── Module config ─────────────────────────────────────────────────────────────
-
-func TestPluginConfig_GetEmpty(t *testing.T) {
-	_, base := newTestServer(t)
-
-	resp := get(t, base+"/api/plugins/cpu-temp/config")
-	if resp.StatusCode != 200 {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-
-	var body map[string]any
-	decodeJSON(t, resp, &body)
-
-	if _, ok := body["plugin"]; !ok {
-		t.Error("missing 'plugin' field in response")
-	}
-	if _, ok := body["config"]; !ok {
-		t.Error("missing 'config' field in response")
-	}
-}
-
-func TestPluginConfig_SetAndGet(t *testing.T) {
-	_, base := newTestServer(t)
-
-	payload := map[string]any{"unit": "metric", "graph": "sparkline"}
-	resp := postJSON(t, base+"/api/plugins/cpu-temp/config", payload)
-	_ = resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Fatalf("POST plugin config: expected 200, got %d", resp.StatusCode)
-	}
-
-	var got map[string]any
-	decodeJSON(t, get(t, base+"/api/plugins/cpu-temp/config"), &got)
-
-	cfg, _ := got["config"].(map[string]any)
-	if cfg["unit"] != "metric" {
-		t.Errorf("unit: want 'metric', got %v", cfg["unit"])
-	}
-	if cfg["graph"] != "sparkline" {
-		t.Errorf("graph: want 'sparkline', got %v", cfg["graph"])
-	}
-}
-
 // ── Zone config ───────────────────────────────────────────────────────────────
 
 func TestZoneConfig_SetGetDelete(t *testing.T) {
-	_, base := newTestServer(t)
+	_, db, base := newTestServerWithStore(t)
 
-	// Set override
+	// Seed a real zone row so SetZonePluginConfig (UPDATE) can find it.
+	pageID, err := db.CreatePage("Test", 0)
+	if err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+	if err := db.CreateZone(store.StoredZone{
+		ID: "zone-1", PageID: pageID, Ord: 0, WidthPx: 640,
+		Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
+	}); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+
+	// Set config via API.
 	payload := map[string]any{"color": "#FF0000", "enabled": true}
 	resp := postJSON(t, base+"/api/zones/zone-1/config", payload)
 	_ = resp.Body.Close()
@@ -388,7 +362,7 @@ func TestZoneConfig_SetGetDelete(t *testing.T) {
 		t.Fatalf("POST zone config: expected 200, got %d", resp.StatusCode)
 	}
 
-	// Get it back
+	// Get it back.
 	var got map[string]any
 	decodeJSON(t, get(t, base+"/api/zones/zone-1/config"), &got)
 	cfg, _ := got["config"].(map[string]any)
@@ -396,7 +370,7 @@ func TestZoneConfig_SetGetDelete(t *testing.T) {
 		t.Errorf("color: want #FF0000, got %v", cfg["color"])
 	}
 
-	// Delete override
+	// Delete (clear) config.
 	req, _ := http.NewRequest("DELETE", base+"/api/zones/zone-1/config", nil)
 	delResp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -16,15 +16,15 @@ type StoredPage struct {
 
 // StoredZone is a zone row from the DB.
 type StoredZone struct {
-	ID          string                 `json:"id"`
-	PageID      int64                  `json:"page_id"`
-	Ord         int                    `json:"ord"`
-	WidthPx     int                    `json:"width_px"`
-	Plugin      string                 `json:"plugin"`
-	RefreshMs   int                    `json:"refresh_ms"`
-	Align       string                 `json:"align"`
-	ConfigJSON  map[string]interface{} `json:"config"`
-	ThemeJSON   map[string]interface{} `json:"theme_override,omitempty"`
+	ID         string         `json:"id"`
+	PageID     int64          `json:"page_id"`
+	Ord        int            `json:"ord"`
+	WidthPx    int            `json:"width_px"`
+	Plugin     string         `json:"plugin"`
+	RefreshMs  int            `json:"refresh_ms"`
+	Align      string         `json:"align"`
+	ConfigJSON map[string]any `json:"config"`
+	ThemeJSON  map[string]any `json:"theme_override,omitempty"`
 }
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ func (s *DB) GetZonesForPage(pageID int64) ([]StoredZone, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		`SELECT id, page_id, ord, width_px, module, refresh_ms, align, config_json, theme_json
+		`SELECT id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json
 		 FROM zones WHERE page_id = ? ORDER BY ord`,
 		pageID,
 	)
@@ -125,16 +125,54 @@ func (s *DB) GetZonesForPage(pageID int64) ([]StoredZone, error) {
 			&z.RefreshMs, &z.Align, &cfgRaw, &themeRaw); err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(cfgRaw), &z.ConfigJSON)   //nolint:errcheck
-		json.Unmarshal([]byte(themeRaw), &z.ThemeJSON)  //nolint:errcheck
+		json.Unmarshal([]byte(cfgRaw), &z.ConfigJSON)  //nolint:errcheck
+		json.Unmarshal([]byte(themeRaw), &z.ThemeJSON) //nolint:errcheck
 		zones = append(zones, z)
 	}
 	return zones, rows.Err()
 }
 
-// CreateZone inserts a new zone and returns any error.
-// If ConfigJSON is non-empty it is also written to zone_plugin_config so the
-// sampler picks it up without a separate POST /api/zones/:id/config call.
+// GetZonePluginConfig returns the plugin config for a single zone from
+// zones.config_json. Returns nil if the zone has no stored config.
+func (s *DB) GetZonePluginConfig(zoneID string) (map[string]any, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var cfgRaw string
+	err := s.db.QueryRow(`SELECT config_json FROM zones WHERE id = ?`, zoneID).Scan(&cfgRaw)
+	if err != nil {
+		return nil, err
+	}
+	if cfgRaw == "" || cfgRaw == "{}" || cfgRaw == "null" {
+		return nil, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(cfgRaw), &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// SetZonePluginConfig updates config_json for a zone.
+func (s *DB) SetZonePluginConfig(zoneID string, cfg map[string]any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.Exec(`UPDATE zones SET config_json = ? WHERE id = ?`, string(raw), zoneID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("zone %q not found", zoneID)
+	}
+	return nil
+}
+
+// CreateZone inserts a new zone.
 func (s *DB) CreateZone(z StoredZone) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -143,26 +181,15 @@ func (s *DB) CreateZone(z StoredZone) error {
 	themeRaw, _ := json.Marshal(z.ThemeJSON)
 
 	_, err := s.db.Exec(
-		`INSERT INTO zones(id, page_id, ord, width_px, module, refresh_ms, align, config_json, theme_json)
+		`INSERT INTO zones(id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		z.ID, z.PageID, z.Ord, z.WidthPx, z.Plugin, z.RefreshMs, z.Align,
 		string(cfgRaw), string(themeRaw),
 	)
-	if err != nil {
-		return err
-	}
-	if len(z.ConfigJSON) > 0 {
-		_, err = s.db.Exec(
-			`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
-			 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
-			z.ID, string(cfgRaw),
-		)
-	}
 	return err
 }
 
 // UpdateZone updates a zone's mutable fields.
-// If ConfigJSON is non-empty it is also synced to zone_plugin_config.
 func (s *DB) UpdateZone(z StoredZone) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -172,7 +199,7 @@ func (s *DB) UpdateZone(z StoredZone) error {
 
 	res, err := s.db.Exec(
 		`UPDATE zones
-		 SET page_id=?, ord=?, width_px=?, module=?, refresh_ms=?, align=?,
+		 SET page_id=?, ord=?, width_px=?, plugin=?, refresh_ms=?, align=?,
 		     config_json=?, theme_json=?
 		 WHERE id=?`,
 		z.PageID, z.Ord, z.WidthPx, z.Plugin, z.RefreshMs, z.Align,
@@ -184,14 +211,7 @@ func (s *DB) UpdateZone(z StoredZone) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("zone %q not found", z.ID)
 	}
-	if len(z.ConfigJSON) > 0 {
-		_, err = s.db.Exec(
-			`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
-			 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
-			z.ID, string(cfgRaw),
-		)
-	}
-	return err
+	return nil
 }
 
 // DeleteZone removes a zone by ID.
@@ -279,22 +299,12 @@ func (s *DB) ImportLayout(pages []StoredPage, zonesByPage map[int64][]StoredZone
 			cfgRaw, _ := json.Marshal(z.ConfigJSON)
 			themeRaw, _ := json.Marshal(z.ThemeJSON)
 			if _, err := tx.Exec(
-				`INSERT INTO zones(id, page_id, ord, width_px, module, refresh_ms, align, config_json, theme_json)
+				`INSERT INTO zones(id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json)
 				 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				z.ID, z.PageID, z.Ord, z.WidthPx, z.Plugin, z.RefreshMs, z.Align,
 				string(cfgRaw), string(themeRaw),
 			); err != nil {
 				return err
-			}
-			// Keep zone_plugin_config in sync with config_json.
-			if len(z.ConfigJSON) > 0 {
-				if _, err := tx.Exec(
-					`INSERT INTO zone_plugin_config(zone_id, config_json) VALUES(?, ?)
-					 ON CONFLICT(zone_id) DO UPDATE SET config_json = excluded.config_json`,
-					z.ID, string(cfgRaw),
-				); err != nil {
-					return err
-				}
 			}
 		}
 	}
@@ -313,4 +323,3 @@ func ValidateZoneWidths(zones []StoredZone) error {
 	}
 	return nil
 }
-

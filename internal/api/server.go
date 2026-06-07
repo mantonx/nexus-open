@@ -23,7 +23,15 @@ type DeviceController interface {
 
 // ZoneConfigNotifier can notify zones about config changes.
 type ZoneConfigNotifier interface {
-	BroadcastZoneConfigChange(zoneID string, config map[string]interface{}) error
+	BroadcastZoneConfigChange(zoneID string, config map[string]any) error
+}
+
+// ZoneCfgManager reads and writes per-zone plugin configuration.
+type ZoneCfgManager interface {
+	GetZoneOverride(zoneID string) map[string]any
+	SetZoneOverride(zoneID string, cfg map[string]any) error
+	DeleteZoneOverride(zoneID string) error
+	BroadcastZoneConfigChange(zoneID string, cfg map[string]any) error
 }
 
 // ZoneStatusProvider returns per-zone health status from the sampler.
@@ -75,7 +83,7 @@ type Server struct {
 	server          *http.Server
 	logger          *slog.Logger
 	cfg             *settings.Manager
-	zoneCfg         *zone.ConfigManager
+	zoneCfg         ZoneCfgManager
 	device          DeviceController
 	zoneNotifier    ZoneConfigNotifier
 	zoneStatus      ZoneStatusProvider
@@ -146,7 +154,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // SetZoneConfigManager sets the zone config manager.
-func (s *Server) SetZoneConfigManager(zoneCfg *zone.ConfigManager) {
+func (s *Server) SetZoneConfigManager(zoneCfg ZoneCfgManager) {
 	s.zoneCfg = zoneCfg
 	s.logger.Debug("zone config manager registered")
 }
@@ -219,8 +227,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/images/{filename}", s.handleServeImage)
 	mux.HandleFunc("/api/images", s.handleListImages)
 
-	// Zone and plugin config endpoints
-	mux.HandleFunc("/api/plugins/", s.handlePluginConfig)
+	// Zone config endpoints
 	mux.HandleFunc("/api/zones/", s.handleZones)
 	mux.HandleFunc("/api/zones/{id}/status", s.handleZoneStatus)
 

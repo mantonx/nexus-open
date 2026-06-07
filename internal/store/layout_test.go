@@ -197,19 +197,40 @@ func TestZones_Reorder(t *testing.T) {
 	}
 }
 
-func TestZones_ConfigSyncedToZonePluginConfig(t *testing.T) {
+func TestZones_PluginConfigRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 
 	pageID, _ := db.CreatePage("P", 0)
 	z := makeZone("z1", pageID, 0, 320)
-	z.ConfigJSON = map[string]interface{}{"unit": "fahrenheit"}
+	z.ConfigJSON = map[string]any{"unit": "fahrenheit", "graph_type": "bar"}
 
-	db.CreateZone(z) //nolint:errcheck
+	if err := db.CreateZone(z); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
 
-	// CreateZone should have synced ConfigJSON → zone_plugin_config.
-	cfg, err := db.GetZoneConfig("z1")
-	if err != nil || cfg == nil || cfg["unit"] != "fahrenheit" {
-		t.Errorf("zone_plugin_config not synced: cfg=%v err=%v", cfg, err)
+	// Config stored in zones.config_json is readable via GetZonePluginConfig.
+	cfg, err := db.GetZonePluginConfig("z1")
+	if err != nil {
+		t.Fatalf("GetZonePluginConfig: %v", err)
+	}
+	if cfg == nil || cfg["unit"] != "fahrenheit" || cfg["graph_type"] != "bar" {
+		t.Errorf("plugin config round-trip failed: %v", cfg)
+	}
+}
+
+func TestZones_PluginConfigUpdate(t *testing.T) {
+	db := openTestDB(t)
+
+	pageID, _ := db.CreatePage("P", 0)
+	db.CreateZone(makeZone("z1", pageID, 0, 320)) //nolint:errcheck
+
+	if err := db.SetZonePluginConfig("z1", map[string]any{"unit": "celsius"}); err != nil {
+		t.Fatalf("SetZonePluginConfig: %v", err)
+	}
+
+	cfg, err := db.GetZonePluginConfig("z1")
+	if err != nil || cfg == nil || cfg["unit"] != "celsius" {
+		t.Errorf("after SetZonePluginConfig: cfg=%v err=%v", cfg, err)
 	}
 }
 

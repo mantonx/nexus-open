@@ -46,11 +46,12 @@ func LoadConfigFromDB(db *store.DB) (*Config, error) {
 		page := Page{Name: p.Name}
 		for _, z := range zones {
 			zc := ZoneConfig{
-				ID:        z.ID,
-				Width:     z.WidthPx,
-				Plugin:    z.Plugin,
-				RefreshMs: z.RefreshMs,
-				Align:     Alignment(z.Align),
+				ID:           z.ID,
+				Width:        z.WidthPx,
+				Plugin:       z.Plugin,
+				RefreshMs:    z.RefreshMs,
+				Align:        Alignment(z.Align),
+				PluginConfig: z.ConfigJSON,
 			}
 
 			// Unmarshal per-zone ThemeOverride from theme_json if present.

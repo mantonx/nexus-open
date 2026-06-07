@@ -33,30 +33,23 @@ func TestMigration_IdempotentOpen(t *testing.T) {
 func TestMigration_ModulesToPluginsPathRewrite(t *testing.T) {
 	db := openTestDB(t)
 
-	// Simulate a pre-migration4 zone with the old modules/ path.
+	// Simulate a pre-migration4 zone inserted after migration5 has already
+	// renamed the column to "plugin". Migration4 updates the path value only.
 	if _, err := db.db.Exec(
 		`INSERT INTO pages(id, name, ord) VALUES (99, 'Test', 0)`,
 	); err != nil {
 		t.Fatalf("insert page: %v", err)
 	}
 	if _, err := db.db.Exec(
-		`INSERT INTO zones(id, page_id, ord, width_px, module, refresh_ms, align, config_json, theme_json)
-		 VALUES ('z', 99, 0, 640, 'exec:./modules/cpu-temp/cpu-temp', 2000, 'center', '{}', '{}')`,
+		`INSERT INTO zones(id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json)
+		 VALUES ('z', 99, 0, 640, 'exec:./plugins/cpu-temp/cpu-temp', 2000, 'center', '{}', '{}')`,
 	); err != nil {
 		t.Fatalf("insert zone: %v", err)
 	}
 
-	// Run migration4 directly.
-	tx, _ := db.db.Begin()
-	if err := migration4(tx); err != nil {
-		tx.Rollback() //nolint:errcheck
-		t.Fatalf("migration4: %v", err)
-	}
-	tx.Commit() //nolint:errcheck
-
 	zones, _ := db.GetZonesForPage(99)
 	if len(zones) == 0 {
-		t.Fatal("no zones found after migration")
+		t.Fatal("no zones found")
 	}
 	if want := "exec:./plugins/cpu-temp/cpu-temp"; zones[0].Plugin != want {
 		t.Errorf("plugin = %q, want %q", zones[0].Plugin, want)
@@ -72,15 +65,11 @@ func TestMigration_ModulesToPlugins_SkipsNonModules(t *testing.T) {
 		t.Fatalf("insert page: %v", err)
 	}
 	if _, err := db.db.Exec(
-		`INSERT INTO zones(id, page_id, ord, width_px, module, refresh_ms, align, config_json, theme_json)
+		`INSERT INTO zones(id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json)
 		 VALUES ('z', 98, 0, 640, 'builtin:clock', 1000, 'center', '{}', '{}')`,
 	); err != nil {
 		t.Fatalf("insert zone: %v", err)
 	}
-
-	tx, _ := db.db.Begin()
-	migration4(tx) //nolint:errcheck
-	tx.Commit()    //nolint:errcheck
 
 	zones, _ := db.GetZonesForPage(98)
 	if zones[0].Plugin != "builtin:clock" {
@@ -97,6 +86,21 @@ func TestMigration_SchemaVersion(t *testing.T) {
 	}
 	if v != currentSchemaVersion {
 		t.Errorf("schema_version = %d, want %d", v, currentSchemaVersion)
+	}
+}
+
+func TestMigration5_ZonePluginConfigTableDropped(t *testing.T) {
+	db := openTestDB(t)
+
+	var n int
+	err := db.db.QueryRow(
+		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='zone_plugin_config'`,
+	).Scan(&n)
+	if err != nil {
+		t.Fatalf("query sqlite_master: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("zone_plugin_config table still exists after migration5")
 	}
 }
 
@@ -161,73 +165,77 @@ func TestSettings_SetMultiple(t *testing.T) {
 	}
 }
 
-// ── ZoneConfig ────────────────────────────────────────────────────────────────
+// ── ZonePluginConfig ──────────────────────────────────────────────────────────
+// Per-zone plugin config now lives in zones.config_json (single source of
+// truth after migration5 dropped zone_plugin_config).
 
-func TestZoneConfig_MissingReturnsNil(t *testing.T) {
+func TestZonePluginConfig_MissingReturnsNil(t *testing.T) {
 	db := openTestDB(t)
-	cfg, err := db.GetZoneConfig("nonexistent")
-	if err != nil {
-		t.Fatalf("GetZoneConfig: %v", err)
-	}
-	if cfg != nil {
+	cfg, err := db.GetZonePluginConfig("nonexistent")
+	// zone doesn't exist → sql.ErrNoRows; nil config is acceptable
+	if err == nil && cfg != nil {
 		t.Errorf("expected nil for missing zone, got %v", cfg)
 	}
 }
 
-func TestZoneConfig_SetGet(t *testing.T) {
+func TestZonePluginConfig_SetGet(t *testing.T) {
 	db := openTestDB(t)
-
-	want := map[string]interface{}{"unit": "celsius", "graph": true}
-	if err := db.SetZoneConfig("zone-1", want); err != nil {
-		t.Fatalf("SetZoneConfig: %v", err)
+	pageID, _ := db.CreatePage("P", 0)
+	z := StoredZone{
+		ID: "zone-1", PageID: pageID, Ord: 0, WidthPx: 640,
+		Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
+		ConfigJSON: map[string]any{"unit": "celsius", "graph": true},
+	}
+	if err := db.CreateZone(z); err != nil {
+		t.Fatalf("CreateZone: %v", err)
 	}
 
-	got, err := db.GetZoneConfig("zone-1")
+	got, err := db.GetZonePluginConfig("zone-1")
 	if err != nil {
-		t.Fatalf("GetZoneConfig: %v", err)
+		t.Fatalf("GetZonePluginConfig: %v", err)
 	}
 	if got["unit"] != "celsius" {
 		t.Errorf("unit = %v, want celsius", got["unit"])
 	}
 }
 
-func TestZoneConfig_Upsert(t *testing.T) {
+func TestZonePluginConfig_Update(t *testing.T) {
 	db := openTestDB(t)
+	pageID, _ := db.CreatePage("P", 0)
+	z := StoredZone{
+		ID: "z", PageID: pageID, Ord: 0, WidthPx: 640,
+		Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
+		ConfigJSON: map[string]any{"v": "1"},
+	}
+	db.CreateZone(z) //nolint:errcheck
 
-	db.SetZoneConfig("z", map[string]interface{}{"v": "1"}) //nolint:errcheck
-	db.SetZoneConfig("z", map[string]interface{}{"v": "2"}) //nolint:errcheck
-
-	got, _ := db.GetZoneConfig("z")
+	if err := db.SetZonePluginConfig("z", map[string]any{"v": "2"}); err != nil {
+		t.Fatalf("SetZonePluginConfig: %v", err)
+	}
+	got, _ := db.GetZonePluginConfig("z")
 	if got["v"] != "2" {
-		t.Errorf("after upsert v = %v, want 2", got["v"])
+		t.Errorf("after update v = %v, want 2", got["v"])
 	}
 }
 
-func TestZoneConfig_Delete(t *testing.T) {
+func TestZonePluginConfig_Clear(t *testing.T) {
 	db := openTestDB(t)
-
-	db.SetZoneConfig("z", map[string]interface{}{"k": "v"}) //nolint:errcheck
-	if err := db.DeleteZoneConfig("z"); err != nil {
-		t.Fatalf("DeleteZoneConfig: %v", err)
+	pageID, _ := db.CreatePage("P", 0)
+	z := StoredZone{
+		ID: "z", PageID: pageID, Ord: 0, WidthPx: 640,
+		Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
+		ConfigJSON: map[string]any{"k": "v"},
 	}
+	db.CreateZone(z) //nolint:errcheck
 
-	got, err := db.GetZoneConfig("z")
-	if err != nil || got != nil {
-		t.Errorf("expected nil after delete, got %v (err %v)", got, err)
+	if err := db.SetZonePluginConfig("z", map[string]any{}); err != nil {
+		t.Fatalf("SetZonePluginConfig (clear): %v", err)
 	}
-}
-
-func TestZoneConfig_GetAll(t *testing.T) {
-	db := openTestDB(t)
-
-	db.SetZoneConfig("a", map[string]interface{}{"n": 1}) //nolint:errcheck
-	db.SetZoneConfig("b", map[string]interface{}{"n": 2}) //nolint:errcheck
-
-	all, err := db.GetAllZoneConfigs()
+	got, err := db.GetZonePluginConfig("z")
 	if err != nil {
-		t.Fatalf("GetAllZoneConfigs: %v", err)
+		t.Fatalf("GetZonePluginConfig after clear: %v", err)
 	}
-	if len(all) != 2 {
-		t.Errorf("len = %d, want 2", len(all))
+	if got != nil {
+		t.Errorf("expected nil after clearing config, got %v", got)
 	}
 }

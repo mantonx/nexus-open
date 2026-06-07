@@ -13,7 +13,6 @@ import (
 
 	"github.com/mantonx/nexus-next/internal/device"
 	"github.com/mantonx/nexus-next/internal/store"
-	"github.com/mantonx/nexus-next/internal/zone"
 	config "github.com/mantonx/nexus-next/internal/settings"
 )
 
@@ -42,14 +41,29 @@ func newTestServerWithStore(t *testing.T) (*Server, *store.DB) {
 	return srv, db
 }
 
-func newTestZoneCfgManager(t *testing.T) *zone.ConfigManager {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "zone.db"), nil)
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return zone.NewConfigManager(db, nil)
+// stubZoneCfgManager is an in-memory ConfigManager used in API handler tests.
+// It avoids needing real zone rows in the DB while still exercising the handler wiring.
+type stubZoneCfgManager struct {
+	data map[string]map[string]any
+}
+
+func (s *stubZoneCfgManager) GetZoneOverride(zoneID string) map[string]any {
+	return s.data[zoneID]
+}
+func (s *stubZoneCfgManager) SetZoneOverride(zoneID string, cfg map[string]any) error {
+	s.data[zoneID] = cfg
+	return nil
+}
+func (s *stubZoneCfgManager) DeleteZoneOverride(zoneID string) error {
+	delete(s.data, zoneID)
+	return nil
+}
+func (s *stubZoneCfgManager) BroadcastZoneConfigChange(zoneID string, cfg map[string]any) error {
+	return nil
+}
+
+func newTestZoneCfgManager(_ *testing.T) *stubZoneCfgManager {
+	return &stubZoneCfgManager{data: make(map[string]map[string]any)}
 }
 
 // ── Zone config handlers ──────────────────────────────────────────────────────
