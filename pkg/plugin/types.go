@@ -3,14 +3,50 @@ package plugin
 
 import "time"
 
+// FieldType names the data type of a config field, used by the Flutter UI to
+// render the appropriate input widget.
+type FieldType string
+
+const (
+	FieldTypeString FieldType = "string"
+	FieldTypeEnum   FieldType = "enum"
+	FieldTypeInt    FieldType = "int"
+	FieldTypeBool   FieldType = "bool"
+	FieldTypeColor  FieldType = "color"
+)
+
+// FieldOption is a single selectable value for an enum field.
+type FieldOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// ConfigField describes one configurable parameter of a plugin.
+type ConfigField struct {
+	Key     string        `json:"key"`
+	Label   string        `json:"label"`
+	Type    FieldType     `json:"type"`
+	Default any           `json:"default,omitempty"`
+	Options []FieldOption `json:"options,omitempty"` // enum only
+	Min     *int          `json:"min,omitempty"`     // int only
+	Max     *int          `json:"max,omitempty"`     // int only
+	Help    string        `json:"help,omitempty"`
+}
+
+// ConfigSchema is the full schema for a plugin's configurable fields.
+type ConfigSchema struct {
+	Fields []ConfigField `json:"fields"`
+}
+
 // Descriptor contains metadata about a plugin.
 type Descriptor struct {
-	Name        string `json:"name"`         // Human-readable name (e.g., "CPU Temperature")
-	Version     string `json:"version"`      // Semantic version (e.g., "1.0.0")
-	Author      string `json:"author"`       // Author name or organization
-	Description string `json:"description"`  // Brief description of functionality
-	Icon        string `json:"icon"`         // Default icon identifier (Font Awesome or emoji)
-	RefreshMs   int    `json:"refresh_ms"`   // Recommended refresh interval in milliseconds
+	Name        string       `json:"name"`         // Human-readable name (e.g., "CPU Temperature")
+	Version     string       `json:"version"`      // Semantic version (e.g., "1.0.0")
+	Author      string       `json:"author"`       // Author name or organization
+	Description string       `json:"description"`  // Brief description of functionality
+	Icon        string       `json:"icon"`         // Default icon identifier (Font Awesome or emoji)
+	RefreshMs   int          `json:"refresh_ms"`   // Recommended refresh interval in milliseconds
+	Schema      ConfigSchema `json:"config_schema"` // Declared configurable fields
 }
 
 // Payload represents data returned by a module to be rendered in a zone.
@@ -148,43 +184,14 @@ func (p *Payload) IsExpired() bool {
 }
 
 // Plugin is the interface that all plugins must implement.
-// This will be used with go-plugin RPC in Phase 2.
 type Plugin interface {
-	// Describe returns plugin metadata
+	// Describe returns plugin metadata and config schema.
 	Describe() (Descriptor, error)
 
-	// Sample returns current data payload
+	// Sample returns current data payload.
 	Sample() (Payload, error)
-}
 
-// PluginConfigNotifier is an optional interface plugins can implement
-// to receive real-time configuration change notifications.
-//
-// When implemented, the host will call OnConfigChanged whenever
-// the global configuration is updated via the API, allowing plugins
-// to react to config changes without polling or file watching.
-type PluginConfigNotifier interface {
-	// OnConfigChanged is called when the global configuration is updated.
-	// The plugin should inspect the config map and update its state if relevant.
-	//
-	// Args:
-	//   config: Full configuration as key-value map (e.g., location, unit, time_format)
-	//
-	// Returns:
-	//   error if the plugin failed to process the config change
-	OnConfigChanged(config map[string]interface{}) error
-}
-
-// SupportsPluginConfig checks if a plugin implements PluginConfigNotifier.
-// This allows the host to conditionally broadcast config changes only to
-// plugins that can handle them.
-//
-// Example:
-//
-//	if notifier, ok := plugin.SupportsPluginConfig(m); ok {
-//	    notifier.OnConfigChanged(configMap)
-//	}
-func SupportsPluginConfig(m Plugin) (PluginConfigNotifier, bool) {
-	notifier, ok := m.(PluginConfigNotifier)
-	return notifier, ok
+	// Configure applies per-zone plugin configuration.
+	// Called once at startup (with zone's stored config) and on every live edit.
+	Configure(cfg map[string]any) error
 }

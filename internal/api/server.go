@@ -40,6 +40,11 @@ type ZoneStatusProvider interface {
 	AllZoneStatuses() map[string]zone.ZoneStatus
 }
 
+// PluginCatalogProvider returns the list of available plugins with their schemas.
+type PluginCatalogProvider interface {
+	GetCatalog() []zone.CatalogEntry
+}
+
 // SwipeSimulator is the subset of zone.Manager needed to drive synthetic swipes.
 type SwipeSimulator interface {
 	UpdateLiveSwipe(progress float32, isLeft bool) error
@@ -91,6 +96,7 @@ type Server struct {
 	navigator       Navigator            // for /api/navigate/page
 	layoutStore     LayoutStore          // for /api/layout/*
 	layoutReloader  LayoutReloader       // for live reloads after layout edits
+	pluginCatalog   PluginCatalogProvider // for /api/plugins
 	windowState     string               // "shown" or "hidden"
 	windowStateCh   chan string
 	hub             *hub
@@ -201,6 +207,11 @@ func (s *Server) SetLayoutReloader(lr LayoutReloader) {
 	s.layoutReloader = lr
 }
 
+// SetPluginCatalog wires in the sampler for GET /api/plugins.
+func (s *Server) SetPluginCatalog(p PluginCatalogProvider) {
+	s.pluginCatalog = p
+}
+
 // BroadcastPageState sends current page index and page list to all WS clients.
 // Called by the app's render loop whenever the page changes.
 func (s *Server) BroadcastPageState() {
@@ -226,6 +237,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/images/delete", s.handleDeleteImage)
 	mux.HandleFunc("/api/images/{filename}", s.handleServeImage)
 	mux.HandleFunc("/api/images", s.handleListImages)
+
+	// Plugin catalog
+	mux.HandleFunc("/api/plugins", s.handlePluginCatalog)
 
 	// Zone config endpoints
 	mux.HandleFunc("/api/zones/", s.handleZones)

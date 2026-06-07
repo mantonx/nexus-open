@@ -29,6 +29,8 @@ func (f *fakePlugin) Sample() (plugin.Payload, error) {
 	return plugin.Payload{Primary: "ok", Timestamp: time.Now()}, nil
 }
 
+func (f *fakePlugin) Configure(_ map[string]any) error { return nil }
+
 // fakePluginHost lets tests control IsAlive and records Evict/Launch calls.
 type fakePluginHost struct {
 	launched atomic.Int32

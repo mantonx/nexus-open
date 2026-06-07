@@ -48,7 +48,23 @@ func (m *GPUTempPlugin) Describe() (plugin.Descriptor, error) {
 		Author:      "Nexus Team",
 		Description: "Monitors GPU temperature (NVIDIA, AMD, Intel)",
 		Icon:        "microchip",
-		RefreshMs:   2000, // Update every 2 seconds
+		RefreshMs:   2000,
+		Schema: plugin.ConfigSchema{
+			Fields: []plugin.ConfigField{
+				{
+					Key: "unit", Label: "Units", Type: plugin.FieldTypeEnum, Default: "metric",
+					Options: []plugin.FieldOption{{Value: "metric", Label: "°C"}, {Value: "imperial", Label: "°F"}},
+				},
+				{
+					Key: "graph_type", Label: "Graph", Type: plugin.FieldTypeEnum, Default: "sparkline",
+					Options: []plugin.FieldOption{
+						{Value: "sparkline", Label: "Sparkline"},
+						{Value: "bar", Label: "Bar"},
+						{Value: "area", Label: "Area"},
+					},
+				},
+			},
+		},
 	}, nil
 }
 
@@ -389,33 +405,19 @@ func (m *GPUTempPlugin) getSeverity(temp float64) plugin.Severity {
 	}
 }
 
-// OnConfigChanged implements plugin.ConfigNotifier interface.
-// The GPU temp plugin uses the "unit" config to switch between Celsius and Fahrenheit,
-// and "graph_type" to change visualization style.
-func (m *GPUTempPlugin) OnConfigChanged(config map[string]interface{}) error {
-	// Update unit
+// Configure applies per-zone plugin configuration.
+func (m *GPUTempPlugin) Configure(cfg map[string]any) error {
 	m.unitMu.Lock()
-	oldUnit := m.unit
-	if unit, ok := config["unit"].(string); ok && unit != "" {
-		if unit == "metric" || unit == "imperial" {
-			m.unit = unit
-			if m.unit != oldUnit {
-				fmt.Printf("gpu-temp: unit changed from %q to %q\n", oldUnit, m.unit)
-			}
-		}
+	if unit, ok := cfg["unit"].(string); ok && (unit == "metric" || unit == "imperial") {
+		m.unit = unit
 	}
 	m.unitMu.Unlock()
 
-	// Update graph type
 	m.graphMu.Lock()
-	oldGraphType := m.graphType
-	if graphType, ok := config["graph_type"].(string); ok && graphType != "" {
-		gt := plugin.GraphType(graphType)
-		if gt == plugin.GraphTypeSparkline || gt == plugin.GraphTypeBar || gt == plugin.GraphTypeArea {
-			m.graphType = gt
-			if m.graphType != oldGraphType {
-				fmt.Printf("gpu-temp: graph_type changed from %q to %q\n", oldGraphType, m.graphType)
-			}
+	if gt, ok := cfg["graph_type"].(string); ok && gt != "" {
+		g := plugin.GraphType(gt)
+		if g == plugin.GraphTypeSparkline || g == plugin.GraphTypeBar || g == plugin.GraphTypeArea {
+			m.graphType = g
 		}
 	}
 	m.graphMu.Unlock()

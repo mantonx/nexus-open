@@ -45,9 +45,5 @@ func (m *DebugPlugin) Sample() (plugin.Payload, error) {
 	}, nil
 }
 
-// OnConfigChanged implements plugin.PluginConfigNotifier interface.
-// Debug plugin doesn't use configuration, so this is a no-op.
-func (m *DebugPlugin) OnConfigChanged(config map[string]interface{}) error {
-	// Debug plugin doesn't need configuration
-	return nil
-}
+// Configure implements plugin.Plugin. Debug has no configurable fields.
+func (m *DebugPlugin) Configure(_ map[string]any) error { return nil }

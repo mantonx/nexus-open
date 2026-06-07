@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -132,6 +133,77 @@ func TestPayloadExpiry(t *testing.T) {
 	}
 	if !p3.IsExpired() {
 		t.Error("Payload beyond TTL should be expired")
+	}
+}
+
+func TestConfigSchema_JSONRoundTrip(t *testing.T) {
+	minVal, maxVal := 0, 100
+	schema := ConfigSchema{
+		Fields: []ConfigField{
+			{Key: "unit", Label: "Units", Type: FieldTypeEnum, Default: "metric",
+				Options: []FieldOption{
+					{Value: "metric", Label: "°C"},
+					{Value: "imperial", Label: "°F"},
+				}},
+			{Key: "threshold", Label: "Warn above", Type: FieldTypeInt, Default: 80, Min: &minVal, Max: &maxVal},
+			{Key: "enabled", Label: "Enabled", Type: FieldTypeBool, Default: true},
+		},
+	}
+
+	data, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got ConfigSchema
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(got.Fields) != 3 {
+		t.Fatalf("fields: want 3, got %d", len(got.Fields))
+	}
+	if got.Fields[0].Key != "unit" {
+		t.Errorf("field[0].key: want unit, got %s", got.Fields[0].Key)
+	}
+	if len(got.Fields[0].Options) != 2 {
+		t.Errorf("field[0].options: want 2, got %d", len(got.Fields[0].Options))
+	}
+	if got.Fields[0].Options[0].Value != "metric" {
+		t.Errorf("option[0].value: want metric, got %s", got.Fields[0].Options[0].Value)
+	}
+	if got.Fields[1].Min == nil || *got.Fields[1].Min != 0 {
+		t.Errorf("field[1].min: want 0, got %v", got.Fields[1].Min)
+	}
+	if got.Fields[1].Max == nil || *got.Fields[1].Max != 100 {
+		t.Errorf("field[1].max: want 100, got %v", got.Fields[1].Max)
+	}
+}
+
+func TestDescriptor_SchemaInJSON(t *testing.T) {
+	desc := Descriptor{
+		Name:      "CPU Temp",
+		Version:   "1.0.0",
+		RefreshMs: 2000,
+		Schema: ConfigSchema{
+			Fields: []ConfigField{
+				{Key: "unit", Label: "Units", Type: FieldTypeEnum, Default: "metric"},
+			},
+		},
+	}
+
+	data, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if _, ok := m["config_schema"]; !ok {
+		t.Error("Descriptor JSON missing config_schema field")
 	}
 }
 

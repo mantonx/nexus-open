@@ -42,9 +42,5 @@ func (m *PlaceholderPlugin) Sample() (plugin.Payload, error) {
 	}, nil
 }
 
-// OnConfigChanged implements plugin.PluginConfigNotifier interface.
-// Placeholder plugin doesn't use configuration, so this is a no-op.
-func (m *PlaceholderPlugin) OnConfigChanged(config map[string]interface{}) error {
-	// Placeholder plugin doesn't need configuration
-	return nil
-}
+// Configure implements plugin.Plugin. Placeholder has no configurable fields.
+func (m *PlaceholderPlugin) Configure(_ map[string]any) error { return nil }

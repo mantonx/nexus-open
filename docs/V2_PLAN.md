@@ -131,7 +131,8 @@ Draft/confirm bar is persistent while there are unsaved changes.
 
 ## Phased delivery
 
-### Phase 0 — Config surface consolidation (no behavior change)
+### Phase 0 — Config surface consolidation (no behavior change) ✅ COMPLETE (2026-06-07, commit 8379b8c)
+
 **Goal:** close the two-store divergence, add `PluginConfig` to the in-memory
 model, and make YAML round-trip complete.
 

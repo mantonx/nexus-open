@@ -47,7 +47,21 @@ func (m *ClockPlugin) Describe() (plugin.Descriptor, error) {
 		Author:      "Nexus Team",
 		Description: "Displays current time and date with blinking colon",
 		Icon:        "clock",
-		RefreshMs:   1000, // Default 1s refresh to match typical digital clocks
+		RefreshMs:   1000,
+		Schema: plugin.ConfigSchema{
+			Fields: []plugin.ConfigField{
+				{
+					Key:     "clock_format",
+					Label:   "Format",
+					Type:    plugin.FieldTypeEnum,
+					Default: "12h",
+					Options: []plugin.FieldOption{
+						{Value: "12h", Label: "12-hour"},
+						{Value: "24h", Label: "24-hour"},
+					},
+				},
+			},
+		},
 	}, nil
 }
 
@@ -85,11 +99,9 @@ func (m *ClockPlugin) formatTime(t time.Time, showColon bool) string {
 	}
 }
 
-// OnConfigChanged implements plugin.PluginConfigNotifier interface.
-// Clock plugin supports configuring the time format (12h or 24h).
-func (m *ClockPlugin) OnConfigChanged(config map[string]interface{}) error {
-	// Check for clock_format configuration
-	if format, ok := config["clock_format"].(string); ok {
+// Configure applies zone-level plugin configuration.
+func (m *ClockPlugin) Configure(cfg map[string]any) error {
+	if format, ok := cfg["clock_format"].(string); ok {
 		switch format {
 		case "24h", "24hour", "24":
 			m.format = ClockFormat24Hour

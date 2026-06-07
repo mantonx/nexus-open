@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -154,22 +155,8 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	s.firstSampleLogged[zoneConfig.ID] = false
 	s.pluginSpec[zoneConfig.ID] = pluginSpec
 
-	// Send zone config to plugin (if plugin supports it)
-	if s.zoneCfg != nil {
-		if config := s.zoneCfg.Get(zoneConfig.ID, pluginSpec); config != nil {
-			if notifier, ok := plugin.SupportsPluginConfig(mod); ok {
-				if err := notifier.OnConfigChanged(config); err != nil {
-					s.logger.Warn("failed to apply initial zone config",
-						"zone_id", zoneConfig.ID,
-						"error", err)
-				} else {
-					s.logger.Info("applied initial zone config",
-						"zone_id", zoneConfig.ID,
-						"config", config)
-				}
-			}
-		}
-	}
+	// Apply stored zone config to the plugin before sampling starts.
+	s.applyInitialZoneConfig(zoneConfig.ID, pluginSpec, mod)
 
 	// Create trigger channel for immediate sampling
 	s.triggerChannels[zoneConfig.ID] = make(chan struct{}, 1)
@@ -177,9 +164,6 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	// Start sampling goroutine
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.cancelFuncs[zoneConfig.ID] = cancel
-
-	// Apply initial configuration if available
-	s.applyInitialZoneConfig(zoneConfig.ID, pluginSpec, mod)
 
 	s.wg.Add(1)
 	go s.sampleLoop(ctx, zoneConfig.ID, mod, time.Duration(zoneConfig.RefreshMs)*time.Millisecond)
@@ -404,6 +388,83 @@ func (s *Sampler) AllZoneStatuses() map[string]ZoneStatus {
 	return out
 }
 
+// CatalogEntry is one entry in the plugin catalog returned by GetCatalog.
+type CatalogEntry struct {
+	ID         string            `json:"id"`   // e.g. "builtin:clock" or "exec:cpu-temp"
+	Kind       string            `json:"kind"` // "builtin" or "exec"
+	Descriptor plugin.Descriptor `json:"descriptor"`
+}
+
+// GetCatalog returns metadata for all available plugins: running builtins (from
+// the loaded modules map) plus every executable found in pluginsDir.
+// Exec plugins not currently loaded are launched briefly to retrieve their Descriptor.
+func (s *Sampler) GetCatalog() []CatalogEntry {
+	seen := make(map[string]bool)
+	var entries []CatalogEntry
+
+	// Collect builtins from loaded modules.
+	s.mu.RLock()
+	for zoneID, mod := range s.modules {
+		spec := s.pluginSpec[zoneID]
+		if !strings.HasPrefix(spec, "builtin:") || seen[spec] {
+			continue
+		}
+		seen[spec] = true
+		if desc, err := mod.Describe(); err == nil {
+			entries = append(entries, CatalogEntry{ID: spec, Kind: "builtin", Descriptor: desc})
+		}
+	}
+	s.mu.RUnlock()
+
+	// Always include static builtins even if no zone is using them right now.
+	for _, id := range []string{"builtin:clock", "builtin:placeholder", "builtin:debug"} {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		var mod plugin.Plugin
+		switch id {
+		case "builtin:clock":
+			mod = builtin.NewClock()
+		case "builtin:placeholder":
+			mod = builtin.NewPlaceholder("")
+		case "builtin:debug":
+			mod = builtin.NewDebug("catalog", 640)
+		}
+		if desc, err := mod.Describe(); err == nil {
+			entries = append(entries, CatalogEntry{ID: id, Kind: "builtin", Descriptor: desc})
+		}
+	}
+
+	// Scan pluginsDir for exec plugin binaries.
+	if s.pluginsDir != "" {
+		dirEntries, err := os.ReadDir(s.pluginsDir)
+		if err == nil {
+			for _, de := range dirEntries {
+				if !de.IsDir() {
+					continue
+				}
+				name := de.Name()
+				binPath := filepath.Join(s.pluginsDir, name, name)
+				id := "exec:" + name
+				if seen[id] {
+					continue
+				}
+
+				desc, err := pluginhost.DescribePlugin(binPath)
+				if err != nil {
+					s.logger.Debug("catalog: describe failed", "plugin", name, "error", err)
+					continue
+				}
+				seen[id] = true
+				entries = append(entries, CatalogEntry{ID: id, Kind: "exec", Descriptor: desc})
+			}
+		}
+	}
+
+	return entries
+}
+
 func (s *Sampler) recordFirstSample(zoneID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -508,23 +569,18 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 	return nil
 }
 
-// applyInitialZoneConfig notifies a plugin of its current configuration before sampling starts.
+// applyInitialZoneConfig delivers the stored zone config to the plugin before sampling starts.
 func (s *Sampler) applyInitialZoneConfig(zoneID, pluginSpec string, mod plugin.Plugin) {
 	if s.zoneCfg == nil {
 		return
 	}
 
-	notifier, ok := plugin.SupportsPluginConfig(mod)
-	if !ok {
+	cfg := s.zoneCfg.Get(zoneID, pluginSpec)
+	if len(cfg) == 0 {
 		return
 	}
 
-	config := s.zoneCfg.Get(zoneID, pluginSpec)
-	if len(config) == 0 {
-		return
-	}
-
-	if err := notifier.OnConfigChanged(config); err != nil {
+	if err := mod.Configure(cfg); err != nil {
 		s.logger.Warn("failed to apply initial zone config",
 			"zone_id", zoneID,
 			"plugin", pluginSpec,
@@ -535,88 +591,54 @@ func (s *Sampler) applyInitialZoneConfig(zoneID, pluginSpec string, mod plugin.P
 	s.logger.Info("applied initial zone config",
 		"zone_id", zoneID,
 		"plugin", pluginSpec,
-		"config", config)
+		"config", cfg)
 }
 
-// BroadcastConfigChange notifies all modules about a configuration change.
-// Only modules implementing the ConfigNotifier interface will receive the notification.
-func (s *Sampler) BroadcastConfigChange(config map[string]interface{}) {
+// BroadcastConfigChange delivers a global config update to all loaded plugins.
+// Kept for the settings-level config path; zone-specific config goes through
+// BroadcastZoneConfigChange.
+func (s *Sampler) BroadcastConfigChange(config map[string]any) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	s.logger.Info("broadcasting config change to modules", "module_count", len(s.modules))
-
-	notified := 0
-	skipped := 0
-	var zonesToResample []string
-
-	// Notify all loaded modules
+	var toResample []string
 	for zoneID, mod := range s.modules {
-		if notifier, ok := plugin.SupportsPluginConfig(mod); ok {
-			if err := notifier.OnConfigChanged(config); err != nil {
-				s.logger.Error("plugin config notification failed",
-					"zone_id", zoneID,
-					"plugin", s.pluginSpec[zoneID],
-					"error", err)
-			} else {
-				s.logger.Debug("plugin config notified",
-					"zone_id", zoneID,
-					"plugin", s.pluginSpec[zoneID])
-				notified++
-				zonesToResample = append(zonesToResample, zoneID)
-			}
-		} else {
-			s.logger.Debug("plugin does not support config notifications",
+		if err := mod.Configure(config); err != nil {
+			s.logger.Error("plugin Configure failed",
 				"zone_id", zoneID,
-				"plugin", s.pluginSpec[zoneID])
-			skipped++
+				"plugin", s.pluginSpec[zoneID],
+				"error", err)
+		} else {
+			toResample = append(toResample, zoneID)
 		}
 	}
 
-	s.logger.Info("config broadcast complete",
-		"notified", notified,
-		"skipped", skipped,
-		"total", len(s.modules))
-
-	// Trigger immediate resampling for modules that were notified
-	for _, zoneID := range zonesToResample {
-		if triggerCh, ok := s.triggerChannels[zoneID]; ok {
-			// Non-blocking send (channel has buffer of 1)
+	for _, zoneID := range toResample {
+		if ch, ok := s.triggerChannels[zoneID]; ok {
 			select {
-			case triggerCh <- struct{}{}:
-				s.logger.Debug("triggered immediate resample", "zone_id", zoneID)
+			case ch <- struct{}{}:
 			default:
-				// Channel already has a pending trigger, skip
 			}
 		}
 	}
 }
 
-// BroadcastZoneConfigChange broadcasts a config change to a specific zone's plugin.
-// Returns an error if the zone doesn't exist or doesn't support config notifications.
-func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]interface{}) error {
+// BroadcastZoneConfigChange delivers a config update to a specific zone's plugin.
+func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]any) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Find the plugin for this zone
 	mod, exists := s.modules[zoneID]
 	if !exists {
 		return fmt.Errorf("zone %q not found", zoneID)
 	}
 
-	// Check if plugin supports config notifications
-	notifier, ok := plugin.SupportsPluginConfig(mod)
-	if !ok {
-		return fmt.Errorf("plugin for zone %q does not support config notifications", zoneID)
-	}
-
-	// Send config to plugin
-	if err := notifier.OnConfigChanged(config); err != nil {
-		s.logger.Error("zone config notification failed",
+	if err := mod.Configure(config); err != nil {
+		s.logger.Error("zone Configure failed",
 			"zone_id", zoneID,
 			"plugin", s.pluginSpec[zoneID],
 			"error", err)
-		return fmt.Errorf("config notification failed: %w", err)
+		return fmt.Errorf("Configure failed: %w", err)
 	}
 
 	s.logger.Info("zone config updated",
@@ -624,13 +646,10 @@ func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]int
 		"plugin", s.pluginSpec[zoneID],
 		"config", config)
 
-	// Trigger immediate resampling
-	if triggerCh, ok := s.triggerChannels[zoneID]; ok {
+	if ch, ok := s.triggerChannels[zoneID]; ok {
 		select {
-		case triggerCh <- struct{}{}:
-			s.logger.Debug("triggered immediate resample", "zone_id", zoneID)
+		case ch <- struct{}{}:
 		default:
-			// Channel already has a pending trigger, skip
 		}
 	}
 

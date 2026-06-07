@@ -45,7 +45,23 @@ func (m *NetworkPlugin) Describe() (plugin.Descriptor, error) {
 		Author:      "Nexus Team",
 		Description: "Monitors network upload/download speeds",
 		Icon:        "network-wired",
-		RefreshMs:   2000, // Update every 2 seconds
+		RefreshMs:   2000,
+		Schema: plugin.ConfigSchema{
+			Fields: []plugin.ConfigField{
+				{
+					Key: "network_format", Label: "Format", Type: plugin.FieldTypeEnum, Default: "bytes",
+					Options: []plugin.FieldOption{{Value: "bytes", Label: "KB/s · MB/s"}, {Value: "bits", Label: "Kbps · Mbps"}},
+				},
+				{
+					Key: "graph_type", Label: "Graph", Type: plugin.FieldTypeEnum, Default: "sparkline",
+					Options: []plugin.FieldOption{
+						{Value: "sparkline", Label: "Sparkline"},
+						{Value: "bar", Label: "Bar"},
+						{Value: "area", Label: "Area"},
+					},
+				},
+			},
+		},
 	}, nil
 }
 
@@ -233,37 +249,25 @@ func (m *NetworkPlugin) getSparkline() []float32 {
 	return spark
 }
 
-// OnConfigChanged implements plugin.ConfigNotifier interface.
-// The network plugin uses the "network_format" config to switch between
-// bytes (KB/s, MB/s) and bits (Kbps, Mbps) display formats,
-// and "graph_type" to change visualization style.
-func (m *NetworkPlugin) OnConfigChanged(config map[string]interface{}) error {
-	// Update network format
+// Configure applies per-zone plugin configuration.
+func (m *NetworkPlugin) Configure(cfg map[string]any) error {
 	m.formatMu.Lock()
 	oldFormat := m.format
-	if format, ok := config["network_format"].(string); ok && format != "" {
-		if format == "bytes" || format == "bits" {
-			m.format = format
-			if m.format != oldFormat {
-				// Reset history so sparkline scales correctly after format change.
-				m.historyMu.Lock()
-				m.history = m.history[:0]
-				m.historyMu.Unlock()
-			}
+	if format, ok := cfg["network_format"].(string); ok && (format == "bytes" || format == "bits") {
+		m.format = format
+		if m.format != oldFormat {
+			m.historyMu.Lock()
+			m.history = m.history[:0]
+			m.historyMu.Unlock()
 		}
 	}
 	m.formatMu.Unlock()
 
-	// Update graph type
 	m.graphMu.Lock()
-	oldGraphType := m.graphType
-	if graphType, ok := config["graph_type"].(string); ok && graphType != "" {
-		gt := plugin.GraphType(graphType)
-		if gt == plugin.GraphTypeSparkline || gt == plugin.GraphTypeBar || gt == plugin.GraphTypeArea {
-			m.graphType = gt
-			if m.graphType != oldGraphType {
-				fmt.Printf("network: graph_type changed from %q to %q\n", oldGraphType, m.graphType)
-			}
+	if gt, ok := cfg["graph_type"].(string); ok && gt != "" {
+		g := plugin.GraphType(gt)
+		if g == plugin.GraphTypeSparkline || g == plugin.GraphTypeBar || g == plugin.GraphTypeArea {
+			m.graphType = g
 		}
 	}
 	m.graphMu.Unlock()

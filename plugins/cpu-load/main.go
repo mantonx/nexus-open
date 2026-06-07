@@ -74,6 +74,22 @@ func (p *CPULoadPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Monitors CPU utilisation by topology group (Linux, Windows, macOS)",
 		Icon:        "microchip",
 		RefreshMs:   1000,
+		Schema: plugin.ConfigSchema{
+			Fields: []plugin.ConfigField{
+				{
+					Key: "source", Label: "Source", Type: plugin.FieldTypeString, Default: "all",
+					Help: "Core/package name or 'all'. Accepts a list for multi-core display.",
+				},
+				{
+					Key: "graph_type", Label: "Graph", Type: plugin.FieldTypeEnum, Default: "sparkline",
+					Options: []plugin.FieldOption{
+						{Value: "sparkline", Label: "Sparkline"},
+						{Value: "bar", Label: "Bar"},
+						{Value: "area", Label: "Area"},
+					},
+				},
+			},
+		},
 	}, nil
 }
 
@@ -195,12 +211,11 @@ func severityFor(pct float64) plugin.Severity {
 	}
 }
 
-// OnConfigChanged handles live config updates.
-func (p *CPULoadPlugin) OnConfigChanged(config map[string]interface{}) error {
+// Configure applies per-zone plugin configuration.
+func (p *CPULoadPlugin) Configure(cfg map[string]any) error {
 	p.topoOnce.Do(p.buildTopology)
 
-	// Parse source — accepts string or []interface{}
-	if raw, ok := config["source"]; ok {
+	if raw, ok := cfg["source"]; ok {
 		specs := p.parseSourceConfig(raw)
 		p.sourcesMu.Lock()
 		p.sources = specs
@@ -208,7 +223,7 @@ func (p *CPULoadPlugin) OnConfigChanged(config map[string]interface{}) error {
 	}
 
 	p.graphMu.Lock()
-	if gt, ok := config["graph_type"].(string); ok && gt != "" {
+	if gt, ok := cfg["graph_type"].(string); ok && gt != "" {
 		g := plugin.GraphType(gt)
 		if g == plugin.GraphTypeSparkline || g == plugin.GraphTypeBar || g == plugin.GraphTypeArea {
 			p.graphType = g

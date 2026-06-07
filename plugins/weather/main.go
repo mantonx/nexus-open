@@ -69,7 +69,19 @@ func (m *WeatherPlugin) Describe() (plugin.Descriptor, error) {
 		Author:      "Nexus Team",
 		Description: "Monitors weather conditions via Open-Meteo API",
 		Icon:        "cloud",
-		RefreshMs:   300000, // Update every 5 minutes
+		RefreshMs:   300000,
+		Schema: plugin.ConfigSchema{
+			Fields: []plugin.ConfigField{
+				{
+					Key: "location", Label: "Location", Type: plugin.FieldTypeString, Default: "Jersey City, NJ",
+					Help: "City name or 'lat,lon' coordinates",
+				},
+				{
+					Key: "unit", Label: "Units", Type: plugin.FieldTypeEnum, Default: "imperial",
+					Options: []plugin.FieldOption{{Value: "imperial", Label: "°F"}, {Value: "metric", Label: "°C"}},
+				},
+			},
+		},
 	}, nil
 }
 
@@ -114,21 +126,16 @@ func (m *WeatherPlugin) Sample() (plugin.Payload, error) {
 	return m.formatPayload(data), nil
 }
 
-// OnConfigChanged implements plugin.ConfigNotifier interface.
-// This method is called by the host when configuration changes via the API,
-// allowing the weather module to react instantly without file watching.
-func (m *WeatherPlugin) OnConfigChanged(config map[string]interface{}) error {
+// Configure applies per-zone plugin configuration.
+func (m *WeatherPlugin) Configure(cfg map[string]any) error {
 	m.mu.Lock()
 	oldLocation := m.location
 	oldUnit := m.unit
 
-	// Extract location from config
-	if location, ok := config["location"].(string); ok && location != "" {
+	if location, ok := cfg["location"].(string); ok && location != "" {
 		m.location = location
 	}
-
-	// Extract unit from config
-	if unit, ok := config["unit"].(string); ok && unit != "" {
+	if unit, ok := cfg["unit"].(string); ok && unit != "" {
 		m.unit = unit
 	}
 
@@ -136,33 +143,19 @@ func (m *WeatherPlugin) OnConfigChanged(config map[string]interface{}) error {
 	newUnit := m.unit
 	m.mu.Unlock()
 
-	// If location or unit changed, fetch fresh data immediately
 	if newLocation != oldLocation || newUnit != oldUnit {
-		fmt.Printf("weather: config updated - location=%q unit=%q (fetching immediately)\n",
-			newLocation, newUnit)
-
-		// Fetch weather data synchronously (fetchWeather doesn't hold locks)
 		data, err := m.fetchWeather()
 		if err != nil {
-			fmt.Printf("weather: failed to fetch after config change: %v\n", err)
-			// Clear cache anyway so next Sample() will retry
 			m.mu.Lock()
 			m.cachedData = nil
 			m.lastUpdate = time.Time{}
 			m.mu.Unlock()
 			return nil
 		}
-
-		// Update cache with new data
 		m.mu.Lock()
 		m.cachedData = data
 		m.lastUpdate = time.Now()
 		m.mu.Unlock()
-
-		fmt.Printf("weather: immediately updated to %s, %s%.1f\n",
-			data.Location,
-			map[bool]string{true: "°F", false: "°C"}[data.Unit == "imperial"],
-			data.Temperature)
 	}
 
 	return nil

@@ -201,6 +201,41 @@ func (h *Host) StopPlugin(id string) error {
 	return nil
 }
 
+// DescribePlugin launches a plugin binary, calls Describe(), kills it, and
+// returns the descriptor. It never adds the process to the live clients map.
+// Used by the catalog endpoint to get schema info without starting sampling.
+func DescribePlugin(path string) (plugin.Descriptor, error) {
+	if _, err := os.Stat(path); err != nil {
+		return plugin.Descriptor{}, fmt.Errorf("plugin binary not found: %s", err)
+	}
+
+	client := goplugin.NewClient(&goplugin.ClientConfig{
+		HandshakeConfig: plugin.Handshake,
+		Plugins: goplugin.PluginSet{
+			"plugin": &plugin.ExecPlugin{},
+		},
+		Cmd:              exec.Command(path),
+		Logger:           hclog.NewNullLogger(),
+		StartTimeout:     5 * time.Second,
+		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolNetRPC},
+	})
+	defer client.Kill()
+
+	rpcClient, err := client.Client()
+	if err != nil {
+		return plugin.Descriptor{}, fmt.Errorf("rpc connect: %w", err)
+	}
+	raw, err := rpcClient.Dispense("plugin")
+	if err != nil {
+		return plugin.Descriptor{}, fmt.Errorf("dispense: %w", err)
+	}
+	mod, ok := raw.(plugin.Plugin)
+	if !ok {
+		return plugin.Descriptor{}, fmt.Errorf("binary does not implement Plugin interface")
+	}
+	return mod.Describe()
+}
+
 // StopAll terminates all running external modules.
 func (h *Host) StopAll() {
 	h.mu.Lock()

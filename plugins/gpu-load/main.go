@@ -66,6 +66,23 @@ func (p *GPULoadPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Monitors GPU utilisation (NVIDIA, AMD, Intel)",
 		Icon:        "display",
 		RefreshMs:   1000,
+		Schema: plugin.ConfigSchema{
+			Fields: []plugin.ConfigField{
+				{
+					Key: "source", Label: "Source", Type: plugin.FieldTypeEnum, Default: "gpu",
+					Options: []plugin.FieldOption{{Value: "gpu", Label: "GPU"}, {Value: "memory", Label: "VRAM"}},
+				},
+				{Key: "show_vram", Label: "Show VRAM bar", Type: plugin.FieldTypeBool, Default: false},
+				{
+					Key: "graph_type", Label: "Graph", Type: plugin.FieldTypeEnum, Default: "sparkline",
+					Options: []plugin.FieldOption{
+						{Value: "sparkline", Label: "Sparkline"},
+						{Value: "bar", Label: "Bar"},
+						{Value: "area", Label: "Area"},
+					},
+				},
+			},
+		},
 	}, nil
 }
 
@@ -265,23 +282,22 @@ func (p *GPULoadPlugin) detectVendor() {
 	}
 }
 
-func (p *GPULoadPlugin) OnConfigChanged(config map[string]interface{}) error {
-	if src, ok := config["source"].(string); ok && src != "" {
-		if src == "gpu" || src == "memory" {
-			p.sourceMu.Lock()
-			p.source = src
-			p.sourceMu.Unlock()
-		}
+// Configure applies per-zone plugin configuration.
+func (p *GPULoadPlugin) Configure(cfg map[string]any) error {
+	if src, ok := cfg["source"].(string); ok && (src == "gpu" || src == "memory") {
+		p.sourceMu.Lock()
+		p.source = src
+		p.sourceMu.Unlock()
 	}
 
-	if v, ok := config["show_vram"].(bool); ok {
+	if v, ok := cfg["show_vram"].(bool); ok {
 		p.showVRAMMu.Lock()
 		p.showVRAM = v
 		p.showVRAMMu.Unlock()
 	}
 
 	p.graphMu.Lock()
-	if gt, ok := config["graph_type"].(string); ok && gt != "" {
+	if gt, ok := cfg["graph_type"].(string); ok && gt != "" {
 		g := plugin.GraphType(gt)
 		if g == plugin.GraphTypeSparkline || g == plugin.GraphTypeBar || g == plugin.GraphTypeArea {
 			p.graphType = g

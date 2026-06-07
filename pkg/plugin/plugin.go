@@ -16,7 +16,7 @@ import (
 
 // Handshake ensures the host and plugin binary are compatible.
 var Handshake = plugin.HandshakeConfig{
-	ProtocolVersion:  1,
+	ProtocolVersion:  2,
 	MagicCookieKey:   "NEXUS_EXEC_MODULE",
 	MagicCookieValue: "nexus-open-v2",
 }
@@ -41,19 +41,19 @@ type rpcClient struct {
 
 func (c *rpcClient) Describe() (Descriptor, error) {
 	var resp Descriptor
-	err := c.client.Call("Plugin.Describe", new(interface{}), &resp)
+	err := c.client.Call("Plugin.Describe", new(any), &resp)
 	return resp, err
 }
 
 func (c *rpcClient) Sample() (Payload, error) {
 	var resp Payload
-	err := c.client.Call("Plugin.Sample", new(interface{}), &resp)
+	err := c.client.Call("Plugin.Sample", new(any), &resp)
 	return resp, err
 }
 
-func (c *rpcClient) OnConfigChanged(config map[string]interface{}) error {
-	var resp interface{}
-	return c.client.Call("Plugin.OnConfigChanged", config, &resp)
+func (c *rpcClient) Configure(cfg map[string]any) error {
+	var resp any
+	return c.client.Call("Plugin.Configure", cfg, &resp)
 }
 
 // pluginRPC is the plugin-side handler that serves requests from the host.
@@ -61,28 +61,28 @@ type pluginRPC struct {
 	Impl Plugin
 }
 
-func (s *pluginRPC) Describe(args interface{}, resp *Descriptor) error {
+func (s *pluginRPC) Describe(args any, resp *Descriptor) error {
 	desc, err := s.Impl.Describe()
 	*resp = desc
 	return err
 }
 
-func (s *pluginRPC) Sample(args interface{}, resp *Payload) error {
+func (s *pluginRPC) Sample(args any, resp *Payload) error {
 	payload, err := s.Impl.Sample()
 	*resp = payload
 	return err
 }
 
-func (s *pluginRPC) OnConfigChanged(config map[string]interface{}, resp *interface{}) error {
-	if notifier, ok := SupportsPluginConfig(s.Impl); ok {
-		return notifier.OnConfigChanged(config)
-	}
-	return nil
+func (s *pluginRPC) Configure(cfg map[string]any, resp *any) error {
+	return s.Impl.Configure(cfg)
 }
 
 func init() {
 	gob.Register(Descriptor{})
+	gob.Register(ConfigSchema{})
+	gob.Register(ConfigField{})
+	gob.Register(FieldOption{})
 	gob.Register(Payload{})
-	gob.Register(map[string]interface{}{})
-	gob.Register([]interface{}{})
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
 }
