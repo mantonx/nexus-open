@@ -81,6 +81,7 @@ type LayoutStore interface {
 	ImportLayout(pages []store.StoredPage, zonesByPage map[int64][]store.StoredZone) error
 }
 
+// LayoutReloader applies a new layout config to the live zone manager without restarting.
 type LayoutReloader interface {
 	ReloadFromConfig(config *zone.Config) error
 	GetConfig() *zone.Config
