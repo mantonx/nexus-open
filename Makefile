@@ -5,8 +5,8 @@
 
 # Configuration
 APP_NAME := nexus-open
-VERSION := 1.0.0
-COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+VERSION := $(shell git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
 # Directories
@@ -90,7 +90,7 @@ build-ui: $(BIN_DIR)
 		echo "Error: Flutter not found. Install from https://flutter.dev"; \
 		exit 1; \
 	fi
-	@cd $(UI_DIR) && flutter build linux --release
+	@cd $(UI_DIR) && flutter build linux --release --dart-define=APP_VERSION=$(VERSION)
 	@echo "Copying Flutter bundle to bin directory..."
 	@rm -rf $(BIN_DIR)/nexus-open-ui-bundle
 	@cp -r $(UI_BUILD_DIR) $(BIN_DIR)/nexus-open-ui-bundle

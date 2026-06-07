@@ -15,7 +15,7 @@
 #   - docker (for --test)
 #
 # The Flutter UI bundle is included if already built:
-#   cd ui && flutter build linux --release
+#   cd ui && flutter build linux --release --dart-define=APP_VERSION=$(git describe --tags --match 'v*' --always | sed 's/^v//')
 
 set -euo pipefail
 
@@ -25,7 +25,7 @@ cd "$REPO_DIR"
 # ── config ────────────────────────────────────────────────────────────────────
 
 PKG_NAME="nexus-open"
-PKG_VERSION="1.0.0"
+PKG_VERSION="$(git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")"
 PKG_ARCH="amd64"
 PKG_DESCRIPTION="Linux controller for Corsair iCUE Nexus display"
 PKG_URL="https://github.com/mantonx/nexus-next"
