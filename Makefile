@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev deb appimage rpm generate-api models all changelog
+.PHONY: help build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui deb appimage rpm generate-api models all changelog
 
 # Configuration
 APP_NAME := nexus-open
@@ -44,7 +44,8 @@ help:
 	@echo "  make build-release - Build optimized release binary (stripped)"
 	@echo "  make run           - Build and run Go backend only"
 	@echo "  make run-tray      - Build and run bundled app with system tray"
-	@echo "  make dev           - Run with live reload (requires air)"
+	@echo "  make dev-backend   - Go hot-reload via air (rebuilds daemon+plugins on save)"
+	@echo "  make dev-ui        - Flutter hot-reload (run alongside dev-backend)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test          - Run all tests"
@@ -137,17 +138,30 @@ screenshot-tour:
 	@./scripts/ui-tour.sh
 
 # Development mode with live reload (requires github.com/air-verse/air)
-dev:
-	@if command -v air > /dev/null || [ -f ~/go/bin/air ]; then \
-		if command -v air > /dev/null; then \
-			air; \
-		else \
-			~/go/bin/air; \
-		fi; \
-	else \
+# Rebuilds and restarts the Go daemon + plugins on any .go file change.
+# The installed plugins in ~/.local/share/nexus-open/plugins are used at runtime;
+# run 'make install' once first so the layout config and plugins are in place.
+dev-backend:
+	@AIR=$$(command -v air 2>/dev/null || echo ~/go/bin/air); \
+	if [ ! -x "$$AIR" ]; then \
 		echo "Error: 'air' not found. Install with: go install github.com/air-verse/air@$(AIR_VERSION)"; \
 		exit 1; \
+	fi; \
+	NEXUS_MOCK_DEVICE=0 NEXUS_DEBUG=1 "$$AIR"
+
+# Flutter hot-reload UI (runs flutter run in debug mode).
+# The backend must already be running (make run or make dev-backend).
+# Token is read from ~/.config/nexus-open/token automatically.
+dev-ui:
+	@if [ ! -f ~/.config/nexus-open/token ]; then \
+		echo "Error: token not found at ~/.config/nexus-open/token — is the backend running?"; \
+		exit 1; \
 	fi
+	@cd ui && flutter run -d linux
+
+# Alias: run both backend watcher and UI hot-reload in split terminals.
+# Usage: open two terminals and run 'make dev-backend' and 'make dev-ui'.
+dev: dev-backend
 
 # Run all tests
 test:

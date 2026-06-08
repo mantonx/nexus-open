@@ -12,16 +12,25 @@ tmp_dir = "tmp"
   exclude_regex = ["_test.go"]
   exclude_unchanged = false
   follow_symlink = false
-  full_bin = ""
-  include_dir = ["modules", "cmd", "internal", "pkg"]
-  include_ext = ["go", "tpl", "tmpl", "html"]
+  full_bin = "NEXUS_DEBUG=1 ./tmp/nexus-open --debug"
+  include_dir = ["cmd", "internal", "pkg", "plugins"]
+  include_ext = ["go"]
   include_file = []
   kill_delay = "0s"
   log = "build-errors.log"
   poll = false
   poll_interval = 0
   post_cmd = []
-  pre_cmd = ["cd modules/cpu-temp && go build -o cpu-temp", "cd modules/gpu-temp && go build -o gpu-temp", "cd modules/network && go build -o network", "cd modules/weather && go build -o weather", "cd modules/hello && go build -o hello"]
+  # Plugins are built directly into the installed location so the daemon
+  # picks them up immediately on restart without a separate copy step.
+  pre_cmd = [
+    "cd plugins/cpu-temp && go build -o ~/.local/share/nexus-open/plugins/cpu-temp  .",
+    "cd plugins/cpu-load && go build -o ~/.local/share/nexus-open/plugins/cpu-load  .",
+    "cd plugins/gpu-temp && go build -o ~/.local/share/nexus-open/plugins/gpu-temp  .",
+    "cd plugins/gpu-load && go build -o ~/.local/share/nexus-open/plugins/gpu-load  .",
+    "cd plugins/network  && go build -o ~/.local/share/nexus-open/plugins/network   .",
+    "cd plugins/weather  && go build -o ~/.local/share/nexus-open/plugins/weather   .",
+  ]
   rerun = false
   rerun_delay = 500
   send_interrupt = true
