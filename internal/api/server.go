@@ -105,6 +105,7 @@ type Server struct {
 	draft           *DraftManager         // live draft session
 	windowState     string                // "shown" or "hidden"
 	windowStateCh   chan string
+	windowClosedCh  chan struct{}
 	hub             *hub
 	lastConnectErr  error
 }
@@ -119,9 +120,10 @@ func NewServer(addr string, cfg *settings.Manager, device DeviceController, logg
 		logger:        logger,
 		cfg:           cfg,
 		device:        device,
-		windowState:   "shown",
-		windowStateCh: make(chan string, 10),
-		hub:           newHub(logger),
+		windowState:    "shown",
+		windowStateCh:  make(chan string, 10),
+		windowClosedCh: make(chan struct{}, 1),
+		hub:            newHub(logger),
 	}
 
 	// Create router
@@ -265,6 +267,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/window/state", s.handleWindowState)
 	mux.HandleFunc("/api/window/show", s.handleWindowShow)
 	mux.HandleFunc("/api/window/hide", s.handleWindowHide)
+	mux.HandleFunc("/api/window/closed", s.handleWindowClosed)
 
 	// Layout editor endpoints
 	mux.HandleFunc("/api/layout", s.handleGetLayout)

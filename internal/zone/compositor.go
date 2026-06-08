@@ -96,10 +96,15 @@ func (c *Compositor) ClearBackground() {
 	c.bg = nil
 }
 
-// Composite renders all zones and composites them into a single 640×48 image.
+// Composite renders all zones and composites them into dst.
+// If dst is nil a new 640×48 RGBA image is allocated. Pass a pre-allocated
+// buffer to avoid allocation on the hot path.
 // theme is passed in so live UpdateTheme calls are reflected immediately.
-func (c *Compositor) Composite(zoneImages map[string]*image.RGBA, theme Theme) (*image.RGBA, error) {
-	display := image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
+func (c *Compositor) Composite(dst *image.RGBA, zoneImages map[string]*image.RGBA, theme Theme) (*image.RGBA, error) {
+	display := dst
+	if display == nil {
+		display = image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
+	}
 
 	// Layer 1: solid background colour.
 	bgColor := theme.GetBgColor()

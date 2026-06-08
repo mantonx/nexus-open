@@ -27,6 +27,10 @@ func (m *Manager) UpdatePayload(zoneID string, payload plugin.Payload) error {
 
 	m.payloads[zoneID] = &payload
 
+	m.lastFrameMu.Lock()
+	m.frameDirty = true
+	m.lastFrameMu.Unlock()
+
 	// Snapshot config pointer once under read-lock before walking pages.
 	m.configMu.RLock()
 	cfg := m.config
@@ -78,9 +82,16 @@ func (m *Manager) UpdateTheme(theme Theme) {
 	m.pageCacheMu.Lock()
 	m.pageCache = make(map[int]*image.RGBA)
 	m.pageCacheMu.Unlock()
+
+	m.lastFrameMu.Lock()
+	m.frameDirty = true
+	m.lastFrameMu.Unlock()
 }
 
 // RenderFrame renders the current frame (transition or live zones composited).
+// When no payload, theme, or page has changed since the last render, it returns
+// the cached lastFrame directly — skipping allocation and the full compositor
+// pipeline. This keeps idle CPU and GC pressure near zero at 30fps.
 func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	m.configMu.RLock()
 	theme := m.config.Theme
@@ -99,6 +110,15 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	}
 	m.transitionMu.RUnlock()
 
+	// Fast path: nothing changed since last render — return cached frame.
+	m.lastFrameMu.Lock()
+	if !m.frameDirty && m.lastFrame != nil {
+		cached := m.lastFrame
+		m.lastFrameMu.Unlock()
+		return cached, nil
+	}
+	m.lastFrameMu.Unlock()
+
 	m.payloadsMu.RLock()
 	defer m.payloadsMu.RUnlock()
 
@@ -109,6 +129,7 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 
 	m.lastFrameMu.Lock()
 	m.lastFrame = frame
+	m.frameDirty = false
 	m.lastFrameMu.Unlock()
 
 	return frame, nil
@@ -164,6 +185,8 @@ func (m *Manager) renderImmediateFrameForCurrentPage() (*image.RGBA, error) {
 }
 
 // renderZoneImages renders all current-page zones into a composited frame.
+// It writes into the pre-allocated back buffer (frameBufs[frameBufIdx]) and
+// flips the index so the next call writes into the other buffer.
 // Callers must hold m.payloadsMu.RLock before calling.
 func (m *Manager) renderZoneImages(theme Theme) (*image.RGBA, error) {
 	zoneImages := make(map[string]*image.RGBA, len(m.zones))
@@ -204,10 +227,12 @@ func (m *Manager) renderZoneImages(theme Theme) (*image.RGBA, error) {
 		zoneImages[zoneID] = img
 	}
 
-	frame, err := m.compositor.Composite(zoneImages, theme)
+	dst := m.frameBufs[m.frameBufIdx]
+	frame, err := m.compositor.Composite(dst, zoneImages, theme)
 	if err != nil {
 		return nil, fmt.Errorf("failed to composite frame: %w", err)
 	}
+	m.frameBufIdx ^= 1
 	return frame, nil
 }
 
@@ -234,17 +259,13 @@ func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
 	defer m.payloadsMu.RUnlock()
 
 	for _, zoneConfig := range page.Zones {
-		// Use live renderer if available (has correct ThemeOverride already applied).
-		var renderer *Renderer
-		if r, ok := m.renderers[zoneConfig.ID]; ok {
-			renderer = r
-		} else {
-			theme := cfg.Theme
-			if zoneConfig.ThemeOverride != nil {
-				theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
-			}
-			renderer = NewRenderer(m.logger, theme, zoneConfig.Width, DisplayHeight, zoneConfig.Align)
+		// Always build a fresh renderer — reusing the live renderer would race
+		// with the main render loop since freetype's GlyphBuf is not thread-safe.
+		theme := cfg.Theme
+		if zoneConfig.ThemeOverride != nil {
+			theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
 		}
+		renderer := NewRenderer(m.logger, theme, zoneConfig.Width, DisplayHeight, zoneConfig.Align)
 		payload, ok := m.payloads[zoneConfig.ID]
 		if !ok {
 			payload = &plugin.Payload{Primary: "—", Severity: plugin.SeverityOK, Timestamp: time.Now()}
@@ -255,5 +276,5 @@ func (m *Manager) renderPageFrame(pageIndex int) (*image.RGBA, error) {
 	}
 
 	compositor := NewCompositor(m.logger, cfg.Theme, &page)
-	return compositor.Composite(zoneImages, cfg.Theme)
+	return compositor.Composite(nil, zoneImages, cfg.Theme)
 }

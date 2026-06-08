@@ -97,6 +97,12 @@ func (a *App) Run(ctx context.Context) error {
 	}
 }
 
+// APIServer returns the underlying API server, used by callers that need to
+// wire channels (e.g. the tray manager listening for window-closed signals).
+func (a *App) APIServer() *api.Server {
+	return a.apiServer
+}
+
 // Shutdown gracefully stops all application components.
 func (a *App) Shutdown() error {
 	var shutdownErr error
@@ -430,6 +436,29 @@ func (a *App) startDeviceWatcher() {
 	}()
 }
 
+// pngBufPool recycles the byte buffers used for PNG encoding the WS preview
+// frames. A 640×48 RGBA PNG compresses to ~3–8 KB; pre-size to 8 KB so the
+// buffer rarely needs to grow.
+var pngBufPool = sync.Pool{
+	New: func() any {
+		b := bytes.NewBuffer(make([]byte, 0, 8192))
+		return b
+	},
+}
+
+// pngEncoderPool implements png.EncoderBufferPool, recycling the internal
+// flate writer and scratch buffers across encode calls.
+type pngEncoderPool struct{ p sync.Pool }
+
+func (p *pngEncoderPool) Get() *png.EncoderBuffer {
+	return p.p.Get().(*png.EncoderBuffer)
+}
+func (p *pngEncoderPool) Put(b *png.EncoderBuffer) { p.p.Put(b) }
+
+var sharedPNGPool = &pngEncoderPool{
+	p: sync.Pool{New: func() any { return new(png.EncoderBuffer) }},
+}
+
 // renderLoop continuously renders frames and sends them to the device.
 // Every 3rd frame (~10 FPS) is also broadcast to WebSocket clients as a base64 PNG.
 func (a *App) renderLoop() {
@@ -444,6 +473,10 @@ func (a *App) renderLoop() {
 
 	var frameCount int
 	wsHub := a.apiServer.Hub()
+
+	// Pool the flate compressor internals via EncoderBufferPool so the
+	// Huffman tables and LZ77 scratch buffers are reused across frames.
+	enc := &png.Encoder{CompressionLevel: png.BestSpeed, BufferPool: sharedPNGPool}
 
 	for {
 		select {
@@ -470,11 +503,13 @@ func (a *App) renderLoop() {
 			// subsample to every 3rd frame (~10fps) to keep bandwidth low.
 			frameCount++
 			if a.zoneManager.IsTransitioning() || frameCount%3 == 0 {
-				var buf bytes.Buffer
-				if err := png.Encode(&buf, frame); err == nil {
+				buf := pngBufPool.Get().(*bytes.Buffer)
+				buf.Reset()
+				if err := enc.Encode(buf, frame); err == nil {
 					encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
 					wsHub.Broadcast(api.WSMessage{Type: "frame", Data: encoded})
 				}
+				pngBufPool.Put(buf)
 			}
 		}
 	}

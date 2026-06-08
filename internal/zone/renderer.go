@@ -672,6 +672,9 @@ func (r *Renderer) truncateSpaced(dc *gg.Context, text string, maxWidth, extraPx
 // truncate clips text to maxWidth pixels using the current dc font, appending
 // "…" if needed.
 func (r *Renderer) truncate(text string, maxWidth float64, dc *gg.Context) string {
+	if r.primaryFace == nil {
+		return text
+	}
 	w, _ := dc.MeasureString(text)
 	if w <= maxWidth {
 		return text

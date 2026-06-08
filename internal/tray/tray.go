@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -20,28 +21,31 @@ var iconData []byte
 
 // Manager handles system tray integration and Flutter UI lifecycle
 type Manager struct {
-	logger      *slog.Logger
-	apiAddr     string // e.g. "localhost:1985"
-	flutterCmd  *exec.Cmd
-	showCh      chan struct{}
-	hideCh      chan struct{}
-	quitCh      chan struct{}
-	ctx         context.Context
-	cancel      context.CancelFunc
+	logger          *slog.Logger
+	apiAddr         string // e.g. "localhost:1985"
+	flutterCmd      *exec.Cmd
+	flutterRunning  bool
+	windowClosedCh  <-chan struct{}
+	showCh          chan struct{}
+	hideCh          chan struct{}
+	quitCh          chan struct{}
+	ctx             context.Context
+	cancel          context.CancelFunc
 }
 
 // New creates a new tray manager. apiAddr is the host:port of the API server
 // (e.g. "localhost:1985") so tray commands reach the correct port.
-func New(logger *slog.Logger, apiAddr string) *Manager {
+func New(logger *slog.Logger, apiAddr string, windowClosedCh <-chan struct{}) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
-		logger:  logger,
-		apiAddr: apiAddr,
-		showCh:  make(chan struct{}, 1),
-		hideCh:  make(chan struct{}, 1),
-		quitCh:  make(chan struct{}, 1),
-		ctx:     ctx,
-		cancel:  cancel,
+		logger:         logger,
+		apiAddr:        apiAddr,
+		windowClosedCh: windowClosedCh,
+		showCh:         make(chan struct{}, 1),
+		hideCh:         make(chan struct{}, 1),
+		quitCh:         make(chan struct{}, 1),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 }
 
@@ -91,8 +95,21 @@ func (m *Manager) onReady() {
 			select {
 			case <-m.ctx.Done():
 				return
+			case <-m.windowClosedCh:
+				m.logger.Info("Flutter window closed — stopping process")
+				m.stopFlutter()
 			case <-mShow.ClickedCh:
 				m.logger.Debug("show clicked")
+				if !m.flutterRunning {
+					m.logger.Info("restarting Flutter UI")
+					if err := m.startFlutter(); err != nil {
+						m.logger.Error("failed to restart Flutter UI", "error", err)
+						break
+					}
+					if err := m.waitForFlutter(10 * time.Second); err != nil {
+						m.logger.Warn("Flutter UI slow to start", "error", err)
+					}
+				}
 				m.showWindow()
 			case <-mHide.ClickedCh:
 				m.logger.Debug("hide clicked")
@@ -121,34 +138,37 @@ func (m *Manager) startFlutter() error {
 		return err
 	}
 
-	m.logger.Info("starting Flutter UI minimized", "path", flutterPath)
+	m.logger.Info("starting Flutter UI", "path", flutterPath)
 
-	m.flutterCmd = exec.CommandContext(m.ctx, flutterPath)
+	m.flutterCmd = exec.Command(flutterPath)
 	m.flutterCmd.Stdout = os.Stdout
 	m.flutterCmd.Stderr = os.Stderr
-	// Inherit the current environment and add the minimized flag so the
-	// Flutter window starts hidden — the user brings it up via the tray.
 	m.flutterCmd.Env = append(os.Environ(),
-		"NEXUS_START_MINIMIZED=1",
 		"WAYLAND_DISPLAY=", // Flutter GTK3 embedder crashes on native Wayland; force XWayland
 	)
+	// Put Flutter in its own process group so signals (SIGTERM, SIGINT) from
+	// the Flutter process or its children don't propagate to the daemon.
+	m.flutterCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := m.flutterCmd.Start(); err != nil {
 		return err
 	}
 
+	m.flutterRunning = true
 	m.logger.Info("Flutter UI started", "pid", m.flutterCmd.Process.Pid)
 	return nil
 }
 
 // stopFlutter terminates the Flutter application
 func (m *Manager) stopFlutter() {
-	if m.flutterCmd != nil && m.flutterCmd.Process != nil {
+	if m.flutterCmd != nil && m.flutterCmd.Process != nil && m.flutterRunning {
 		m.logger.Info("stopping Flutter UI", "pid", m.flutterCmd.Process.Pid)
 		if err := m.flutterCmd.Process.Kill(); err != nil {
 			m.logger.Error("failed to kill Flutter process", "error", err)
 		}
+		_ = m.flutterCmd.Wait()
 	}
+	m.flutterRunning = false
 }
 
 // findFlutterExecutable locates the Flutter executable

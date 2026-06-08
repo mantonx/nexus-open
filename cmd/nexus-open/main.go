@@ -132,7 +132,7 @@ func main() {
 	if *enableTray {
 		logger.Info("starting system tray mode")
 		apiAddr := fmt.Sprintf("localhost:%d", *apiPort)
-		trayManager := tray.New(logger, apiAddr)
+		trayManager := tray.New(logger, apiAddr, application.APIServer().WindowClosedChannel())
 
 		// Run tray in goroutine
 		go func() {
@@ -205,8 +205,15 @@ func writePIDFile(path string) error {
 }
 
 // killOtherInstances sends SIGTERM to all other processes whose executable
-// name is "nexus-open", regardless of how they were launched.
+// name is "nexus-open", and kills any orphaned plugin subprocesses left behind
+// by previously crashed instances.
 func killOtherInstances(myPID int) {
+	xdgData := os.Getenv("XDG_DATA_HOME")
+	if xdgData == "" {
+		xdgData = filepath.Join(os.Getenv("HOME"), ".local", "share")
+	}
+	pluginsDir := filepath.Join(xdgData, "nexus-open", "plugins")
+
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return
@@ -219,13 +226,15 @@ func killOtherInstances(myPID int) {
 		if err != nil || pid == myPID {
 			continue
 		}
-		// Read the executable name via /proc/<pid>/comm
-		comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		// Read the executable path via /proc/<pid>/exe
+		exePath, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
 		if err != nil {
 			continue
 		}
+		comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
 		name := strings.TrimSpace(string(comm))
-		if name == "nexus-open" {
+
+		if name == "nexus-open" || strings.HasPrefix(exePath, pluginsDir) {
 			if proc, err := os.FindProcess(pid); err == nil {
 				_ = proc.Signal(syscall.SIGTERM)
 			}

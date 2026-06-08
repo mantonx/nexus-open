@@ -54,7 +54,15 @@ type Manager struct {
 	transition   *TransitionState
 	transitionMu sync.RWMutex
 	lastFrame    *image.RGBA
+	frameDirty   bool // true when lastFrame is stale and must be re-composited
 	lastFrameMu  sync.Mutex
+
+	// Double-buffer for the compositor output: frameBufs[0] and [1] are
+	// pre-allocated once and reused. frameBufIdx is the index of the buffer
+	// that is currently being written (back buffer); the other is lastFrame
+	// (front buffer). Both are 640×48 RGBA = 122,880 bytes each.
+	frameBufs   [2]*image.RGBA
+	frameBufIdx int
 
 	// Live swipe tracking
 	liveSwipeActive        bool
@@ -141,6 +149,11 @@ func NewManager(ctx context.Context, logger *slog.Logger, db *store.DB, fallback
 		renderers:   make(map[string]*Renderer),
 		payloads:    make(map[string]*plugin.Payload),
 		transition:  NewTransitionState(),
+		frameDirty:  true,
+		frameBufs: [2]*image.RGBA{
+			image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight)),
+			image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight)),
+		},
 		pageCache:   make(map[int]*image.RGBA),
 		choiceIndex: make(map[string]int),
 		ctx:         ctx,

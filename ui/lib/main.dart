@@ -33,7 +33,6 @@ void main() async {
       title: 'Nexus Open',
     ),
     () async {
-      await windowManager.maximize();
       if (startMinimized) {
         await windowManager.minimize();
       } else {
@@ -70,9 +69,16 @@ class OpenNextApp extends StatefulWidget {
   State<OpenNextApp> createState() => _OpenNextAppState();
 }
 
-class _OpenNextAppState extends State<OpenNextApp> {
+class _OpenNextAppState extends State<OpenNextApp> with WindowListener {
   StreamSubscription? _wsSub;
   SettingsState? _settings;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    windowManager.setPreventClose(true);
+  }
 
   @override
   void didChangeDependencies() {
@@ -82,9 +88,23 @@ class _OpenNextAppState extends State<OpenNextApp> {
     _wsSub = context.read<WsService>().events.listen(_onWsEvent);
   }
 
+  @override
+  void onWindowClose() async {
+    try {
+      final client = HttpClient();
+      final req = await client.postUrl(
+          Uri.parse('http://localhost:1985/api/window/closed'));
+      req.headers.contentType = ContentType.json;
+      await req.close();
+      client.close();
+    } catch (_) {}
+    await windowManager.hide();
+  }
+
   void _onWsEvent(WsEvent event) {
     if (event is WsWindowStateEvent) {
       if (event.state == 'shown') {
+        windowManager.restore();
         windowManager.show();
         windowManager.focus();
       } else if (event.state == 'hidden') {
@@ -95,6 +115,7 @@ class _OpenNextAppState extends State<OpenNextApp> {
 
   @override
   void dispose() {
+    windowManager.removeListener(this);
     _wsSub?.cancel();
     super.dispose();
   }
@@ -102,14 +123,48 @@ class _OpenNextAppState extends State<OpenNextApp> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
+    final ws = context.watch<WsService>();
     return MaterialApp(
       title: 'Open Next',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: settings.themeMode,
-      home: settings.isFirstRun
-          ? const OnboardingOverlay()
-          : const SettingsPage(),
+      home: !ws.isConnected
+          ? const _LoadingScreen()
+          : settings.isFirstRun
+              ? const OnboardingOverlay()
+              : const SettingsPage(),
+    );
+  }
+}
+
+class _LoadingScreen extends StatelessWidget {
+  const _LoadingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF131316),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(
+              color: Color(0xFF4F9EFF),
+              strokeWidth: 2.5,
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Connecting…',
+              style: TextStyle(
+                color: Color(0xFF6B6B7A),
+                fontSize: 13,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

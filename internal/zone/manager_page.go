@@ -60,6 +60,10 @@ func (m *Manager) initializePage() error {
 
 	m.compositor = NewCompositor(m.logger, m.config.Theme, page)
 
+	m.lastFrameMu.Lock()
+	m.frameDirty = true
+	m.lastFrameMu.Unlock()
+
 	return nil
 }
 
@@ -335,19 +339,13 @@ func (m *Manager) preRenderPage(pageIndex int) {
 	defer m.payloadsMu.RUnlock()
 
 	for _, zoneConfig := range page.Zones {
-		// Reuse the live renderer if this zone is on the current page — it
-		// already has the correct per-zone ThemeOverride accents applied.
-		// For zones on other pages, build a renderer with the correct theme.
-		var renderer *Renderer
-		if r, ok := m.renderers[zoneConfig.ID]; ok {
-			renderer = r
-		} else {
-			theme := m.config.Theme
-			if zoneConfig.ThemeOverride != nil {
-				theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
-			}
-			renderer = NewRenderer(m.logger, theme, zoneConfig.Width, DisplayHeight, zoneConfig.Align)
+		// Always build a fresh renderer — reusing the live renderer would race
+		// with the main render loop since freetype's GlyphBuf is not thread-safe.
+		theme := m.config.Theme
+		if zoneConfig.ThemeOverride != nil {
+			theme = mergeTheme(theme, *zoneConfig.ThemeOverride)
 		}
+		renderer := NewRenderer(m.logger, theme, zoneConfig.Width, DisplayHeight, zoneConfig.Align)
 
 		payload, ok := m.payloads[zoneConfig.ID]
 		if !ok {
@@ -370,7 +368,7 @@ func (m *Manager) preRenderPage(pageIndex int) {
 	m.configMu.RUnlock()
 
 	compositor := NewCompositor(m.logger, theme, &page)
-	frame, err := compositor.Composite(zoneImages, theme)
+	frame, err := compositor.Composite(nil, zoneImages, theme)
 	if err != nil {
 		m.logger.Error("failed to pre-render page", "page", pageIndex, "error", err)
 		return

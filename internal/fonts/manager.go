@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
@@ -18,24 +19,32 @@ import (
 var fontFS embed.FS
 
 // Manager handles font loading and caching.
+// fonts caches parsed *truetype.Font objects (read-only after parse, safe to share).
+// Faces are NOT cached — each caller gets its own face with its own GlyphBuf,
+// since truetype.face is not safe for concurrent use.
 type Manager struct {
 	logger *slog.Logger
+	mu     sync.RWMutex
 	fonts  map[string]*truetype.Font
-	faces  map[fontKey]font.Face
 }
 
-type fontKey struct {
-	name string
-	size float64
-}
+// global is the process-wide font cache. All renderers share it so each
+// (name, size) pair is parsed and rasterised at most once.
+var (
+	globalOnce    sync.Once
+	globalManager *Manager
+)
 
-// NewManager creates a new font manager.
+// NewManager returns the process-wide font manager singleton.
+// The logger from the first call is used; subsequent calls ignore their logger.
 func NewManager(logger *slog.Logger) *Manager {
-	return &Manager{
-		logger: logger,
-		fonts:  make(map[string]*truetype.Font),
-		faces:  make(map[fontKey]font.Face),
-	}
+	globalOnce.Do(func() {
+		globalManager = &Manager{
+			logger: logger,
+			fonts:  make(map[string]*truetype.Font),
+		}
+	})
+	return globalManager
 }
 
 var bundledGoFonts = map[string][]byte{
@@ -54,8 +63,11 @@ var bundledGoFonts = map[string][]byte{
 
 // LoadFont loads a TrueType font from embedded, system, or bundled sources.
 func (m *Manager) LoadFont(name string) (*truetype.Font, error) {
-	if font, ok := m.fonts[name]; ok {
-		return font, nil
+	m.mu.RLock()
+	f, ok := m.fonts[name]
+	m.mu.RUnlock()
+	if ok {
+		return f, nil
 	}
 
 	var (
@@ -100,34 +112,31 @@ func (m *Manager) LoadFont(name string) (*truetype.Font, error) {
 }
 
 func (m *Manager) parseAndCache(name string, data []byte) (*truetype.Font, error) {
-	font, err := truetype.Parse(data)
+	f, err := truetype.Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse font: %w", err)
 	}
-	m.fonts[name] = font
-	return font, nil
+	m.mu.Lock()
+	m.fonts[name] = f
+	m.mu.Unlock()
+	m.logger.Info("parsed font", "name", name)
+	return f, nil
 }
 
-// GetFace returns a font face with the specified size.
+// GetFace returns a new font face with the specified size.
+// A fresh face is returned on every call — truetype.face is not safe for
+// concurrent use (it wraps a mutable GlyphBuf), so callers must not share faces.
 func (m *Manager) GetFace(fontName string, size float64) (font.Face, error) {
-	key := fontKey{name: fontName, size: size}
-	if face, ok := m.faces[key]; ok {
-		return face, nil
-	}
-
 	ttfFont, err := m.LoadFont(fontName)
 	if err != nil {
 		return nil, err
 	}
 
-	face := truetype.NewFace(ttfFont, &truetype.Options{
+	return truetype.NewFace(ttfFont, &truetype.Options{
 		Size:    size,
 		DPI:     72,
 		Hinting: font.HintingFull,
-	})
-
-	m.faces[key] = face
-	return face, nil
+	}), nil
 }
 
 // GetDefaultFonts returns an ordered list of preferred fonts.
@@ -150,7 +159,7 @@ func (m *Manager) LoadBestAvailableFont(size float64) (font.Face, string, error)
 	for _, fontName := range GetDefaultFonts() {
 		face, err := m.GetFace(fontName, size)
 		if err == nil {
-			m.logger.Info("loaded font", "name", fontName, "size", size)
+			m.logger.Debug("font face resolved", "name", fontName, "size", size)
 			return face, fontName, nil
 		}
 		m.logger.Debug("font not available", "name", fontName, "error", err)

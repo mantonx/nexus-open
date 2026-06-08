@@ -408,6 +408,28 @@ func (s *Server) handleWindowHide(w http.ResponseWriter, r *http.Request) {
 	s.respondSuccess(w, "Window hide command sent", map[string]string{"state": "hidden"})
 }
 
+// handleWindowClosed is called by Flutter just before it exits on close.
+// It signals the tray to kill the Flutter process and restart it on next Show.
+func (s *Server) handleWindowClosed(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.windowState = "hidden"
+	select {
+	case s.windowClosedCh <- struct{}{}:
+	default:
+	}
+
+	s.respondSuccess(w, "Window closed", map[string]string{"state": "hidden"})
+}
+
+// WindowClosedChannel returns the channel that fires when Flutter reports it is closing.
+func (s *Server) WindowClosedChannel() <-chan struct{} {
+	return s.windowClosedCh
+}
+
 // handleNavigateState returns current page index + page list for the Flutter preview UI.
 // GET /api/navigate/state
 func (s *Server) handleNavigateState(w http.ResponseWriter, r *http.Request) {
