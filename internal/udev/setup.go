@@ -15,25 +15,29 @@ const rulesFilename = "99-corsair-nexus.rules"
 const rules = `# udev rules for Corsair iCUE Nexus (VID: 0x1b1c, PID: 0x1b8e)
 #
 # TAG+="uaccess" grants access to the active desktop session automatically
-# via logind — no group membership required on any systemd distro.
+# via logind — this is the primary access mechanism on all systemd desktops.
+# No group membership is required for normal desktop use.
 #
-# GROUP="plugdev" is a fallback for headless / multi-user setups where no
-# logind session is present. The group is created by the package installer
-# if it doesn't already exist.
+# MODE="0600" is a root-only fallback: it prevents world-read while still
+# allowing logind/uaccess to set per-session ACLs.  On desktops, uaccess
+# is sufficient; users should NOT need to join plugdev.
+#
+# GROUP="plugdev" + MODE="0660" is only needed on headless or multi-user
+# setups where no logind session is active (e.g. a server running the daemon
+# under a dedicated service account).  Enable it manually in that case.
 #
 # RUN+="usbreset" issues a USB reset on each attach so any stale usbfs handle
 # from a previous unclean exit is cleared and hid-generic rebinds cleanly.
-# This eliminates the need to physically replug the device after the app
-# restarts (e.g. after a crash or SIGKILL).
+# Requires the usbreset binary (shipped in the nexus-open package).
 
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", \
-    MODE="0660", GROUP="plugdev", TAG+="uaccess", \
+    MODE="0600", TAG+="uaccess", \
     RUN+="/usr/bin/usbreset /dev/bus/usb/$env{BUSNUM}/$env{DEVNUM}"
 
 # hidraw nodes do not always inherit ACLs from the parent USB device
 # (distro-dependent). This rule ensures direct hidraw access works everywhere.
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", \
-    MODE="0660", GROUP="plugdev", TAG+="uaccess"
+    MODE="0600", TAG+="uaccess"
 `
 
 // RulesInstalled reports whether the udev rules file is present on disk.
@@ -92,11 +96,13 @@ func Setup() error {
 	fmt.Println("Unplug and replug your iCUE Nexus — it will be accessible")
 	fmt.Println("immediately in your current desktop session (no logout needed).")
 	fmt.Println()
-	fmt.Println("On headless or multi-user systems, also add yourself to plugdev:")
+	fmt.Println("Headless / multi-user systems only:")
+	fmt.Println("  If running without a logind session (e.g. a dedicated service account),")
+	fmt.Println("  change MODE to 0660, add GROUP=\"plugdev\", and add that user to plugdev:")
 	fmt.Println()
-	fmt.Println("  sudo usermod -a -G plugdev $USER")
+	fmt.Println("  sudo usermod -a -G plugdev <serviceuser>")
 	fmt.Println()
-	fmt.Println("and log out/in for the group change to take effect.")
+	fmt.Println("Desktop users do not need to join plugdev.")
 
 	return nil
 }
