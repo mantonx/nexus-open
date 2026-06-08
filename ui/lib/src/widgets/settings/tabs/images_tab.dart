@@ -16,6 +16,13 @@ class ImagesTab extends StatefulWidget {
 
 class _ImagesTabState extends State<ImagesTab> {
   bool _uploading = false;
+  late NexusApiService _api;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _api = context.read<NexusApiService>();
+  }
 
   Future<void> _pickAndUploadImage(SettingsState state) async {
     final result = await FilePicker.platform
@@ -24,8 +31,7 @@ class _ImagesTabState extends State<ImagesTab> {
 
     setState(() => _uploading = true);
     try {
-      final api = NexusApiService();
-      final filename = await api.uploadImage(File(result.files.first.path!));
+      final filename = await _api.uploadImage(File(result.files.first.path!));
       state.addImagePath(filename);
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -58,8 +64,7 @@ class _ImagesTabState extends State<ImagesTab> {
     if (ok != true) return;
 
     try {
-      final api = NexusApiService();
-      await api.deleteImage(filename);
+      await _api.deleteImage(filename);
       state.removeImagePath(filename);
       if (mounted) {
         ScaffoldMessenger.of(context)

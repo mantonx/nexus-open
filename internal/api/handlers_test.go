@@ -144,24 +144,41 @@ func TestListImagesHandler(t *testing.T) {
 	}
 }
 
-func TestCORSMiddleware(t *testing.T) {
+func TestLocalOnlyMiddleware(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := newTestConfig(t)
 	server := NewServer(":0", cfg, device.NewMockDevice(), logger)
+	token := server.Token()
 
-	handler := server.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	req := httptest.NewRequest("OPTIONS", "/api/test", nil)
-	req.Header.Set("Origin", "http://localhost:3000")
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	handler := server.localOnlyMiddleware(ok)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	do := func(host, tok, path string) int {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = host
+		if tok != "" {
+			req.Header.Set("X-Nexus-Token", tok)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
 	}
-	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("missing CORS origin header")
+
+	// Correct host + correct token — allowed.
+	if code := do("localhost:1985", token, "/api/config"); code != 200 {
+		t.Errorf("valid request: want 200, got %d", code)
+	}
+	// Correct host, no token — rejected.
+	if code := do("localhost:1985", "", "/api/config"); code != 401 {
+		t.Errorf("missing token: want 401, got %d", code)
+	}
+	// Wrong host — rejected regardless of token.
+	if code := do("evil.example.com", token, "/api/config"); code != 403 {
+		t.Errorf("bad host: want 403, got %d", code)
+	}
+	// Health is token-exempt.
+	if code := do("localhost:1985", "", "/api/health"); code != 200 {
+		t.Errorf("health without token: want 200, got %d", code)
 	}
 }
 

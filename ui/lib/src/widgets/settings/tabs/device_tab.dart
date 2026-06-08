@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../../services/nexus_api_service.dart';
 import '../../../theme/app_tokens.dart';
 import '../../common/common.dart';
@@ -18,20 +19,24 @@ class _DeviceTabState extends State<DeviceTab> {
   DeviceInfo? _info;
   bool _loading = true;
   String? _error;
-  final _api = NexusApiService();
+  late NexusApiService _api;
   Timer? _pollTimer;
+  bool _initialized = false;
 
   @override
-  void initState() {
-    super.initState();
-    _fetchInfo();
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchInfo());
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _api = context.read<NexusApiService>();
+    if (!_initialized) {
+      _initialized = true;
+      _fetchInfo();
+      _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchInfo());
+    }
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _api.dispose();
     super.dispose();
   }
 

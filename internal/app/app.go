@@ -236,7 +236,7 @@ func (a *App) initialize() error {
 	}
 
 	// 4. Create API server
-	apiAddr := fmt.Sprintf(":%d", a.apiPort)
+	apiAddr := fmt.Sprintf("127.0.0.1:%d", a.apiPort)
 	a.apiServer = api.NewServer(apiAddr, a.cfg, a.device, a.logger)
 	a.logger.Info("API server created", "addr", apiAddr)
 

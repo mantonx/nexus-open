@@ -270,7 +270,7 @@ func (m *Manager) QuitChannel() <-chan struct{} {
 // the timeout elapses. This prevents Show/Hide tray clicks from silently
 // failing in the first few seconds after launch.
 func (m *Manager) waitForFlutter(timeout time.Duration) error {
-	url := "http://" + m.apiAddr + "/api/window/state"
+	url := "http://" + m.apiAddr + "/api/health"
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 

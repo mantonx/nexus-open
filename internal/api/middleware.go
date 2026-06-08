@@ -2,31 +2,61 @@ package api
 
 import (
 	"bufio"
+	"crypto/subtle"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
 // middleware applies all middleware to the handler chain.
 func (s *Server) middleware(next http.Handler) http.Handler {
-	// Apply middleware in order: logging -> CORS -> handler
-	return s.loggingMiddleware(s.corsMiddleware(next))
+	return s.loggingMiddleware(s.localOnlyMiddleware(next))
 }
 
-// corsMiddleware adds CORS headers to all responses.
-func (s *Server) corsMiddleware(next http.Handler) http.Handler {
+// localOnlyMiddleware rejects requests that don't come from a local client.
+// It enforces two independent checks:
+//
+//  1. Host header must be localhost or 127.0.0.1 (with the server port).
+//     This closes DNS-rebinding: a browser page at attacker.com can resolve
+//     to 127.0.0.1, but the request still carries "Host: attacker.com", which
+//     we reject here.
+//
+//  2. X-Nexus-Token must match the per-user token stored at
+//     ~/.config/nexus-open/token (mode 0600).  This protects multi-user
+//     machines and any non-bundled local process.
+func (s *Server) localOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow all origins for development
-		// TODO: Make this configurable for production
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Max-Age", "3600")
-
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
+		// --- Host validation ---
+		host := r.Host
+		// Strip port suffix for the pure-hostname comparison.
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		switch host {
+		case "localhost", "127.0.0.1", "::1":
+			// allowed
+		default:
+			http.Error(w, "forbidden", http.StatusForbidden)
 			return
+		}
+
+		// --- Token validation ---
+		// Exempt /api/health so waitForFlutter can probe before the client
+		// has loaded the token file.
+		// WebSocket upgrades send the token as ?token= because the WS handshake
+		// HTTP request cannot carry arbitrary headers from most WS clients.
+		if r.URL.Path != "/api/health" {
+			var tok string
+			if r.URL.Path == "/api/ws" {
+				tok = strings.TrimSpace(r.URL.Query().Get("token"))
+			} else {
+				tok = strings.TrimSpace(r.Header.Get("X-Nexus-Token"))
+			}
+			if s.token == "" || tok == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		next.ServeHTTP(w, r)
@@ -38,16 +68,13 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// Wrap response writer to capture status code
 		wrapped := &responseWriter{
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
 		}
 
-		// Call next handler
 		next.ServeHTTP(wrapped, r)
 
-		// Log request
 		duration := time.Since(start)
 		s.logger.Info("http request",
 			"method", r.Method,
@@ -76,4 +103,3 @@ func (rw *responseWriter) WriteHeader(code int) {
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return rw.ResponseWriter.(http.Hijacker).Hijack()
 }
-

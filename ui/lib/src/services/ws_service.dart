@@ -63,12 +63,13 @@ class WsDraftStateEvent extends WsEvent {
 /// Reconnects with exponential backoff on disconnect. Exposes a single
 /// broadcast stream of [WsEvent]s that any widget can listen to.
 class WsService extends ChangeNotifier {
-  static const _wsUrl = 'ws://localhost:1985/api/ws';
+  static const _baseWsUrl = 'ws://localhost:1985/api/ws';
   static const _maxBackoff = Duration(seconds: 30);
 
   final _controller = StreamController<WsEvent>.broadcast();
   Stream<WsEvent> get events => _controller.stream;
 
+  final String _wsUrl;
   WebSocketChannel? _channel;
   bool _disposed = false;
   bool _connected = false;
@@ -76,12 +77,17 @@ class WsService extends ChangeNotifier {
 
   bool get isConnected => _connected;
 
-  WsService() {
+  WsService({String? token})
+      : _wsUrl = token != null
+            ? '$_baseWsUrl?token=${Uri.encodeComponent(token)}'
+            : _baseWsUrl {
     _connect();
   }
 
   /// Fake constructor for tests — never attempts a real connection.
-  WsService.fake() : _disposed = false;
+  WsService.fake()
+      : _wsUrl = _baseWsUrl,
+        _disposed = false;
 
   /// Inject a synthetic event (test use only).
   void injectEvent(WsEvent event) {
@@ -98,7 +104,7 @@ class WsService extends ChangeNotifier {
     if (_disposed) return;
 
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));
+      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl));  // _wsUrl includes ?token= when set
       await _channel!.ready;
 
       _connected = true;

@@ -13,7 +13,7 @@ class PluginsTab extends StatefulWidget {
 }
 
 class _PluginsTabState extends State<PluginsTab> {
-  final _api = NexusApiService();
+  late NexusApiService _api;
   final Map<String, Map<String, dynamic>> _configs = {};
   final Map<String, String?> _errors = {};
   final Map<String, Map<String, String>> _statuses = {};
@@ -69,10 +69,16 @@ class _PluginsTabState extends State<PluginsTab> {
     ),
   ];
 
+  bool _initialized = false;
+
   @override
-  void initState() {
-    super.initState();
-    _loadAll();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _api = context.read<NexusApiService>();
+    if (!_initialized) {
+      _initialized = true;
+      _loadAll();
+    }
   }
 
   Future<void> _loadAll() async {
@@ -113,7 +119,6 @@ class _PluginsTabState extends State<PluginsTab> {
 
   @override
   void dispose() {
-    _api.dispose();
     super.dispose();
   }
 

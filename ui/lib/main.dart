@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'src/models/settings_state.dart';
+import 'src/services/nexus_api_service.dart';
+import 'src/services/token_client.dart';
 import 'src/services/ws_service.dart';
 import 'src/theme/app_theme.dart';
 import 'src/widgets/onboarding/onboarding_overlay.dart';
@@ -17,7 +19,6 @@ final _appKey = GlobalKey<_OpenNextAppState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
 
   await windowManager.ensureInitialized();
 
@@ -42,6 +43,11 @@ void main() async {
     },
   );
 
+  // Load the capability token written by the daemon at startup.
+  final token = await TokenClient.readToken();
+  final httpClient = await TokenClient.create();
+  final apiService = NexusApiService(client: httpClient);
+
   // Register VM service extension for screenshot tour — forces onboarding
   // to show regardless of backend firstRun state. Debug builds only.
   if (kDebugMode) {
@@ -54,16 +60,18 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => SettingsState()),
-        ChangeNotifierProvider(create: (_) => WsService()),
+        Provider<NexusApiService>.value(value: apiService),
+        ChangeNotifierProvider(create: (_) => SettingsState(apiService: apiService)),
+        ChangeNotifierProvider(create: (_) => WsService(token: token)),
       ],
-      child: OpenNextApp(key: _appKey),
+      child: OpenNextApp(key: _appKey, token: token),
     ),
   );
 }
 
 class OpenNextApp extends StatefulWidget {
-  const OpenNextApp({super.key});
+  final String? token;
+  const OpenNextApp({super.key, this.token});
 
   @override
   State<OpenNextApp> createState() => _OpenNextAppState();
@@ -95,6 +103,9 @@ class _OpenNextAppState extends State<OpenNextApp> with WindowListener {
       final req = await client.postUrl(
           Uri.parse('http://localhost:1985/api/window/closed'));
       req.headers.contentType = ContentType.json;
+      if (widget.token != null) {
+        req.headers.set('X-Nexus-Token', widget.token!);
+      }
       await req.close();
       client.close();
     } catch (_) {}

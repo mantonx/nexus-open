@@ -23,9 +23,12 @@ Widget _wrap(
   Widget child, {
   SettingsState? settings,
   WsService? ws,
+  NexusApiService? api,
 }) {
   return MultiProvider(
     providers: [
+      Provider<NexusApiService>.value(
+          value: api ?? NexusApiService(client: _defaultClient)),
       ChangeNotifierProvider<SettingsState>.value(
           value: settings ?? SettingsState()),
       ChangeNotifierProvider<WsService>.value(value: ws ?? _FakeWsService()),

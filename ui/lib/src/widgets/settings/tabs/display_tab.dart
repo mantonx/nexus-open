@@ -17,12 +17,12 @@ class DisplayTab extends StatefulWidget {
 
 class _DisplayTabState extends State<DisplayTab> {
   double _brightness = 75;
-  final _api = NexusApiService();
+  late NexusApiService _api;
 
   @override
-  void dispose() {
-    _api.dispose();
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _api = context.read<NexusApiService>();
   }
 
   Future<void> _setBrightness(double v) async {

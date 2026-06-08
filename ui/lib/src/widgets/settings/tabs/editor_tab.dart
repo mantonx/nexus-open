@@ -18,6 +18,7 @@ class EditorTab extends StatefulWidget {
 }
 
 class _EditorTabState extends State<EditorTab> {
+  late NexusApiService _api;
   List<LayoutPage> _pages = [];
   List<PluginCatalogEntry> _catalog = [];
   int _selectedPageIdx = 0;
@@ -25,16 +26,12 @@ class _EditorTabState extends State<EditorTab> {
   bool _loading = true;
   String? _error;
   StreamSubscription? _wsSub;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
+  bool _initialized = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _api = context.read<NexusApiService>();
     _wsSub?.cancel();
     _wsSub = context.read<WsService>().events.listen((event) {
       if (!mounted) return;
@@ -42,6 +39,10 @@ class _EditorTabState extends State<EditorTab> {
         _load(useDraft: false);
       }
     });
+    if (!_initialized) {
+      _initialized = true;
+      _load();
+    }
   }
 
   @override
@@ -52,11 +53,10 @@ class _EditorTabState extends State<EditorTab> {
 
   Future<void> _load({bool useDraft = true}) async {
     setState(() { _loading = true; _error = null; });
-    final api = NexusApiService();
     try {
       final results = await Future.wait([
-        useDraft ? api.getDraft() : api.getLayout(),
-        api.getPluginCatalog(),
+        useDraft ? _api.getDraft() : _api.getLayout(),
+        _api.getPluginCatalog(),
       ]);
       if (!mounted) return;
       setState(() {
@@ -67,8 +67,6 @@ class _EditorTabState extends State<EditorTab> {
       });
     } catch (e) {
       if (mounted) setState(() { _loading = false; _error = e.toString(); });
-    } finally {
-      api.dispose();
     }
   }
 
@@ -126,14 +124,13 @@ class _EditorTabState extends State<EditorTab> {
 
   Future<void> _addZone(String pluginId, {String? insertBeforeId}) async {
     final pageIdx = _selectedPageIdx;
-    final api = NexusApiService();
     try {
-      final newId = await api.addDraftZone(
+      final newId = await _api.addDraftZone(
         pageIndex: pageIdx,
         plugin: pluginId,
         insertBeforeId: insertBeforeId,
       );
-      final pages = await api.getDraft();
+      final pages = await _api.getDraft();
       if (!mounted) return;
       setState(() {
         _pages = pages;
@@ -143,44 +140,35 @@ class _EditorTabState extends State<EditorTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add zone failed: $e')));
       }
-    } finally {
-      api.dispose();
     }
   }
 
   Future<void> _reorderZones(List<String> orderedIds) async {
     final pageIdx = _selectedPageIdx;
-    final api = NexusApiService();
     try {
-      await api.reorderDraftZones(pageIdx, orderedIds);
-      final pages = await api.getDraft();
+      await _api.reorderDraftZones(pageIdx, orderedIds);
+      final pages = await _api.getDraft();
       if (!mounted) return;
       setState(() { _pages = pages; });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Reorder failed: $e')));
       }
-    } finally {
-      api.dispose();
     }
   }
 
   Future<void> _navigatePage(int pageIndex) async {
-    final api = NexusApiService();
     try {
-      await api.navigatePage(pageIndex);
+      await _api.navigatePage(pageIndex);
     } catch (_) {
       // hardware navigation is best-effort
-    } finally {
-      api.dispose();
     }
   }
 
   Future<void> _deleteZone(String zoneId) async {
-    final api = NexusApiService();
     try {
-      await api.deleteDraftZone(zoneId);
-      final pages = await api.getDraft();
+      await _api.deleteDraftZone(zoneId);
+      final pages = await _api.getDraft();
       if (!mounted) return;
       setState(() {
         _pages = pages;
@@ -190,50 +178,41 @@ class _EditorTabState extends State<EditorTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete zone failed: $e')));
       }
-    } finally {
-      api.dispose();
     }
   }
 
   Future<void> _patchZone(String zoneId, Map<String, dynamic> patch) async {
-    final api = NexusApiService();
     try {
-      await api.patchDraftZone(zoneId, patch);
-      final pages = await api.getDraft();
+      await _api.patchDraftZone(zoneId, patch);
+      final pages = await _api.getDraft();
       if (!mounted) return;
       setState(() { _pages = pages; });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
       }
-    } finally {
-      api.dispose();
     }
   }
 
   Future<void> _addPage() async {
     final name = await _promptText(context, 'New Page', 'Page name', 'Page ${_pages.length + 1}');
     if (name == null) return;
-    final api = NexusApiService();
     try {
-      await api.createPage(name, _pages.length);
+      await _api.createPage(name, _pages.length);
       await _load();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create page failed: $e')));
-    } finally {
-      api.dispose();
     }
   }
 
   // pageIdx is the position in _pages — we resolve the real DB id from the
   // committed layout because draft pages carry id=0.
   Future<void> _deletePage(int pageIdx) async {
-    final api = NexusApiService();
     try {
-      final committed = await api.getLayout();
+      final committed = await _api.getLayout();
       if (pageIdx >= committed.length) return;
       final realId = committed[pageIdx].id;
-      await api.deletePage(realId);
+      await _api.deletePage(realId);
       setState(() {
         _selectedPageIdx = _selectedPageIdx.clamp(0, (_pages.length - 2).clamp(0, _pages.length));
         _selectedZoneId = null;
@@ -241,8 +220,6 @@ class _EditorTabState extends State<EditorTab> {
       await _load();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete page failed: $e')));
-    } finally {
-      api.dispose();
     }
   }
 

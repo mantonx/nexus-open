@@ -27,7 +27,7 @@ class LayoutEditorTab extends StatefulWidget {
 }
 
 class _LayoutEditorTabState extends State<LayoutEditorTab> {
-  final _api = NexusApiService();
+  late NexusApiService _api;
   StreamSubscription? _wsSub;
 
   Uint8List? _frame;
@@ -45,6 +45,7 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _api = context.read<NexusApiService>();
     _wsSub?.cancel();
     _wsSub = context.read<WsService>().events.listen((event) {
       if (event is WsFrameEvent && mounted) {
@@ -61,7 +62,6 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
   @override
   void dispose() {
     _wsSub?.cancel();
-    _api.dispose();
     super.dispose();
   }
 

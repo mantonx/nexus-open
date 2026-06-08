@@ -24,6 +24,7 @@ class _SettingsPageState extends State<SettingsPage> {
   StreamSubscription? _wsSub;
   bool _hasDraftChanges = false;
   bool _draftBusy = false;
+  late NexusApiService _api;
 
   static const _destinations = [
     (icon: Icons.dashboard_customize_outlined, selected: Icons.dashboard_customize, label: 'Editor',  tooltip: 'Layout Editor'),
@@ -42,6 +43,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _api = context.read<NexusApiService>();
     _wsSub?.cancel();
     _wsSub = context.read<WsService>().events.listen((event) {
       if (!mounted) return;
@@ -76,9 +78,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _commitDraft() async {
     setState(() => _draftBusy = true);
     try {
-      final api = NexusApiService();
-      await api.commitDraft();
-      api.dispose();
+      await _api.commitDraft();
       if (mounted) setState(() => _hasDraftChanges = false);
     } catch (e) {
       if (mounted) {
@@ -94,9 +94,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _discardDraft() async {
     setState(() => _draftBusy = true);
     try {
-      final api = NexusApiService();
-      await api.discardDraft();
-      api.dispose();
+      await _api.discardDraft();
       if (mounted) setState(() => _hasDraftChanges = false);
     } catch (e) {
       if (mounted) {

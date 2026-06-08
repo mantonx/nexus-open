@@ -108,6 +108,7 @@ type Server struct {
 	windowClosedCh  chan struct{}
 	hub             *hub
 	lastConnectErr  error
+	token           string // capability token for X-Nexus-Token validation
 }
 
 // NewServer creates a new API server instance.
@@ -116,10 +117,19 @@ func NewServer(addr string, cfg *settings.Manager, device DeviceController, logg
 		logger = slog.Default()
 	}
 
+	tok, err := LoadOrCreateToken()
+	if err != nil {
+		// Non-fatal: log and continue. Middleware treats an empty token as
+		// "deny all protected requests", so the daemon stays up but the API is
+		// locked until the token file is readable.
+		logger.Warn("could not load capability token, all API requests will be denied", "error", err)
+	}
+
 	s := &Server{
-		logger:        logger,
-		cfg:           cfg,
-		device:        device,
+		logger:         logger,
+		cfg:            cfg,
+		device:         device,
+		token:          tok,
 		windowState:    "shown",
 		windowStateCh:  make(chan string, 10),
 		windowClosedCh: make(chan struct{}, 1),
@@ -216,6 +226,12 @@ func (s *Server) SetLayoutReloader(lr LayoutReloader) {
 	if s.layoutStore != nil {
 		s.draft = NewDraftManager(s.layoutStore, lr, s.hub.Broadcast)
 	}
+}
+
+// Token returns the capability token required in X-Nexus-Token on all requests
+// except GET /api/health. Used by tests to authorise their requests.
+func (s *Server) Token() string {
+	return s.token
 }
 
 // SetPluginCatalog wires in the sampler for GET /api/plugins.

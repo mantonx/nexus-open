@@ -30,14 +30,23 @@ import (
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// newTestServer creates a Server bound to a random localhost port and returns
-// the server, its base URL, and the backing store (for seeding test data).
-func newTestServer(t *testing.T) (*api.Server, string) {
-	srv, _, base := newTestServerWithStore(t)
-	return srv, base
+// testEnv bundles the server, its base URL, and a pre-authorised HTTP client.
+type testEnv struct {
+	srv    *api.Server
+	base   string
+	client *http.Client
+	token  string
 }
 
-func newTestServerWithStore(t *testing.T) (*api.Server, *store.DB, string) {
+// newTestServer creates a Server bound to a random loopback port.
+func newTestServer(t *testing.T) (*api.Server, string) {
+	env := newTestEnv(t, nil)
+	return env.srv, env.base
+}
+
+// newTestEnv is the single construction path. If dbOut is non-nil, it receives
+// the opened store so callers can seed test data.
+func newTestEnv(t *testing.T, dbOut **store.DB) testEnv {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -49,6 +58,9 @@ func newTestServerWithStore(t *testing.T) (*api.Server, *store.DB, string) {
 		t.Fatalf("store.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
+	if dbOut != nil {
+		*dbOut = s
+	}
 
 	cfg, err := config.NewManager(s, logger)
 	if err != nil {
@@ -71,7 +83,7 @@ func newTestServerWithStore(t *testing.T) (*api.Server, *store.DB, string) {
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
 
-	srv := api.NewServer(fmt.Sprintf(":%d", port), cfg, mockDev, logger)
+	srv := api.NewServer(fmt.Sprintf("127.0.0.1:%d", port), cfg, mockDev, logger)
 	srv.SetZoneConfigManager(zoneCfg)
 	srv.SetLayoutStore(s)
 
@@ -79,8 +91,9 @@ func newTestServerWithStore(t *testing.T) (*api.Server, *store.DB, string) {
 		_ = srv.Start()
 	}()
 
-	// Wait until the server accepts connections.
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	// Wait until the server accepts connections (health is token-exempt).
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(baseURL + "/api/health")
@@ -97,9 +110,84 @@ func newTestServerWithStore(t *testing.T) (*api.Server, *store.DB, string) {
 		_ = srv.Shutdown(ctx)
 	})
 
-	return srv, s, baseURL
+	token := srv.Token()
+	client := &http.Client{
+		Transport: &tokenTransport{token: token, inner: http.DefaultTransport},
+	}
+	return testEnv{srv: srv, base: baseURL, client: client, token: token}
 }
 
+// tokenTransport injects X-Nexus-Token on every request.
+type tokenTransport struct {
+	token string
+	inner http.RoundTripper
+}
+
+func (t *tokenTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	if clone.Header == nil {
+		clone.Header = make(http.Header)
+	}
+	clone.Header.Set("X-Nexus-Token", t.token)
+	return t.inner.RoundTrip(clone)
+}
+
+func (env testEnv) get(t *testing.T, url string) *http.Response {
+	t.Helper()
+	resp, err := env.client.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	return resp
+}
+
+func (env testEnv) postJSON(t *testing.T, url string, body any) *http.Response {
+	t.Helper()
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	return resp
+}
+
+func (env testEnv) do(t *testing.T, method, url string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := env.client.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	return resp
+}
+
+// wsURL converts an http base URL to a ws URL and appends the token.
+func (env testEnv) wsURL(base string) string {
+	return "ws" + base[4:] + "/api/ws?token=" + env.token
+}
+
+// decodeJSON is a standalone helper (no client needed).
+func decodeJSON(t *testing.T, resp *http.Response, dst any) {
+	t.Helper()
+	defer func() { _ = resp.Body.Close() }()
+	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+}
+
+// Legacy package-level helpers used by a handful of tests that send requests
+// the middleware purposefully blocks — they need to bypass token injection.
 func get(t *testing.T, url string) *http.Response {
 	t.Helper()
 	resp, err := http.Get(url)
@@ -109,30 +197,10 @@ func get(t *testing.T, url string) *http.Response {
 	return resp
 }
 
-func postJSON(t *testing.T, url string, body any) *http.Response {
-	t.Helper()
-	data, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
-	}
-	return resp
-}
-
-func decodeJSON(t *testing.T, resp *http.Response, dst any) {
-	t.Helper()
-	defer func() { _ = resp.Body.Close() }()
-	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
-		t.Fatalf("decode JSON: %v", err)
-	}
-}
-
 // ── Health ────────────────────────────────────────────────────────────────────
 
 func TestHealth_OK(t *testing.T) {
+	// /api/health is token-exempt; use the plain package-level get.
 	_, base := newTestServer(t)
 
 	resp := get(t, base+"/api/health")
@@ -156,6 +224,7 @@ func TestHealth_OK(t *testing.T) {
 }
 
 func TestHealth_MethodNotAllowed(t *testing.T) {
+	// No token needed — health is exempt and 405 fires before handler logic.
 	_, base := newTestServer(t)
 
 	resp, err := http.Post(base+"/api/health", "application/json", nil)
@@ -171,9 +240,9 @@ func TestHealth_MethodNotAllowed(t *testing.T) {
 // ── Config ────────────────────────────────────────────────────────────────────
 
 func TestConfig_GetReturnsExpectedFields(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
-	resp := get(t, base+"/api/config")
+	resp := env.get(t, env.base+"/api/config")
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -199,7 +268,7 @@ func TestConfig_GetReturnsExpectedFields(t *testing.T) {
 }
 
 func TestConfig_RoundTrip(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
 	update := map[string]any{
 		"background_color": "#112233",
@@ -215,16 +284,15 @@ func TestConfig_RoundTrip(t *testing.T) {
 		},
 	}
 
-	resp := postJSON(t, base+"/api/config", update)
+	resp := env.postJSON(t, env.base+"/api/config", update)
 	if resp.StatusCode != 200 {
 		_ = resp.Body.Close()
 		t.Fatalf("POST /api/config: expected 200, got %d", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
 
-	// Read back and verify the saved values.
 	var got map[string]any
-	decodeJSON(t, get(t, base+"/api/config"), &got)
+	decodeJSON(t, env.get(t, env.base+"/api/config"), &got)
 
 	if got["background_color"] != "#112233" {
 		t.Errorf("background_color: want #112233, got %v", got["background_color"])
@@ -240,13 +308,13 @@ func TestConfig_RoundTrip(t *testing.T) {
 }
 
 func TestConfig_InvalidColorRejected(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
 	update := map[string]any{
 		"background_color": "not-a-color",
 		"text_color":       "#FFFFFF",
 	}
-	resp := postJSON(t, base+"/api/config", update)
+	resp := env.postJSON(t, env.base+"/api/config", update)
 	_ = resp.Body.Close()
 	if resp.StatusCode != 400 {
 		t.Errorf("expected 400 for invalid color, got %d", resp.StatusCode)
@@ -254,9 +322,11 @@ func TestConfig_InvalidColorRejected(t *testing.T) {
 }
 
 func TestConfig_InvalidJSONRejected(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
-	resp, err := http.Post(base+"/api/config", "application/json", bytes.NewBufferString("{bad json"))
+	req, _ := http.NewRequest(http.MethodPost, env.base+"/api/config", bytes.NewBufferString("{bad json"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.client.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,40 +336,57 @@ func TestConfig_InvalidJSONRejected(t *testing.T) {
 	}
 }
 
-// ── CORS ──────────────────────────────────────────────────────────────────────
+// ── Security middleware ───────────────────────────────────────────────────────
 
-func TestCORS_HeadersPresent(t *testing.T) {
+func TestSecurity_MissingTokenRejected(t *testing.T) {
 	_, base := newTestServer(t)
 
-	resp := get(t, base+"/api/health")
+	// No token header — must get 401 on a protected endpoint.
+	resp, err := http.Get(base + "/api/config")
+	if err != nil {
+		t.Fatal(err)
+	}
 	_ = resp.Body.Close()
-
-	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("missing Access-Control-Allow-Origin: *")
+	if resp.StatusCode != 401 {
+		t.Errorf("missing token: expected 401, got %d", resp.StatusCode)
 	}
 }
 
-func TestCORS_PreflightReturns200(t *testing.T) {
+func TestSecurity_WrongTokenRejected(t *testing.T) {
 	_, base := newTestServer(t)
 
-	req, _ := http.NewRequest("OPTIONS", base+"/api/config", nil)
-	req.Header.Set("Origin", "http://localhost:3000")
+	req, _ := http.NewRequest(http.MethodGet, base+"/api/config", nil)
+	req.Header.Set("X-Nexus-Token", "wrong-token-value")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("wrong token: expected 401, got %d", resp.StatusCode)
+	}
+}
+
+func TestSecurity_HealthExemptFromToken(t *testing.T) {
+	_, base := newTestServer(t)
+
+	// /api/health must be reachable without a token (used by waitForFlutter).
+	resp, err := http.Get(base + "/api/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Errorf("preflight: expected 200, got %d", resp.StatusCode)
+		t.Errorf("health without token: expected 200, got %d", resp.StatusCode)
 	}
 }
 
 // ── Device info ───────────────────────────────────────────────────────────────
 
 func TestDeviceInfo_MockConnected(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
-	resp := get(t, base+"/api/device/info")
+	resp := env.get(t, env.base+"/api/device/info")
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -316,10 +403,10 @@ func TestDeviceInfo_MockConnected(t *testing.T) {
 // ── Brightness ────────────────────────────────────────────────────────────────
 
 func TestBrightness_ValidRange(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
 	for _, level := range []int{0, 50, 100} {
-		resp := postJSON(t, base+"/api/device/brightness", map[string]int{"brightness": level})
+		resp := env.postJSON(t, env.base+"/api/device/brightness", map[string]int{"brightness": level})
 		_ = resp.Body.Close()
 		if resp.StatusCode != 200 {
 			t.Errorf("brightness %d: expected 200, got %d", level, resp.StatusCode)
@@ -328,10 +415,10 @@ func TestBrightness_ValidRange(t *testing.T) {
 }
 
 func TestBrightness_OutOfRange(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
 	for _, level := range []int{-1, 101} {
-		resp := postJSON(t, base+"/api/device/brightness", map[string]int{"brightness": level})
+		resp := env.postJSON(t, env.base+"/api/device/brightness", map[string]int{"brightness": level})
 		_ = resp.Body.Close()
 		if resp.StatusCode != 400 {
 			t.Errorf("brightness %d: expected 400, got %d", level, resp.StatusCode)
@@ -342,7 +429,8 @@ func TestBrightness_OutOfRange(t *testing.T) {
 // ── Zone config ───────────────────────────────────────────────────────────────
 
 func TestZoneConfig_SetGetDelete(t *testing.T) {
-	_, db, base := newTestServerWithStore(t)
+	var db *store.DB
+	env := newTestEnv(t, &db)
 
 	// Seed a real zone row so SetZonePluginConfig (UPDATE) can find it.
 	pageID, err := db.CreatePage("Test", 0)
@@ -356,28 +444,21 @@ func TestZoneConfig_SetGetDelete(t *testing.T) {
 		t.Fatalf("CreateZone: %v", err)
 	}
 
-	// Set config via API.
 	payload := map[string]any{"color": "#FF0000", "enabled": true}
-	resp := postJSON(t, base+"/api/zones/zone-1/config", payload)
+	resp := env.postJSON(t, env.base+"/api/zones/zone-1/config", payload)
 	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("POST zone config: expected 200, got %d", resp.StatusCode)
 	}
 
-	// Get it back.
 	var got map[string]any
-	decodeJSON(t, get(t, base+"/api/zones/zone-1/config"), &got)
+	decodeJSON(t, env.get(t, env.base+"/api/zones/zone-1/config"), &got)
 	cfg, _ := got["config"].(map[string]any)
 	if cfg["color"] != "#FF0000" {
 		t.Errorf("color: want #FF0000, got %v", cfg["color"])
 	}
 
-	// Delete (clear) config.
-	req, _ := http.NewRequest("DELETE", base+"/api/zones/zone-1/config", nil)
-	delResp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	delResp := env.do(t, http.MethodDelete, env.base+"/api/zones/zone-1/config")
 	_ = delResp.Body.Close()
 	if delResp.StatusCode != 200 {
 		t.Errorf("DELETE zone config: expected 200, got %d", delResp.StatusCode)
@@ -387,14 +468,14 @@ func TestZoneConfig_SetGetDelete(t *testing.T) {
 // ── Zone cap + redistribution ─────────────────────────────────────────────────
 
 func TestZoneCap_RejectsSeventhZone(t *testing.T) {
-	_, db, base := newTestServerWithStore(t)
+	var db *store.DB
+	env := newTestEnv(t, &db)
 
 	pageID, err := db.CreatePage("Test", 0)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
 
-	// Add 6 zones (the maximum) directly via the DB.
 	for i := range 6 {
 		if err := db.CreateZone(store.StoredZone{
 			ID: fmt.Sprintf("z%d", i), PageID: pageID, Ord: i,
@@ -404,8 +485,7 @@ func TestZoneCap_RejectsSeventhZone(t *testing.T) {
 		}
 	}
 
-	// A 7th zone via the API must be rejected with 422.
-	resp := postJSON(t, base+"/api/layout/zones", map[string]any{
+	resp := env.postJSON(t, env.base+"/api/layout/zones", map[string]any{
 		"id": "z6", "page_id": pageID, "width_px": 80,
 		"plugin": "builtin:clock", "refresh_ms": 1000, "align": "center",
 	})
@@ -416,14 +496,14 @@ func TestZoneCap_RejectsSeventhZone(t *testing.T) {
 }
 
 func TestZoneRedistribute_AfterCreate(t *testing.T) {
-	_, db, base := newTestServerWithStore(t)
+	var db *store.DB
+	env := newTestEnv(t, &db)
 
 	pageID, err := db.CreatePage("Test", 0)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
 
-	// Seed one zone spanning the full width.
 	if err := db.CreateZone(store.StoredZone{
 		ID: "z0", PageID: pageID, Ord: 0, WidthPx: 640,
 		Plugin: "builtin:clock", RefreshMs: 1000, Align: "center",
@@ -431,8 +511,7 @@ func TestZoneRedistribute_AfterCreate(t *testing.T) {
 		t.Fatalf("seed zone: %v", err)
 	}
 
-	// Add a second zone via the API — should trigger redistribution.
-	resp := postJSON(t, base+"/api/layout/zones", map[string]any{
+	resp := env.postJSON(t, env.base+"/api/layout/zones", map[string]any{
 		"id": "z1", "page_id": pageID, "width_px": 80,
 		"plugin": "builtin:clock", "refresh_ms": 1000, "align": "center",
 	})
@@ -449,7 +528,6 @@ func TestZoneRedistribute_AfterCreate(t *testing.T) {
 	if total != 640 {
 		t.Errorf("widths after add: want sum=640, got %d", total)
 	}
-	// Both zones should be equal (320 each).
 	for _, z := range zones {
 		if z.WidthPx != 320 {
 			t.Errorf("zone %s: want width=320, got %d", z.ID, z.WidthPx)
@@ -458,14 +536,14 @@ func TestZoneRedistribute_AfterCreate(t *testing.T) {
 }
 
 func TestZoneRedistribute_AfterDelete(t *testing.T) {
-	_, db, base := newTestServerWithStore(t)
+	var db *store.DB
+	env := newTestEnv(t, &db)
 
 	pageID, err := db.CreatePage("Test", 0)
 	if err != nil {
 		t.Fatalf("CreatePage: %v", err)
 	}
 
-	// Seed three equal zones.
 	for i := range 3 {
 		if err := db.CreateZone(store.StoredZone{
 			ID: fmt.Sprintf("z%d", i), PageID: pageID, Ord: i,
@@ -475,12 +553,7 @@ func TestZoneRedistribute_AfterDelete(t *testing.T) {
 		}
 	}
 
-	// Delete the last zone via the API — remaining two should get 320 each.
-	req, _ := http.NewRequest("DELETE", base+"/api/layout/zones/z2", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := env.do(t, http.MethodDelete, env.base+"/api/layout/zones/z2")
 	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("DELETE zone: expected 200, got %d", resp.StatusCode)
@@ -502,9 +575,9 @@ func TestZoneRedistribute_AfterDelete(t *testing.T) {
 // ── Zone status ───────────────────────────────────────────────────────────────
 
 func TestZoneStatus_ReturnsShape(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
-	resp := get(t, base+"/api/zones/zone-1/status")
+	resp := env.get(t, env.base+"/api/zones/zone-1/status")
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -520,35 +593,32 @@ func TestZoneStatus_ReturnsShape(t *testing.T) {
 // ── Window state ──────────────────────────────────────────────────────────────
 
 func TestWindowState_ShowHide(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
-	// Initial state
 	var state map[string]any
-	decodeJSON(t, get(t, base+"/api/window/state"), &state)
+	decodeJSON(t, env.get(t, env.base+"/api/window/state"), &state)
 	if state["state"] != "shown" {
 		t.Errorf("initial state: want 'shown', got %v", state["state"])
 	}
 
-	// Hide
-	resp := postJSON(t, base+"/api/window/hide", nil)
+	resp := env.postJSON(t, env.base+"/api/window/hide", nil)
 	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Errorf("POST /hide: expected 200, got %d", resp.StatusCode)
 	}
 
-	decodeJSON(t, get(t, base+"/api/window/state"), &state)
+	decodeJSON(t, env.get(t, env.base+"/api/window/state"), &state)
 	if state["state"] != "hidden" {
 		t.Errorf("after hide: want 'hidden', got %v", state["state"])
 	}
 
-	// Show
-	resp = postJSON(t, base+"/api/window/show", nil)
+	resp = env.postJSON(t, env.base+"/api/window/show", nil)
 	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Errorf("POST /show: expected 200, got %d", resp.StatusCode)
 	}
 
-	decodeJSON(t, get(t, base+"/api/window/state"), &state)
+	decodeJSON(t, env.get(t, env.base+"/api/window/state"), &state)
 	if state["state"] != "shown" {
 		t.Errorf("after show: want 'shown', got %v", state["state"])
 	}
@@ -557,9 +627,9 @@ func TestWindowState_ShowHide(t *testing.T) {
 // ── Images ────────────────────────────────────────────────────────────────────
 
 func TestImages_ListEmpty(t *testing.T) {
-	_, base := newTestServer(t)
+	env := newTestEnv(t, nil)
 
-	resp := get(t, base+"/api/images")
+	resp := env.get(t, env.base+"/api/images")
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -574,13 +644,12 @@ func TestImages_ListEmpty(t *testing.T) {
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
 func TestWebSocket_UpgradeSucceeds(t *testing.T) {
-	_, base := newTestServer(t)
-	wsURL := "ws" + base[4:] + "/api/ws"
+	env := newTestEnv(t, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+	conn, _, err := websocket.Dial(ctx, env.wsURL(env.base), &websocket.DialOptions{
 		// No Origin header — matches Flutter desktop behaviour.
 	})
 	if err != nil {
@@ -590,19 +659,17 @@ func TestWebSocket_UpgradeSucceeds(t *testing.T) {
 }
 
 func TestWebSocket_ReceivesInitialWindowState(t *testing.T) {
-	_, base := newTestServer(t)
-	wsURL := "ws" + base[4:] + "/api/ws"
+	env := newTestEnv(t, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, _, err := websocket.Dial(ctx, env.wsURL(env.base), nil)
 	if err != nil {
 		t.Fatalf("WebSocket dial: %v", err)
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	// The server sends a window_state message immediately on connect.
 	var msg map[string]any
 	if err := wsjson.Read(ctx, conn, &msg); err != nil {
 		t.Fatalf("read first message: %v", err)
@@ -617,29 +684,25 @@ func TestWebSocket_ReceivesInitialWindowState(t *testing.T) {
 }
 
 func TestWebSocket_BroadcastsWindowStateChange(t *testing.T) {
-	srv, base := newTestServer(t)
-	wsURL := "ws" + base[4:] + "/api/ws"
+	env := newTestEnv(t, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn, _, err := websocket.Dial(ctx, env.wsURL(env.base), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	// Drain the initial window_state message.
 	var initial map[string]any
 	if err := wsjson.Read(ctx, conn, &initial); err != nil {
 		t.Fatalf("read initial: %v", err)
 	}
 
-	// Trigger a state change via the REST API.
-	resp := postJSON(t, base+"/api/window/hide", nil)
+	resp := env.postJSON(t, env.base+"/api/window/hide", nil)
 	_ = resp.Body.Close()
 
-	// Expect a window_state broadcast on the WebSocket.
 	var msg map[string]any
 	if err := wsjson.Read(ctx, conn, &msg); err != nil {
 		t.Fatalf("read broadcast: %v", err)
@@ -651,40 +714,32 @@ func TestWebSocket_BroadcastsWindowStateChange(t *testing.T) {
 	if msg["data"] != "hidden" {
 		t.Errorf("data: want 'hidden', got %v", msg["data"])
 	}
-
-	// Suppress unused variable warning.
-	_ = srv
 }
 
 func TestWebSocket_MultipleClients(t *testing.T) {
-	_, base := newTestServer(t)
-	wsURL := "ws" + base[4:] + "/api/ws"
+	env := newTestEnv(t, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Connect two clients simultaneously.
-	conn1, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn1, _, err := websocket.Dial(ctx, env.wsURL(env.base), nil)
 	if err != nil {
 		t.Fatalf("dial conn1: %v", err)
 	}
 	defer func() { _ = conn1.CloseNow() }()
 
-	conn2, _, err := websocket.Dial(ctx, wsURL, nil)
+	conn2, _, err := websocket.Dial(ctx, env.wsURL(env.base), nil)
 	if err != nil {
 		t.Fatalf("dial conn2: %v", err)
 	}
 	defer func() { _ = conn2.CloseNow() }()
 
-	// Drain initial messages from both.
 	var m map[string]any
 	_ = wsjson.Read(ctx, conn1, &m)
 	_ = wsjson.Read(ctx, conn2, &m)
 
-	// Trigger a broadcast.
-	_ = postJSON(t, base+"/api/window/show", nil).Body.Close()
+	_ = env.postJSON(t, env.base+"/api/window/show", nil).Body.Close()
 
-	// Both clients should receive the broadcast.
 	var msg1, msg2 map[string]any
 	if err := wsjson.Read(ctx, conn1, &msg1); err != nil {
 		t.Errorf("conn1: read broadcast: %v", err)
@@ -702,9 +757,9 @@ func TestWebSocket_MultipleClients(t *testing.T) {
 }
 
 func TestErrorResponse_HasExpectedShape(t *testing.T) {
+	// POST to /api/health (token-exempt, GET-only) to trigger 405.
 	_, base := newTestServer(t)
 
-	// POST to a GET-only endpoint to trigger a 405.
 	resp, err := http.Post(base+"/api/health", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -717,7 +772,6 @@ func TestErrorResponse_HasExpectedShape(t *testing.T) {
 	var body map[string]any
 	decodeJSON(t, resp, &body)
 
-	// Error responses must have "error" and optionally "message".
 	if _, ok := body["error"]; !ok {
 		t.Error("error response missing 'error' field")
 	}
