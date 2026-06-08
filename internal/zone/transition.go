@@ -16,6 +16,8 @@ const (
 	TransitionFade
 	TransitionSlideLeft
 	TransitionSlideRight
+	TransitionSlideUp
+	TransitionSlideDown
 )
 
 // Spring constants for the finalize/cancel snap animation.
@@ -253,6 +255,10 @@ func (ts *TransitionState) Render() *image.RGBA {
 		return ts.renderSlide(easedProgress, -1)
 	case TransitionSlideRight:
 		return ts.renderSlide(easedProgress, 1)
+	case TransitionSlideUp:
+		return ts.renderSlideVertical(easedProgress, -1)
+	case TransitionSlideDown:
+		return ts.renderSlideVertical(easedProgress, 1)
 	default:
 		return ts.NewFrame
 	}
@@ -307,6 +313,44 @@ func (ts *TransitionState) renderSlide(progress float64, direction int) *image.R
 			newRect.Max.X = DisplayWidth
 		}
 		draw.Draw(result, newRect, ts.NewFrame, image.Point{X: srcOffsetX, Y: 0}, draw.Src)
+	}
+
+	return result
+}
+
+// renderSlideVertical creates a vertical slide transition between two frames.
+// direction: -1 for up (new slides in from bottom), 1 for down (new slides in from top).
+func (ts *TransitionState) renderSlideVertical(progress float64, direction int) *image.RGBA {
+	result := image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
+	offset := int(float64(DisplayHeight) * progress * float64(-direction))
+
+	// Old frame sliding out.
+	oldRect := image.Rect(0, offset, DisplayWidth, DisplayHeight+offset)
+	if oldRect.Min.Y < DisplayHeight && oldRect.Max.Y > 0 {
+		srcOffsetY := 0
+		if oldRect.Min.Y < 0 {
+			srcOffsetY = -oldRect.Min.Y
+			oldRect.Min.Y = 0
+		}
+		if oldRect.Max.Y > DisplayHeight {
+			oldRect.Max.Y = DisplayHeight
+		}
+		draw.Draw(result, oldRect, ts.OldFrame, image.Point{X: 0, Y: srcOffsetY}, draw.Src)
+	}
+
+	// New frame sliding in from the opposite edge.
+	newOffset := offset + DisplayHeight*direction
+	newRect := image.Rect(0, newOffset, DisplayWidth, DisplayHeight+newOffset)
+	if newRect.Min.Y < DisplayHeight && newRect.Max.Y > 0 {
+		srcOffsetY := 0
+		if newRect.Min.Y < 0 {
+			srcOffsetY = -newRect.Min.Y
+			newRect.Min.Y = 0
+		}
+		if newRect.Max.Y > DisplayHeight {
+			newRect.Max.Y = DisplayHeight
+		}
+		draw.Draw(result, newRect, ts.NewFrame, image.Point{X: 0, Y: srcOffsetY}, draw.Src)
 	}
 
 	return result

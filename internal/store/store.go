@@ -18,6 +18,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -25,17 +26,20 @@ import (
 	"path/filepath"
 	"sync"
 
+	dbgen "github.com/mantonx/nexus-open/internal/store/db"
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 5
+const currentSchemaVersion = 7
 
 // DB is the application's SQLite store. All methods are safe for concurrent use.
 type DB struct {
-	db     *sql.DB
-	mu     sync.RWMutex
-	logger *slog.Logger
-	path   string
+	db       *sql.DB
+	q        *dbgen.Queries
+	mu       sync.RWMutex
+	logger   *slog.Logger
+	path     string
+	firstRun bool // true if schema_version was 0 when Open() was called (before migrate ran)
 }
 
 // Open opens (or creates) the SQLite database at path and runs any pending
@@ -72,7 +76,12 @@ func Open(path string, logger *slog.Logger) (*DB, error) {
 		return nil, fmt.Errorf("store: enable foreign keys: %w", err)
 	}
 
-	s := &DB{db: db, logger: logger, path: path}
+	// Capture pre-migration schema version so IsFirstRun() can report correctly
+	// after migrate() has already bumped the version.
+	var preVer int
+	_ = db.QueryRow(`SELECT version FROM schema_version LIMIT 1`).Scan(&preVer)
+
+	s := &DB{db: db, q: dbgen.New(db), logger: logger, path: path, firstRun: preVer == 0}
 
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
@@ -93,16 +102,13 @@ func (s *DB) Path() string {
 	return s.path
 }
 
-// IsFirstRun reports whether the database was freshly created on this open
-// (i.e. schema_version didn't exist before migrate ran).
+// IsFirstRun reports whether the database was freshly created on this open.
+// The answer is captured before migrate() runs so it remains correct even
+// after migrations have bumped the schema version to the current value.
 func (s *DB) IsFirstRun() bool {
-	var v int
-	row := s.db.QueryRow(`SELECT version FROM schema_version`)
-	if err := row.Scan(&v); err != nil || v == 0 {
-		return true
-	}
-	return false
+	return s.firstRun
 }
+
 
 // ── Settings (key/value) ──────────────────────────────────────────────────────
 
@@ -111,10 +117,7 @@ func (s *DB) GetSetting(key, defaultVal string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var val string
-	err := s.db.QueryRow(
-		`SELECT value FROM settings WHERE key = ?`, key,
-	).Scan(&val)
+	val, err := s.q.GetSetting(context.Background(), key)
 	if err != nil {
 		return defaultVal
 	}
@@ -126,12 +129,10 @@ func (s *DB) SetSetting(key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(
-		`INSERT INTO settings(key, value) VALUES(?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		key, value,
-	)
-	return err
+	return s.q.UpsertSetting(context.Background(), dbgen.UpsertSettingParams{
+		Key:   key,
+		Value: value,
+	})
 }
 
 // GetSettings returns all settings as a map.
@@ -139,21 +140,15 @@ func (s *DB) GetSettings() (map[string]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT key, value FROM settings`)
+	rows, err := s.q.GetAllSettings(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	m := make(map[string]string)
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return nil, err
-		}
-		m[k] = v
+	m := make(map[string]string, len(rows))
+	for _, r := range rows {
+		m[r.Key] = r.Value
 	}
-	return m, rows.Err()
+	return m, nil
 }
 
 // SetSettings upserts multiple settings in a single transaction.
@@ -167,17 +162,11 @@ func (s *DB) SetSettings(settings map[string]string) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	stmt, err := tx.Prepare(
-		`INSERT INTO settings(key, value) VALUES(?, ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-	)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = stmt.Close() }()
-
+	qtx := s.q.WithTx(tx)
 	for k, v := range settings {
-		if _, err := stmt.Exec(k, v); err != nil {
+		if err := qtx.UpsertSetting(context.Background(), dbgen.UpsertSettingParams{
+			Key: k, Value: v,
+		}); err != nil {
 			return err
 		}
 	}
@@ -204,11 +193,13 @@ func (s *DB) migrate() error {
 	}
 
 	migrations := []func(*sql.Tx) error{
-		migration1, // v0 → v1: settings + zone_plugin_config
-		migration2, // v1 → v2: pages + zones (layout editor)
-		migration3, // v2 → v3: rename zone_module_config → zone_plugin_config
-		migration4, // v3 → v4: rewrite exec:./modules/ → exec:./plugins/ after directory rename
-		migration5, // v4 → v5: consolidate zone_plugin_config into zones.config_json; rename zones.module → zones.plugin
+		migrateV1_settingsAndZonePluginConfig,      // v0 → v1
+		migrateV2_pagesAndZones,                    // v1 → v2
+		migrateV3_renameTable,                      // v2 → v3
+		migrateV4_rewriteExecPaths,                 // v3 → v4
+		migrateV5_consolidateConfigAndRenameColumn, // v4 → v5
+		migrateV6_addOnTapAndChoicesJson,           // v5 → v6
+		migrateV7_payloadCache,                     // v6 → v7
 	}
 
 	for i := current; i < currentSchemaVersion; i++ {
@@ -234,8 +225,8 @@ func (s *DB) migrate() error {
 	return nil
 }
 
-// migration1 creates the initial schema (v0 → v1).
-func migration1(tx *sql.Tx) error {
+// migrateV1_settingsAndZonePluginConfig creates the initial schema (v0 → v1).
+func migrateV1_settingsAndZonePluginConfig(tx *sql.Tx) error {
 	_, err := tx.Exec(`
 		-- UI preferences (replaces config.yaml + shared_preferences)
 		CREATE TABLE IF NOT EXISTS settings (
@@ -252,8 +243,8 @@ func migration1(tx *sql.Tx) error {
 	return err
 }
 
-// migration2 adds the layout tables: pages and zones (v1 → v2).
-func migration2(tx *sql.Tx) error {
+// migrateV2_pagesAndZones adds the layout tables: pages and zones (v1 → v2).
+func migrateV2_pagesAndZones(tx *sql.Tx) error {
 	_, err := tx.Exec(`
 		-- Display pages (swipeable screens)
 		CREATE TABLE IF NOT EXISTS pages (
@@ -280,10 +271,10 @@ func migration2(tx *sql.Tx) error {
 	return err
 }
 
-// migration3 renames zone_module_config → zone_plugin_config (v2 → v3).
-// Databases created after migration1 was updated already have zone_plugin_config,
+// migrateV3_renameTable renames zone_module_config → zone_plugin_config (v2 → v3).
+// Databases created after migrateV1 was updated already have zone_plugin_config,
 // so this is a no-op for them; only legacy DBs with zone_module_config need renaming.
-func migration3(tx *sql.Tx) error {
+func migrateV3_renameTable(tx *sql.Tx) error {
 	var n int
 	if err := tx.QueryRow(
 		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='zone_module_config'`,
@@ -297,10 +288,10 @@ func migration3(tx *sql.Tx) error {
 	return err
 }
 
-// migration4 rewrites exec:./modules/ plugin paths to exec:./plugins/ (v3 → v4).
+// migrateV4_rewriteExecPaths rewrites exec:./modules/ plugin paths to exec:./plugins/ (v3 → v4).
 // The modules/ directory was renamed to plugins/ in the codebase; any layout
 // seeded before that rename will have stale paths that fail to launch.
-func migration4(tx *sql.Tx) error {
+func migrateV4_rewriteExecPaths(tx *sql.Tx) error {
 	_, err := tx.Exec(`
 		UPDATE zones
 		SET module = 'exec:./plugins/' || substr(module, length('exec:./modules/') + 1)
@@ -309,7 +300,8 @@ func migration4(tx *sql.Tx) error {
 	return err
 }
 
-// migration5 consolidates per-zone plugin config into a single location (v4 → v5).
+// migrateV5_consolidateConfigAndRenameColumn consolidates per-zone plugin config
+// into a single location and renames the module column to plugin (v4 → v5).
 //
 // Before this migration two tables both held per-zone plugin config:
 //   - zones.config_json   (written by the layout API)
@@ -323,7 +315,7 @@ func migration4(tx *sql.Tx) error {
 // It also renames the zones.module column to zones.plugin to match the Go
 // struct field name (StoredZone.Plugin) and the plugin: terminology used
 // everywhere since the v1.0 rename.
-func migration5(tx *sql.Tx) error {
+func migrateV5_consolidateConfigAndRenameColumn(tx *sql.Tx) error {
 	// Merge zone_plugin_config rows into zones.config_json where the zone
 	// exists but zones.config_json is still the empty default '{}'. Rows
 	// where zones.config_json already has content are left untouched (the
@@ -363,4 +355,29 @@ func migration5(tx *sql.Tx) error {
 	}
 
 	return nil
+}
+
+// migrateV6_addOnTapAndChoicesJson adds on_tap and choices_json columns to zones (v5 → v6).
+func migrateV6_addOnTapAndChoicesJson(tx *sql.Tx) error {
+	if _, err := tx.Exec(`ALTER TABLE zones ADD COLUMN on_tap TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migration6: add on_tap: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE zones ADD COLUMN choices_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		return fmt.Errorf("migration6: add choices_json: %w", err)
+	}
+	return nil
+}
+
+// migrateV7_payloadCache adds the payload_cache table for persisting OnTap
+// DetailPayload results across restarts (v6 → v7).
+func migrateV7_payloadCache(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS payload_cache (
+			zone_id    TEXT    PRIMARY KEY,
+			plugin_id  TEXT    NOT NULL,
+			payload    TEXT    NOT NULL,
+			fetched_at INTEGER NOT NULL
+		);
+	`)
+	return err
 }

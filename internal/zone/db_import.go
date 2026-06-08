@@ -27,13 +27,15 @@ func SaveConfigToDB(db LayoutImporter, cfg *Config) error {
 
 		for j, z := range p.Zones {
 			sz := store.StoredZone{
-				ID:        z.ID,
-				PageID:    pageID,
-				Ord:       j,
-				WidthPx:   z.Width,
-				Plugin:    z.Plugin,
-				RefreshMs: z.RefreshMs,
-				Align:     string(z.Align),
+				ID:         z.ID,
+				PageID:     pageID,
+				Ord:        j,
+				WidthPx:    z.Width,
+				Plugin:     z.Plugin,
+				RefreshMs:  z.RefreshMs,
+				Align:      string(z.Align),
+				OnTap:      string(z.OnTap),
+				Choices:    z.Choices,
 				ConfigJSON: z.PluginConfig,
 			}
 			if z.ThemeOverride != nil {
@@ -96,6 +98,8 @@ func LoadConfigFromDB(db *store.DB) (*Config, error) {
 				Plugin:       z.Plugin,
 				RefreshMs:    z.RefreshMs,
 				Align:        Alignment(z.Align),
+				OnTap:        TapAction(z.OnTap),
+				Choices:      z.Choices,
 				PluginConfig: z.ConfigJSON,
 			}
 

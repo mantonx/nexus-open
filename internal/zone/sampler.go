@@ -441,6 +441,14 @@ func (s *Sampler) GetZoneStatus(zoneID string) ZoneStatus {
 	return ZoneStatus{Status: "loading"}
 }
 
+// GetPlugin returns the live plugin instance for zoneID, if one is loaded.
+func (s *Sampler) GetPlugin(zoneID string) (plugin.Plugin, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.modules[zoneID]
+	return p, ok
+}
+
 // AllZoneStatuses returns a snapshot of all zone statuses.
 func (s *Sampler) AllZoneStatuses() map[string]ZoneStatus {
 	s.zoneErrorsMu.RLock()
@@ -634,7 +642,7 @@ func (s *Sampler) RestartForPage(pageIndex int) error {
 }
 
 // applyInitialZoneConfig delivers the stored zone config to the plugin before sampling starts.
-// Zone pixel dimensions are injected under the reserved "_zone_width" / "_zone_height" keys
+// Zone pixel dimensions are injected under the reserved keys declared in pkg/plugin
 // so plugins like the analog clock can size their RawFrame output correctly.
 func (s *Sampler) applyInitialZoneConfig(zoneConfig ZoneConfig, pluginSpec string, mod plugin.Plugin) {
 	if s.zoneCfg == nil {
@@ -646,8 +654,8 @@ func (s *Sampler) applyInitialZoneConfig(zoneConfig ZoneConfig, pluginSpec strin
 		cfg = make(map[string]any)
 	}
 
-	cfg["_zone_width"] = zoneConfig.Width
-	cfg["_zone_height"] = DisplayHeight
+	cfg[plugin.ConfigKeyZoneWidth] = zoneConfig.Width
+	cfg[plugin.ConfigKeyZoneHeight] = DisplayHeight
 
 	if err := mod.Configure(cfg); err != nil {
 		s.logger.Warn("failed to apply initial zone config",
@@ -703,8 +711,8 @@ func (s *Sampler) BroadcastZoneConfigChange(zoneID string, config map[string]any
 	}
 
 	if w, ok := s.zoneWidths[zoneID]; ok {
-		config["_zone_width"] = w
-		config["_zone_height"] = DisplayHeight
+		config[plugin.ConfigKeyZoneWidth] = w
+		config[plugin.ConfigKeyZoneHeight] = DisplayHeight
 	}
 
 	if err := mod.Configure(config); err != nil {

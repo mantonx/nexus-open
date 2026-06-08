@@ -197,6 +197,15 @@ func (p *Payload) IsExpired() bool {
 	return time.Since(p.Timestamp) > p.TTL
 }
 
+// ConfigKeyZoneWidth and ConfigKeyZoneHeight are reserved keys injected into
+// every plugin's Configure call by the sampler. Plugins may read these to
+// adapt their rendering to the actual pixel dimensions of their zone.
+// Do not declare these in ConfigSchema — they are host-injected, not user-editable.
+const (
+	ConfigKeyZoneWidth  = "_zone_width"
+	ConfigKeyZoneHeight = "_zone_height"
+)
+
 // Plugin is the interface that all plugins must implement.
 type Plugin interface {
 	// Describe returns plugin metadata and config schema.
@@ -208,4 +217,34 @@ type Plugin interface {
 	// Configure applies per-zone plugin configuration.
 	// Called once at startup (with zone's stored config) and on every live edit.
 	Configure(cfg map[string]any) error
+}
+
+// DailyForecast holds weather data for a single day.
+type DailyForecast struct {
+	Date        string  `json:"date"`         // "Mon", "Tue", etc.
+	Icon        string  `json:"icon"`         // Font Awesome codepoint
+	TempHigh    float64 `json:"temp_high"`
+	TempLow     float64 `json:"temp_low"`
+	Description string  `json:"description"`
+	Unit        string  `json:"unit"` // "imperial" or "metric"
+}
+
+// DetailPayload carries rich detail data surfaced when a zone is tapped.
+// Only the fields relevant to the plugin's detail view need to be populated.
+type DetailPayload struct {
+	// ZoneID identifies which zone this detail belongs to.
+	ZoneID string `json:"zone_id"`
+
+	// Title is the detail overlay header (e.g. "Jersey City Weather").
+	Title string `json:"title,omitempty"`
+
+	// Forecast is a weekly day-by-day forecast (weather plugin).
+	Forecast []DailyForecast `json:"forecast,omitempty"`
+}
+
+// Tapper is an optional interface plugins may implement to handle zone taps.
+// When a zone with on_tap:"detail" is tapped, the host type-asserts the plugin
+// to Tapper and calls OnTap to retrieve the rich detail payload.
+type Tapper interface {
+	OnTap() (DetailPayload, error)
 }

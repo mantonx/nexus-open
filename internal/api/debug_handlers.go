@@ -149,6 +149,45 @@ func (s *Server) handleSwipeFinalize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleDebugTap simulates a hardware tap at a given X coordinate (0–639).
+// POST /api/debug/tap  body: {"x": 320}
+//
+// Matches the hardware tap path exactly: dismiss detail overlay if showing,
+// otherwise find the zone at x and execute its OnTap action.
+func (s *Server) handleDebugTap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.zoneTapper == nil {
+		s.respondError(w, "Zone tapper not available", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		X int `json:"x"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.X < 0 || req.X >= 640 {
+		s.respondError(w, "x must be 0–639", http.StatusBadRequest)
+		return
+	}
+
+	if s.zoneTapper.IsShowingDetail() {
+		s.zoneTapper.ClearDetail()
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if err := s.zoneTapper.HandleZoneTapAtX(req.X); err != nil {
+		s.respondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleSwipeCancel cancels an in-progress live swipe.
 // POST /api/debug/swipe/cancel
 func (s *Server) handleSwipeCancel(w http.ResponseWriter, r *http.Request) {

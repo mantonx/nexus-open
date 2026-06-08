@@ -6,6 +6,9 @@ import (
 )
 
 var (
+	// ErrNotTapper is returned over RPC when a plugin does not implement Tapper.
+	ErrNotTapper = errors.New("plugin does not implement Tapper")
+
 	// ErrEmptyPrimary indicates the Primary field is required
 	ErrEmptyPrimary = errors.New("payload primary field cannot be empty")
 

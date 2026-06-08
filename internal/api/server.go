@@ -54,6 +54,13 @@ type SwipeSimulator interface {
 	CancelLiveSwipe() error
 }
 
+// ZoneTapper is the subset of zone.Manager needed to simulate a hardware tap.
+type ZoneTapper interface {
+	HandleZoneTapAtX(x int) error
+	IsShowingDetail() bool
+	ClearDetail()
+}
+
 // Navigator is the subset of zone.Manager needed for page navigation from the UI.
 type Navigator interface {
 	GetCurrentPage() int
@@ -98,6 +105,7 @@ type Server struct {
 	zoneNotifier    ZoneConfigNotifier
 	zoneStatus      ZoneStatusProvider
 	swipeSim        SwipeSimulator        // for /api/debug/swipe
+	zoneTapper      ZoneTapper            // for /api/debug/tap
 	navigator       Navigator             // for /api/navigate/page
 	layoutStore     LayoutStore           // for /api/layout/*
 	layoutReloader  LayoutReloader        // for live reloads after layout edits
@@ -205,6 +213,11 @@ func (s *Server) SetSwipeSimulator(sim SwipeSimulator) {
 	s.swipeSim = sim
 }
 
+// SetZoneTapper wires in the zone manager for the debug tap endpoint.
+func (s *Server) SetZoneTapper(t ZoneTapper) {
+	s.zoneTapper = t
+}
+
 // SetZoneStatusProvider wires in the sampler so zone status can be queried.
 func (s *Server) SetZoneStatusProvider(p ZoneStatusProvider) {
 	s.zoneStatus = p
@@ -252,6 +265,15 @@ func (s *Server) BroadcastPageState() {
 			"num_pages":    s.navigator.NumPages(),
 			"pages":        s.navigator.GetPageInfos(),
 		},
+	})
+}
+
+// BroadcastDetailState sends the detail overlay active/inactive flag to all WS clients.
+// closeX/Y are the hardware pixel center of the close button; meaningful only when active=true.
+func (s *Server) BroadcastDetailState(active bool, closeX, closeY int) {
+	s.hub.Broadcast(WSMessage{
+		Type: "detail_state",
+		Data: map[string]any{"active": active, "close_x": closeX, "close_y": closeY},
 	})
 }
 
@@ -306,6 +328,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Debug endpoints — swipe simulation for tuning transition parameters
 	mux.HandleFunc("/api/debug/swipe", s.handleDebugSwipe)
+	mux.HandleFunc("/api/debug/tap", s.handleDebugTap)
 
 	// Preview navigation — page switching from Flutter UI
 	mux.HandleFunc("/api/navigate/page", s.handleNavigatePage)

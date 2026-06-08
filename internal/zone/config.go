@@ -40,6 +40,7 @@ type PageInfo struct {
 type ZoneInfo struct {
 	ID    string `json:"id"`
 	Width int    `json:"width"`
+	OnTap string `json:"on_tap,omitempty"`
 }
 
 // ZoneConfig represents configuration for a single zone
@@ -155,8 +156,9 @@ const (
 type TapAction string
 
 const (
-	TapActionNone  TapAction = "none"
-	TapActionCycle TapAction = "cycle" // Cycle through plugin choices
+	TapActionNone   TapAction = "none"
+	TapActionCycle  TapAction = "cycle"  // Cycle through plugin choices
+	TapActionDetail TapAction = "detail" // Show plugin detail overlay
 )
 
 // Severity display colors — fixed values that match the Corsair design language.

@@ -56,6 +56,14 @@ func (c *rpcClient) Configure(cfg map[string]any) error {
 	return c.client.Call("Plugin.Configure", cfg, &resp)
 }
 
+// OnTap implements Tapper over RPC. Returns ErrNotTapper when the plugin's
+// Impl does not implement Tapper — same semantic as a failed type assertion.
+func (c *rpcClient) OnTap() (DetailPayload, error) {
+	var resp DetailPayload
+	err := c.client.Call("Plugin.OnTap", new(any), &resp)
+	return resp, err
+}
+
 // pluginRPC is the plugin-side handler that serves requests from the host.
 type pluginRPC struct {
 	Impl Plugin
@@ -77,12 +85,25 @@ func (s *pluginRPC) Configure(cfg map[string]any, resp *any) error {
 	return s.Impl.Configure(cfg)
 }
 
+func (s *pluginRPC) OnTap(args any, resp *DetailPayload) error {
+	tapper, ok := s.Impl.(Tapper)
+	if !ok {
+		return ErrNotTapper
+	}
+	detail, err := tapper.OnTap()
+	*resp = detail
+	return err
+}
+
 func init() {
 	gob.Register(Descriptor{})
 	gob.Register(ConfigSchema{})
 	gob.Register(ConfigField{})
 	gob.Register(FieldOption{})
 	gob.Register(Payload{})
+	gob.Register(DetailPayload{})
+	gob.Register(DailyForecast{})
+	gob.Register([]DailyForecast{})
 	gob.Register(map[string]any{})
 	gob.Register([]any{})
 }

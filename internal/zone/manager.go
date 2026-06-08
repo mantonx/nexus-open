@@ -3,6 +3,7 @@ package zone
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/draw"
@@ -25,6 +26,12 @@ import (
 // liveSwipePreviewThreshold is the drag progress at which the target page
 // frame is swapped in. 0 = show immediately on first drag update.
 const liveSwipePreviewThreshold = 0.0
+
+// PluginLookup is satisfied by Sampler. Manager uses it to resolve a zone's
+// live plugin instance without importing the sampler package directly.
+type PluginLookup interface {
+	GetPlugin(zoneID string) (plugin.Plugin, bool)
+}
 
 // Manager manages zones, their renderers, and lifecycle.
 //
@@ -85,9 +92,24 @@ type Manager struct {
 	// Zone cycle callback — called when a tap action advances a zone to the next plugin choice.
 	onZoneCycle func(zoneConfig ZoneConfig) error
 
+	// Detail state callback — called when the detail overlay is shown or hidden.
+	onDetailState func(active bool)
+
 	// Tracks the current choice index per zone for cycling (zoneID → choice index).
 	choiceIndex   map[string]int
 	choiceIndexMu sync.Mutex
+
+	// Detail overlay — shown when a Tapper zone is tapped.
+	detailActive     bool
+	detailShownAt    time.Time
+	detailFrame      *image.RGBA
+	detailTransition TransitionState
+	detailTimer      *time.Timer
+	detailMu         sync.Mutex
+
+	// Plugin lookup — set after construction via SetPluginLookup.
+	// Kept as an interface so the zone package does not import the sampler.
+	pluginLookup PluginLookup
 
 	// Lifecycle
 	ctx    context.Context
@@ -102,6 +124,235 @@ type Zone struct {
 	Plugin   string
 }
 
+const (
+	detailTimeout  = 10 * time.Second
+	detailDebounce = 600 * time.Millisecond
+)
+
+// SetDetailStateCallback registers a function called whenever the detail overlay
+// is shown or hidden. Safe to call before Start.
+func (m *Manager) SetDetailStateCallback(fn func(active bool)) {
+	m.onDetailState = fn
+}
+
+// ShowDetail renders payload into a detail overlay and starts the slide-up transition.
+func (m *Manager) ShowDetail(payload plugin.DetailPayload) {
+	m.configMu.RLock()
+	theme := m.config.Theme
+	m.configMu.RUnlock()
+
+	frame := RenderDetailFrame(m.logger, payload, theme)
+
+	// Snapshot lastFrame before acquiring detailMu to avoid lock-order deadlock
+	// with RenderFrame (which holds lastFrameMu then acquires detailMu).
+	m.lastFrameMu.Lock()
+	oldFrame := m.lastFrame
+	m.lastFrameMu.Unlock()
+	if oldFrame == nil {
+		oldFrame = image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
+	}
+
+	m.detailMu.Lock()
+	defer m.detailMu.Unlock()
+
+	m.detailFrame = frame
+	m.detailActive = true
+	m.detailShownAt = time.Now()
+	m.detailTransition.Duration = 200 * time.Millisecond
+	m.detailTransition.Start(TransitionSlideUp, oldFrame, frame, 1)
+
+	// Auto-dismiss after timeout.
+	if m.detailTimer != nil {
+		m.detailTimer.Stop()
+	}
+	m.detailTimer = time.AfterFunc(detailTimeout, func() {
+		m.ClearDetail()
+	})
+
+	if m.onDetailState != nil {
+		go m.onDetailState(true)
+	}
+}
+
+// ClearDetail dismisses the detail overlay with a slide-down transition.
+func (m *Manager) ClearDetail() {
+	// Snapshot lastFrame before acquiring detailMu — same lock-order rule as ShowDetail.
+	m.lastFrameMu.Lock()
+	pageFrame := m.lastFrame
+	m.lastFrameMu.Unlock()
+	if pageFrame == nil {
+		pageFrame = image.NewRGBA(image.Rect(0, 0, DisplayWidth, DisplayHeight))
+	}
+
+	m.detailMu.Lock()
+	defer m.detailMu.Unlock()
+
+	if !m.detailActive {
+		return
+	}
+
+	// Ignore dismiss requests within the debounce window — prevents the finger
+	// lift from the opening tap from immediately closing the overlay.
+	if time.Since(m.detailShownAt) < detailDebounce {
+		return
+	}
+
+	if m.detailTimer != nil {
+		m.detailTimer.Stop()
+		m.detailTimer = nil
+	}
+
+	m.detailTransition.Duration = 180 * time.Millisecond
+	m.detailTransition.Start(TransitionSlideDown, m.detailFrame, pageFrame, -1)
+
+	// Mark inactive — RenderFrame will still render the slide-down transition.
+	m.detailActive = false
+
+	if m.onDetailState != nil {
+		go m.onDetailState(false)
+	}
+}
+
+// IsShowingDetail reports whether the detail overlay is active or animating IN.
+// Returns false during the slide-down dismiss transition so taps pass through.
+func (m *Manager) IsShowingDetail() bool {
+	m.detailMu.Lock()
+	defer m.detailMu.Unlock()
+	if m.detailActive {
+		return true
+	}
+	// Only block taps during slide-in (TransitionSlideUp), not slide-out.
+	return m.detailTransition.Active &&
+		m.detailTransition.Type == TransitionSlideUp &&
+		!m.detailTransition.IsComplete()
+}
+
+// SetPluginLookup wires in the sampler so HandleZoneTap can resolve plugins.
+func (m *Manager) SetPluginLookup(pl PluginLookup) {
+	m.pluginLookup = pl
+}
+
+// detailCacheTTL is how long a DB-persisted DetailPayload is considered fresh.
+// Longer than the plugin's in-memory TTL because the point of DB persistence
+// is to survive restarts, not to drive high-frequency refreshes.
+const detailCacheTTL = 30 * time.Minute
+
+// HandleZoneTap looks up the plugin for zoneID, calls OnTap if it implements
+// plugin.Tapper, and shows the result as a detail overlay. Safe to call from
+// any goroutine.
+//
+// Cache strategy (DB-backed):
+//  1. Load cached DetailPayload from DB.
+//  2. If cache is fresh (< detailCacheTTL), show it immediately — done.
+//  3. If cache is stale, show it immediately for responsiveness, then fetch
+//     fresh data in the background and update the overlay + DB.
+//  4. If no cache, fetch synchronously, show, and save to DB.
+func (m *Manager) HandleZoneTap(zoneID string) error {
+	if m.pluginLookup == nil {
+		return fmt.Errorf("HandleZoneTap: plugin lookup not set")
+	}
+	p, ok := m.pluginLookup.GetPlugin(zoneID)
+	if !ok {
+		return fmt.Errorf("HandleZoneTap: no plugin loaded for zone %q", zoneID)
+	}
+	tapper, ok := p.(plugin.Tapper)
+	if !ok {
+		return fmt.Errorf("HandleZoneTap: plugin for zone %q does not implement Tapper", zoneID)
+	}
+
+	// Try DB cache first.
+	if m.db != nil {
+		cached, fetchedAt, err := m.db.LoadPayloadCache(zoneID)
+		if err == nil && len(cached) > 0 {
+			var detail plugin.DetailPayload
+			if json.Unmarshal(cached, &detail) == nil {
+				detail.ZoneID = zoneID
+				age := time.Since(time.Unix(fetchedAt, 0))
+				if age < detailCacheTTL {
+					// Fresh — serve immediately.
+					m.ShowDetail(detail)
+					return nil
+				}
+				// Stale — serve immediately, revalidate in background.
+				m.ShowDetail(detail)
+				go m.revalidateDetailCache(zoneID, tapper)
+				return nil
+			}
+		}
+	}
+
+	// No usable cache — fetch synchronously.
+	detail, err := tapper.OnTap()
+	if err == plugin.ErrNotTapper {
+		return fmt.Errorf("HandleZoneTap: plugin for zone %q returned ErrNotTapper", zoneID)
+	}
+	if err != nil {
+		return fmt.Errorf("HandleZoneTap: OnTap error for zone %q: %w", zoneID, err)
+	}
+	detail.ZoneID = zoneID
+	m.ShowDetail(detail)
+	m.saveDetailCache(zoneID, detail)
+	return nil
+}
+
+// revalidateDetailCache fetches a fresh DetailPayload and updates the overlay
+// and DB cache. Called in a goroutine when a stale cache entry was served.
+func (m *Manager) revalidateDetailCache(zoneID string, tapper plugin.Tapper) {
+	detail, err := tapper.OnTap()
+	if err != nil {
+		m.logger.Warn("detail cache revalidation failed", "zone", zoneID, "error", err)
+		return
+	}
+	detail.ZoneID = zoneID
+	m.ShowDetail(detail)
+	m.saveDetailCache(zoneID, detail)
+}
+
+// saveDetailCache serialises detail and writes it to the DB cache.
+func (m *Manager) saveDetailCache(zoneID string, detail plugin.DetailPayload) {
+	if m.db == nil {
+		return
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		m.logger.Warn("detail cache marshal failed", "zone", zoneID, "error", err)
+		return
+	}
+	if err := m.db.SavePayloadCache(zoneID, detail.ZoneID, raw, time.Now().Unix()); err != nil {
+		m.logger.Warn("detail cache save failed", "zone", zoneID, "error", err)
+	}
+}
+
+// HandleZoneTapAtX resolves the zone at hardware X coordinate x (0–639) on the
+// current page and executes its OnTap action — identical to what the hardware
+// touch handler does. Used by the debug tap API so the Flutter preview can
+// drive the same code path with mouse clicks.
+func (m *Manager) HandleZoneTapAtX(x int) error {
+	m.configMu.RLock()
+	cfg := m.config
+	pageIdx := m.currentPage
+	m.configMu.RUnlock()
+
+	if pageIdx >= len(cfg.Pages) {
+		return fmt.Errorf("tap: page index %d out of range", pageIdx)
+	}
+	page := cfg.Pages[pageIdx]
+	page.ComputeOffsets()
+
+	for _, z := range page.Zones {
+		if x >= z.X && x < z.X+z.Width {
+			switch z.OnTap {
+			case TapActionCycle:
+				return m.CycleZonePlugin(z.ID)
+			case TapActionDetail:
+				return m.HandleZoneTap(z.ID)
+			}
+			return nil
+		}
+	}
+	return nil // tap outside all zones — not an error
+}
+
 // NewManager creates a new zone manager.
 //
 // When db is non-nil the manager loads the layout from SQLite first; if the
@@ -113,9 +364,12 @@ func NewManager(ctx context.Context, logger *slog.Logger, db *store.DB, fallback
 	var err error
 
 	if db != nil {
-		config, err = LoadConfigFromDB(db)
-		if err != nil {
-			// No layout in DB yet — seed from YAML then use that config.
+		hasLayout, hlErr := db.HasLayout()
+		if hlErr != nil {
+			return nil, fmt.Errorf("zone: check db layout: %w", hlErr)
+		}
+		if !hasLayout {
+			// Genuine first use or deliberate wipe — seed from the factory YAML.
 			logger.Info("zone: db has no layout, seeding from YAML", "path", fallbackYAMLPath)
 			config, err = LoadConfig(fallbackYAMLPath)
 			if err != nil {
@@ -124,6 +378,11 @@ func NewManager(ctx context.Context, logger *slog.Logger, db *store.DB, fallback
 			if seedErr := seedDBFromConfig(db, config, logger); seedErr != nil {
 				// Non-fatal: log and continue with the YAML-loaded config.
 				logger.Warn("zone: failed to seed db from YAML (continuing with YAML)", "error", seedErr)
+			}
+		} else {
+			config, err = LoadConfigFromDB(db)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load config from db: %w", err)
 			}
 		}
 	} else {
@@ -197,6 +456,8 @@ func seedDBFromConfig(db *store.DB, cfg *Config, logger *slog.Logger) error {
 				Plugin:    z.Plugin,
 				RefreshMs: z.RefreshMs,
 				Align:     string(z.Align),
+				OnTap:     string(z.OnTap),
+				Choices:   z.Choices,
 			}
 			if z.ThemeOverride != nil {
 				sz.ThemeJSON = map[string]any{

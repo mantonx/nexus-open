@@ -1,8 +1,11 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+
+	dbgen "github.com/mantonx/nexus-open/internal/store/db"
 )
 
 // ── Layout types ──────────────────────────────────────────────────────────────
@@ -23,6 +26,8 @@ type StoredZone struct {
 	Plugin     string         `json:"plugin"`
 	RefreshMs  int            `json:"refresh_ms"`
 	Align      string         `json:"align"`
+	OnTap      string         `json:"on_tap,omitempty"`
+	Choices    []string       `json:"choices,omitempty"`
 	ConfigJSON map[string]any `json:"config"`
 	ThemeJSON  map[string]any `json:"theme_override,omitempty"`
 }
@@ -34,21 +39,15 @@ func (s *DB) GetPages() ([]StoredPage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(`SELECT id, name, ord FROM pages ORDER BY ord`)
+	rows, err := s.q.ListPages(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	var pages []StoredPage
-	for rows.Next() {
-		var p StoredPage
-		if err := rows.Scan(&p.ID, &p.Name, &p.Ord); err != nil {
-			return nil, err
-		}
-		pages = append(pages, p)
+	pages := make([]StoredPage, len(rows))
+	for i, r := range rows {
+		pages[i] = StoredPage{ID: r.ID, Name: r.Name, Ord: int(r.Ord)}
 	}
-	return pages, rows.Err()
+	return pages, nil
 }
 
 // CreatePage inserts a new page and returns its ID.
@@ -56,11 +55,10 @@ func (s *DB) CreatePage(name string, ord int) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, err := s.db.Exec(`INSERT INTO pages(name, ord) VALUES(?, ?)`, name, ord)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
+	return s.q.InsertPage(context.Background(), dbgen.InsertPageParams{
+		Name: name,
+		Ord:  int64(ord),
+	})
 }
 
 // UpdatePage updates a page's name and/or order.
@@ -68,8 +66,11 @@ func (s *DB) UpdatePage(id int64, name string, ord int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`UPDATE pages SET name = ?, ord = ? WHERE id = ?`, name, ord, id)
-	return err
+	return s.q.UpdatePage(context.Background(), dbgen.UpdatePageParams{
+		ID:   id,
+		Name: name,
+		Ord:  int64(ord),
+	})
 }
 
 // DeletePage deletes a page (cascades to zones).
@@ -77,8 +78,7 @@ func (s *DB) DeletePage(id int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`DELETE FROM pages WHERE id = ?`, id)
-	return err
+	return s.q.DeletePage(context.Background(), id)
 }
 
 // ReorderPages sets ord for each page ID in a single transaction.
@@ -92,8 +92,12 @@ func (s *DB) ReorderPages(order []int64) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	qtx := s.q.WithTx(tx)
 	for i, id := range order {
-		if _, err := tx.Exec(`UPDATE pages SET ord = ? WHERE id = ?`, i, id); err != nil {
+		if err := qtx.UpdatePageOrd(context.Background(), dbgen.UpdatePageOrdParams{
+			Ord: int64(i),
+			ID:  id,
+		}); err != nil {
 			return err
 		}
 	}
@@ -107,56 +111,53 @@ func (s *DB) GetZonesForPage(pageID int64) ([]StoredZone, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query(
-		`SELECT id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json
-		 FROM zones WHERE page_id = ? ORDER BY ord`,
-		pageID,
-	)
+	rows, err := s.q.ListZonesForPage(context.Background(), pageID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	var zones []StoredZone
-	for rows.Next() {
-		var z StoredZone
-		var cfgRaw, themeRaw string
-		if err := rows.Scan(&z.ID, &z.PageID, &z.Ord, &z.WidthPx, &z.Plugin,
-			&z.RefreshMs, &z.Align, &cfgRaw, &themeRaw); err != nil {
-			return nil, err
+	zones := make([]StoredZone, 0, len(rows))
+	for _, r := range rows {
+		z := StoredZone{
+			ID:        r.ID,
+			PageID:    r.PageID,
+			Ord:       int(r.Ord),
+			WidthPx:   int(r.WidthPx),
+			Plugin:    r.Plugin,
+			RefreshMs: int(r.RefreshMs),
+			Align:     r.Align,
+			OnTap:     r.OnTap,
 		}
-		json.Unmarshal([]byte(cfgRaw), &z.ConfigJSON)  //nolint:errcheck
-		json.Unmarshal([]byte(themeRaw), &z.ThemeJSON) //nolint:errcheck
+		json.Unmarshal([]byte(r.ConfigJson), &z.ConfigJSON)  //nolint:errcheck
+		json.Unmarshal([]byte(r.ThemeJson), &z.ThemeJSON)    //nolint:errcheck
+		json.Unmarshal([]byte(r.ChoicesJson), &z.Choices)    //nolint:errcheck
 		zones = append(zones, z)
 	}
-	return zones, rows.Err()
+	return zones, nil
 }
 
 // GetZonePageID returns the page_id for a zone. Returns 0 if not found.
 func (s *DB) GetZonePageID(zoneID string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var pageID int64
-	err := s.db.QueryRow(`SELECT page_id FROM zones WHERE id = ?`, zoneID).Scan(&pageID)
-	return pageID, err
+
+	return s.q.GetZonePageID(context.Background(), zoneID)
 }
 
-// GetZonePluginConfig returns the plugin config for a single zone from
-// zones.config_json. Returns nil if the zone has no stored config.
+// GetZonePluginConfig returns the plugin config for a single zone.
+// Returns nil if the zone has no stored config.
 func (s *DB) GetZonePluginConfig(zoneID string) (map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var cfgRaw string
-	err := s.db.QueryRow(`SELECT config_json FROM zones WHERE id = ?`, zoneID).Scan(&cfgRaw)
+	raw, err := s.q.GetZoneConfigJSON(context.Background(), zoneID)
 	if err != nil {
 		return nil, err
 	}
-	if cfgRaw == "" || cfgRaw == "{}" || cfgRaw == "null" {
+	if raw == "" || raw == "{}" || raw == "null" {
 		return nil, nil
 	}
 	var m map[string]any
-	if err := json.Unmarshal([]byte(cfgRaw), &m); err != nil {
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -171,14 +172,10 @@ func (s *DB) SetZonePluginConfig(zoneID string, cfg map[string]any) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.db.Exec(`UPDATE zones SET config_json = ? WHERE id = ?`, string(raw), zoneID)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("zone %q not found", zoneID)
-	}
-	return nil
+	return s.q.UpdateZoneConfigJSON(context.Background(), dbgen.UpdateZoneConfigJSONParams{
+		ID:         zoneID,
+		ConfigJson: string(raw),
+	})
 }
 
 // CreateZone inserts a new zone.
@@ -188,14 +185,21 @@ func (s *DB) CreateZone(z StoredZone) error {
 
 	cfgRaw, _ := json.Marshal(z.ConfigJSON)
 	themeRaw, _ := json.Marshal(z.ThemeJSON)
+	choicesRaw, _ := json.Marshal(z.Choices)
 
-	_, err := s.db.Exec(
-		`INSERT INTO zones(id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		z.ID, z.PageID, z.Ord, z.WidthPx, z.Plugin, z.RefreshMs, z.Align,
-		string(cfgRaw), string(themeRaw),
-	)
-	return err
+	return s.q.InsertZone(context.Background(), dbgen.InsertZoneParams{
+		ID:          z.ID,
+		PageID:      z.PageID,
+		Ord:         int64(z.Ord),
+		WidthPx:     int64(z.WidthPx),
+		Plugin:      z.Plugin,
+		RefreshMs:   int64(z.RefreshMs),
+		Align:       z.Align,
+		OnTap:       z.OnTap,
+		ChoicesJson: string(choicesRaw),
+		ConfigJson:  string(cfgRaw),
+		ThemeJson:   string(themeRaw),
+	})
 }
 
 // UpdateZone updates a zone's mutable fields.
@@ -205,19 +209,25 @@ func (s *DB) UpdateZone(z StoredZone) error {
 
 	cfgRaw, _ := json.Marshal(z.ConfigJSON)
 	themeRaw, _ := json.Marshal(z.ThemeJSON)
+	choicesRaw, _ := json.Marshal(z.Choices)
 
-	res, err := s.db.Exec(
-		`UPDATE zones
-		 SET page_id=?, ord=?, width_px=?, plugin=?, refresh_ms=?, align=?,
-		     config_json=?, theme_json=?
-		 WHERE id=?`,
-		z.PageID, z.Ord, z.WidthPx, z.Plugin, z.RefreshMs, z.Align,
-		string(cfgRaw), string(themeRaw), z.ID,
-	)
+	result, err := s.q.UpdateZone(context.Background(), dbgen.UpdateZoneParams{
+		ID:          z.ID,
+		PageID:      z.PageID,
+		Ord:         int64(z.Ord),
+		WidthPx:     int64(z.WidthPx),
+		Plugin:      z.Plugin,
+		RefreshMs:   int64(z.RefreshMs),
+		Align:       z.Align,
+		OnTap:       z.OnTap,
+		ChoicesJson: string(choicesRaw),
+		ConfigJson:  string(cfgRaw),
+		ThemeJson:   string(themeRaw),
+	})
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if n, _ := result.RowsAffected(); n == 0 {
 		return fmt.Errorf("zone %q not found", z.ID)
 	}
 	return nil
@@ -228,8 +238,7 @@ func (s *DB) DeleteZone(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`DELETE FROM zones WHERE id = ?`, id)
-	return err
+	return s.q.DeleteZone(context.Background(), id)
 }
 
 // ReorderZones sets ord for each zone ID within a page.
@@ -243,10 +252,13 @@ func (s *DB) ReorderZones(pageID int64, order []string) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	qtx := s.q.WithTx(tx)
 	for i, id := range order {
-		if _, err := tx.Exec(
-			`UPDATE zones SET ord = ? WHERE id = ? AND page_id = ?`, i, id, pageID,
-		); err != nil {
+		if err := qtx.UpdateZoneOrd(context.Background(), dbgen.UpdateZoneOrdParams{
+			Ord:    int64(i),
+			ID:     id,
+			PageID: pageID,
+		}); err != nil {
 			return err
 		}
 	}
@@ -258,8 +270,7 @@ func (s *DB) HasLayout() (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM pages`).Scan(&count)
+	count, err := s.q.CountPages(context.Background())
 	return count > 0, err
 }
 
@@ -269,7 +280,6 @@ func (s *DB) GetFullLayout() ([]StoredPage, map[int64][]StoredZone, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
 	zoneMap := make(map[int64][]StoredZone, len(pages))
 	for _, p := range pages {
 		zones, err := s.GetZonesForPage(p.ID)
@@ -293,32 +303,82 @@ func (s *DB) ImportLayout(pages []StoredPage, zonesByPage map[int64][]StoredZone
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if _, err := tx.Exec(`DELETE FROM pages`); err != nil {
+	qtx := s.q.WithTx(tx)
+	if err := qtx.DeleteAllPages(context.Background()); err != nil {
 		return err
 	}
-
 	for _, p := range pages {
-		if _, err := tx.Exec(
-			`INSERT INTO pages(id, name, ord) VALUES(?, ?, ?)`,
-			p.ID, p.Name, p.Ord,
-		); err != nil {
+		if err := qtx.InsertPageWithID(context.Background(), dbgen.InsertPageWithIDParams{
+			ID:   p.ID,
+			Name: p.Name,
+			Ord:  int64(p.Ord),
+		}); err != nil {
 			return err
 		}
 		for _, z := range zonesByPage[p.ID] {
 			cfgRaw, _ := json.Marshal(z.ConfigJSON)
 			themeRaw, _ := json.Marshal(z.ThemeJSON)
-			if _, err := tx.Exec(
-				`INSERT INTO zones(id, page_id, ord, width_px, plugin, refresh_ms, align, config_json, theme_json)
-				 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				z.ID, z.PageID, z.Ord, z.WidthPx, z.Plugin, z.RefreshMs, z.Align,
-				string(cfgRaw), string(themeRaw),
-			); err != nil {
+			choicesRaw, _ := json.Marshal(z.Choices)
+			if err := qtx.InsertZone(context.Background(), dbgen.InsertZoneParams{
+				ID:          z.ID,
+				PageID:      z.PageID,
+				Ord:         int64(z.Ord),
+				WidthPx:     int64(z.WidthPx),
+				Plugin:      z.Plugin,
+				RefreshMs:   int64(z.RefreshMs),
+				Align:       z.Align,
+				OnTap:       z.OnTap,
+				ChoicesJson: string(choicesRaw),
+				ConfigJson:  string(cfgRaw),
+				ThemeJson:   string(themeRaw),
+			}); err != nil {
 				return err
 			}
 		}
 	}
-
 	return tx.Commit()
+}
+
+// SetZonePlugin updates the plugin field for a single zone.
+// Used by CycleZonePlugin to persist user-initiated plugin changes.
+func (s *DB) SetZonePlugin(zoneID, pluginID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.q.UpdateZonePlugin(context.Background(), dbgen.UpdateZonePluginParams{
+		ID:     zoneID,
+		Plugin: pluginID,
+	})
+}
+
+// ── Payload cache ─────────────────────────────────────────────────────────────
+
+// SavePayloadCache persists a serialised DetailPayload for a zone.
+// fetchedAt is the Unix timestamp of when the payload was fetched.
+func (s *DB) SavePayloadCache(zoneID, pluginID string, payload []byte, fetchedAt int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.q.UpsertPayloadCache(context.Background(), dbgen.UpsertPayloadCacheParams{
+		ZoneID:    zoneID,
+		PluginID:  pluginID,
+		Payload:   string(payload),
+		FetchedAt: fetchedAt,
+	})
+}
+
+// LoadPayloadCache returns the cached payload bytes and fetch timestamp for a
+// zone, or (nil, 0, nil) if no cache entry exists.
+func (s *DB) LoadPayloadCache(zoneID string) (payload []byte, fetchedAt int64, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	row, err := s.q.GetPayloadCache(context.Background(), zoneID)
+	if err != nil {
+		// sql.ErrNoRows means no cache — not an error the caller needs to handle.
+		return nil, 0, nil
+	}
+	return []byte(row.Payload), row.FetchedAt, nil
 }
 
 // ValidateZoneWidths checks that zones for a page sum to exactly 640px.

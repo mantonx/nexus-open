@@ -97,6 +97,22 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	theme := m.config.Theme
 	m.configMu.RUnlock()
 
+	// Detail overlay takes priority — either animating in/out or fully shown.
+	m.detailMu.Lock()
+	if m.detailTransition.Active && !m.detailTransition.IsComplete() {
+		frame := m.detailTransition.Render()
+		m.detailMu.Unlock()
+		m.logger.Debug("rendering detail transition")
+		return frame, nil
+	}
+	if m.detailActive {
+		frame := m.detailFrame
+		m.detailMu.Unlock()
+		m.logger.Debug("rendering detail overlay")
+		return frame, nil
+	}
+	m.detailMu.Unlock()
+
 	m.transitionMu.RLock()
 	if m.transition.Active && !m.transition.IsComplete() {
 		frame := m.transition.Render()

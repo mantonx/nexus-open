@@ -14,4 +14,5 @@ type Event struct {
 	SwipePixels   int           // Signed pixel delta from gesture start (left is negative)
 	Timestamp     time.Time     // When this event was captured
 	TapX          int           // Display pixel X position of tap (0–639); only valid for Button==0 taps
+	SlideX        int           // Net horizontal movement during the press (px, signed); non-zero means finger slid on lift
 }

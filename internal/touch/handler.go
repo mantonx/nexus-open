@@ -4,7 +4,9 @@ package touch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/mantonx/nexus-open/internal/zone"
@@ -23,6 +25,13 @@ var (
 	ErrDeviceDisconnected = errors.New("device disconnected")
 )
 
+// tapMaxMovePixels is the maximum finger drift (px) for a zone-targeting tap.
+// Set to 100px (~15% of screen) to accommodate natural left-drift on lift.
+// The swipe classifier catches anything that actually commits a page change,
+// so raising this threshold does not risk accidental zone fires during swipes.
+const tapMaxMovePixels = 100
+
+
 // Handler processes touch events and dispatches them to zone-aware actions.
 type Handler struct {
 	logger      *slog.Logger
@@ -30,7 +39,8 @@ type Handler struct {
 	zoneManager *zone.Manager
 
 	// Gesture state
-	lastTouch time.Time
+	lastTouch       time.Time
+	detailInFlight  atomic.Bool // true while a handleDetailTap goroutine is running
 
 	// Configuration
 	swipeEnabled bool
@@ -158,15 +168,49 @@ func (h *Handler) handleEvent(event Event) {
 
 // handleTap routes a tap to the zone at event.TapX and executes its OnTap action.
 func (h *Handler) handleTap(event Event) {
+	showingDetail := h.zoneManager.IsShowingDetail()
+	inFlight := h.detailInFlight.Load()
+	h.logger.Info("TAP_DIAG: handleTap entry",
+		"x", event.TapX,
+		"slide_dx", event.SlideX,
+		"showing_detail", showingDetail,
+		"detail_in_flight", inFlight)
+
+	// Any non-swipe release dismisses the detail overlay — the whole screen is
+	// the dismiss target, so we don't require a stationary finger.
+	if showingDetail {
+		h.logger.Info("tap dismissed detail overlay", "dx", event.SlideX)
+		h.zoneManager.ClearDetail()
+		return
+	}
+
+	// For zone targeting, require a stationary-enough touch (SlideX within tap
+	// threshold) so sliding touches don't accidentally activate zones.
+	if abs(event.SlideX) > tapMaxMovePixels {
+		h.logger.Info("TAP_DIAG: sliding tap ignored for zone targeting", "dx", event.SlideX)
+		return
+	}
+
 	tapX := event.TapX
 
 	cfg := h.zoneManager.GetConfig()
 	pageIdx := h.zoneManager.GetCurrentPage()
 	if pageIdx >= len(cfg.Pages) {
+		h.logger.Warn("TAP_DIAG: page index out of range", "page_idx", pageIdx, "pages", len(cfg.Pages))
 		return
 	}
 	page := cfg.Pages[pageIdx]
 	page.ComputeOffsets()
+
+	h.logger.Info("TAP_DIAG: zone layout",
+		"page", page.Name,
+		"zones", func() []string {
+			out := make([]string, len(page.Zones))
+			for i, z := range page.Zones {
+				out[i] = fmt.Sprintf("%s[x=%d w=%d]", z.ID, z.X, z.Width)
+			}
+			return out
+		}())
 
 	// Find which zone contains tapX.
 	for _, z := range page.Zones {
@@ -176,16 +220,32 @@ func (h *Handler) handleTap(event Event) {
 			return
 		}
 	}
-	h.logger.Debug("tap outside all zones", "x", tapX)
+	h.logger.Info("TAP_DIAG: tap outside all zones", "x", tapX)
 }
 
 // executeTapAction runs the configured OnTap action for a zone.
 func (h *Handler) executeTapAction(z zone.ZoneConfig) {
 	switch z.OnTap {
 	case zone.TapActionCycle:
-		// Cycle the zone to its next plugin choice.
 		if err := h.zoneManager.CycleZonePlugin(z.ID); err != nil {
 			h.logger.Warn("cycle zone plugin failed", "zone", z.ID, "error", err)
+		}
+	case zone.TapActionDetail:
+		if h.detailInFlight.CompareAndSwap(false, true) {
+			go func() {
+				defer h.detailInFlight.Store(false)
+				h.logger.Info("TAP_DIAG: calling HandleZoneTap", "zone", z.ID)
+				start := time.Now()
+				if err := h.zoneManager.HandleZoneTap(z.ID); err != nil {
+					h.logger.Warn("TAP_DIAG: HandleZoneTap error",
+						"zone", z.ID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
+				} else {
+					h.logger.Info("TAP_DIAG: HandleZoneTap complete",
+						"zone", z.ID, "duration_ms", time.Since(start).Milliseconds())
+				}
+			}()
+		} else {
+			h.logger.Info("TAP_DIAG: detail tap dropped — OnTap already in flight", "zone", z.ID)
 		}
 	case zone.TapActionNone, "":
 		// No action configured — silently ignore.

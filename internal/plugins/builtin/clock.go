@@ -281,10 +281,10 @@ func drawHand(dc *gg.Context, cx, cy, angle, length, width float64, col color.RG
 
 // Configure applies zone-level plugin configuration.
 func (m *ClockPlugin) Configure(cfg map[string]any) error {
-	if v, ok := cfg["_zone_width"].(int); ok {
+	if v, ok := cfg[plugin.ConfigKeyZoneWidth].(int); ok {
 		m.zoneW = v
 	}
-	if v, ok := cfg["_zone_height"].(int); ok {
+	if v, ok := cfg[plugin.ConfigKeyZoneHeight].(int); ok {
 		m.zoneH = v
 	}
 	if v, ok := cfg["clock_face"].(string); ok {

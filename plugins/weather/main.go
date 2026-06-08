@@ -18,11 +18,14 @@ import (
 
 const (
 	openMeteoBaseURL   = "https://api.open-meteo.com/v1/forecast?temperature_unit=%s&wind_speed_unit=%s&latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code,wind_speed_10m,is_day"
+	openMeteoDailyURL  = "https://api.open-meteo.com/v1/forecast?temperature_unit=%s&latitude=%.4f&longitude=%.4f&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=7"
 	nominatimSearchURL = "https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1"
 	defaultLat         = 40.7282  // Jersey City, NJ
 	defaultLon         = -74.0776 // Jersey City, NJ
-	cacheTimeout       = 5 * time.Minute
 )
+
+// sampleCacheTTL is how long Sample results are cached in-memory.
+const sampleCacheTTL = 5 * time.Minute
 
 // WeatherPlugin monitors weather conditions
 type WeatherPlugin struct {
@@ -89,7 +92,7 @@ func (m *WeatherPlugin) Describe() (plugin.Descriptor, error) {
 func (m *WeatherPlugin) Sample() (plugin.Payload, error) {
 	// Check cache
 	m.mu.RLock()
-	if m.cachedData != nil && time.Since(m.lastUpdate) < cacheTimeout {
+	if m.cachedData != nil && time.Since(m.lastUpdate) < sampleCacheTTL {
 		data := m.cachedData
 		m.mu.RUnlock()
 		return m.formatPayload(data), nil
@@ -397,6 +400,91 @@ func weatherCodeToCondition(code int) string {
 		return cond
 	}
 	return "Unknown"
+}
+
+// OnTap returns a 7-day daily forecast as a DetailPayload.
+// Caching is handled by Manager at the DB layer; this is a pure network fetch.
+// Implements plugin.Tapper.
+func (m *WeatherPlugin) OnTap() (plugin.DetailPayload, error) {
+	m.mu.RLock()
+	location := m.location
+	unit := m.unit
+	m.mu.RUnlock()
+
+	lat, lon, err := m.getCityCoordinates(location)
+	if err != nil {
+		lat, lon = defaultLat, defaultLon
+	}
+
+	tempUnit := "celsius"
+	if unit == "imperial" {
+		tempUnit = "fahrenheit"
+	}
+
+	dailyURL := fmt.Sprintf(openMeteoDailyURL, tempUnit, lat, lon)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(dailyURL)
+	if err != nil {
+		return plugin.DetailPayload{}, fmt.Errorf("fetch daily forecast: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		Daily struct {
+			Time           []string  `json:"time"`
+			WeatherCode    []int     `json:"weather_code"`
+			TemperatureMax []float64 `json:"temperature_2m_max"`
+			TemperatureMin []float64 `json:"temperature_2m_min"`
+		} `json:"daily"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return plugin.DetailPayload{}, fmt.Errorf("decode daily forecast: %w", err)
+	}
+
+	days := result.Daily
+	n := len(days.Time)
+	forecast := make([]plugin.DailyForecast, 0, n)
+	for i := range n {
+		label := days.Time[i]
+		if t, err := time.Parse("2006-01-02", days.Time[i]); err == nil {
+			if i == 0 {
+				label = "Today"
+			} else {
+				label = t.Format("Mon")
+			}
+		}
+
+		var code int
+		if i < len(days.WeatherCode) {
+			code = days.WeatherCode[i]
+		}
+		var hi, lo float64
+		if i < len(days.TemperatureMax) {
+			hi = days.TemperatureMax[i]
+		}
+		if i < len(days.TemperatureMin) {
+			lo = days.TemperatureMin[i]
+		}
+
+		forecast = append(forecast, plugin.DailyForecast{
+			Date:        label,
+			Icon:        weatherCodeToIcon(code, true),
+			TempHigh:    hi,
+			TempLow:     lo,
+			Description: weatherCodeToCondition(code),
+			Unit:        unit,
+		})
+	}
+
+	title := location
+	if i := strings.Index(title, ","); i > 0 {
+		title = strings.TrimSpace(title[:i])
+	}
+
+	return plugin.DetailPayload{
+		Title:    title + " — 7-Day Forecast",
+		Forecast: forecast,
+	}, nil
 }
 
 func main() {

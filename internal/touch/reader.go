@@ -232,6 +232,10 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 
 	if rawX > t.maxRawSeen {
 		t.maxRawSeen = rawX
+		if rawX > t.rawMax {
+			t.logger.Info("touch: rawMax auto-calibrated", "old", t.rawMax, "new", rawX)
+			t.rawMax = rawX
+		}
 	}
 
 	now := time.Now()
@@ -252,17 +256,17 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	xi := int(math.Round(xs))
 
 	// Gesture detection thresholds
-	const (
-		tapMaxMoveFrac = 0.05 // 5% of screen width for tap
-		tapMaxDur      = 1 * time.Second
-	)
+	const tapMaxDur = 1 * time.Second
 
-	// Adaptive swipe threshold based on velocity (snappier at higher speeds)
+	// Adaptive swipe threshold based on velocity (snappier at higher speeds).
 	speed := math.Abs(t.euro.prevDx)                      // pixels/sec after normalization
 	swipeStartFrac := 0.09 - math.Min(0.04, speed/1200.0) // base range: [0.05..0.09]
 	if swipeStartFrac < 0.07 {
 		swipeStartFrac = 0.07 // keep short taps from triggering swipes
 	}
+
+	// Tap threshold matches swipe threshold exactly — no dead zone between them.
+	tapMaxMoveFrac := swipeStartFrac
 
 	events := []Event{}
 
@@ -335,18 +339,28 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 				"velocity_px_s", int(velocity),
 				"max_raw_x_seen", t.maxRawSeen,
 				"configured_raw_max", t.rawMax)
-		} else if abs(dx) < t.px(tapMaxMoveFrac) && dur <= tapMaxDur {
-			// Tap — xi is the smoothed display-pixel X position (0–screenWidth-1).
+		} else if dur <= tapMaxDur {
+			// Any non-swipe release within tap duration is emitted as a tap.
+			// The handler uses IsShowingDetail to decide whether to dismiss or
+			// require the tighter dx<threshold for zone targeting — keeping that
+			// policy decision out of the gesture classifier.
 			events = append(events, Event{
 				Button:    0,
 				Pressed:   false,
 				Duration:  dur,
 				Timestamp: now,
 				TapX:      xi,
+				SlideX:    dx,
 			})
-			t.logger.Info("tap detected", "x", xi, "duration_ms", dur.Milliseconds())
+			if abs(dx) < t.px(tapMaxMoveFrac) {
+				t.logger.Info("tap detected", "x", xi, "duration_ms", dur.Milliseconds())
+			} else {
+				t.logger.Info("TAP_DIAG: sliding tap emitted", "x", xi, "dx", dx, "duration_ms", dur.Milliseconds())
+			}
 		} else {
-			t.logger.Debug("gesture canceled", "dx", dx, "duration_ms", dur.Milliseconds())
+			t.logger.Info("TAP_DIAG: gesture canceled (long press, not swipe)",
+				"dx", dx,
+				"duration_ms", dur.Milliseconds())
 		}
 		t.swipeActive = false
 		return events, nil

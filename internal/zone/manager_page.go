@@ -120,7 +120,7 @@ func (m *Manager) GetPageInfos() []PageInfo {
 	for i, p := range m.config.Pages {
 		zones := make([]ZoneInfo, len(p.Zones))
 		for j, z := range p.Zones {
-			zones[j] = ZoneInfo{ID: z.ID, Width: z.Width}
+			zones[j] = ZoneInfo{ID: z.ID, Width: z.Width, OnTap: string(z.OnTap)}
 		}
 		pages[i] = PageInfo{Name: p.Name, Zones: zones}
 	}
@@ -171,6 +171,12 @@ func (m *Manager) CycleZonePlugin(zoneID string) error {
 
 	found.Plugin = found.Choices[idx]
 	m.logger.Info("cycling zone plugin", "zone", zoneID, "plugin", found.Plugin, "choice", idx)
+
+	if m.db != nil {
+		if err := m.db.SetZonePlugin(zoneID, found.Plugin); err != nil {
+			m.logger.Warn("failed to persist zone cycle", "zone", zoneID, "error", err)
+		}
+	}
 
 	if m.onZoneCycle != nil {
 		return m.onZoneCycle(*found)

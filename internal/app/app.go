@@ -311,8 +311,12 @@ func (a *App) initialize() error {
 	// Register zone sampler as plugin catalog provider so /api/plugins works.
 	a.apiServer.SetPluginCatalog(a.zoneSampler)
 
-	// Wire zone manager for swipe simulation, navigation, and layout editing.
+	// Wire zone manager for swipe simulation, tap simulation, navigation, and layout editing.
 	a.apiServer.SetSwipeSimulator(a.zoneManager)
+	a.apiServer.SetZoneTapper(a.zoneManager)
+	a.zoneManager.SetDetailStateCallback(func(active bool) {
+		a.apiServer.BroadcastDetailState(active, zone.DetailCloseX, zone.DetailCloseY)
+	})
 	a.apiServer.SetNavigator(a.zoneManager)
 	a.apiServer.SetLayoutStore(a.store)
 	a.apiServer.SetLayoutReloader(a.zoneManager)
@@ -350,7 +354,8 @@ func (a *App) initialize() error {
 		}
 	}()
 
-	// 7. Create touch handler
+	// 7. Create touch handler and wire detail tap support.
+	a.zoneManager.SetPluginLookup(a.zoneSampler)
 	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
 	a.logger.Info("touch handler created")
 
