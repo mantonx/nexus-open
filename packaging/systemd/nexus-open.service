@@ -10,8 +10,33 @@ ExecStart=/usr/bin/nexus-open --tray
 Restart=on-failure
 RestartSec=3s
 
+# ── Privilege & execution hardening ──────────────────────────────────────────
 NoNewPrivileges=true
+LockPersonality=true
+RestrictSUIDSGID=true
 PrivateTmp=true
+
+# ── Filesystem hardening ──────────────────────────────────────────────────────
+# Make the system tree read-only; grant write access only to the data directory.
+ProtectSystem=strict
+ReadWritePaths=%h/.config/nexus-open %h/.local/share/nexus-open
+
+# ── Kernel & namespace hardening ─────────────────────────────────────────────
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+
+# ── Device access ─────────────────────────────────────────────────────────────
+# The daemon needs /dev/bus/usb; deny everything else.
+# PrivateDevices=true would block USB, so use DevicePolicy + DeviceAllow instead.
+DevicePolicy=closed
+DeviceAllow=char-usb_device rwm
+
+# ── Network & syscall restrictions ───────────────────────────────────────────
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=graphical-session.target

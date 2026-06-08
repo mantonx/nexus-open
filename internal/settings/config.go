@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/mantonx/nexus-open/internal/store"
@@ -235,6 +237,24 @@ func (c *Config) Validate() error {
 	}
 	if !isValidHexColor(c.BackgroundColor) {
 		return fmt.Errorf("%w: background_color=%s", ErrInvalidColor, c.BackgroundColor)
+	}
+	if err := isBareFilename(c.BackgroundImage); c.BackgroundImage != "" && err != nil {
+		return fmt.Errorf("invalid background_image: %w", err)
+	}
+	for _, p := range c.ImagePaths {
+		if err := isBareFilename(p); err != nil {
+			return fmt.Errorf("invalid image path %q: %w", p, err)
+		}
+	}
+	return nil
+}
+
+// isBareFilename rejects anything that is not a plain filename: no slashes,
+// no null bytes, no path separators. This confines file fields to their
+// expected directory and prevents directory traversal.
+func isBareFilename(name string) error {
+	if name != filepath.Base(name) || strings.ContainsAny(name, "/\\\x00") {
+		return fmt.Errorf("must be a plain filename with no path separators")
 	}
 	return nil
 }

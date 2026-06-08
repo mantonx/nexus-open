@@ -59,6 +59,13 @@ func (s *Server) localOnlyMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
+		// Limit request body size for all non-multipart, non-websocket requests.
+		// Multipart uploads set their own limit via ParseMultipartForm.
+		ct := r.Header.Get("Content-Type")
+		if r.URL.Path != "/api/ws" && !strings.HasPrefix(ct, "multipart/") {
+			r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // 2 MiB
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }

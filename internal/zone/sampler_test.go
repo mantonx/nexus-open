@@ -199,3 +199,36 @@ func TestSampler_CrashRestart_StatusBecomesError(t *testing.T) {
 		}
 	}
 }
+
+func TestResolvePluginPath(t *testing.T) {
+	pluginsDir := "/srv/plugins"
+	s := &Sampler{pluginsDir: pluginsDir}
+
+	cases := []struct {
+		spec    string
+		want    string
+		wantErr bool
+	}{
+		{"exec:cpu-temp", "/srv/plugins/cpu-temp/cpu-temp", false},
+		{"exec:./plugins/cpu-temp/cpu-temp", "/srv/plugins/cpu-temp/cpu-temp", false},
+		{"exec:weather/weather", "/srv/plugins/weather/weather", false},
+		{"exec:/usr/bin/sh", "", true},
+		{"exec:../../etc/passwd", "", true},
+		{"exec:./plugins/../../../etc/passwd", "", true},
+	}
+
+	for _, tc := range cases {
+		got, err := s.resolvePluginPath(tc.spec)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("resolvePluginPath(%q): expected error, got path %q", tc.spec, got)
+			}
+		} else {
+			if err != nil {
+				t.Errorf("resolvePluginPath(%q): unexpected error: %v", tc.spec, err)
+			} else if got != tc.want {
+				t.Errorf("resolvePluginPath(%q): got %q, want %q", tc.spec, got, tc.want)
+			}
+		}
+	}
+}

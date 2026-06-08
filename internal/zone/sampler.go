@@ -94,25 +94,40 @@ func NormalizePluginID(id string) string {
 	return "exec:" + name
 }
 
-// resolvePluginPath converts an exec: spec into an absolute binary path.
-// Handles all three forms:
+// resolvePluginPath converts an exec: spec into an absolute binary path and
+// confirms it stays inside pluginsDir. Returns ("", error) if the spec is
+// absolute, contains directory traversal, or escapes the plugins directory.
 //
-//	exec:cpu-temp                       → <pluginsDir>/cpu-temp/cpu-temp
-//	exec:./plugins/cpu-temp/cpu-temp    → <pluginsDir>/cpu-temp/cpu-temp
-//	exec:/absolute/path/to/binary       → /absolute/path/to/binary
-func (s *Sampler) resolvePluginPath(spec string) string {
+// Accepted forms:
+//
+//	exec:cpu-temp                    → <pluginsDir>/cpu-temp/cpu-temp
+//	exec:./plugins/cpu-temp/cpu-temp → <pluginsDir>/cpu-temp/cpu-temp
+func (s *Sampler) resolvePluginPath(spec string) (string, error) {
 	rel := strings.TrimPrefix(spec, "exec:")
+
+	// Absolute paths are never allowed — they bypass the plugins directory entirely.
 	if filepath.IsAbs(rel) {
-		return rel
+		return "", fmt.Errorf("plugin spec must not be an absolute path: %q", spec)
 	}
+
 	// Strip the conventional ./plugins/ prefix if present.
 	rel = strings.TrimPrefix(rel, "./plugins/")
+
 	// rel is now either "cpu-temp/cpu-temp" or just "cpu-temp".
-	// If it contains no separator, it is the short form: expand to name/name.
+	// If it contains no separator, expand to the canonical name/name form.
 	if !strings.Contains(rel, "/") {
 		rel = rel + "/" + rel
 	}
-	return filepath.Join(s.pluginsDir, rel)
+
+	resolved := filepath.Join(s.pluginsDir, rel)
+
+	// Confirm the resolved path is inside pluginsDir (catches .. traversal).
+	relCheck, err := filepath.Rel(s.pluginsDir, resolved)
+	if err != nil || strings.HasPrefix(relCheck, "..") {
+		return "", fmt.Errorf("plugin path %q escapes plugins directory", spec)
+	}
+
+	return resolved, nil
 }
 
 // Start begins sampling all modules configured in the zone manager
@@ -164,7 +179,11 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 		s.logger.Info("using built-in plugin", "zone_id", zoneConfig.ID, "plugin", modName)
 	} else if strings.HasPrefix(pluginSpec, "exec:") {
 		// External plugin
-		modPath := s.resolvePluginPath(pluginSpec)
+		var modPath string
+		modPath, err = s.resolvePluginPath(pluginSpec)
+		if err != nil {
+			return fmt.Errorf("failed to launch plugin: %w", err)
+		}
 		mod, err = s.pluginHost.LaunchPlugin(s.ctx, zoneConfig.ID, modPath)
 		if err != nil {
 			return fmt.Errorf("failed to launch plugin: %w", err)
@@ -284,7 +303,12 @@ func (s *Sampler) handlePluginCrash(ctx context.Context, zoneID string, backoff 
 	spec := s.pluginSpec[zoneID]
 	s.mu.RUnlock()
 
-	modPath := s.resolvePluginPath(spec)
+	modPath, err := s.resolvePluginPath(spec)
+	if err != nil {
+		s.logger.Error("plugin restart failed", "zone_id", zoneID, "error", err)
+		s.markZoneLaunchFailed(zoneID, err)
+		return nil
+	}
 	mod, err := s.pluginHost.LaunchPlugin(ctx, zoneID, modPath)
 	if err != nil {
 		s.logger.Error("plugin restart failed", "zone_id", zoneID, "error", err)

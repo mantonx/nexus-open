@@ -189,8 +189,8 @@ func (s *Server) handleServeImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Path is /api/images/<filename>
-	filename := r.PathValue("filename")
-	if filename == "" {
+	filename := filepath.Base(r.PathValue("filename"))
+	if filename == "" || filename == "." {
 		s.respondError(w, "Filename required", http.StatusBadRequest)
 		return
 	}
@@ -211,8 +211,8 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := r.FormValue("filename")
-	if filename == "" {
+	filename := filepath.Base(r.FormValue("filename"))
+	if filename == "" || filename == "." {
 		s.respondError(w, "Missing filename parameter", http.StatusBadRequest)
 		return
 	}

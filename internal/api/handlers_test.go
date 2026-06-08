@@ -202,3 +202,45 @@ func TestLoggingMiddleware(t *testing.T) {
 		t.Errorf("body = %q, want test", w.Body.String())
 	}
 }
+
+func TestServeImage_TraversalRejected(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := newTestConfig(t)
+	server := NewServer(":0", cfg, device.NewMockDevice(), logger)
+
+	for _, filename := range []string{"../etc/passwd", "../../secret", "sub/dir/file.png"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/images/"+filename, nil)
+		req.SetPathValue("filename", filename)
+		w := httptest.NewRecorder()
+		server.handleServeImage(w, req)
+		// filepath.Base strips all path components, so the handler will look for a
+		// bare filename in the images dir — it won't find it and returns 404, not
+		// the traversal target.
+		if w.Code == http.StatusOK {
+			t.Errorf("traversal %q: expected non-200, got 200", filename)
+		}
+	}
+}
+
+func TestBodySizeLimit(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	cfg := newTestConfig(t)
+	server := NewServer(":0", cfg, device.NewMockDevice(), logger)
+	token := server.Token()
+
+	// Route through the full middleware chain to handleUpdateConfig, which
+	// decodes the body. A body over 2 MiB should cause a decode error → 400.
+	handler := server.middleware(http.HandlerFunc(server.handleUpdateConfig))
+
+	bigBody := bytes.Repeat([]byte("x"), 3<<20)
+	req := httptest.NewRequest(http.MethodPost, "/api/config", bytes.NewReader(bigBody))
+	req.Host = "localhost:1985"
+	req.Header.Set("X-Nexus-Token", token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code == http.StatusOK {
+		t.Errorf("oversized body: expected non-200, got 200")
+	}
+}
