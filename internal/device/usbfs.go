@@ -98,7 +98,7 @@ func usbOpen(vid, pid uint16) (*usbHandle, string, string, error) {
 	iface := uint32(0)
 	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd),
 		ioctlClaimInterface, uintptr(unsafe.Pointer(&iface))); errno != 0 {
-		unix.Close(fd)
+		_ = unix.Close(fd)
 		return nil, "", "", classifyOpenError(fmt.Errorf("claim interface 0: %w", errno))
 	}
 
@@ -124,7 +124,7 @@ func (h *usbHandle) close() {
 	iface := uint32(0)
 	unix.Syscall(unix.SYS_IOCTL, uintptr(h.fd), //nolint:errcheck
 		ioctlReleaseInterface, uintptr(unsafe.Pointer(&iface)))
-	unix.Close(h.fd)
+	_ = unix.Close(h.fd)
 }
 
 // writeFrame sends a 1024-byte packet to EP 0x02 OUT.

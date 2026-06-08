@@ -125,12 +125,3 @@ func (s *Server) handleZoneStatus(w http.ResponseWriter, r *http.Request) {
 		"error":  st.Error,
 	}, http.StatusOK)
 }
-
-// pluginNameToPath converts a short plugin name to a full exec: path.
-// e.g., "cpu-temp" -> "exec:./plugins/cpu-temp/cpu-temp"
-func pluginNameToPath(name string) string {
-	if strings.HasPrefix(name, "exec:") || strings.HasPrefix(name, "builtin:") {
-		return name
-	}
-	return "exec:./plugins/" + name + "/" + name
-}
