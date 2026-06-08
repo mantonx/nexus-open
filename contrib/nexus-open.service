@@ -1,6 +1,6 @@
 [Unit]
 Description=Nexus Open — iCUE Nexus companion daemon
-Documentation=https://github.com/mantonx/nexus-next
+Documentation=https://github.com/mantonx/nexus-open
 After=graphical-session.target
 Wants=graphical-session.target
 

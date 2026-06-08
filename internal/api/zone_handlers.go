@@ -77,7 +77,6 @@ func (s *Server) handleSetZoneConfig(w http.ResponseWriter, r *http.Request, zon
 	s.logger.Info("zone config updated", "zone_id", zoneID)
 	s.respondSuccess(w, "Zone config updated successfully", map[string]any{
 		"zone_id": zoneID,
-		"config":  config,
 	})
 }
 
