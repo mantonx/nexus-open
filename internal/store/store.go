@@ -30,7 +30,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 7
+const currentSchemaVersion = 8
 
 // DB is the application's SQLite store. All methods are safe for concurrent use.
 type DB struct {
@@ -200,6 +200,7 @@ func (s *DB) migrate() error {
 		migrateV5_consolidateConfigAndRenameColumn, // v4 → v5
 		migrateV6_addOnTapAndChoicesJson,           // v5 → v6
 		migrateV7_payloadCache,                     // v6 → v7
+		migrateV8_clearDetailOnTap,                 // v7 → v8
 	}
 
 	for i := current; i < currentSchemaVersion; i++ {
@@ -366,6 +367,14 @@ func migrateV6_addOnTapAndChoicesJson(tx *sql.Tx) error {
 		return fmt.Errorf("migration6: add choices_json: %w", err)
 	}
 	return nil
+}
+
+// migrateV8_clearDetailOnTap clears on_tap='detail' from all zones (v7 → v8).
+// detail tap is now derived from the plugin's Tapper interface at runtime, so
+// storing it in the DB is redundant and causes stale state after re-seeding.
+func migrateV8_clearDetailOnTap(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE zones SET on_tap = '' WHERE on_tap = 'detail'`)
+	return err
 }
 
 // migrateV7_payloadCache adds the payload_cache table for persisting OnTap

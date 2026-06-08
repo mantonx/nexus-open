@@ -18,11 +18,11 @@ Do not let user frustration accelerate you into reactive mode. Frustration is a 
 
 Use `make install` for a full production deploy (Go + Flutter + plugins + service restart).
 
-For iterative development, use hot reload instead — it is much faster. Both processes start automatically when a Claude session opens (via the `SessionStart` hook in `.claude/settings.json` and the project `Procfile`).
+For iterative development, use `make dev` instead — it starts the full hot-reload environment automatically via overmind. The SessionStart hook also starts it when a Claude session opens.
 
 - **Go changes**: air rebuilds the daemon and all plugins on save (~2–4 s) automatically.
-- **Flutter changes**: `r` in the UI process hot-reloads in under a second; `R` hot-restarts.
-- **Attach to a process**: `overmind connect backend` or `overmind connect ui` (detach with `Ctrl-B D`).
+- **Flutter changes**: watchexec detects `.dart` saves and sends `SIGUSR1` to flutter run — hot reload happens in under a second with no manual input. Only new imports require a hot-restart (`kill -USR2 $(cat /tmp/nexus-flutter.pid)`).
+- **Attach to a process**: `overmind connect backend`, `overmind connect ui`, or `overmind connect ui-reload` (detach with `Ctrl-B D`).
 - **Stop dev servers**: `overmind quit` when done for the day.
 
 Only fall back to `make install` when changing the layout YAML, adding a new plugin for the first time, or making changes that affect the installed binary path.

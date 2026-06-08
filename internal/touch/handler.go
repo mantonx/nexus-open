@@ -223,9 +223,10 @@ func (h *Handler) handleTap(event Event) {
 	h.logger.Info("TAP_DIAG: tap outside all zones", "x", tapX)
 }
 
-// executeTapAction runs the configured OnTap action for a zone.
+// executeTapAction runs the tap action for a zone, using the plugin's Tapper
+// implementation as the authority when on_tap is not explicitly configured.
 func (h *Handler) executeTapAction(z zone.ZoneConfig) {
-	switch z.OnTap {
+	switch h.zoneManager.EffectiveTapAction(z) {
 	case zone.TapActionCycle:
 		if err := h.zoneManager.CycleZonePlugin(z.ID); err != nil {
 			h.logger.Warn("cycle zone plugin failed", "zone", z.ID, "error", err)

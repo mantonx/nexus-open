@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help setup doctor build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui deb appimage rpm generate-api models all changelog
+.PHONY: help setup doctor build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui dev-ui-reload deb appimage rpm generate-api models all changelog
 
 # Configuration
 APP_NAME := nexus-open
@@ -46,8 +46,10 @@ help:
 	@echo "  make build-release - Build optimized release binary (stripped)"
 	@echo "  make run           - Build and run Go backend only"
 	@echo "  make run-tray      - Build and run bundled app with system tray"
-	@echo "  make dev-backend   - Go hot-reload via air (rebuilds daemon+plugins on save)"
-	@echo "  make dev-ui        - Flutter hot-reload (run alongside dev-backend)"
+	@echo "  make dev           - Start full dev environment (backend + UI + auto-reload)"
+	@echo "  make dev-backend   - Go hot-reload only (air)"
+	@echo "  make dev-ui        - Flutter runner only (writes PID for auto-reload)"
+	@echo "  make dev-ui-reload - Dart file watcher only (watchexec → SIGUSR1)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test          - Run all tests"
@@ -153,7 +155,16 @@ setup:
 	else \
 		echo "overmind already installed: $$(overmind --version)"; \
 	fi
-	@echo "✓ Setup complete. Run 'make dev-backend' and 'make dev-ui' to start."
+	@echo "Checking for watchexec (Flutter auto-reload watcher)..."
+	@if ! command -v watchexec > /dev/null; then \
+		echo "watchexec not found. Install it with:"; \
+		echo "  Arch:         sudo pacman -S watchexec"; \
+		echo "  Cargo:        cargo install watchexec-cli"; \
+		echo "  Homebrew:     brew install watchexec"; \
+	else \
+		echo "watchexec already installed: $$(watchexec --version)"; \
+	fi
+	@echo "✓ Setup complete. Run 'make dev-backend', 'make dev-ui', and 'make dev-ui-reload' to start."
 
 # Check runtime health (end-user) and dev toolchain (contributor).
 # Exits 1 if any required check fails, so it can be used in scripts.
@@ -240,6 +251,12 @@ doctor:
 		warn "sqlc not found (only needed to regenerate DB queries) — go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)"; \
 	fi; \
 	\
+	if command -v watchexec > /dev/null; then \
+		ok "watchexec $$(watchexec --version 2>&1)"; \
+	else \
+		warn "watchexec not found (needed for Flutter auto-reload) — sudo pacman -S watchexec"; \
+	fi; \
+	\
 	if command -v golangci-lint > /dev/null; then \
 		ok "golangci-lint $$(golangci-lint --version 2>&1 | head -1)"; \
 	else \
@@ -269,16 +286,33 @@ dev-backend:
 # Flutter hot-reload UI (runs flutter run in debug mode).
 # The backend must already be running (make run or make dev-backend).
 # Token is read from ~/.config/nexus-open/token automatically.
+# Writes its PID to /tmp/nexus-flutter.pid so dev-ui-reload can signal it.
 dev-ui:
 	@if [ ! -f ~/.config/nexus-open/token ]; then \
 		echo "Error: token not found at ~/.config/nexus-open/token — is the backend running?"; \
 		exit 1; \
 	fi
-	@cd ui && flutter run -d linux
+	@cd ui && flutter run -d linux --pid-file /tmp/nexus-flutter.pid
 
-# Alias: run both backend watcher and UI hot-reload in split terminals.
-# Usage: open two terminals and run 'make dev-backend' and 'make dev-ui'.
-dev: dev-backend
+# Watch ui/lib for Dart changes and signal flutter run to hot-reload.
+# SIGUSR1 = hot reload (preserves state), SIGUSR2 = hot restart (full reset).
+# Run alongside dev-ui; watchexec debounces rapid multi-file saves automatically.
+dev-ui-reload:
+	@if ! command -v watchexec > /dev/null; then \
+		echo "Error: 'watchexec' not found."; \
+		echo "  Arch:   sudo pacman -S watchexec"; \
+		echo "  Cargo:  cargo install watchexec-cli"; \
+		exit 1; \
+	fi
+	@echo "Watching ui/lib for Dart changes (SIGUSR1 → hot reload, SIGUSR2 → hot restart)…"
+	@watchexec --watch ui/lib --exts dart --no-process-group \
+		'pid=$$(cat /tmp/nexus-flutter.pid 2>/dev/null); [ -n "$$pid" ] && kill -USR1 $$pid'
+
+# Start the full dev environment: Go hot-reload (air), Flutter UI, and Dart
+# file watcher (watchexec → SIGUSR1). All three run under overmind so logs are
+# multiplexed and any process can be attached to with 'overmind connect <name>'.
+dev:
+	@overmind status 2>/dev/null && overmind echo || { rm -f .overmind.sock && overmind start; }
 
 # Run all tests
 test:

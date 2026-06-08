@@ -30,7 +30,6 @@ pages:
         plugin: exec:./plugins/weather/weather
         refresh_ms: 300000  # 5 minutes
         align: left
-        on_tap: detail
         theme_override:
           accent: "#C87820"
 

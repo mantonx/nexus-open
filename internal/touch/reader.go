@@ -162,6 +162,7 @@ type HIDTouchReader struct {
 	downPrev    bool
 	pressT      time.Time
 	startX      int
+	lastDownX   int // last filtered X seen while finger was down (device zeroes coords on lift)
 	swipeActive bool
 	maxRawSeen  int // tracks highest raw X seen — logged on first swipe to validate rawMax
 }
@@ -230,6 +231,7 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	rawX := int(buffer[6]) | (int(buffer[7]) << 8) // Little-endian
 	down := touchState != 0
 
+
 	if rawX > t.maxRawSeen {
 		t.maxRawSeen = rawX
 		if rawX > t.rawMax {
@@ -274,6 +276,7 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	if down && !t.downPrev {
 		// Touch press
 		t.startX = xi
+		t.lastDownX = xi
 		t.pressT = now
 		t.swipeActive = false
 		t.downPrev = true
@@ -284,7 +287,8 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	}
 
 	if down && t.downPrev {
-		// Touch held - check for swipe
+		// Touch held - track last position and check for swipe
+		t.lastDownX = xi
 		dx := xi - t.startX
 		if !t.swipeActive && abs(dx) >= t.px(swipeStartFrac) {
 			t.swipeActive = true
@@ -309,8 +313,9 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	}
 
 	if !down && t.downPrev {
-		// Touch release
+		// Touch release — device zeroes coordinates on lift, use last known position.
 		t.downPrev = false
+		xi = t.lastDownX
 		dx := xi - t.startX
 		dur := now.Sub(t.pressT)
 
@@ -353,9 +358,9 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 				SlideX:    dx,
 			})
 			if abs(dx) < t.px(tapMaxMoveFrac) {
-				t.logger.Info("tap detected", "x", xi, "duration_ms", dur.Milliseconds())
+				t.logger.Info("tap detected", "x", xi, "raw_x", rawX, "raw_max", t.rawMax, "duration_ms", dur.Milliseconds())
 			} else {
-				t.logger.Info("TAP_DIAG: sliding tap emitted", "x", xi, "dx", dx, "duration_ms", dur.Milliseconds())
+				t.logger.Info("TAP_DIAG: sliding tap emitted", "x", xi, "raw_x", rawX, "dx", dx, "duration_ms", dur.Milliseconds())
 			}
 		} else {
 			t.logger.Info("TAP_DIAG: gesture canceled (long press, not swipe)",

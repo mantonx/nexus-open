@@ -272,13 +272,13 @@ func (z *ZoneConfig) Validate() error {
 	return nil
 }
 
-// ComputeOffsets calculates X offsets for zones if not specified
+// ComputeOffsets calculates X offsets for all zones by accumulated width.
+// Always overwrites X — never skip zones with X==0, since the first zone
+// legitimately has X=0 and stale values from a previous layout must not persist.
 func (p *Page) ComputeOffsets() {
 	x := 0
 	for i := range p.Zones {
-		if p.Zones[i].X == 0 {
-			p.Zones[i].X = x
-		}
+		p.Zones[i].X = x
 		x += p.Zones[i].Width
 	}
 }

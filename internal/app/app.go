@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"image/png"
 	"log/slog"
 	"os"
@@ -315,7 +316,7 @@ func (a *App) initialize() error {
 	a.apiServer.SetSwipeSimulator(a.zoneManager)
 	a.apiServer.SetZoneTapper(a.zoneManager)
 	a.zoneManager.SetDetailStateCallback(func(active bool) {
-		a.apiServer.BroadcastDetailState(active, zone.DetailCloseX, zone.DetailCloseY)
+		a.apiServer.BroadcastDetailState(active, zone.DetailCloseX*2, zone.DetailCloseY*2)
 	})
 	a.apiServer.SetNavigator(a.zoneManager)
 	a.apiServer.SetLayoutStore(a.store)
@@ -441,12 +442,28 @@ func (a *App) startDeviceWatcher() {
 	}()
 }
 
+// scaleNN2x returns a new RGBA image scaled 2× by nearest-neighbour replication.
+// Each source pixel becomes a 2×2 block — correct for hardware pixel-art frames.
+func scaleNN2x(src *image.RGBA) *image.RGBA {
+	sw, sh := src.Bounds().Dx(), src.Bounds().Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, sw*2, sh*2))
+	for y := 0; y < sh; y++ {
+		for x := 0; x < sw; x++ {
+			c := src.RGBAAt(x, y)
+			dst.SetRGBA(x*2, y*2, c)
+			dst.SetRGBA(x*2+1, y*2, c)
+			dst.SetRGBA(x*2, y*2+1, c)
+			dst.SetRGBA(x*2+1, y*2+1, c)
+		}
+	}
+	return dst
+}
+
 // pngBufPool recycles the byte buffers used for PNG encoding the WS preview
-// frames. A 640×48 RGBA PNG compresses to ~3–8 KB; pre-size to 8 KB so the
-// buffer rarely needs to grow.
+// frames. The frame is scaled 2× before encoding (1280×96); pre-size to 16 KB.
 var pngBufPool = sync.Pool{
 	New: func() any {
-		b := bytes.NewBuffer(make([]byte, 0, 8192))
+		b := bytes.NewBuffer(make([]byte, 0, 16384))
 		return b
 	},
 }
@@ -510,7 +527,7 @@ func (a *App) renderLoop() {
 			if a.zoneManager.IsTransitioning() || frameCount%3 == 0 {
 				buf := pngBufPool.Get().(*bytes.Buffer)
 				buf.Reset()
-				if err := enc.Encode(buf, frame); err == nil {
+				if err := enc.Encode(buf, scaleNN2x(frame)); err == nil {
 					encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
 					wsHub.Broadcast(api.WSMessage{Type: "frame", Data: encoded})
 				}

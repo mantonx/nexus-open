@@ -341,6 +341,7 @@ func (s *DB) ImportLayout(pages []StoredPage, zonesByPage map[int64][]StoredZone
 
 // SetZonePlugin updates the plugin field for a single zone.
 // Used by CycleZonePlugin to persist user-initiated plugin changes.
+
 func (s *DB) SetZonePlugin(zoneID, pluginID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

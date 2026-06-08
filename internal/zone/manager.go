@@ -323,6 +323,25 @@ func (m *Manager) saveDetailCache(zoneID string, detail plugin.DetailPayload) {
 	}
 }
 
+// effectiveTapAction returns the tap action for a zone. If the zone's
+// configured on_tap is empty, the plugin's Tapper implementation is the
+// authority: any plugin implementing Tapper gets TapActionDetail automatically.
+// This means on_tap never needs to be set in the layout for detail-capable
+// plugins — the interface is the declaration.
+func (m *Manager) EffectiveTapAction(z ZoneConfig) TapAction {
+	if z.OnTap != TapActionNone && z.OnTap != "" {
+		return z.OnTap
+	}
+	if m.pluginLookup != nil {
+		if p, ok := m.pluginLookup.GetPlugin(z.ID); ok {
+			if _, isTapper := p.(plugin.Tapper); isTapper {
+				return TapActionDetail
+			}
+		}
+	}
+	return TapActionNone
+}
+
 // HandleZoneTapAtX resolves the zone at hardware X coordinate x (0–639) on the
 // current page and executes its OnTap action — identical to what the hardware
 // touch handler does. Used by the debug tap API so the Flutter preview can
@@ -341,7 +360,7 @@ func (m *Manager) HandleZoneTapAtX(x int) error {
 
 	for _, z := range page.Zones {
 		if x >= z.X && x < z.X+z.Width {
-			switch z.OnTap {
+			switch m.EffectiveTapAction(z) {
 			case TapActionCycle:
 				return m.CycleZonePlugin(z.ID)
 			case TapActionDetail:

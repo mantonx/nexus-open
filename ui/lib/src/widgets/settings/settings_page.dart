@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -226,7 +226,7 @@ class _PreviewStrip extends StatefulWidget {
 }
 
 class _PreviewStripState extends State<_PreviewStrip> {
-  Uint8List? _lastFrame;
+  ui.Image? _uiImage;
   StreamSubscription? _sub;
   List<WsZoneInfo> _currentZones = [];
   int _numPages = 1;
@@ -263,7 +263,12 @@ class _PreviewStripState extends State<_PreviewStrip> {
     _sub = context.read<WsService>().events.listen((event) {
       if (!mounted) return;
       if (event is WsFrameEvent) {
-        setState(() => _lastFrame = event.pngBytes);
+        ui.decodeImageFromList(event.pngBytes, (img) {
+          if (!mounted) { img.dispose(); return; }
+          final old = _uiImage;
+          setState(() => _uiImage = img);
+          old?.dispose();
+        });
       } else if (event is WsPageStateEvent) {
         _applyPageState(event);
       } else if (event is WsDetailStateEvent) {
@@ -289,6 +294,7 @@ class _PreviewStripState extends State<_PreviewStrip> {
   @override
   void dispose() {
     _sub?.cancel();
+    _uiImage?.dispose();
     super.dispose();
   }
 
@@ -314,8 +320,8 @@ class _PreviewStripState extends State<_PreviewStrip> {
     final box = _displayKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return null;
     return Offset(
-      _closeButtonHardwareX / 640 * box.size.width,
-      _closeButtonHardwareY / 48 * box.size.height,
+      _closeButtonHardwareX / 1280 * box.size.width,
+      _closeButtonHardwareY / 96 * box.size.height,
     );
   }
 
@@ -452,12 +458,11 @@ class _PreviewStripState extends State<_PreviewStrip> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          if (_lastFrame != null)
-                            Image.memory(
-                              _lastFrame!,
+                          if (_uiImage != null)
+                            RawImage(
+                              image: _uiImage,
                               fit: BoxFit.fill,
                               filterQuality: FilterQuality.medium,
-                              gaplessPlayback: true,
                             )
                           else
                             const ColoredBox(color: Colors.black),
