@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help setup build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui deb appimage rpm generate-api models all changelog
+.PHONY: help setup doctor build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui deb appimage rpm generate-api models all changelog
 
 # Configuration
 APP_NAME := nexus-open
@@ -38,6 +38,7 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make setup         - Install dev tool dependencies (air, overmind)"
+	@echo "  make doctor        - Check runtime health (user) and toolchain (dev)"
 	@echo "  make build         - Build Go backend only (with debug info)"
 	@echo "  make build-ui      - Build Flutter UI only"
 	@echo "  make build-plugins - Build all external plugins"
@@ -153,6 +154,105 @@ setup:
 		echo "overmind already installed: $$(overmind --version)"; \
 	fi
 	@echo "✓ Setup complete. Run 'make dev-backend' and 'make dev-ui' to start."
+
+# Check runtime health (end-user) and dev toolchain (contributor).
+# Exits 1 if any required check fails, so it can be used in scripts.
+doctor:
+	@fail=0; \
+	ok()   { printf '  \033[32m✓\033[0m %s\n' "$$*"; }; \
+	warn() { printf '  \033[33m!\033[0m %s\n' "$$*"; }; \
+	bad()  { printf '  \033[31m✗\033[0m %s\n' "$$*"; fail=1; }; \
+	\
+	echo "── Runtime ─────────────────────────────────────────"; \
+	\
+	if systemctl --user is-active --quiet nexus-open.service 2>/dev/null; then \
+		ok "daemon running (systemd)"; \
+	elif pgrep -x nexus-open > /dev/null 2>&1; then \
+		ok "daemon running (standalone)"; \
+	else \
+		bad "daemon not running — run 'make install' then start the service, or 'make dev-backend'"; \
+	fi; \
+	\
+	if curl -sf -H "X-Nexus-Token: $$(cat ~/.config/nexus-open/token 2>/dev/null)" \
+		http://localhost:1985/api/health > /dev/null 2>&1; then \
+		ok "API reachable at localhost:1985"; \
+	else \
+		bad "API not reachable — is the daemon running?"; \
+	fi; \
+	\
+	if [ -f ~/.config/nexus-open/token ]; then \
+		ok "capability token present"; \
+	else \
+		bad "token missing at ~/.config/nexus-open/token — start the daemon once to generate it"; \
+	fi; \
+	\
+	if lsusb 2>/dev/null | grep -q "1b1c:1b8e"; then \
+		ok "Nexus device detected (USB 1b1c:1b8e)"; \
+	else \
+		warn "Nexus device not detected — not connected, or using mock mode"; \
+	fi; \
+	\
+	if ls /etc/udev/rules.d/99-corsair-nexus.rules /usr/lib/udev/rules.d/99-corsair-nexus.rules > /dev/null 2>&1; then \
+		ok "udev rules installed"; \
+	else \
+		bad "udev rules missing — run: sudo nexus-open --setup-udev"; \
+	fi; \
+	\
+	if groups | grep -qE '\bplugdev\b'; then \
+		ok "user in plugdev group"; \
+	else \
+		warn "user not in plugdev group (may still work via udev TAG+=\"uaccess\")"; \
+	fi; \
+	\
+	echo ""; \
+	echo "── Dev toolchain ───────────────────────────────────"; \
+	\
+	if command -v go > /dev/null; then \
+		ok "go $$(go version | awk '{print $$3}')"; \
+	else \
+		bad "go not found"; \
+	fi; \
+	\
+	if command -v flutter > /dev/null; then \
+		ok "flutter $$(flutter --version --machine 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("frameworkVersion","?"))' 2>/dev/null || flutter --version 2>&1 | head -1)"; \
+	else \
+		bad "flutter not found — see https://flutter.dev/docs/get-started/install/linux"; \
+	fi; \
+	\
+	AIR=$$(command -v air 2>/dev/null || echo ~/go/bin/air); \
+	if [ -x "$$AIR" ]; then \
+		ok "air $$($$AIR -v 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"; \
+	else \
+		bad "air not found — run 'make setup'"; \
+	fi; \
+	\
+	if command -v overmind > /dev/null; then \
+		ok "overmind $$(overmind --version 2>&1)"; \
+	else \
+		bad "overmind not found — run 'make setup' for install instructions"; \
+	fi; \
+	\
+	SQLC=$$(command -v sqlc 2>/dev/null || echo ~/go/bin/sqlc); \
+	if [ -x "$$SQLC" ]; then \
+		SQLC_INST=$$($$SQLC version 2>&1 | head -1); \
+		ok "sqlc $$SQLC_INST"; \
+	else \
+		warn "sqlc not found (only needed to regenerate DB queries) — go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)"; \
+	fi; \
+	\
+	if command -v golangci-lint > /dev/null; then \
+		ok "golangci-lint $$(golangci-lint --version 2>&1 | head -1)"; \
+	else \
+		warn "golangci-lint not found (only needed for lint) — see https://golangci-lint.run/usage/install/"; \
+	fi; \
+	\
+	echo ""; \
+	if [ $$fail -eq 0 ]; then \
+		echo "All checks passed."; \
+	else \
+		echo "Some checks failed — see above."; \
+		exit 1; \
+	fi
 
 # Development mode with live reload (requires github.com/air-verse/air)
 # Rebuilds and restarts the Go daemon + plugins on any .go file change.
