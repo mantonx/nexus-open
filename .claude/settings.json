@@ -1,4 +1,28 @@
 {
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "systemctl --user stop nexus-open.service 2>/dev/null; overmind status 2>/dev/null || overmind start --root /home/fictional/Projects/nexus-next --procfile /home/fictional/Projects/nexus-next/Procfile --daemonize 2>/dev/null; true"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "overmind quit 2>/dev/null; systemctl --user start nexus-open.service 2>/dev/null; true"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "WebSearch",
