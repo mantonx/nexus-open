@@ -16,7 +16,14 @@ Do not let user frustration accelerate you into reactive mode. Frustration is a 
 
 ## Build and deploy
 
-Always use `make install` — never `flutter build`, `go build`, or manual binary copies in isolation. The install target builds Go + Flutter + plugins + copies everything + restarts the service atomically.
+Use `make install` for a full production deploy (Go + Flutter + plugins + service restart).
+
+For iterative development, use hot reload instead — it is much faster:
+
+- **Go changes**: `make dev-backend` — air rebuilds the daemon and all plugins on save (~2–4 s), no Flutter rebuild needed.
+- **Flutter changes**: `make dev-ui` in a second terminal — `r` hot-reloads in under a second, `R` hot-restarts. The UI connects to the already-running backend over HTTP/WS; the capability token is read automatically from `~/.config/nexus-open/token`.
+
+Only fall back to `make install` when changing the layout YAML, adding a new plugin for the first time, or making changes that affect the installed binary path.
 
 ## Lock ordering
 
