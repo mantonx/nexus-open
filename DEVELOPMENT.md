@@ -1,5 +1,31 @@
 # Development Guide
 
+## Prerequisites
+
+Beyond the standard Go and Flutter toolchains, two tools are needed for the hot-reload workflow. Run `make setup` to install them, or follow the steps below manually:
+
+**air** — Go live reload:
+
+```bash
+go install github.com/air-verse/air@latest
+```
+
+**overmind** — process manager used to run backend + UI together (also started automatically when a Claude Code session opens):
+
+```bash
+# Arch
+sudo pacman -S overmind
+
+# Debian/Ubuntu
+sudo apt install overmind
+
+# macOS
+brew install overmind
+
+# Any platform (Go)
+go install github.com/DarthSim/overmind/v2@latest
+```
+
 ## Quick Start
 
 ### Using Mock Device Mode (Recommended for Development)

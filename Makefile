@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui deb appimage rpm generate-api models all changelog
+.PHONY: help setup build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui deb appimage rpm generate-api models all changelog
 
 # Configuration
 APP_NAME := nexus-open
@@ -37,6 +37,7 @@ help:
 	@echo "  make screenshot-tour - Navigate all tabs and capture screenshots"
 	@echo ""
 	@echo "Development:"
+	@echo "  make setup         - Install dev tool dependencies (air, overmind)"
 	@echo "  make build         - Build Go backend only (with debug info)"
 	@echo "  make build-ui      - Build Flutter UI only"
 	@echo "  make build-plugins - Build all external plugins"
@@ -136,6 +137,22 @@ run-tray: build-all
 # Requires: Go backend running (make run) and DISPLAY set.
 screenshot-tour:
 	@./scripts/ui-tour.sh
+
+# Install dev tool dependencies
+setup:
+	@echo "Installing air (Go live reload)..."
+	@go install github.com/air-verse/air@$(AIR_VERSION)
+	@echo "Checking for overmind (process manager)..."
+	@if ! command -v overmind > /dev/null; then \
+		echo "overmind not found. Install it with:"; \
+		echo "  Arch:         sudo pacman -S overmind"; \
+		echo "  Debian/Ubuntu: sudo apt install overmind"; \
+		echo "  macOS:        brew install overmind"; \
+		echo "  Go:           go install github.com/DarthSim/overmind/v2@latest"; \
+	else \
+		echo "overmind already installed: $$(overmind --version)"; \
+	fi
+	@echo "✓ Setup complete. Run 'make dev-backend' and 'make dev-ui' to start."
 
 # Development mode with live reload (requires github.com/air-verse/air)
 # Rebuilds and restarts the Go daemon + plugins on any .go file change.
