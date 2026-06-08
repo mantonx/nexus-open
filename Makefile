@@ -17,6 +17,13 @@ CMD_DIR := cmd/nexus-open
 UI_DIR := ui
 UI_BUILD_DIR := $(UI_DIR)/build/linux/x64/release/bundle
 
+# Tool versions — keep in sync with .github/workflows/ci.yml
+SQLC_VERSION         := v1.31.1
+GOVULNCHECK_VERSION  := v1.3.0
+GOLANGCI_VERSION     := v2.12.2
+AIR_VERSION          := v1.63.1
+GOPENAPI_VERSION     := v0.32.3
+
 # Build flags
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)
 GOFLAGS  := -trimpath
@@ -49,6 +56,7 @@ help:
 	@echo "  make appimage      - Build AppImage"
 	@echo "  make rpm           - Build RPM package"
 	@echo "  make generate-api  - Regenerate api/openapi.yaml from annotations"
+	@echo "  make generate-store - Regenerate internal/store/db/ from schema + queries"
 	@echo "  make models        - Generate freezed/json_serializable Dart models"
 	@echo "  make all           - Build all packages"
 	@echo ""
@@ -137,7 +145,7 @@ dev:
 			~/go/bin/air; \
 		fi; \
 	else \
-		echo "Error: 'air' not found. Install with: go install github.com/air-verse/air@latest"; \
+		echo "Error: 'air' not found. Install with: go install github.com/air-verse/air@$(AIR_VERSION)"; \
 		exit 1; \
 	fi
 
@@ -183,7 +191,7 @@ generate-api:
 		sed -i 's|http://localhost:8080|http://localhost:1985|g' api/openapi.yaml; \
 		echo "✓ Spec written to api/openapi.yaml"; \
 	else \
-		echo "Error: go-openapi not found. Install with: go install github.com/go-openapi/cmd/go-openapi@latest"; \
+		echo "Error: go-openapi not found. Install with: go install github.com/go-openapi/cmd/go-openapi@$(GOPENAPI_VERSION)"; \
 		exit 1; \
 	fi
 
@@ -205,7 +213,7 @@ INSTALL_BIN    := $(HOME)/.local/bin/$(APP_NAME)
 INSTALL_DATA   := $(HOME)/.local/share/$(APP_NAME)
 SYSTEMD_UNIT   := app-nexus\x2dopen\x2dautostart@autostart.service
 
-install: build-release build-ui
+install: build-release build-ui build-plugins
 	@echo "Stopping service..."
 	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
 	@echo "Installing backend to $(INSTALL_BIN)..."
@@ -215,6 +223,16 @@ install: build-release build-ui
 	@cp $(UI_DIR)/build/linux/x64/release/bundle/ui $(INSTALL_DATA)/ui.real
 	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/lib/. $(INSTALL_DATA)/lib/
 	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/data/. $(INSTALL_DATA)/data/
+	@echo "Installing plugins to $(INSTALL_DATA)/plugins..."
+	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load; do \
+		if [ -f plugins/$$mod/$$mod ]; then \
+			mkdir -p $(INSTALL_DATA)/plugins/$$mod; \
+			cp plugins/$$mod/$$mod $(INSTALL_DATA)/plugins/$$mod/$$mod; \
+		fi; \
+	done
+	@echo "Installing layout config to $(INSTALL_DATA)..."
+	@mkdir -p $(INSTALL_DATA)/configs/layouts
+	@cp configs/layouts/multi-page.yaml $(INSTALL_DATA)/configs/layouts/
 	@echo "Restarting service..."
 	@systemctl --user start "$(SYSTEMD_UNIT)"
 	@echo "✓ Installed and restarted"
@@ -243,7 +261,7 @@ clean-ui:
 	@echo "✓ Flutter UI cleaned"
 
 # Additional development targets
-.PHONY: fmt lint vet tidy
+.PHONY: fmt lint vet tidy generate-store
 
 # Format code
 fmt:
@@ -257,7 +275,7 @@ lint:
 		echo "Running linter..."; \
 		golangci-lint run; \
 	else \
-		echo "Warning: golangci-lint not found. Install from https://golangci-lint.run/"; \
+		echo "Warning: golangci-lint not found. Install $(GOLANGCI_VERSION) from https://golangci-lint.run/"; \
 	fi
 
 # Run go vet
@@ -281,6 +299,23 @@ changelog:
 		echo "Updating CHANGELOG.md..."; \
 		git-cliff -o CHANGELOG.md; \
 		echo "✓ CHANGELOG.md updated"; \
+	fi
+
+# Regenerate type-safe DB query code from schema.sql + queries/*.sql
+generate-store:
+	@if command -v sqlc > /dev/null || [ -f ~/go/bin/sqlc ]; then \
+		SQLC=$$(command -v sqlc 2>/dev/null || echo ~/go/bin/sqlc); \
+		INSTALLED=$$($$SQLC version 2>/dev/null); \
+		if [ "$$INSTALLED" != "$(SQLC_VERSION)" ]; then \
+			echo "Warning: sqlc $$INSTALLED installed, expected $(SQLC_VERSION)"; \
+			echo "         Run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)"; \
+		fi; \
+		echo "Regenerating store query code..."; \
+		$$SQLC generate; \
+		echo "✓ internal/store/db/ regenerated"; \
+	else \
+		echo "Error: sqlc not found. Install with: go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)"; \
+		exit 1; \
 	fi
 
 # Tidy dependencies

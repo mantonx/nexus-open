@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/settings_state.dart';
@@ -227,16 +228,62 @@ class _PreviewStrip extends StatefulWidget {
 class _PreviewStripState extends State<_PreviewStrip> {
   Uint8List? _lastFrame;
   StreamSubscription? _sub;
+  List<WsZoneInfo> _currentZones = [];
+  int _numPages = 1;
+
+  final _displayKey = GlobalKey();
+  double? _dragStartX;
+  double _lastDragX = 0;
+  bool _isDragging = false;
+
+  // Index into _currentZones of the zone under the cursor, or -1 if none/not tappable.
+  int _hoveredZoneIdx = -1;
+  Offset? _cursorPos; // local position within the display widget
+  bool _detailActive = false;
+  int _closeButtonHardwareX = 630; // hardware pixel center, updated from backend
+  int _closeButtonHardwareY = 10;
+  bool _ringVisible = false; // drives AnimatedOpacity
+
+  NexusApiService get _api => context.read<NexusApiService>();
+
+  void _applyPageState(WsPageStateEvent event) {
+    if (!mounted) return;
+    setState(() {
+      _numPages = event.numPages;
+      _currentZones = event.currentPage < event.pages.length
+          ? event.pages[event.currentPage].zones
+          : [];
+    });
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _sub?.cancel();
     _sub = context.read<WsService>().events.listen((event) {
-      if (event is WsFrameEvent && mounted) {
+      if (!mounted) return;
+      if (event is WsFrameEvent) {
         setState(() => _lastFrame = event.pngBytes);
+      } else if (event is WsPageStateEvent) {
+        _applyPageState(event);
+      } else if (event is WsDetailStateEvent) {
+        setState(() {
+          _detailActive = event.active;
+          if (event.active) {
+            _closeButtonHardwareX = event.closeX;
+            _closeButtonHardwareY = event.closeY;
+          } else {
+            _hoveredZoneIdx = -1;
+            _cursorPos = null;
+            _ringVisible = false;
+          }
+        });
       }
     });
+    // Fetch current state immediately — WS stream doesn't replay past events.
+    context.read<NexusApiService>().getNavigateState()
+        .then(_applyPageState)
+        .catchError((_) {});
   }
 
   @override
@@ -245,37 +292,291 @@ class _PreviewStripState extends State<_PreviewStrip> {
     super.dispose();
   }
 
+  int _toHardwareX(double localX) {
+    final box = _displayKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return 0;
+    return (localX / box.size.width * 640).round().clamp(0, 639);
+  }
+
+  // Returns the zone index whose x-range contains hardwareX, or -1.
+  int _zoneIndexAt(int hardwareX) {
+    int offset = 0;
+    for (var i = 0; i < _currentZones.length; i++) {
+      final z = _currentZones[i];
+      if (hardwareX >= offset && hardwareX < offset + z.width) return i;
+      offset += z.width;
+    }
+    return -1;
+  }
+
+  // Maps hardware pixel coordinates to local widget coordinates.
+  Offset? _closeButtonLocalPos() {
+    final box = _displayKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    return Offset(
+      _closeButtonHardwareX / 640 * box.size.width,
+      _closeButtonHardwareY / 48 * box.size.height,
+    );
+  }
+
+  void _onHover(PointerHoverEvent e) {
+    if (_detailActive) {
+      // In detail mode: show ring near close button, not at cursor.
+      final closePos = _closeButtonLocalPos();
+      setState(() {
+        _hoveredZoneIdx = -1;
+        _cursorPos = closePos;
+        _ringVisible = closePos != null;
+      });
+      return;
+    }
+    final hx = _toHardwareX(e.localPosition.dx);
+    final idx = _zoneIndexAt(hx);
+    final next = (idx != -1 && _currentZones[idx].isTappable) ? idx : -1;
+    setState(() {
+      _hoveredZoneIdx = next;
+      _cursorPos = next != -1 ? e.localPosition : null;
+      _ringVisible = next != -1;
+    });
+  }
+
+  void _onExit(PointerExitEvent _) {
+    if (_hoveredZoneIdx != -1 || _cursorPos != null || _ringVisible) {
+      setState(() { _hoveredZoneIdx = -1; _cursorPos = null; _ringVisible = false; });
+    }
+  }
+
+  void _onPanStart(DragStartDetails d) {
+    _dragStartX = d.localPosition.dx;
+    _isDragging = false;
+  }
+
+  void _onPanUpdate(DragUpdateDetails d) {
+    final startX = _dragStartX;
+    if (startX == null) return;
+    final dx = d.localPosition.dx - startX;
+    final box = _displayKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final progress = (dx.abs() / box.size.width).clamp(0.0, 1.0);
+    if (progress > 0.01) _isDragging = true;
+    if (_isDragging) {
+      _lastDragX = d.localPosition.dx;
+      _api.swipeUpdate(progress, isLeft: dx < 0).catchError((_) {});
+    }
+  }
+
+  void _onPanEnd(DragEndDetails d) {
+    if (!_isDragging) {
+      _dragStartX = null;
+      return;
+    }
+    final startX = _dragStartX;
+    _dragStartX = null;
+    _isDragging = false;
+    if (startX == null) return;
+    final box = _displayKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) { _api.swipeCancel().catchError((_) {}); return; }
+    final velocity = d.velocity.pixelsPerSecond.dx;
+    final progress = ((_lastDragX - startX).abs() / box.size.width).clamp(0.0, 1.0);
+    _api.swipeFinalize(progress, velocity.abs(), isLeft: velocity < 0).catchError((_) {});
+  }
+
+  void _onTapUp(TapUpDetails d) {
+    if (_isDragging) return;
+    _api.tapZone(_toHardwareX(d.localPosition.dx)).catchError((_) {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final borderColor = widget.hasDraft
         ? AppColors.hardwareAccent
         : AppColors.hardwareAccent.withValues(alpha: 0.35);
+    final canSwipeLeft  = _numPages > 1;
+    final canSwipeRight = _numPages > 1;
+
+    // Reserve 32px for the two arrows (20px icon + 6px gap each side).
+    const arrowReserve = 32.0;
 
     return Container(
-      height: 48 + 8, // 48px display + 4px padding top/bottom
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       decoration: BoxDecoration(
         color: AppColors.darkBg,
         border: Border(
           bottom: BorderSide(color: borderColor, width: widget.hasDraft ? 2 : 1),
         ),
       ),
-      child: Center(
-        child: Container(
-          width: 640,
-          height: 48,
-          decoration: BoxDecoration(
-            color: Colors.black,
-            borderRadius: AppRadius.xsBr,
-            border: Border.all(color: borderColor, width: widget.hasDraft ? 2 : 1),
-            boxShadow: widget.hasDraft
-                ? [BoxShadow(color: AppColors.hardwareAccent.withValues(alpha: 0.25), blurRadius: 10, spreadRadius: 1)]
-                : null,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: _lastFrame != null
-              ? Image.memory(_lastFrame!, fit: BoxFit.fill, gaplessPlayback: true)
-              : const ColoredBox(color: Colors.black),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Fill available width; clamp so it never shrinks below a usable size.
+          final displayW = (constraints.maxWidth - arrowReserve).clamp(200.0, 960.0);
+          final displayH = (displayW / 640 * 48).roundToDouble();
+
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // ── Left swipe arrow ───────────────────────────────────────────
+              _SwipeArrow(
+                direction: _SwipeDirection.left,
+                visible: canSwipeLeft,
+                onTap: () => _api.simulateSwipe(direction: 'right').catchError((_) {}),
+              ),
+              const SizedBox(width: 6),
+
+              // ── Display ───────────────────────────────────────────────────
+              MouseRegion(
+                cursor: _hoveredZoneIdx != -1
+                    ? SystemMouseCursors.click
+                    : SystemMouseCursors.basic,
+                onExit: _onExit,
+                child: Listener(
+                  onPointerHover: _onHover,
+                  child: GestureDetector(
+                    key: _displayKey,
+                    onPanStart: _onPanStart,
+                    onPanUpdate: _onPanUpdate,
+                    onPanEnd: _onPanEnd,
+                    onTapUp: _onTapUp,
+                    child: Container(
+                      width: displayW,
+                      height: displayH,
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: AppRadius.xsBr,
+                        border: Border.all(color: borderColor, width: widget.hasDraft ? 2 : 1),
+                        boxShadow: widget.hasDraft
+                            ? [BoxShadow(color: AppColors.hardwareAccent.withValues(alpha: 0.25), blurRadius: 10, spreadRadius: 1)]
+                            : null,
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (_lastFrame != null)
+                            Image.memory(
+                              _lastFrame!,
+                              fit: BoxFit.fill,
+                              filterQuality: FilterQuality.medium,
+                              gaplessPlayback: true,
+                            )
+                          else
+                            const ColoredBox(color: Colors.black),
+                          if (_cursorPos != null)
+                            AnimatedOpacity(
+                              duration: const Duration(milliseconds: 180),
+                              opacity: _ringVisible ? 1.0 : 0.0,
+                              child: CustomPaint(
+                                painter: _CloseButtonHighlightPainter(
+                                  position: _cursorPos!,
+                                  accentColor: AppColors.hardwareAccent,
+                                  widgetSize: Size(displayW, displayH),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 6),
+              // ── Right swipe arrow ──────────────────────────────────────────
+              _SwipeArrow(
+                direction: _SwipeDirection.right,
+                visible: canSwipeRight,
+                onTap: () => _api.simulateSwipe(direction: 'left').catchError((_) {}),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Close-button hover highlight ──────────────────────────────────────────────
+// Draws an accent-tinted circular glow centered on the close (✕) icon.
+// Radius is proportional to the widget height so it looks right at any scale.
+
+class _CloseButtonHighlightPainter extends CustomPainter {
+  const _CloseButtonHighlightPainter({
+    required this.position,
+    required this.accentColor,
+    required this.widgetSize,
+  });
+  final Offset position;
+  final Color accentColor;
+  final Size widgetSize;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Scale radius to widget height so it looks consistent at any preview scale.
+    final r = widgetSize.height * 0.30;
+
+    // Outer diffuse glow
+    canvas.drawCircle(
+      position,
+      r * 1.6,
+      Paint()
+        ..color = accentColor.withValues(alpha: 0.12)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, r * 0.8),
+    );
+    // Inner crisp ring
+    canvas.drawCircle(
+      position,
+      r,
+      Paint()
+        ..color = accentColor.withValues(alpha: 0.50)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CloseButtonHighlightPainter old) =>
+      old.position != position ||
+      old.accentColor != accentColor ||
+      old.widgetSize != widgetSize;
+}
+
+// ── Swipe arrows ──────────────────────────────────────────────────────────────
+
+enum _SwipeDirection { left, right }
+
+class _SwipeArrow extends StatefulWidget {
+  const _SwipeArrow({
+    required this.direction,
+    required this.visible,
+    required this.onTap,
+  });
+  final _SwipeDirection direction;
+  final bool visible;
+  final VoidCallback onTap;
+
+  @override
+  State<_SwipeArrow> createState() => _SwipeArrowState();
+}
+
+class _SwipeArrowState extends State<_SwipeArrow> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.visible) return const SizedBox(width: 20);
+    final icon = widget.direction == _SwipeDirection.left
+        ? Icons.chevron_left
+        : Icons.chevron_right;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 120),
+          opacity: _hovered ? 0.7 : 0.25,
+          child: Icon(icon, size: 20, color: Colors.white),
         ),
       ),
     );

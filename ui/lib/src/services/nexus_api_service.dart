@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/api_models.dart';
+import 'ws_service.dart' show WsPageStateEvent, WsPageInfo;
 
 export '../models/api_models.dart' show NexusConfig, DeviceInfo, ApiError;
 
@@ -198,6 +199,24 @@ class NexusApiService {
     }
   }
 
+  /// Fetch the current page navigation state (current page, num pages, zone info).
+  Future<WsPageStateEvent> getNavigateState() async {
+    final response = await _client
+        .get(Uri.parse('$baseUrl/api/navigate/state'))
+        .timeout(timeout);
+    if (response.statusCode != 200) {
+      throw ApiException('Failed to get navigate state', statusCode: response.statusCode);
+    }
+    final d = json.decode(response.body) as Map<String, dynamic>;
+    return WsPageStateEvent(
+      currentPage: d['current_page'] as int,
+      numPages: d['num_pages'] as int,
+      pages: (d['pages'] as List<dynamic>)
+          .map((p) => WsPageInfo.fromJson(p as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
   /// Trigger a synthetic swipe (mirrors POST /api/debug/swipe).
   Future<void> simulateSwipe({
     String direction = 'left',
@@ -256,6 +275,20 @@ class NexusApiService {
   Future<void> swipeCancel() async {
     await _client
         .post(Uri.parse('$baseUrl/api/debug/swipe/cancel'))
+        .timeout(timeout);
+  }
+
+  /// Simulate a hardware tap at [x] (0–639 hardware pixels).
+  /// Mirrors the hardware touch path: dismisses detail overlay if showing,
+  /// otherwise executes the zone's OnTap action. Best-effort; errors are
+  /// silently swallowed by the caller since this is a debug/preview path.
+  Future<void> tapZone(int x) async {
+    await _client
+        .post(
+          Uri.parse('$baseUrl/api/debug/tap'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({'x': x}),
+        )
         .timeout(timeout);
   }
 

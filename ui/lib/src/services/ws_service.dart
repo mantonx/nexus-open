@@ -20,9 +20,14 @@ class WsWindowStateEvent extends WsEvent {
 class WsZoneInfo {
   final String id;
   final int width;
-  const WsZoneInfo({required this.id, required this.width});
-  factory WsZoneInfo.fromJson(Map<String, dynamic> j) =>
-      WsZoneInfo(id: j['id'] as String, width: j['width'] as int);
+  final String onTap;
+  const WsZoneInfo({required this.id, required this.width, this.onTap = ''});
+  factory WsZoneInfo.fromJson(Map<String, dynamic> j) => WsZoneInfo(
+        id: j['id'] as String,
+        width: j['width'] as int,
+        onTap: j['on_tap'] as String? ?? '',
+      );
+  bool get isTappable => onTap.isNotEmpty && onTap != 'none';
 }
 
 class WsPageInfo {
@@ -51,6 +56,13 @@ class WsPageStateEvent extends WsEvent {
 class WsConnectedEvent extends WsEvent {}
 
 class WsDisconnectedEvent extends WsEvent {}
+
+class WsDetailStateEvent extends WsEvent {
+  final bool active;
+  final int closeX; // hardware X (0–639) center of close button
+  final int closeY; // hardware Y (0–47) center of close button
+  WsDetailStateEvent({required this.active, this.closeX = 0, this.closeY = 0});
+}
 
 class WsDraftStateEvent extends WsEvent {
   final bool active;
@@ -149,6 +161,13 @@ class WsService extends ChangeNotifier {
           _controller.add(WsDraftStateEvent(
             active: d['active'] as bool? ?? false,
             reason: d['reason'] as String?,
+          ));
+        case 'detail_state':
+          final d = data as Map<String, dynamic>? ?? {};
+          _controller.add(WsDetailStateEvent(
+            active: d['active'] as bool? ?? false,
+            closeX: d['close_x'] as int? ?? 0,
+            closeY: d['close_y'] as int? ?? 0,
           ));
       }
     } catch (_) {

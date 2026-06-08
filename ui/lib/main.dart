@@ -80,7 +80,6 @@ class OpenNextApp extends StatefulWidget {
 class _OpenNextAppState extends State<OpenNextApp> with WindowListener {
   StreamSubscription? _wsSub;
   SettingsState? _settings;
-
   @override
   void initState() {
     super.initState();
@@ -135,16 +134,17 @@ class _OpenNextAppState extends State<OpenNextApp> with WindowListener {
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
     final ws = context.watch<WsService>();
+    final body = !ws.isConnected
+        ? const _LoadingScreen()
+        : settings.isFirstRun
+            ? const OnboardingOverlay()
+            : const SettingsPage();
     return MaterialApp(
       title: 'Open Next',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: settings.themeMode,
-      home: !ws.isConnected
-          ? const _LoadingScreen()
-          : settings.isFirstRun
-              ? const OnboardingOverlay()
-              : const SettingsPage(),
+      home: body,
     );
   }
 }

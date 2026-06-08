@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -30,7 +29,6 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
   late NexusApiService _api;
   StreamSubscription? _wsSub;
 
-  Uint8List? _frame;
   List<LayoutPage> _pages = [];
   int _selectedPageIdx = 0;
   bool _loading = true;
@@ -48,9 +46,7 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
     _api = context.read<NexusApiService>();
     _wsSub?.cancel();
     _wsSub = context.read<WsService>().events.listen((event) {
-      if (event is WsFrameEvent && mounted) {
-        setState(() => _frame = event.pngBytes);
-      } else if (event is WsPageStateEvent && mounted) {
+      if (event is WsPageStateEvent && mounted) {
         // Keep selected page in sync with hardware when user swipes on device.
         if (event.currentPage < _pages.length) {
           setState(() => _selectedPageIdx = event.currentPage);
@@ -255,7 +251,6 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
 
   @override
   Widget build(BuildContext context) {
-    final connected = context.watch<WsService>().isConnected;
     final theme = Theme.of(context);
 
     if (_loading) {
@@ -278,13 +273,6 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
 
     return Column(
       children: [
-        // ── Live frame ───────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
-          child: _LiveFrame(frame: _frame, connected: connected),
-        ),
-
         // ── Page tabs ────────────────────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.symmetric(
@@ -399,81 +387,6 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
               onPressed: () => Navigator.pop(context, ctrl.text),
               child: const Text('OK')),
         ],
-      ),
-    );
-  }
-}
-
-// ── Live frame ────────────────────────────────────────────────────────────────
-
-class _LiveFrame extends StatelessWidget {
-  const _LiveFrame({required this.frame, required this.connected});
-  final Uint8List? frame;
-  final bool connected;
-
-  static const _housingHighlight = Color(0xFF242428);
-  static const _glossySurround   = Color(0xFF0A0A0C);
-  static const _mountingSlot     = Color(0xFF1A1A1E);
-  static const _displayBorder    = Color(0xFF1C1C20);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A1A1C), Color(0xFF0E0E10), Color(0xFF121214)],
-          stops: [0.0, 0.4, 1.0],
-        ),
-        borderRadius: const BorderRadius.all(Radius.circular(4)),
-        border: Border.all(color: _housingHighlight, width: 0.5),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.6), blurRadius: 16, offset: const Offset(0, 6)),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-        child: Row(children: [
-          const _MountingEnd(slot: _mountingSlot),
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: _glossySurround,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft, end: Alignment.bottomRight,
-                  colors: [Colors.white.withValues(alpha: 0.04), Colors.transparent],
-                ),
-              ),
-              padding: const EdgeInsets.all(6),
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: _displayBorder, width: 1),
-                  borderRadius: BorderRadius.circular(1),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(1),
-                  child: AspectRatio(
-                    aspectRatio: 640 / 48,
-                    child: frame != null
-                        ? Image.memory(frame!, fit: BoxFit.fill,
-                            gaplessPlayback: true, filterQuality: FilterQuality.none)
-                        : Container(color: const Color(0xFF101010),
-                            alignment: Alignment.center,
-                            child: Text(
-                              connected ? 'Waiting for frame…' : 'Not connected',
-                              style: TextStyle(
-                                fontSize: 7,
-                                color: connected ? Colors.white24 : Colors.red.withValues(alpha: 0.4),
-                              ),
-                            )),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const _MountingEnd(slot: _mountingSlot),
-        ]),
       ),
     );
   }
@@ -819,30 +732,3 @@ class _ZoneCard extends StatelessWidget {
   }
 }
 
-// ── Mounting bracket ──────────────────────────────────────────────────────────
-
-class _MountingEnd extends StatelessWidget {
-  const _MountingEnd({required this.slot});
-  final Color slot;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 12,
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        _slotWidget(slot),
-        const SizedBox(height: 8),
-        _slotWidget(slot),
-      ]),
-    );
-  }
-
-  Widget _slotWidget(Color color) => Container(
-        width: 3, height: 12,
-        decoration: BoxDecoration(
-          color: color, borderRadius: BorderRadius.circular(2),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.5),
-              blurRadius: 2, offset: const Offset(1, 1))],
-        ),
-      );
-}
