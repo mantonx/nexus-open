@@ -2,10 +2,12 @@
 
 Open-source Linux controller for the Corsair iCUE Nexus companion display.
 
+[![Release](https://img.shields.io/github/v/release/mantonx/nexus-open)](https://github.com/mantonx/nexus-open/releases/latest)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Go](https://img.shields.io/badge/go-1.25+-00ADD8)
+![Go](https://img.shields.io/badge/go-1.26+-00ADD8)
 ![Flutter](https://img.shields.io/badge/flutter-3.24+-02569B)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange)
+[![AUR](https://img.shields.io/aur/version/nexus-open)](https://aur.archlinux.org/packages/nexus-open)
 
 ## Overview
 
