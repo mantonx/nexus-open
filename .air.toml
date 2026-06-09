@@ -12,7 +12,7 @@ tmp_dir = "tmp"
   exclude_regex = ["_test.go"]
   exclude_unchanged = false
   follow_symlink = false
-  full_bin = "NEXUS_DEBUG=1 ./tmp/nexus-open --debug"
+  full_bin = "NEXUS_DEBUG=1 NEXUS_PLUGINS_DIR=./tmp/plugins ./tmp/nexus-open --debug"
   include_dir = ["cmd", "internal", "pkg", "plugins"]
   include_ext = ["go"]
   include_file = []
@@ -21,16 +21,11 @@ tmp_dir = "tmp"
   poll = false
   poll_interval = 0
   post_cmd = []
-  # Plugins are built directly into the installed location so the daemon
-  # picks them up immediately on restart without a separate copy step.
-  pre_cmd = [
-    "cd plugins/cpu-temp && go build -o ~/.local/share/nexus-open/plugins/cpu-temp  .",
-    "cd plugins/cpu-load && go build -o ~/.local/share/nexus-open/plugins/cpu-load  .",
-    "cd plugins/gpu-temp && go build -o ~/.local/share/nexus-open/plugins/gpu-temp  .",
-    "cd plugins/gpu-load && go build -o ~/.local/share/nexus-open/plugins/gpu-load  .",
-    "cd plugins/network  && go build -o ~/.local/share/nexus-open/plugins/network   .",
-    "cd plugins/weather  && go build -o ~/.local/share/nexus-open/plugins/weather   .",
-  ]
+  # Only rebuild plugins whose source is newer than their binary (mtime check).
+  # Builds to ./tmp/plugins/<name>/<name> via atomic rename — the running daemon
+  # never sees a partial binary. NEXUS_PLUGINS_DIR keeps dev artifacts out of
+  # the XDG install path.
+  pre_cmd = ["bash scripts/build-changed-plugins.sh"]
   rerun = false
   rerun_delay = 500
   send_interrupt = true

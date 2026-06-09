@@ -258,10 +258,11 @@ func (a *App) initialize() error {
 		"current_page", a.zoneManager.GetConfig().Pages[0].Name)
 
 	// 6. Resolve plugins directory.
-	// Priority: explicit flag > XDG data dir install > sibling to executable (dev).
+	// Priority: explicit flag > NEXUS_PLUGINS_DIR env > XDG data dir install > sibling to executable (dev).
 	if a.pluginsDir == "" {
-		exePath, err := os.Executable()
-		if err == nil {
+		if env := os.Getenv("NEXUS_PLUGINS_DIR"); env != "" {
+			a.pluginsDir = env
+		} else if exePath, err := os.Executable(); err == nil {
 			sibling := filepath.Join(filepath.Dir(exePath), "plugins")
 			xdgData := filepath.Join(os.Getenv("XDG_DATA_HOME"), "nexus-open", "plugins")
 			if os.Getenv("XDG_DATA_HOME") == "" {
