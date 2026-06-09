@@ -88,14 +88,16 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	// Block until context is canceled or shutdown is called
+	var runErr error
 	select {
 	case <-ctx.Done():
 		a.logger.Info("context canceled")
-		return ctx.Err()
+		runErr = ctx.Err()
 	case <-a.shutdownCh:
 		a.logger.Info("shutdown requested")
-		return nil
 	}
+	a.Shutdown() //nolint:errcheck
+	return runErr
 }
 
 // APIServer returns the underlying API server, used by callers that need to

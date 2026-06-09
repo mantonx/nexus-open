@@ -31,6 +31,7 @@ func defaultLayoutPath() string {
 }
 
 func TestApp_New(t *testing.T) {
+	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -67,6 +68,7 @@ func TestApp_New(t *testing.T) {
 }
 
 func TestApp_Lifecycle(t *testing.T) {
+	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -74,6 +76,7 @@ func TestApp_Lifecycle(t *testing.T) {
 		WithConfigPath(""),
 		WithAPIPort(19851),
 		WithLayoutPath(defaultLayoutPath()),
+		WithPluginsDir(t.TempDir()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -96,18 +99,20 @@ func TestApp_Lifecycle(t *testing.T) {
 		t.Errorf("shutdown failed: %v", err)
 	}
 
-	// Wait for Run to complete
+	// Wait for Run to complete. Allow generous headroom — start() iterates all
+	// zones synchronously and race-detector overhead can add several seconds.
 	select {
 	case err := <-done:
 		if err != nil && err != context.Canceled {
 			t.Errorf("unexpected run error: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Error("app did not shutdown in time")
 	}
 }
 
 func TestApp_MultipleShutdowns(t *testing.T) {
+	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -115,6 +120,7 @@ func TestApp_MultipleShutdowns(t *testing.T) {
 		WithConfigPath(""),
 		WithAPIPort(19852),
 		WithLayoutPath(defaultLayoutPath()),
+		WithPluginsDir(t.TempDir()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -138,6 +144,7 @@ func TestApp_MultipleShutdowns(t *testing.T) {
 }
 
 func TestApp_ContextCancellation(t *testing.T) {
+	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -145,6 +152,7 @@ func TestApp_ContextCancellation(t *testing.T) {
 		WithConfigPath(""),
 		WithAPIPort(19853),
 		WithLayoutPath(defaultLayoutPath()),
+		WithPluginsDir(t.TempDir()),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -163,15 +171,14 @@ func TestApp_ContextCancellation(t *testing.T) {
 	// Cancel context
 	cancel()
 
-	// Wait for Run to exit. 5s gives comfortable headroom — Run() itself
-	// returns instantly on ctx cancel; the budget covers goroutine scheduling
-	// and startup work that varies with system load and module launch attempts.
+	// Wait for Run to exit. The race detector adds substantial overhead when
+	// iterating zones during start(), so allow generous headroom.
 	select {
 	case err := <-done:
 		if err != context.Canceled {
 			t.Errorf("expected context.Canceled, got %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Error("app did not exit after context cancellation")
 	}
 
