@@ -70,30 +70,34 @@ build_binary() {
     ok "Built: $DAEMON_BIN"
 }
 
-# Build inside Ubuntu 22.04 to target its glibc (2.35), so the binary runs
-# on Ubuntu 22.04, 24.04, and Debian 12. Binaries built on Arch link against
-# glibc 2.38+ which is too new for Ubuntu 22.04.
-build_binary_ubuntu() {
-    info "Building Go daemon inside Ubuntu 24.04 (minimum supported distro)..."
+# Build a fully static binary with CGO_ENABLED=0. No Docker needed — pure Go
+# means no glibc dependency at all, so the binary runs on any Linux amd64.
+# Also writes dist/nexus-open-<version>-linux-amd64.tar.gz for direct download.
+build_binary_static() {
+    info "Building static Go daemon (CGO_ENABLED=0)..."
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    docker run --rm \
-        -v "$REPO_DIR:/src" \
-        -w /src \
-        ubuntu:24.04 bash -c "
-            set -e
-            apt-get update -qq
-            apt-get install -y --no-install-recommends \
-                curl ca-certificates \
-                libusb-1.0-0-dev \
-                libayatana-appindicator3-dev \
-                pkg-config gcc 2>&1 | tail -2
-            curl -sSL https://go.dev/dl/go1.25.0.linux-amd64.tar.gz | tar -C /usr/local -xz
-            export PATH=/usr/local/go/bin:\$PATH
-            go build -trimpath \
-                -ldflags \"-X main.version=${PKG_VERSION} -X main.commit=${COMMIT}\" \
-                -o nexus-open ./cmd/nexus-open
-        "
-    ok "Built: $DAEMON_BIN (Ubuntu 24.04 target)"
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags "-s -w -X main.version=${PKG_VERSION} -X main.commit=${COMMIT}" \
+        -o "$DAEMON_BIN" \
+        ./cmd/nexus-open
+    ok "Built: $DAEMON_BIN (static)"
+
+    # Produce a standalone tarball for direct installs and AUR.
+    # Includes the binary plus all packaging files needed by the PKGBUILD
+    # (udev rule, systemd service, desktop file, license) so the PKGBUILD
+    # needs no build tools — just go, makedepends-free.
+    mkdir -p "$OUT_DIR"
+    local tarball="$OUT_DIR/${PKG_NAME}-${PKG_VERSION}-linux-amd64.tar.gz"
+    tar -czf "$tarball" \
+        -C "$REPO_DIR" \
+        --transform "s|^|nexus-open-${PKG_VERSION}/|" \
+        nexus-open \
+        packaging/udev/99-corsair-nexus.rules \
+        packaging/systemd/nexus-open.service \
+        packaging/desktop/nexus-open.desktop \
+        LICENSE
+    ok "Static tarball: $tarball"
 }
 
 # ── staging area ──────────────────────────────────────────────────────────────
@@ -177,10 +181,7 @@ fpm_common() {
 # ── deb ───────────────────────────────────────────────────────────────────────
 
 build_deb() {
-    # Build inside Ubuntu 24.04 (minimum supported) so the binary links
-    # against glibc 2.39 / glib 2.80 — the oldest we support.
-    # Ubuntu 22.04 and Debian 12 require the Flatpak due to glib < 2.75.
-    build_binary_ubuntu
+    build_binary_static
     build_staging  # re-stage with the freshly built binary
     info "Building .deb..."
     mkdir -p "$OUT_DIR"
@@ -436,25 +437,21 @@ FPM="$HOME/.local/share/gem/ruby/3.4.0/bin/fpm"
 echo "Building Nexus Open v${PKG_VERSION} packages..."
 echo ""
 
-# deb builds its own binary inside Ubuntu 24.04 for glibc compatibility.
-# rpm and pacman use a native binary (the host distro's glibc is fine for
-# Fedora/Arch users who will have a recent glibc).
-if $BUILD_RPM || $BUILD_PACMAN; then
-    build_binary
+# All formats use the same static binary. Build it once, then stage/package.
+# deb calls build_binary_static + build_staging internally; do it here for
+# rpm/pacman/appimage so they share the same artifact.
+if $BUILD_RPM || $BUILD_PACMAN || $BUILD_APPIMAGE; then
+    build_binary_static
     build_staging
     $BUILD_RPM    && build_rpm
     $BUILD_PACMAN && build_pacman
 fi
 
-# deb: build_deb calls build_binary_ubuntu + build_staging internally
 $BUILD_DEB && build_deb
 
 # AppImage: delegates to scripts/build-appimage.sh which manages its own AppDir.
 # Requires appimagetool in PATH or ~/bin.
-if $BUILD_APPIMAGE; then
-    build_binary
-    build_appimage
-fi
+$BUILD_APPIMAGE && build_appimage
 
 if $RUN_TESTS; then
     echo ""

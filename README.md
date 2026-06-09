@@ -69,13 +69,17 @@ NEXUS_MOCK_DEVICE=1 make dev
 
 ### Install from package
 
-| Distribution | Command |
+Download the latest release from the [GitHub releases page](https://github.com/mantonx/nexus-open/releases/latest).
+
+| Format | Who it's for |
 | --- | --- |
-| Flatpak (all distros) | `flatpak install flathub com.github.nexusopen.NexusOpen` |
-| Snap | `sudo snap install nexus-open` |
-| Debian / Ubuntu | `sudo dpkg -i nexus-open_1.0.0_amd64.deb` |
-| Arch Linux (AUR) | `yay -S nexus-open` |
-| AppImage | `chmod +x nexus-open-1.0.0-x86_64.AppImage && ./nexus-open-1.0.0-x86_64.AppImage` |
+| `.deb` | Debian, Ubuntu 24.04+ |
+| `.rpm` | Fedora, RHEL, openSUSE |
+| `.pkg.tar.zst` | Arch Linux |
+| `.AppImage` | Any distro (no install needed) |
+| `.tar.gz` | Manual / headless installs (static binary + udev rule) |
+
+After installing, unplug and replug the Nexus — the bundled udev rule grants access automatically on any systemd desktop (no group membership needed).
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full instructions and USB permission setup.
 

@@ -1,91 +1,42 @@
-# Maintainer: Nexus Open Team <matthew.panton@gmail.com>
+# Maintainer: Matt <matthew.panton@gmail.com>
 pkgname=nexus-open
-pkgver=1.0.0
+pkgver=0.0.1
 pkgrel=1
 pkgdesc="Linux controller for Corsair iCUE Nexus display device"
 arch=('x86_64')
-url="https://github.com/mantonx/nexus-next"
+url="https://github.com/mantonx/nexus-open"
 license=('MIT')
-depends=('libayatana-appindicator')
-optdepends=('flutter: for GUI configuration interface')
-makedepends=('go>=1.23' 'git' 'libayatana-appindicator')
-source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/v${pkgver}.tar.gz")
-sha256sums=('SKIP')  # Update this with actual checksum after release
-backup=('usr/lib/udev/rules.d/99-corsair-nexus.rules')
-
-prepare() {
-    cd "${srcdir}/${pkgname}-${pkgver}"
-    # Download Go module dependencies
-    go mod download
-}
-
-build() {
-    cd "${srcdir}/${pkgname}-${pkgver}"
-
-    export CGO_CPPFLAGS="${CPPFLAGS}"
-    export CGO_CFLAGS="${CFLAGS}"
-    export CGO_CXXFLAGS="${CXXFLAGS}"
-    export CGO_LDFLAGS="${LDFLAGS}"
-    export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-
-    # Get git commit hash
-    _commit=$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')
-
-    # Build the binary
-    go build \
-        -ldflags "-linkmode external -extldflags \"${LDFLAGS}\" -X main.version=${pkgver} -X main.commit=${_commit}" \
-        -o "${pkgname}" \
-        ./cmd/nexus-open
-}
-
-check() {
-    cd "${srcdir}/${pkgname}-${pkgver}"
-
-    # Run tests
-    go test -v ./...
-}
+depends=('libayatana-appindicator3' 'gtk3' 'libgl' 'libgles' 'libegl')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}-linux-amd64.tar.gz")
+sha256sums=('SKIP')
 
 package() {
     cd "${srcdir}/${pkgname}-${pkgver}"
 
-    # Install binary
-    install -Dm755 "${pkgname}" "${pkgdir}/usr/bin/${pkgname}"
+    install -Dm755 nexus-open \
+        "${pkgdir}/usr/bin/nexus-open"
 
-    # Install udev rules to /usr/lib — the package-managed location on Arch.
     install -Dm644 packaging/udev/99-corsair-nexus.rules \
         "${pkgdir}/usr/lib/udev/rules.d/99-corsair-nexus.rules"
 
-    # Install systemd user service
     install -Dm644 packaging/systemd/nexus-open.service \
-        "${pkgdir}/usr/lib/systemd/user/${pkgname}.service"
+        "${pkgdir}/usr/lib/systemd/user/nexus-open.service"
 
-    # Install desktop file
-    install -Dm644 packaging/desktop/${pkgname}.desktop \
-        "${pkgdir}/usr/share/applications/${pkgname}.desktop"
+    install -Dm644 packaging/desktop/nexus-open.desktop \
+        "${pkgdir}/usr/share/applications/nexus-open.desktop"
 
-    # Install documentation
-    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
-    install -Dm644 PROJECT_PLAN.md "${pkgdir}/usr/share/doc/${pkgname}/PROJECT_PLAN.md"
-
-    # Install license
-    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 LICENSE \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
 
 post_install() {
-    # Ensure plugdev group exists — fallback for headless installs.
-    getent group plugdev > /dev/null 2>&1 || groupadd -r plugdev
-
     echo ""
     echo "==> Nexus Open installed!"
     echo ""
-    echo "Unplug and replug your iCUE Nexus — it will be accessible immediately"
-    echo "in your desktop session (TAG+=\"uaccess\" handles permissions automatically)."
+    echo "Unplug and replug your iCUE Nexus — uaccess grants access automatically"
+    echo "in your desktop session. No group membership needed."
     echo ""
-    echo "On headless or multi-user systems, also run:"
-    echo "  sudo gpasswd -a \$USER plugdev"
-    echo "and log out/in for the group change to take effect."
-    echo ""
-    echo "To enable at login: systemctl --user enable --now nexus-open.service"
+    echo "To start at login: systemctl --user enable --now nexus-open.service"
     echo ""
 }
 

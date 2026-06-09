@@ -1,15 +1,16 @@
 pkgbase = nexus-open
 	pkgdesc = Linux controller for Corsair iCUE Nexus display device
-	pkgver = 1.0.0
+	pkgver = 0.0.1
 	pkgrel = 1
-	url = https://github.com/mantonx/nexus-next
+	url = https://github.com/mantonx/nexus-open
 	arch = x86_64
 	license = MIT
-	makedepends = go>=1.23
-	makedepends = git
-	optdepends = flutter: for GUI configuration interface
-	backup = usr/lib/udev/rules.d/99-corsair-nexus.rules
-	source = nexus-open-1.0.0.tar.gz::https://github.com/mantonx/nexus-next/archive/v1.0.0.tar.gz
+	depends = libayatana-appindicator3
+	depends = gtk3
+	depends = libgl
+	depends = libgles
+	depends = libegl
+	source = nexus-open-0.0.1.tar.gz::https://github.com/mantonx/nexus-open/releases/download/v0.0.1/nexus-open-0.0.1-linux-amd64.tar.gz
 	sha256sums = SKIP
 
 pkgname = nexus-open
