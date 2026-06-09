@@ -65,6 +65,4 @@ const (
 	DisplayWidth  = 640
 	DisplayHeight = 48
 	FrameSize     = DisplayWidth * DisplayHeight * 4 // RGBA
-	ChunkSize     = 1024 * 4                         // USB transfer chunk size
-	NumChunks     = 121                              // Total chunks per frame
 )
