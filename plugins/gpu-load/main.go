@@ -108,7 +108,7 @@ func (p *GPULoadPlugin) Sample() (plugin.Payload, error) {
 			Primary:   "—",
 			Secondary: secondary,
 			Severity:  plugin.SeverityWarn,
-			TTL:       2 * time.Second,
+			TTL:       1500 * time.Millisecond,
 			Timestamp: time.Now(),
 		}, nil
 	}

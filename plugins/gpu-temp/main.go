@@ -22,12 +22,15 @@ type GPUTempPlugin struct {
 	history    []float32  // Sparkline data (last 60 samples)
 	historyMu  sync.Mutex // Protect history
 	maxHistory int        // Maximum history length
-	vendor     string     // Detected GPU vendor (nvidia/amd/intel)
-	vendorMu   sync.Mutex // Protect vendor detection
-	unit       string     // "metric" (Celsius) or "imperial" (Fahrenheit)
-	unitMu     sync.RWMutex
-	graphType  plugin.GraphType // Graph visualization type
-	graphMu    sync.RWMutex
+
+	vendorOnce sync.Once
+	vendor     string // Detected GPU vendor (nvidia/amd/intel/generic)
+	vendorPath string // sysfs card path for AMD/Intel/generic
+
+	unit      string // "metric" (Celsius) or "imperial" (Fahrenheit)
+	unitMu    sync.RWMutex
+	graphType plugin.GraphType
+	graphMu   sync.RWMutex
 }
 
 // NewGPUTempPlugin creates a new GPU temperature module
@@ -35,8 +38,8 @@ func NewGPUTempPlugin() *GPUTempPlugin {
 	return &GPUTempPlugin{
 		history:    make([]float32, 0, 60),
 		maxHistory: 60,
-		graphType:  plugin.GraphTypeSparkline, // default to sparkline
-		unit:       "metric", // default to Celsius
+		graphType:  plugin.GraphTypeSparkline,
+		unit:       "metric",
 	}
 }
 
@@ -78,7 +81,7 @@ func (m *GPUTempPlugin) Sample() (plugin.Payload, error) {
 			Primary:   "—",
 			Secondary: "No GPU",
 			Severity:  plugin.SeverityWarn,
-			TTL:       2 * time.Second,
+			TTL:       3 * time.Second,
 			Timestamp: time.Now(),
 		}, nil
 	}
@@ -126,31 +129,55 @@ func (m *GPUTempPlugin) Sample() (plugin.Payload, error) {
 
 // getGPUTemp queries for GPU temperature using multiple detection methods
 func (m *GPUTempPlugin) getGPUTemp() (float64, error) {
-	// Try NVIDIA first
-	if temp, err := m.getNVIDIATemp(); err == nil {
-		m.setVendor("nvidia")
-		return temp, nil
+	m.vendorOnce.Do(m.detectVendor)
+	switch m.vendor {
+	case "nvidia":
+		return m.getNVIDIATemp()
+	case "amd":
+		return m.getAMDTemp()
+	case "intel":
+		return m.findIntelSysfsTemp()
+	case "generic":
+		return m.getSysfsTemp()
 	}
-
-	// Try AMD
-	if temp, err := m.getAMDTemp(); err == nil {
-		m.setVendor("amd")
-		return temp, nil
-	}
-
-	// Try Intel
-	if temp, err := m.getIntelTemp(); err == nil {
-		m.setVendor("intel")
-		return temp, nil
-	}
-
-	// Try generic sysfs (fallback for any GPU)
-	if temp, err := m.getSysfsTemp(); err == nil {
-		m.setVendor("generic")
-		return temp, nil
-	}
-
 	return 0, fmt.Errorf("no GPU found or supported")
+}
+
+// detectVendor probes hardware once and caches the result.
+func (m *GPUTempPlugin) detectVendor() {
+	// NVIDIA
+	cmd := exec.Command("nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits")
+	if out, err := cmd.Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		m.vendor = "nvidia"
+		return
+	}
+
+	cards, _ := filepath.Glob("/sys/class/drm/card[0-9]*")
+	for _, card := range cards {
+		vendorData, err := os.ReadFile(filepath.Join(card, "device", "vendor"))
+		if err != nil {
+			continue
+		}
+		vendor := strings.TrimSpace(string(vendorData))
+		devPath := filepath.Join(card, "device")
+		switch vendor {
+		case "0x1002": // AMD
+			m.vendor = "amd"
+			m.vendorPath = devPath
+			return
+		case "0x8086": // Intel
+			m.vendor = "intel"
+			m.vendorPath = devPath
+			return
+		default:
+			// Generic: any card with a hwmon temp file
+			if matches, _ := filepath.Glob(filepath.Join(devPath, "hwmon", "hwmon*", "temp1_input")); len(matches) > 0 {
+				m.vendor = "generic"
+				m.vendorPath = devPath
+				return
+			}
+		}
+	}
 }
 
 // getNVIDIATemp queries nvidia-smi for NVIDIA GPU temperature
@@ -175,168 +202,50 @@ func (m *GPUTempPlugin) getNVIDIATemp() (float64, error) {
 	return temp, nil
 }
 
-// getAMDTemp queries rocm-smi for AMD GPU temperature
+// getAMDTemp reads AMD GPU temperature via rocm-smi, falling back to sysfs.
 func (m *GPUTempPlugin) getAMDTemp() (float64, error) {
-	// Try rocm-smi first (AMD ROCm stack)
 	cmd := exec.Command("rocm-smi", "--showtemp", "--csv")
-	output, err := cmd.Output()
-	if err == nil {
-		// Parse CSV output: card0,Temperature (Sensor edge) (C),52.0
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		for _, line := range lines {
+	if output, err := cmd.Output(); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 			if strings.Contains(line, "card") && strings.Contains(line, "Temperature") {
 				fields := strings.Split(line, ",")
 				if len(fields) >= 3 {
-					temp, err := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
-					if err == nil {
+					if temp, err := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64); err == nil {
 						return temp, nil
 					}
 				}
 			}
 		}
 	}
-
-	// Fallback: Try AMD sysfs path
-	// /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input (in millidegrees)
-	return m.findAMDSysfsTemp()
+	return readHwmonTemp(m.vendorPath)
 }
 
-// getIntelTemp queries for Intel GPU temperature
-func (m *GPUTempPlugin) getIntelTemp() (float64, error) {
-	// Intel GPUs typically expose temperature via sysfs
-	// /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input
-	return m.findIntelSysfsTemp()
-}
-
-// getSysfsTemp is a generic fallback that searches sysfs for any GPU temp
+// getSysfsTemp reads temperature for generic or Intel GPUs via hwmon.
 func (m *GPUTempPlugin) getSysfsTemp() (float64, error) {
-	// Search /sys/class/drm/card*/device/hwmon/hwmon*/temp*_input
-	pattern := "/sys/class/drm/card*/device/hwmon/hwmon*/temp1_input"
-	matches, err := filepath.Glob(pattern)
-	if err != nil || len(matches) == 0 {
-		return 0, fmt.Errorf("no sysfs temperature found")
-	}
+	return readHwmonTemp(m.vendorPath)
+}
 
-	// Read first match
+// findIntelSysfsTemp reads Intel GPU temperature via the cached vendorPath.
+func (m *GPUTempPlugin) findIntelSysfsTemp() (float64, error) {
+	return readHwmonTemp(m.vendorPath)
+}
+
+// readHwmonTemp reads temp1_input from the hwmon directory under devPath
+// and converts millidegrees Celsius to degrees.
+func readHwmonTemp(devPath string) (float64, error) {
+	matches, err := filepath.Glob(filepath.Join(devPath, "hwmon", "hwmon*", "temp1_input"))
+	if err != nil || len(matches) == 0 {
+		return 0, fmt.Errorf("no hwmon temp file under %s", devPath)
+	}
 	data, err := os.ReadFile(matches[0])
 	if err != nil {
-		return 0, fmt.Errorf("failed to read sysfs temp: %w", err)
+		return 0, err
 	}
-
-	// Parse temperature (in millidegrees Celsius)
-	tempStr := strings.TrimSpace(string(data))
-	milliTemp, err := strconv.ParseInt(tempStr, 10, 64)
+	milliTemp, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse sysfs temp: %w", err)
+		return 0, err
 	}
-
-	// Convert millidegrees to degrees
 	return float64(milliTemp) / 1000.0, nil
-}
-
-// findAMDSysfsTemp searches for AMD GPU temperature in sysfs
-func (m *GPUTempPlugin) findAMDSysfsTemp() (float64, error) {
-	// AMD GPUs appear as /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input
-	// Look for cards with AMD vendor ID (1002) or amdgpu driver
-	cards, err := filepath.Glob("/sys/class/drm/card[0-9]")
-	if err != nil {
-		return 0, err
-	}
-
-	for _, card := range cards {
-		// Check if this is an AMD GPU
-		vendorPath := filepath.Join(card, "device", "vendor")
-		vendorData, err := os.ReadFile(vendorPath)
-		if err != nil {
-			continue
-		}
-		vendor := strings.TrimSpace(string(vendorData))
-
-		// AMD vendor ID is 0x1002
-		if !strings.Contains(vendor, "0x1002") {
-			continue
-		}
-
-		// Find temperature file
-		pattern := filepath.Join(card, "device", "hwmon", "hwmon*", "temp1_input")
-		matches, err := filepath.Glob(pattern)
-		if err != nil || len(matches) == 0 {
-			continue
-		}
-
-		// Read temperature
-		data, err := os.ReadFile(matches[0])
-		if err != nil {
-			continue
-		}
-
-		tempStr := strings.TrimSpace(string(data))
-		milliTemp, err := strconv.ParseInt(tempStr, 10, 64)
-		if err != nil {
-			continue
-		}
-
-		return float64(milliTemp) / 1000.0, nil
-	}
-
-	return 0, fmt.Errorf("no AMD GPU found")
-}
-
-// findIntelSysfsTemp searches for Intel GPU temperature in sysfs
-func (m *GPUTempPlugin) findIntelSysfsTemp() (float64, error) {
-	// Intel GPUs appear as /sys/class/drm/card*/device/hwmon/hwmon*/temp1_input
-	// Look for cards with Intel vendor ID (8086) or i915 driver
-	cards, err := filepath.Glob("/sys/class/drm/card[0-9]")
-	if err != nil {
-		return 0, err
-	}
-
-	for _, card := range cards {
-		// Check if this is an Intel GPU
-		vendorPath := filepath.Join(card, "device", "vendor")
-		vendorData, err := os.ReadFile(vendorPath)
-		if err != nil {
-			continue
-		}
-		vendor := strings.TrimSpace(string(vendorData))
-
-		// Intel vendor ID is 0x8086
-		if !strings.Contains(vendor, "0x8086") {
-			continue
-		}
-
-		// Find temperature file
-		pattern := filepath.Join(card, "device", "hwmon", "hwmon*", "temp1_input")
-		matches, err := filepath.Glob(pattern)
-		if err != nil || len(matches) == 0 {
-			continue
-		}
-
-		// Read temperature
-		data, err := os.ReadFile(matches[0])
-		if err != nil {
-			continue
-		}
-
-		tempStr := strings.TrimSpace(string(data))
-		milliTemp, err := strconv.ParseInt(tempStr, 10, 64)
-		if err != nil {
-			continue
-		}
-
-		return float64(milliTemp) / 1000.0, nil
-	}
-
-	return 0, fmt.Errorf("no Intel GPU found")
-}
-
-// setVendor sets the detected GPU vendor (thread-safe)
-func (m *GPUTempPlugin) setVendor(vendor string) {
-	m.vendorMu.Lock()
-	defer m.vendorMu.Unlock()
-	if m.vendor == "" {
-		m.vendor = vendor
-	}
 }
 
 // addToHistory adds a temperature sample to history
