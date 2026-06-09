@@ -1,0 +1,8 @@
+{
+  "value": "80",
+  "value_unit": "°F",
+  "secondary": "Weather",
+  "severity": "ok",
+  "expandable": true,
+"ttl": 300000000000
+}

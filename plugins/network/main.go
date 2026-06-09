@@ -111,20 +111,15 @@ func (m *NetworkPlugin) Sample() (plugin.Payload, error) {
 	m.graphMu.RUnlock()
 
 	return plugin.Payload{
-		Primary:          fmt.Sprintf("↓ %s\n↑ %s", downStr, upStr),
-		Secondary:        "Network",
-		Severity:         plugin.SeverityOK,
-		Spark:            spark,
-		GraphType:        currentGraphType,
-		TTL:              3 * time.Second,           // Slightly longer than refresh to prevent "plugin slow" warnings
-		Icon:             "network-wired",
-		LineSpacing:      20,                        // Extra spacing for stacked network speeds
-		LabelPosition:    plugin.LabelPositionRight, // Position label to the right
-		LabelOffsetX:     20,                        // Spacing between values and label (in pixels)
-		NormalizeGraph:   true,                      // Normalize to show relative bandwidth changes
-		GraphBgOpacity:   0, // 0 = use renderer default
-		GraphLineOpacity: 0, // 0 = use renderer default
-		Timestamp:        time.Now(),
+		Primary:        fmt.Sprintf("↓%s ↑%s", downStr, upStr),
+		Secondary:      "Net",
+		Caption:        fmt.Sprintf("↓%s ↑%s", downStr, upStr),
+		Severity:       plugin.SeverityOK,
+		Spark:          spark,
+		GraphType:      currentGraphType,
+		TTL:            3 * time.Second,
+		NormalizeGraph: true,
+		Timestamp:      time.Now(),
 	}, nil
 }
 

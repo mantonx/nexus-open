@@ -121,11 +121,13 @@ func (m *WeatherPlugin) Configure(cfg map[string]any) error {
 }
 
 func (m *WeatherPlugin) formatPayload(data *WeatherData) plugin.Payload {
-	var tempStr string
+	var tempVal, tempUnit string
 	if data.Unit == "imperial" {
-		tempStr = fmt.Sprintf("%.0f°F", data.Temperature)
+		tempVal = fmt.Sprintf("%.0f", data.Temperature)
+		tempUnit = "°F"
 	} else {
-		tempStr = fmt.Sprintf("%.0f°C", data.Temperature)
+		tempVal = fmt.Sprintf("%.0f", data.Temperature)
+		tempUnit = "°C"
 	}
 
 	loc := data.Location
@@ -134,7 +136,9 @@ func (m *WeatherPlugin) formatPayload(data *WeatherData) plugin.Payload {
 	}
 
 	return plugin.Payload{
-		Primary:   tempStr,
+		Primary:   tempVal + tempUnit,
+		Value:     tempVal,
+		ValueUnit: tempUnit,
 		Secondary: loc,
 		Severity:  plugin.SeverityOK,
 		Icon:      data.Icon,

@@ -95,12 +95,14 @@ func (m *CPUTempPlugin) Sample() (plugin.Payload, error) {
 	currentUnit := m.unit
 	m.unitMu.RUnlock()
 
-	var tempStr string
+	var tempVal, tempUnit string
 	if currentUnit == "imperial" {
 		fahrenheit := (temp * 9 / 5) + 32
-		tempStr = fmt.Sprintf("%.0f°F", fahrenheit)
+		tempVal = fmt.Sprintf("%.0f", fahrenheit)
+		tempUnit = "°F"
 	} else {
-		tempStr = fmt.Sprintf("%.0f°C", temp)
+		tempVal = fmt.Sprintf("%.0f", temp)
+		tempUnit = "°C"
 	}
 
 	// Get current graph type
@@ -109,7 +111,9 @@ func (m *CPUTempPlugin) Sample() (plugin.Payload, error) {
 	m.graphMu.RUnlock()
 
 	return plugin.Payload{
-		Primary:          tempStr,
+		Primary:          tempVal + tempUnit,
+		Value:            tempVal,
+		ValueUnit:        tempUnit,
 		Secondary:        "CPU",
 		Severity:         severity,
 		Spark:            spark,

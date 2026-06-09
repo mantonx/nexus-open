@@ -1,0 +1,9 @@
+{
+  "primary": "↓222\n↑221",
+  "secondary": "Net",
+  "severity": "ok",
+  "graph_type": "line",
+  "spark": [0.40, 0.42, 0.38, 0.52, 0.35, 0.60, 0.45, 0.58, 0.40, 0.70, 0.50, 0.65, 0.55, 0.62],
+  "normalize_graph": true,
+  "ttl": 2000000000
+}
