@@ -13,9 +13,15 @@ Nexus Open is a native Linux application for the Corsair iCUE Nexus (640×48 pix
 
 The device is not officially supported on Linux — this project reverse-engineered the USB protocol to make it work.
 
-![640×48 hardware display — clock, weather, CPU, GPU, and network zones](docs/screenshots/display.png)
+## Screenshots
 
-![Settings UI showing the layout editor and live hardware preview](docs/screenshots/settings-ui.png)
+**Hardware display** — 640×48 pixels; clock, weather, CPU, GPU temperature, and network throughput:
+
+![640×48 hardware display showing clock, weather, CPU, GPU, and network zones](docs/screenshots/display.png)
+
+**Settings UI** — layout editor with live hardware preview at the top:
+
+![Flutter settings UI with layout editor and live hardware preview strip](docs/screenshots/settings-ui.png)
 
 ## Features
 
