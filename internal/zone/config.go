@@ -4,6 +4,8 @@ package zone
 import (
 	"fmt"
 	"image/color"
+
+	"github.com/mantonx/nexus-open/internal/design"
 )
 
 const (
@@ -74,16 +76,16 @@ type Theme struct {
 // DefaultTheme returns the default dark theme
 func DefaultTheme() Theme {
 	return Theme{
-		Bg:                "#000000",
-		Fg:                "#EAEAEA",
-		Muted:             "#B8BDC2",
-		Accent:            "#00C8FF",
-		ZoneBg:            "#000000",
+		Bg:                "#050505",
+		Fg:                "#ECECEC",
+		Muted:             "#9A9A9A",
+		Accent:            "#5AA0E0",
+		ZoneBg:            "#050505",
 		GutterPx:          2,
-		FontSizePrimary:   24,
-		FontSizeSecondary: 9,
-		GraphBgOpacity:    0, // new renderer uses gradient fill — this is unused
-		GraphLineOpacity:  0, // new renderer uses fixed 0.95 line opacity
+		FontSizePrimary:   22,
+		FontSizeSecondary: 10,
+		GraphBgOpacity:    0,
+		GraphLineOpacity:  0,
 	}
 }
 
@@ -161,10 +163,10 @@ const (
 	TapActionDetail TapAction = "detail" // Show plugin detail overlay
 )
 
-// Severity display colors — fixed values that match the Corsair design language.
+// Severity display colors — sourced from design tokens; never configurable.
 var (
-	SeverityColorWarn = color.RGBA{R: 255, G: 176, B: 32, A: 255}
-	SeverityColorCrit = color.RGBA{R: 255, G: 68, B: 68, A: 255}
+	SeverityColorWarn = design.Warn
+	SeverityColorCrit = design.Crit
 )
 
 // Validate checks if the configuration is valid

@@ -92,6 +92,66 @@ func TestPayloadValidation(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		// New fields added in Phase 2.
+		{
+			name: "value accepted without primary",
+			payload: Payload{
+				Value:     "41",
+				ValueUnit: "°C",
+				Severity:  SeverityOK,
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty primary and empty value",
+			payload: Payload{
+				ValueUnit: "°C",
+			},
+			wantErr: true,
+		},
+		{
+			name: "load_spark too long",
+			payload: Payload{
+				Value:     "72",
+				LoadSpark: make([]float32, 61),
+			},
+			wantErr: true,
+		},
+		{
+			name: "load_spark value out of range (negative)",
+			payload: Payload{
+				Value:     "72",
+				LoadSpark: []float32{0.3, -0.1, 0.9},
+			},
+			wantErr: true,
+		},
+		{
+			name: "load_spark value out of range (too high)",
+			payload: Payload{
+				Value:     "72",
+				LoadSpark: []float32{0.3, 1.2, 0.9},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid load_spark",
+			payload: Payload{
+				Value:     "72",
+				Spark:     []float32{0.5, 0.6, 0.7},
+				LoadSpark: []float32{0.3, 0.4, 0.5},
+				GraphType: GraphTypeCombo,
+			},
+			wantErr: false,
+		},
+		{
+			name: "span and expandable are optional",
+			payload: Payload{
+				Value:      "Now Playing",
+				Span:       3,
+				Expandable: true,
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -204,6 +264,68 @@ func TestDescriptor_SchemaInJSON(t *testing.T) {
 
 	if _, ok := m["config_schema"]; !ok {
 		t.Error("Descriptor JSON missing config_schema field")
+	}
+}
+
+func TestGraphTypeConstants(t *testing.T) {
+	// All graph types must round-trip through JSON without loss.
+	types := []GraphType{
+		GraphTypeSparkline,
+		GraphTypeBar,
+		GraphTypeArea,
+		GraphTypeLine,
+		GraphTypeSegmented,
+		GraphTypeBarThresh,
+		GraphTypeCombo,
+		GraphTypeNumberDelta,
+	}
+	for _, gt := range types {
+		p := Payload{Value: "42", GraphType: gt}
+		data, err := json.Marshal(p)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", gt, err)
+		}
+		var got Payload
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("%s: unmarshal: %v", gt, err)
+		}
+		if got.GraphType != gt {
+			t.Errorf("%s: round-trip got %s", gt, got.GraphType)
+		}
+	}
+}
+
+func TestNewFieldsJSONRoundTrip(t *testing.T) {
+	orig := Payload{
+		Value:      "41",
+		ValueUnit:  "°C",
+		Span:       2,
+		Expandable: true,
+		LoadSpark:  []float32{0.1, 0.5, 0.9},
+		GraphType:  GraphTypeCombo,
+	}
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got Payload
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Value != orig.Value {
+		t.Errorf("Value: want %q got %q", orig.Value, got.Value)
+	}
+	if got.ValueUnit != orig.ValueUnit {
+		t.Errorf("ValueUnit: want %q got %q", orig.ValueUnit, got.ValueUnit)
+	}
+	if got.Span != orig.Span {
+		t.Errorf("Span: want %d got %d", orig.Span, got.Span)
+	}
+	if !got.Expandable {
+		t.Error("Expandable: want true got false")
+	}
+	if len(got.LoadSpark) != 3 || got.LoadSpark[1] != 0.5 {
+		t.Errorf("LoadSpark: got %v", got.LoadSpark)
 	}
 }
 

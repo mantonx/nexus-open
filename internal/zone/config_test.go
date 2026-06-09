@@ -115,14 +115,14 @@ func TestPageComputeOffsets(t *testing.T) {
 func TestThemeColors(t *testing.T) {
 	theme := DefaultTheme()
 
-	// Test parsing valid colors
+	// Background and accent must match design tokens.
 	bgColor := theme.GetBgColor()
-	if bgColor.R != 0x00 || bgColor.G != 0x00 || bgColor.B != 0x00 {
+	if bgColor.R != 0x05 || bgColor.G != 0x05 || bgColor.B != 0x05 {
 		t.Errorf("Background color incorrect: got R=%d G=%d B=%d", bgColor.R, bgColor.G, bgColor.B)
 	}
 
 	accentColor := theme.GetAccentColor()
-	if accentColor.R != 0x00 || accentColor.G != 0xC8 || accentColor.B != 0xFF {
+	if accentColor.R != 0x5A || accentColor.G != 0xA0 || accentColor.B != 0xE0 {
 		t.Errorf("Accent color incorrect: got R=%d G=%d B=%d", accentColor.R, accentColor.G, accentColor.B)
 	}
 }

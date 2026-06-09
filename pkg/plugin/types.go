@@ -114,6 +114,27 @@ type Payload struct {
 	// Positive moves down, negative moves up. Applied after base positioning.
 	LabelOffsetY int `json:"label_offset_y,omitempty"`
 
+	// Value - Numeric or short string value (displayed large, left-aligned).
+	// Replaces the fused Primary field for structured payloads.
+	// If set, Value+ValueUnit are rendered together; Primary is ignored.
+	Value string `json:"value,omitempty"`
+
+	// ValueUnit - Unit suffix rendered smaller and dimmer after Value.
+	// Examples: "°C", "%", "MB/s"
+	ValueUnit string `json:"value_unit,omitempty"`
+
+	// Span - Number of contiguous zone slots this payload occupies (1–6).
+	// A value of 3 means the zone expands to 300px wide at render time.
+	// Defaults to 1.
+	Span int `json:"span,omitempty"`
+
+	// Expandable - True if tapping this zone can show a detail view.
+	Expandable bool `json:"expandable,omitempty"`
+
+	// LoadSpark - Secondary sparkline data for combo graph type.
+	// Used alongside Spark to render e.g. temp+load on the same graph.
+	LoadSpark []float32 `json:"load_spark,omitempty"`
+
 	// NormalizeGraph - If true, graph data is normalized to fill from baseline
 	// Set to true for graphs where relative changes matter (network bandwidth)
 	// Set to false for graphs where absolute values matter (temperatures)
@@ -129,6 +150,11 @@ type Payload struct {
 	// 0 = fully transparent, 100 = fully opaque
 	// If not set, uses theme default (typically low for subtlety)
 	GraphLineOpacity int `json:"graph_line_opacity,omitempty"`
+
+	// Caption - Small accent-colored annotation rendered between the label and the
+	// sparkline (info-blue, caption font size). Intended for rate readouts like
+	// "↓222K ↑221K" in the network zone. Ignored when no Spark data is present.
+	Caption string `json:"caption,omitempty"`
 
 	// RawFrame - Pre-rendered RGBA pixel data (width×height×4 bytes, row-major).
 	// When set, the renderer skips all text/graph layout and blits these pixels
@@ -150,10 +176,14 @@ const (
 type GraphType string
 
 const (
-	GraphTypeSparkline GraphType = "sparkline" // Line graph (default)
-	GraphTypeBar       GraphType = "bar"       // Vertical bars
-	GraphTypeArea      GraphType = "area"      // Filled area under line
-	GraphTypeLine      GraphType = "line"      // Thick gradient line with glow
+	GraphTypeSparkline    GraphType = "sparkline"     // Line graph (default)
+	GraphTypeBar          GraphType = "bar"           // Vertical bars
+	GraphTypeArea         GraphType = "area"          // Filled area under line
+	GraphTypeLine         GraphType = "line"          // Thick gradient line with glow
+	GraphTypeSegmented    GraphType = "segmented"     // Segmented bar (e.g. CPU temp bands)
+	GraphTypeBarThresh    GraphType = "bar_thresh"    // Bar with warning/crit threshold colours
+	GraphTypeCombo        GraphType = "combo"         // Dual sparkline: Spark + LoadSpark
+	GraphTypeNumberDelta  GraphType = "number_delta"  // Large number with +/- delta badge
 )
 
 // LabelPosition specifies where the secondary label should be positioned
@@ -166,7 +196,7 @@ const (
 
 // Validate checks if the payload meets requirements
 func (p *Payload) Validate() error {
-	if p.Primary == "" && len(p.RawFrame) == 0 {
+	if p.Primary == "" && p.Value == "" && len(p.RawFrame) == 0 {
 		return ErrEmptyPrimary
 	}
 
@@ -181,6 +211,16 @@ func (p *Payload) Validate() error {
 	for i, v := range p.Spark {
 		if v < 0.0 || v > 1.0 {
 			return &ErrSparkOutOfRange{Index: i, Value: v}
+		}
+	}
+
+	if len(p.LoadSpark) > 60 {
+		return ErrLoadSparkTooLong
+	}
+
+	for i, v := range p.LoadSpark {
+		if v < 0.0 || v > 1.0 {
+			return &ErrLoadSparkOutOfRange{Index: i, Value: v}
 		}
 	}
 
