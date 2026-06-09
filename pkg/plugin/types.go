@@ -8,11 +8,12 @@ import "time"
 type FieldType string
 
 const (
-	FieldTypeString FieldType = "string"
-	FieldTypeEnum   FieldType = "enum"
-	FieldTypeInt    FieldType = "int"
-	FieldTypeBool   FieldType = "bool"
-	FieldTypeColor  FieldType = "color"
+	FieldTypeString   FieldType = "string"
+	FieldTypeEnum     FieldType = "enum"
+	FieldTypeInt      FieldType = "int"
+	FieldTypeBool     FieldType = "bool"
+	FieldTypeColor    FieldType = "color"
+	FieldTypeLocation FieldType = "location"
 )
 
 // FieldOption is a single selectable value for an enum field.

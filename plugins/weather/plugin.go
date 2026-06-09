@@ -41,12 +41,11 @@ func (m *WeatherPlugin) Describe() (plugin.Descriptor, error) {
 		Schema: plugin.ConfigSchema{
 			Fields: []plugin.ConfigField{
 				{
-					Key: "location", Label: "Location", Type: plugin.FieldTypeString, Default: "Jersey City, NJ",
-					Help: "City name or 'lat,lon' coordinates",
-				},
-				{
 					Key: "unit", Label: "Units", Type: plugin.FieldTypeEnum, Default: "imperial",
 					Options: []plugin.FieldOption{{Value: "imperial", Label: "°F"}, {Value: "metric", Label: "°C"}},
+				},
+				{
+					Key: "location", Label: "Location", Type: plugin.FieldTypeLocation, Default: "Jersey City, NJ",
 				},
 			},
 		},

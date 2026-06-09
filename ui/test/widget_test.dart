@@ -128,7 +128,6 @@ void main() {
       final state = SettingsState(apiService: svc);
       await state.loadFromBackend();
 
-      expect(state.location, 'Tokyo');
       expect(state.timeFormat, '12h');
       expect(state.dateFormat, 'DD/MM/YYYY');
 
@@ -143,9 +142,9 @@ void main() {
       await state.loadFromBackend();
 
       final originalTime = state.timeFormat;
-      state.updateConfig(location: 'Paris');
+      state.updateConfig(unit: 'metric');
 
-      expect(state.location, 'Paris');
+      expect(state.unit, 'metric');
       expect(state.timeFormat, originalTime); // unchanged
     });
   });

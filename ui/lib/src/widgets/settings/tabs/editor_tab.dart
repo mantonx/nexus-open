@@ -2,12 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_typeahead/flutter_typeahead.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../../../models/api_models.dart';
+import '../../../models/place.dart';
+import '../../../services/location_service.dart';
 import '../../../services/nexus_api_service.dart';
 import '../../../services/ws_service.dart';
 import '../../../theme/app_tokens.dart';
 import '../../common/common.dart';
+import '../../maps/world_map.dart';
 
 part 'editor_helpers.dart';
 part 'editor_zone_row.dart';
@@ -298,15 +304,11 @@ class _EditorTabState extends State<EditorTab> {
                         onReorder: _reorderZones,
                         onNavigate: _navigatePage,
                         catalogFor: _catalogFor,
-                      ),
-                    ),
-                    const VerticalDivider(width: 1),
-                    SizedBox(
-                      width: 260,
-                      child: _Configuration(
-                        zone: _selectedZone,
-                        catalog: _catalogFor(_selectedZone?.plugin ?? ''),
-                        onPatch: _patchZone,
+                        configuration: _Configuration(
+                          zone: _selectedZone,
+                          catalog: _catalogFor(_selectedZone?.plugin ?? ''),
+                          onPatch: _patchZone,
+                        ),
                       ),
                     ),
                   ],

@@ -50,7 +50,6 @@ class _PluginsTabState extends State<PluginsTab> {
       sublabel: 'Conditions',
       icon: Icons.cloud,
       keys: [
-        _ConfigKey('location', 'Location', _ControlType.text),
         _ConfigKey('unit', 'Unit', _ControlType.dropdown,
             options: ['metric', 'imperial']),
       ],
@@ -342,7 +341,7 @@ class _PluginCardState extends State<_PluginCard> {
 
 // ── Data model helpers ────────────────────────────────────────────────────────
 
-enum _ControlType { dropdown, text }
+enum _ControlType { dropdown }
 
 class _ConfigKey {
   final String id;

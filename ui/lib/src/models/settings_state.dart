@@ -58,7 +58,6 @@ class SettingsState extends ChangeNotifier {
     notifyListeners();
   }
 
-  String get location => _config?.location ?? '';
   String get timeFormat => _config?.timeFormat ?? '24h';
   String get unit => _config?.unit ?? 'imperial';
   String get backgroundColor => _config?.backgroundColor ?? '#000000';
@@ -138,7 +137,6 @@ class SettingsState extends ChangeNotifier {
   /// Update configuration locally.
   /// Only the fields you pass are changed; others keep their current value.
   void updateConfig({
-    String? location,
     String? timeFormat,
     String? unit,
     String? backgroundColor,
@@ -155,7 +153,6 @@ class SettingsState extends ChangeNotifier {
         : _config!.display;
 
     _config = _config!.copyWith(
-      location: location ?? _config!.location,
       timeFormat: timeFormat ?? _config!.timeFormat,
       unit: unit ?? _config!.unit,
       backgroundColor: backgroundColor ?? _config!.backgroundColor,
@@ -165,11 +162,6 @@ class SettingsState extends ChangeNotifier {
       display: display,
     );
     notifyListeners();
-  }
-
-  /// Set location
-  void setLocation(String value) {
-    updateConfig(location: value);
   }
 
   /// Set time format

@@ -29,7 +29,6 @@ class DisplayConfig with _$DisplayConfig {
 @freezed
 class NexusConfig with _$NexusConfig {
   const factory NexusConfig({
-    @Default('Jersey City') String location,
     @JsonKey(name: 'time_format') @Default('24h') String timeFormat,
     @Default('imperial') String unit,
     @JsonKey(name: 'background_color') @Default('#000000') String backgroundColor,

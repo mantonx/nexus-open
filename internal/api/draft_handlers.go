@@ -280,9 +280,17 @@ func (s *Server) draftPatchZone(w http.ResponseWriter, r *http.Request, draft *z
 
 	// Live-preview: push changes to the running renderer immediately so
 	// the device display updates without requiring a commit first.
-	if patch.PluginConfig != nil && s.zoneNotifier != nil {
-		if err := s.zoneNotifier.BroadcastZoneConfigChange(zoneID, patch.PluginConfig); err != nil {
-			s.logger.Warn("live preview config push failed", "zone_id", zoneID, "error", err)
+	if patch.PluginConfig != nil {
+		// Persist to store so the plugin picks up the new config on restart.
+		if s.zoneCfg != nil {
+			if err := s.zoneCfg.BroadcastZoneConfigChange(zoneID, patch.PluginConfig); err != nil {
+				s.logger.Warn("zone config persist failed", "zone_id", zoneID, "error", err)
+			}
+		}
+		if s.zoneNotifier != nil {
+			if err := s.zoneNotifier.BroadcastZoneConfigChange(zoneID, patch.PluginConfig); err != nil {
+				s.logger.Warn("live preview config push failed", "zone_id", zoneID, "error", err)
+			}
 		}
 	}
 	if patch.ThemeOverride != nil && s.layoutReloader != nil {
