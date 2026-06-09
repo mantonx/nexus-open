@@ -1,0 +1,8 @@
+{
+  "value": "fail",
+  "secondary": "Build",
+  "severity": "crit",
+  "graph_type": "number_delta",
+  "expandable": true,
+  "ttl": 30000000000
+}

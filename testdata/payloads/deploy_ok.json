@@ -1,0 +1,7 @@
+{
+  "value": "live",
+  "secondary": "Deploy",
+  "severity": "ok",
+  "graph_type": "number_delta",
+  "ttl": 30000000000
+}
