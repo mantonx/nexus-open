@@ -2,15 +2,17 @@
 # build-package.sh — build installable packages for all supported formats
 #
 # Usage:
-#   ./build-package.sh              # build deb + rpm + pacman
-#   ./build-package.sh --deb        # deb only
-#   ./build-package.sh --rpm        # rpm only
-#   ./build-package.sh --pacman     # pacman only
-#   ./build-package.sh --test       # build then smoke-test each in Docker
+#   ./build-package.sh                  # build deb + rpm + pacman + appimage
+#   ./build-package.sh --deb            # deb only
+#   ./build-package.sh --rpm            # rpm only
+#   ./build-package.sh --pacman         # pacman only
+#   ./build-package.sh --appimage       # AppImage only
+#   ./build-package.sh --test           # build then smoke-test each in Docker
 #
 # Prerequisites (host):
 #   - go 1.25+
 #   - fpm (gem install fpm)
+#   - appimagetool in PATH or ~/bin (for --appimage)
 #   - rpm-build (for --rpm on non-RPM hosts): sudo pacman -S rpm-tools
 #   - docker (for --test)
 #
@@ -233,6 +235,15 @@ build_pacman() {
     ok "Built: $PACMAN_FILE"
 }
 
+# ── appimage ──────────────────────────────────────────────────────────────────
+
+build_appimage() {
+    info "Building AppImage..."
+    bash "$REPO_DIR/scripts/build-appimage.sh"
+    APPIMAGE_FILE=$(ls -t "$OUT_DIR"/${PKG_NAME}-*.AppImage 2>/dev/null | head -1)
+    ok "Built: $APPIMAGE_FILE"
+}
+
 # ── docker test ───────────────────────────────────────────────────────────────
 
 # run_runtime_test IMAGE INSTALL_BLOCK FLUTTER_DEPS_BLOCK
@@ -371,6 +382,7 @@ test_pacman() {
 BUILD_DEB=false
 BUILD_RPM=false
 BUILD_PACMAN=false
+BUILD_APPIMAGE=false
 RUN_TESTS=false
 TEST_DEB_ONLY=false
 TEST_RPM_ONLY=false
@@ -378,7 +390,7 @@ TEST_PACMAN_ONLY=false
 
 # Default: build all
 if [[ $# -eq 0 ]]; then
-    BUILD_DEB=true; BUILD_RPM=true; BUILD_PACMAN=true
+    BUILD_DEB=true; BUILD_RPM=true; BUILD_PACMAN=true; BUILD_APPIMAGE=true
 fi
 
 for arg in "$@"; do
@@ -386,12 +398,13 @@ for arg in "$@"; do
         --deb)        BUILD_DEB=true ;;
         --rpm)        BUILD_RPM=true ;;
         --pacman)     BUILD_PACMAN=true ;;
-        --test)       BUILD_DEB=true; BUILD_RPM=true; BUILD_PACMAN=true; RUN_TESTS=true ;;
+        --appimage)   BUILD_APPIMAGE=true ;;
+        --test)       BUILD_DEB=true; BUILD_RPM=true; BUILD_PACMAN=true; BUILD_APPIMAGE=true; RUN_TESTS=true ;;
         # Test-only flags: skip build, run Docker test against existing dist/ packages.
         --test-deb)   TEST_DEB_ONLY=true ;;
         --test-rpm)   TEST_RPM_ONLY=true ;;
         --test-pacman) TEST_PACMAN_ONLY=true ;;
-        *) die "Unknown option: $arg. Usage: ./build-package.sh [--deb] [--rpm] [--pacman] [--test] [--test-deb|--test-rpm|--test-pacman]" ;;
+        *) die "Unknown option: $arg. Usage: ./build-package.sh [--deb] [--rpm] [--pacman] [--appimage] [--test] [--test-deb|--test-rpm|--test-pacman]" ;;
     esac
 done
 
@@ -435,6 +448,13 @@ fi
 
 # deb: build_deb calls build_binary_ubuntu + build_staging internally
 $BUILD_DEB && build_deb
+
+# AppImage: delegates to scripts/build-appimage.sh which manages its own AppDir.
+# Requires appimagetool in PATH or ~/bin.
+if $BUILD_APPIMAGE; then
+    build_binary
+    build_appimage
+fi
 
 if $RUN_TESTS; then
     echo ""
