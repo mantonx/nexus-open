@@ -7,10 +7,11 @@ Comment=Control and configure your Corsair iCUE Nexus display
 Icon=nexus-open
 Exec=/usr/bin/nexus-open --tray
 Terminal=false
-Categories=Utility;System;HardwareSettings;
+Categories=Utility;System;Settings;HardwareSettings;
 Keywords=corsair;icue;nexus;display;monitor;system;
 StartupNotify=true
 StartupWMClass=io.nexus.open
+Actions=Show;
 
 [Desktop Action Show]
 Name=Show Window
