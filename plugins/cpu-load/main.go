@@ -74,6 +74,7 @@ func (p *CPULoadPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Monitors CPU utilisation by topology group (Linux, Windows, macOS)",
 		Icon:        "microchip",
 		RefreshMs:   1000,
+		HasGraph:    true,
 		Schema: plugin.ConfigSchema{
 			Fields: []plugin.ConfigField{
 				{

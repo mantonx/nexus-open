@@ -260,6 +260,7 @@ class PluginDescriptor {
   final String name;
   final String description;
   final String version;
+  final bool hasGraph;
   final List<PluginConfigField> schemaFields;
 
   const PluginDescriptor({
@@ -267,6 +268,7 @@ class PluginDescriptor {
     required this.name,
     required this.description,
     required this.version,
+    required this.hasGraph,
     required this.schemaFields,
   });
 
@@ -280,6 +282,7 @@ class PluginDescriptor {
       name: j['name'] as String? ?? '',
       description: j['description'] as String? ?? '',
       version: j['version'] as String? ?? '',
+      hasGraph: j['has_graph'] as bool? ?? false,
       schemaFields: fields,
     );
   }

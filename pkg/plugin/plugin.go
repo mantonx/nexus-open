@@ -102,8 +102,6 @@ func init() {
 	gob.Register(FieldOption{})
 	gob.Register(Payload{})
 	gob.Register(DetailPayload{})
-	gob.Register(DailyForecast{})
-	gob.Register([]DailyForecast{})
 	gob.Register(map[string]any{})
 	gob.Register([]any{})
 }

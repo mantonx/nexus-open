@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"image/png"
 	"net/http"
 	"time"
 )
@@ -186,6 +187,60 @@ func (s *Server) handleDebugTap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDebugTapZone triggers OnTap directly for a zone by ID, bypassing the
+// detail-dismiss logic. POST /api/debug/tap-zone  body: {"zone_id": "system.weather"}
+func (s *Server) handleDebugTapZone(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.zoneTapper == nil {
+		s.respondError(w, "Zone tapper not available", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		ZoneID string `json:"zone_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.ZoneID == "" {
+		s.respondError(w, "zone_id is required", http.StatusBadRequest)
+		return
+	}
+	if err := s.zoneTapper.HandleZoneTap(req.ZoneID); err != nil {
+		s.respondError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDebugRenderDetail renders the current detail overlay frame as a PNG.
+// GET /api/debug/render-detail
+//
+// Returns 404 if no detail frame has been rendered yet (tap the weather zone first).
+// Useful for visually verifying detail_overlay.go changes without needing the live app.
+func (s *Server) handleDebugRenderDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.detailProvider == nil {
+		s.respondError(w, "Detail frame provider not available", http.StatusServiceUnavailable)
+		return
+	}
+	frame := s.detailProvider.GetDetailFrame()
+	if frame == nil {
+		s.respondError(w, "No detail frame available — tap a zone with OnTap support first", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	if err := png.Encode(w, frame); err != nil {
+		s.logger.Error("render-detail: png encode failed", "error", err)
+	}
 }
 
 // handleSwipeCancel cancels an in-progress live swipe.

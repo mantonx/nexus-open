@@ -54,6 +54,7 @@ type Descriptor struct {
 	Description string       `json:"description"`  // Brief description of functionality
 	Icon        string       `json:"icon"`         // Default icon identifier (Font Awesome or emoji)
 	RefreshMs   int          `json:"refresh_ms"`   // Recommended refresh interval in milliseconds
+	HasGraph    bool         `json:"has_graph,omitempty"` // True if this plugin renders a sparkline/graph
 	Schema      ConfigSchema `json:"config_schema"` // Declared configurable fields
 }
 
@@ -219,27 +220,21 @@ type Plugin interface {
 	Configure(cfg map[string]any) error
 }
 
-// DailyForecast holds weather data for a single day.
-type DailyForecast struct {
-	Date        string  `json:"date"`         // "Mon", "Tue", etc.
-	Icon        string  `json:"icon"`         // Font Awesome codepoint
-	TempHigh    float64 `json:"temp_high"`
-	TempLow     float64 `json:"temp_low"`
-	Description string  `json:"description"`
-	Unit        string  `json:"unit"` // "imperial" or "metric"
-}
-
-// DetailPayload carries rich detail data surfaced when a zone is tapped.
-// Only the fields relevant to the plugin's detail view need to be populated.
+// DetailPayload carries the pre-rendered detail overlay surfaced when a zone is tapped.
+// The plugin renders its own 640×48 RGBA frame and returns it in RawFrame.
+// Title is optional metadata (used for logging/accessibility; not rendered by core).
 type DetailPayload struct {
 	// ZoneID identifies which zone this detail belongs to.
 	ZoneID string `json:"zone_id"`
 
-	// Title is the detail overlay header (e.g. "Jersey City Weather").
+	// Title is human-readable metadata about this detail view (e.g. "Jersey City — 7-Day Forecast").
+	// Not rendered by the core; plugins may use it for logging or future accessibility support.
 	Title string `json:"title,omitempty"`
 
-	// Forecast is a weekly day-by-day forecast (weather plugin).
-	Forecast []DailyForecast `json:"forecast,omitempty"`
+	// RawFrame is a pre-rendered 640×48 RGBA pixel buffer (width×height×4 bytes, row-major).
+	// The core blits this directly to the display. Plugins are responsible for all layout
+	// and rendering. Use the gg (fogleman/gg) or image/draw packages to produce this.
+	RawFrame []byte `json:"raw_frame,omitempty"`
 }
 
 // Tapper is an optional interface plugins may implement to handle zone taps.

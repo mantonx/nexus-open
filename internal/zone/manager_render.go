@@ -13,7 +13,24 @@ func (m *Manager) UpdatePayload(zoneID string, payload plugin.Payload) error {
 	m.payloadsMu.Lock()
 	defer m.payloadsMu.Unlock()
 
-	if _, ok := m.zones[zoneID]; !ok {
+	// Accept payloads for any zone that exists in any page — not just the
+	// current page's m.zones — because all plugins run simultaneously.
+	m.configMu.RLock()
+	cfg := m.config
+	m.configMu.RUnlock()
+	knownZone := false
+	for _, page := range cfg.Pages {
+		for _, z := range page.Zones {
+			if z.ID == zoneID {
+				knownZone = true
+				break
+			}
+		}
+		if knownZone {
+			break
+		}
+	}
+	if !knownZone {
 		return fmt.Errorf("zone not found: %s", zoneID)
 	}
 
@@ -30,11 +47,6 @@ func (m *Manager) UpdatePayload(zoneID string, payload plugin.Payload) error {
 	m.lastFrameMu.Lock()
 	m.frameDirty = true
 	m.lastFrameMu.Unlock()
-
-	// Snapshot config pointer once under read-lock before walking pages.
-	m.configMu.RLock()
-	cfg := m.config
-	m.configMu.RUnlock()
 
 	// Invalidate cached frames for every page that contains this zone.
 	m.pageCacheMu.Lock()

@@ -26,6 +26,7 @@ func (m *HelloPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Simple example plugin — useful as a starting point for custom plugins",
 		Icon:        "hand-wave",
 		RefreshMs:   2000,
+		HasGraph:    true,
 		Schema: plugin.ConfigSchema{
 			Fields: []plugin.ConfigField{
 				{

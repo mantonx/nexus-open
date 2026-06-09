@@ -704,27 +704,10 @@ func (r *Renderer) severityColor(sev plugin.Severity) color.RGBA {
 	}
 }
 
-// resolveIconGlyph maps icon name strings to FontAwesome Unicode glyphs.
-var faGlyphs = map[string]string{
-	"cloud":         "",
-	"cloud-rain":    "",
-	"sun":           "",
-	"snowflake":     "",
-	"bolt":          "",
-	"cpu":           "",
-	"microchip":     "",
-	"desktop":       "",
-	"memory":        "",
-	"network-wired": "",
-	"thermometer":   "",
-	"hand-wave":     "",
-}
-
+// resolveIconGlyph returns icon if it is a single Unicode codepoint, otherwise "".
+// Plugins are responsible for passing raw FA codepoints — the core does not
+// maintain a name-to-glyph mapping.
 func resolveIconGlyph(icon string) string {
-	if g, ok := faGlyphs[icon]; ok {
-		return g
-	}
-	// Pass through if it's already a unicode glyph.
 	if len([]rune(icon)) == 1 {
 		return icon
 	}
