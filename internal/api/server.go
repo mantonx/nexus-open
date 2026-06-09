@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"image"
 	"log/slog"
 	"net/http"
 	"os"
@@ -57,8 +58,14 @@ type SwipeSimulator interface {
 // ZoneTapper is the subset of zone.Manager needed to simulate a hardware tap.
 type ZoneTapper interface {
 	HandleZoneTapAtX(x int) error
+	HandleZoneTap(zoneID string) error
 	IsShowingDetail() bool
 	ClearDetail()
+}
+
+// DetailFrameProvider returns the most recently rendered detail overlay frame.
+type DetailFrameProvider interface {
+	GetDetailFrame() *image.RGBA
 }
 
 // Navigator is the subset of zone.Manager needed for page navigation from the UI.
@@ -106,6 +113,7 @@ type Server struct {
 	zoneStatus      ZoneStatusProvider
 	swipeSim        SwipeSimulator        // for /api/debug/swipe
 	zoneTapper      ZoneTapper            // for /api/debug/tap
+	detailProvider  DetailFrameProvider   // for /api/debug/render-detail
 	navigator       Navigator             // for /api/navigate/page
 	layoutStore     LayoutStore           // for /api/layout/*
 	layoutReloader  LayoutReloader        // for live reloads after layout edits
@@ -216,6 +224,11 @@ func (s *Server) SetSwipeSimulator(sim SwipeSimulator) {
 // SetZoneTapper wires in the zone manager for the debug tap endpoint.
 func (s *Server) SetZoneTapper(t ZoneTapper) {
 	s.zoneTapper = t
+}
+
+// SetDetailFrameProvider wires in the zone manager for the debug render-detail endpoint.
+func (s *Server) SetDetailFrameProvider(p DetailFrameProvider) {
+	s.detailProvider = p
 }
 
 // SetZoneStatusProvider wires in the sampler so zone status can be queried.
@@ -329,6 +342,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Debug endpoints — swipe simulation for tuning transition parameters
 	mux.HandleFunc("/api/debug/swipe", s.handleDebugSwipe)
 	mux.HandleFunc("/api/debug/tap", s.handleDebugTap)
+	mux.HandleFunc("/api/debug/tap-zone", s.handleDebugTapZone)
+	mux.HandleFunc("/api/debug/render-detail", s.handleDebugRenderDetail)
 
 	// Preview navigation — page switching from Flutter UI
 	mux.HandleFunc("/api/navigate/page", s.handleNavigatePage)

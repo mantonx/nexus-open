@@ -46,6 +46,7 @@ func (m *NetworkPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Monitors network upload/download speeds",
 		Icon:        "network-wired",
 		RefreshMs:   2000,
+		HasGraph:    true,
 		Schema: plugin.ConfigSchema{
 			Fields: []plugin.ConfigField{
 				{

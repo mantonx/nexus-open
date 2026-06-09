@@ -130,28 +130,29 @@ func (s *Sampler) resolvePluginPath(spec string) (string, error) {
 	return resolved, nil
 }
 
-// Start begins sampling all modules configured in the zone manager
+// Start begins sampling all zones across all pages. Keeping every plugin
+// running at all times means page switches are instant — no subprocess
+// teardown/restart on swipe, so payloads are always current when a page
+// becomes visible.
 func (s *Sampler) Start() error {
 	s.logger.Info("starting plugin sampler")
 
-	// Get all zones and their plugin configurations
 	config := s.manager.GetConfig()
-	currentPage := s.manager.GetCurrentPage()
 
-	if currentPage >= len(config.Pages) {
-		return fmt.Errorf("invalid page index: %d", currentPage)
-	}
-
-	page := config.Pages[currentPage]
-
-	// Start sampling for each zone on the current page
-	for _, zoneConfig := range page.Zones {
-		if err := s.startZoneSampling(zoneConfig); err != nil {
-			s.logger.Error("failed to start zone sampling",
-				"zone_id", zoneConfig.ID,
-				"plugin", zoneConfig.Plugin,
-				"error", err)
-			s.markZoneLaunchFailed(zoneConfig.ID, err)
+	seen := make(map[string]bool)
+	for _, page := range config.Pages {
+		for _, zoneConfig := range page.Zones {
+			if seen[zoneConfig.ID] {
+				continue
+			}
+			seen[zoneConfig.ID] = true
+			if err := s.startZoneSampling(zoneConfig); err != nil {
+				s.logger.Error("failed to start zone sampling",
+					"zone_id", zoneConfig.ID,
+					"plugin", zoneConfig.Plugin,
+					"error", err)
+				s.markZoneLaunchFailed(zoneConfig.ID, err)
+			}
 		}
 	}
 

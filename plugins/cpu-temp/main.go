@@ -47,6 +47,7 @@ func (m *CPUTempPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Monitors CPU temperature (Linux, Windows, macOS)",
 		Icon:        "cpu",
 		RefreshMs:   2000,
+		HasGraph:    true,
 		Schema: plugin.ConfigSchema{
 			Fields: []plugin.ConfigField{
 				{

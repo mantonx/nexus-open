@@ -215,6 +215,21 @@ func (m *Manager) ClearDetail() {
 
 // IsShowingDetail reports whether the detail overlay is active or animating IN.
 // Returns false during the slide-down dismiss transition so taps pass through.
+// GetDetailFrame returns the most recently rendered detail frame, or nil if none.
+// The caller receives a copy safe to read without holding any lock.
+func (m *Manager) GetDetailFrame() *image.RGBA {
+	m.detailMu.Lock()
+	defer m.detailMu.Unlock()
+	if m.detailFrame == nil {
+		return nil
+	}
+	// Shallow copy: Pix slice is the only mutable field and we copy it.
+	out := *m.detailFrame
+	out.Pix = make([]uint8, len(m.detailFrame.Pix))
+	copy(out.Pix, m.detailFrame.Pix)
+	return &out
+}
+
 func (m *Manager) IsShowingDetail() bool {
 	m.detailMu.Lock()
 	defer m.detailMu.Unlock()
@@ -265,7 +280,7 @@ func (m *Manager) HandleZoneTap(zoneID string) error {
 		cached, fetchedAt, err := m.db.LoadPayloadCache(zoneID)
 		if err == nil && len(cached) > 0 {
 			var detail plugin.DetailPayload
-			if json.Unmarshal(cached, &detail) == nil {
+			if json.Unmarshal(cached, &detail) == nil && len(detail.RawFrame) > 0 {
 				detail.ZoneID = zoneID
 				age := time.Since(time.Unix(fetchedAt, 0))
 				if age < detailCacheTTL {

@@ -285,14 +285,10 @@ func (a *App) initialize() error {
 	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager, a.zoneCfg, a.pluginsDir)
 	a.logger.Info("zone sampler created")
 
-	// Register page change callback: restart sampler and broadcast new page state.
-	// BroadcastPageState is fired in its own goroutine — it acquires the hub
-	// lock, and doing that on the same goroutine as sampler restart adds latency
-	// that can push past test timing budgets when modules are slow to launch.
+	// On page change, just broadcast new page state. All plugins run
+	// continuously across all pages (started in Start()), so no sampler
+	// restart is needed — payloads are already current on arrival.
 	a.zoneManager.SetOnPageChange(func(pageIndex int) error {
-		if err := a.zoneSampler.RestartForPage(pageIndex); err != nil {
-			return err
-		}
 		go a.apiServer.BroadcastPageState()
 		return nil
 	})
@@ -315,6 +311,7 @@ func (a *App) initialize() error {
 	// Wire zone manager for swipe simulation, tap simulation, navigation, and layout editing.
 	a.apiServer.SetSwipeSimulator(a.zoneManager)
 	a.apiServer.SetZoneTapper(a.zoneManager)
+	a.apiServer.SetDetailFrameProvider(a.zoneManager)
 	a.zoneManager.SetDetailStateCallback(func(active bool) {
 		a.apiServer.BroadcastDetailState(active, zone.DetailCloseX*2, zone.DetailCloseY*2)
 	})

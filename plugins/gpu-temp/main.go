@@ -49,6 +49,7 @@ func (m *GPUTempPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Monitors GPU temperature (NVIDIA, AMD, Intel)",
 		Icon:        "microchip",
 		RefreshMs:   2000,
+		HasGraph:    true,
 		Schema: plugin.ConfigSchema{
 			Fields: []plugin.ConfigField{
 				{

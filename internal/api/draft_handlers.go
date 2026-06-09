@@ -221,11 +221,12 @@ func (s *Server) draftDeleteZone(w http.ResponseWriter, draft *zone.Config, zone
 
 func (s *Server) draftPatchZone(w http.ResponseWriter, r *http.Request, draft *zone.Config, zoneID string) {
 	var patch struct {
-		Plugin       *string        `json:"plugin,omitempty"`
-		RefreshMs    *int           `json:"refresh_ms,omitempty"`
-		Width        *int           `json:"width,omitempty"`
-		Align        *string        `json:"align,omitempty"`
-		PluginConfig map[string]any `json:"plugin_config,omitempty"`
+		Plugin        *string        `json:"plugin,omitempty"`
+		RefreshMs     *int           `json:"refresh_ms,omitempty"`
+		Width         *int           `json:"width,omitempty"`
+		Align         *string        `json:"align,omitempty"`
+		PluginConfig  map[string]any `json:"plugin_config,omitempty"`
+		ThemeOverride map[string]any `json:"theme_override,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		s.respondError(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -254,6 +255,13 @@ func (s *Server) draftPatchZone(w http.ResponseWriter, r *http.Request, draft *z
 			if patch.PluginConfig != nil {
 				z.PluginConfig = patch.PluginConfig
 			}
+			if patch.ThemeOverride != nil {
+				raw, _ := json.Marshal(patch.ThemeOverride)
+				var t zone.Theme
+				if err := json.Unmarshal(raw, &t); err == nil {
+					z.ThemeOverride = &t
+				}
+			}
 			found = true
 			break
 		}
@@ -270,11 +278,18 @@ func (s *Server) draftPatchZone(w http.ResponseWriter, r *http.Request, draft *z
 		return
 	}
 
-	// Live-preview: push plugin config to the running sampler immediately so
+	// Live-preview: push changes to the running renderer immediately so
 	// the device display updates without requiring a commit first.
 	if patch.PluginConfig != nil && s.zoneNotifier != nil {
 		if err := s.zoneNotifier.BroadcastZoneConfigChange(zoneID, patch.PluginConfig); err != nil {
 			s.logger.Warn("live preview config push failed", "zone_id", zoneID, "error", err)
+		}
+	}
+	if patch.ThemeOverride != nil && s.layoutReloader != nil {
+		if err := s.layoutReloader.ReloadFromConfig(draft); err != nil {
+			s.logger.Warn("live preview theme reload failed", "zone_id", zoneID, "error", err)
+		} else {
+			go s.BroadcastPageState()
 		}
 	}
 

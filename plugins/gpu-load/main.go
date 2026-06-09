@@ -66,6 +66,7 @@ func (p *GPULoadPlugin) Describe() (plugin.Descriptor, error) {
 		Description: "Monitors GPU utilisation (NVIDIA, AMD, Intel)",
 		Icon:        "display",
 		RefreshMs:   1000,
+		HasGraph:    true,
 		Schema: plugin.ConfigSchema{
 			Fields: []plugin.ConfigField{
 				{
