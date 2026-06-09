@@ -1,310 +1,211 @@
 # Nexus Open
 
-Open-source Linux controller for the Corsair iCUE Nexus display device.
+Open-source Linux controller for the Corsair iCUE Nexus companion display.
 
-![Status](https://img.shields.io/badge/status-in%20development-yellow)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Go](https://img.shields.io/badge/go-1.25+-00ADD8)
 ![Flutter](https://img.shields.io/badge/flutter-3.24+-02569B)
+![Platform](https://img.shields.io/badge/platform-Linux-orange)
 
 ## Overview
 
-Nexus Open provides a native Linux desktop application to control and configure your Corsair iCUE Nexus (640x48 pixel display). Display system metrics, weather information, and custom backgrounds on your device.
+Nexus Open is a native Linux application for the Corsair iCUE Nexus (640×48 pixel companion display). It streams live system metrics and custom content to the display, with a Flutter settings UI for configuration.
 
-### Features
+The device is not officially supported on Linux — this project reverse-engineered the USB protocol to make it work.
 
-- ✅ **System Monitoring** - Real-time CPU/GPU temperature and network statistics
-- ✅ **Weather Display** - Location-based weather with configurable units
-- ✅ **Custom Backgrounds** - Upload and manage background images
-- ✅ **Touch Input** - Responsive button controls
-- ✅ **Configuration UI** - Flutter-based desktop settings application
-- ✅ **REST API** - HTTP API for programmatic control
-- ✅ **Headless Mode** - Run as background service
+## Features
 
-## Current Status: Ready for v1.0 🚀
+- **Live system monitoring** — CPU and GPU temperature, load, and network throughput
+- **Weather display** — configurable location and units via open-meteo
+- **Sparklines and graphs** — per-zone graph types (sparkline, bar, area, segmented, combo)
+- **Multi-page layouts** — swipe between display pages with spring-physics transitions
+- **Flutter settings UI** — dark-mode, live 640×48 hardware preview via WebSocket
+- **Layout editor** — configure zones, plugins, and page order without restarting
+- **REST API** — full HTTP API for programmatic control; OpenAPI 3.0 spec at `/openapi.yaml`
+- **Plugin system** — write a plugin in Go, drop a binary, reference it in the layout YAML
+- **Headless mode** — runs as a systemd user service with no tray or UI required
 
-The refactoring from Wails to Flutter is complete! See [PROJECT_PLAN.md](PROJECT_PLAN.md) for full development history.
-
-### What's Working
-- ✅ **Core Functionality** - Display rendering at 24 FPS with system metrics
-- ✅ **Data Collection** - CPU/GPU temperature, network stats, weather data
-- ✅ **USB Communication** - Stable device interface with proper lifecycle management
-- ✅ **REST API** - Full HTTP API for configuration and control
-- ✅ **Testing** - 64.9% code coverage with 65 unit tests
-- ✅ **Linux Packages** - DEB, AppImage, and AUR (Arch) packages ready
-- ✅ **Documentation** - Comprehensive installation and usage guides
-
-### Recent Milestones
-- **Phase 1-4:** Foundation, backend refactoring, API layer, UI integration (COMPLETE)
-- **Phase 5:** Core functionality integration with instruments and display (COMPLETE)
-- **Phase 6:** Testing coverage from 37.8% to 64.9% (COMPLETE)
-- **Phase 7:** Production-ready Linux packaging (COMPLETE)
-
-### Next Steps
-- [ ] Release v1.0.0
-- [ ] Publish to AUR
-- [ ] Community feedback and bug fixes
-- [ ] Additional features based on user requests
-
-## Architecture
-
-```
-┌──────────────┐     HTTP :1985      ┌──────────────┐
-│  Flutter UI  │ ◄──────────────────► │  Go Backend  │
-│  (Desktop)   │   JSON REST API     │  + USB Dev   │
-└──────────────┘                      └──────────────┘
-```
-
-## Quick Start (Development)
+## Quick Start
 
 ### Prerequisites
 
 - Go 1.25+
 - Flutter 3.24+
-- libusb-1.0-dev
-- Corsair iCUE Nexus device (VID: 0x1b1c, PID: 0x1b8e)
-- make (optional, for using Makefile)
+- `libusb-1.0-dev`
+- Corsair iCUE Nexus (USB VID `0x1b1c`, PID `0x1b8e`)
 
-### Build & Run
+### Run from source
 
 ```bash
-# Clone repository
 git clone https://github.com/mantonx/nexus-open.git
 cd nexus-open
 
-# Build Go backend (using Make)
-make build                 # Development build (with debug info)
-make build-release         # Optimized release build (stripped, smaller)
+# Install dev tools (air, overmind, watchexec)
+make setup
 
-# Or build manually
-go build -o bin/nexus-open ./cmd/nexus-open
+# One-time: set up USB permissions
+sudo nexus-open --setup-udev   # or: sudo bash scripts/setup-udev.sh
 
-# Set up USB permissions (one-time)
-sudo bash scripts/setup-udev.sh
-# Log out and back in for group changes
-
-# Run backend
-make run                   # Build and run
-# Or run directly
-./bin/nexus-open
-
-# In another terminal, run Flutter UI (development)
-cd ui
-flutter run -d linux
+# Start full dev environment (Go hot-reload + Flutter hot-reload)
+make dev
 ```
 
-### Build Commands
+`make dev` starts the Go backend (via air), the Flutter UI, and a Dart file watcher under overmind. Changes to `.go` files rebuild the daemon in ~3 s; changes to `.dart` files hot-reload the UI in under a second.
 
-The project includes a Makefile for standardized builds:
+To develop without hardware:
 
 ```bash
-# Development
-make build         # Build development binary (with debug info)
-make build-release # Build optimized release binary (stripped)
-make run           # Build and run the application
-make clean         # Remove all build artifacts
-
-# Testing
-make test          # Run all tests
-make test-race     # Run tests with race detector
-make coverage      # Generate test coverage report
-
-# Packaging
-make deb           # Build DEB package
-make appimage      # Build AppImage
-make all           # Build all packages
-
-# Maintenance
-make install       # Install to /usr/local/bin (requires sudo)
-make uninstall     # Remove from /usr/local/bin (requires sudo)
-
-# See all available commands
-make help
+NEXUS_MOCK_DEVICE=1 make dev
 ```
+
+### Install from package
+
+| Distribution | Command |
+| --- | --- |
+| Flatpak (all distros) | `flatpak install flathub com.github.nexusopen.NexusOpen` |
+| Snap | `sudo snap install nexus-open` |
+| Debian / Ubuntu | `sudo dpkg -i nexus-open_1.0.0_amd64.deb` |
+| Arch Linux (AUR) | `yay -S nexus-open` |
+| AppImage | `chmod +x nexus-open-1.0.0-x86_64.AppImage && ./nexus-open-1.0.0-x86_64.AppImage` |
+
+See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full instructions and USB permission setup.
+
+## Build Commands
+
+```bash
+make build          # Development binary (with debug info)
+make build-release  # Optimised release binary (stripped)
+make build-ui       # Flutter UI only
+make build-plugins  # All external plugins
+make build-all      # Everything
+
+make test           # Run all tests
+make test-race      # Run with race detector
+make coverage       # Coverage report
+
+make dev            # Full hot-reload environment (Go + Flutter + watcher)
+make dev-backend    # Go hot-reload only (air)
+make dev-ui         # Flutter runner only
+
+make install        # Build + install to ~/.local/bin, restart service
+make doctor         # Check runtime health and dev toolchain
+
+make deb            # DEB package
+make appimage       # AppImage
+make rpm            # RPM package
+```
+
+## Architecture
+
+```text
+┌─────────────────┐    WebSocket (frame stream)   ┌─────────────────┐
+│   Flutter UI    │ ◄───────────────────────────── │   Go backend    │
+│  (settings,     │                                │  + USB device   │
+│   live preview) │ ──── REST API :1985 ──────────► │                 │
+└─────────────────┘                                └────────┬────────┘
+                                                            │ go-plugin (net/RPC)
+                                               ┌────────────▼────────────┐
+                                               │  Plugin subprocesses    │
+                                               │  cpu-temp  gpu-temp     │
+                                               │  cpu-load  gpu-load     │
+                                               │  network   weather      │
+                                               └─────────────────────────┘
+```
+
+The Flutter UI receives the hardware framebuffer as a live RGBA stream over WebSocket — there is no separate "preview render." Everything shown in the settings preview is the exact frame being sent to the device.
 
 ## Project Structure
 
-```
+```text
 nexus-open/
-├── cmd/
-│   └── nexus-open/          # Application entry point
-├── internal/                 # Private application code
-│   ├── app/                 # Application orchestration
-│   ├── device/              # USB device abstraction
-│   ├── display/             # Display rendering
-│   ├── instruments/         # Data sources (temp, network, weather)
-│   ├── config/              # Configuration management
-│   └── api/                 # HTTP API server
-├── pkg/                      # Public reusable libraries
-├── ui/                       # Flutter frontend
-├── nexus/                    # Legacy code (being migrated)
-├── packaging/                # Linux distribution files
-│   ├── deb/                 # Debian/Ubuntu packages
-│   ├── udev/                # USB permissions
-│   └── desktop/             # Desktop integration
-├── scripts/                  # Build and deployment scripts
-├── docs/                     # Documentation
-└── PROJECT_PLAN.md          # Comprehensive development plan
+├── cmd/nexus-open/         # Application entry point and CLI flags
+├── internal/
+│   ├── app/                # Dependency wiring and lifecycle
+│   ├── api/                # REST API server and WebSocket hub
+│   ├── device/             # USB HID abstraction (real + mock)
+│   ├── zone/               # Layout, renderer, sampler, transitions
+│   ├── plugins/            # Plugin host (go-plugin) and builtin plugins
+│   ├── store/              # SQLite persistence (settings, layout, configs)
+│   ├── settings/           # User settings manager
+│   ├── touch/              # Touch event reader and handler
+│   ├── tray/               # System tray integration
+│   └── design/             # Hardware display design tokens (generated)
+├── pkg/plugin/             # Public plugin interface (types, errors, protocol)
+├── plugins/                # External plugin source
+│   ├── cpu-temp/           # CPU temperature
+│   ├── cpu-load/           # CPU load percentage
+│   ├── gpu-temp/           # GPU temperature (AMD, Intel, NVIDIA)
+│   ├── gpu-load/           # GPU load and VRAM
+│   ├── network/            # Network throughput (↓/↑)
+│   ├── weather/            # Weather via open-meteo
+│   └── hello/              # Minimal example plugin
+├── ui/                     # Flutter application
+├── configs/layouts/        # Layout YAML files
+├── design/                 # Style Dictionary token pipeline
+├── packaging/              # DEB, RPM, AppImage, Flatpak, Snap, AUR
+├── scripts/                # Build and setup scripts
+├── docs/                   # Documentation
+└── testdata/               # Golden frames and payload fixtures
 ```
 
-## Configuration
+## Writing a Plugin
 
-Configuration is stored in `~/.config/nexus-open/config.yaml`:
+Plugins are standalone Go binaries launched over net/RPC via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin). The interface is in `pkg/plugin/`:
 
-```yaml
-location: "Jersey City, NJ"
-time_format: "12h"           # or "24h"
-unit: "imperial"             # or "metric"
-background_color: "#000000"
-text_color: "#FFFFFF"
-image_paths:
-  - "background1.png"
-  - "background2.gif"
+```go
+type Plugin interface {
+    Describe() (Descriptor, error)
+    Sample()   (Payload, error)
+    Configure(cfg map[string]any) error
+}
 ```
 
-## API Endpoints
+See `plugins/hello/main.go` for a minimal working example. Reference your plugin binary in a layout YAML under `configs/layouts/` using an `exec:` specifier.
 
-The backend provides a REST API on port 1985:
+## REST API
 
-- `GET /api/config` - Get current configuration
-- `POST /api/config` - Update configuration
-- `POST /api/images/upload` - Upload background image
-- `GET /api/images` - List uploaded images
-- `POST /api/images/delete` - Delete image
-- `GET /api/health` - Health check
+The backend listens on `127.0.0.1:1985`. Key endpoints:
 
-## Installation
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/health` | Health check and device status |
+| `GET /api/config` | Get user settings |
+| `POST /api/config` | Update user settings |
+| `GET /api/layout` | Current layout (pages + zones) |
+| `GET /api/plugins` | Plugin catalog with per-zone status |
+| `GET /api/zones/{id}/status` | Zone health and last error |
+| `GET /api/device/info` | Firmware version, connection state |
+| `GET /api/ws` | WebSocket — streams live 640×48 RGBA frames |
+| `GET /openapi.yaml` | OpenAPI 3.0 specification |
 
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed installation instructions.
-
-### Quick Install
-
-**Flatpak (Recommended - All Distributions):**
-```bash
-flatpak install flathub com.github.nexusopen.NexusOpen
-flatpak run com.github.nexusopen.NexusOpen
-```
-
-**Snap (Ubuntu & Others):**
-```bash
-sudo snap install nexus-open
-sudo snap connect nexus-open:raw-usb
-```
-
-**Debian/Ubuntu (DEB Package):**
-```bash
-sudo dpkg -i nexus-open_1.0.0_amd64.deb
-sudo usermod -a -G plugdev $USER
-# Log out and back in
-```
-
-**Arch Linux (AUR):**
-```bash
-yay -S nexus-open
-```
-
-**AppImage (Universal Binary):**
-```bash
-chmod +x nexus-open-1.0.0-x86_64.AppImage
-./nexus-open-1.0.0-x86_64.AppImage
-```
-
-**From Source:**
-```bash
-# Using Make
-make build-release
-make install
-# Or manually
-go build -o bin/nexus-open ./cmd/nexus-open
-sudo cp bin/nexus-open /usr/local/bin/
-sudo cp packaging/udev/99-corsair-nexus.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo usermod -a -G plugdev $USER
-# Log out and back in
-nexus-open
-```
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Open an issue to discuss major changes before submitting PRs
-2. Follow the existing code style and project structure
-3. Add tests for new features (maintain 60%+ coverage)
-4. Update documentation as needed
-5. Test on your hardware if possible (Corsair iCUE Nexus)
-
-See [PROJECT_PLAN.md](PROJECT_PLAN.md) for development history and architecture details.
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Credits
-
-- **Original Device Communication:** Reverse-engineered USB protocol
-- **System Monitoring:** github.com/shirou/gopsutil
-- **USB Library:** github.com/google/gousb
-- **UI Framework:** Flutter
+Full documentation at `/openapi.yaml` when the backend is running, or in `api/openapi.yaml`.
 
 ## Troubleshooting
 
-### Device not found
+**Device not found** — Run `lsusb | grep 1b1c`. If the device doesn't appear, try a different USB port. If it appears but the app can't open it, run `make doctor` to check USB permissions.
 
-The app shows "Device not found" or "Disconnected" immediately on launch.
+**USB permission denied** — Install udev rules and rejoin the `plugdev` group:
 
-- Make sure the iCUE Nexus is plugged in via USB.
-- Run `lsusb | grep 1b1c` — the device should appear as `1b1c:1b8e`.
-- If it doesn't appear, try a different USB port or cable.
+```bash
+sudo nexus-open --setup-udev
+sudo usermod -a -G plugdev $USER
+# Log out and back in
+```
 
-### USB permission denied
+See [DEVICE_SETUP.md](DEVICE_SETUP.md) for per-distro instructions.
 
-The app connects but immediately fails with a permission error, or you see `hidapi: failed to open` in logs.
+**Port 1985 in use** — `ss -tlnp | grep 1985` to find the conflicting process, or run on a different port with `nexus-open --port 1986`.
 
-- Add your user to the `plugdev` group and log out/in:
+**Plugin shows blank** — Check `GET /api/zones/{id}/status` for the error. Confirm the plugin binary is built (`make build-plugins`).
 
-  ```sh
-  sudo usermod -a -G plugdev $USER
-  ```
+## Contributing
 
-- Reload udev rules:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [DEVELOPMENT.md](DEVELOPMENT.md) for environment setup.
 
-  ```sh
-  sudo udevadm control --reload-rules && sudo udevadm trigger
-  ```
-- On **Arch Linux**, udev rules go to `/usr/lib/udev/rules.d/` when installed via package. Run `sudo setup-udev.sh` for a manual install.
-- On **Fedora/RHEL**, use the `input` group instead of `plugdev`: `sudo usermod -a -G input $USER`.
+## License
 
-### Backend won't start (port 1985 in use)
-
-Another process is using port 1985.
-
-- Find and stop it: `ss -tlnp | grep 1985`
-- Or run on a different port: `nexus-open --port 1986`
-
-### Flutter UI won't connect
-
-The settings window opens but shows "Backend not responding".
-
-- Make sure the Go backend is running: `pgrep nexus-open`
-- If using a custom port, the UI always connects to `localhost:1985`. Run the backend on the default port or wait for the WebSocket support (Week 2).
-
-### Plugin shows blank
-
-A zone displays nothing or a placeholder instead of data.
-
-- Confirm the plugin binary is built and present next to the `nexus-open` binary.
-- From the project root: `make plugins` (or `cd plugins/<name> && go build -o <name>`).
-- Check logs for `plugin error` or `plugin timeout` lines.
-
-## Support
-
-- **Installation:** [docs/INSTALLATION.md](docs/INSTALLATION.md)
-- **Device setup:** [DEVICE_SETUP.md](DEVICE_SETUP.md)
-- **Issues:** [GitHub Issues](https://github.com/mantonx/nexus-open/issues)
-- **API Documentation:** See REST API endpoints section above
-- **Development:** [PROJECT_PLAN.md](PROJECT_PLAN.md)
+MIT — see [LICENSE](LICENSE).
 
 ---
 
-**Note:** This project is not affiliated with Corsair. iCUE Nexus is a trademark of Corsair.
+*Not affiliated with Corsair. iCUE Nexus is a trademark of Corsair.*

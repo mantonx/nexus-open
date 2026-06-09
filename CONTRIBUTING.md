@@ -11,12 +11,16 @@ Thanks for taking an interest in contributing! This is a hardware interfacing pr
 ## Development Setup
 
 ```bash
-# Prerequisites: Go 1.24+, Flutter 3.24+, libusb-1.0-dev
+# Prerequisites: Go 1.25+, Flutter 3.24+, libusb-1.0-dev
 git clone https://github.com/mantonx/nexus-open.git
 cd nexus-open
+make setup   # installs air, overmind, watchexec
+
+# Start the full hot-reload environment (Go + Flutter)
+make dev
 
 # Run without hardware (mock device mode)
-NEXUS_MOCK_DEVICE=1 make run
+NEXUS_MOCK_DEVICE=1 make dev
 
 # Run tests
 make test
@@ -36,7 +40,7 @@ See [DEVICE_SETUP.md](DEVICE_SETUP.md) if you have a physical Corsair iCUE Nexus
 
 ## Writing a Plugin
 
-Plugins are standalone binaries that communicate with the host over gRPC (via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin)). See `plugins/hello/main.go` for the minimal example and `pkg/plugin/types.go` for the `Payload` type.
+Plugins are standalone binaries that communicate with the host over net/RPC (via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin)). See `plugins/hello/main.go` for the minimal example and `pkg/plugin/types.go` for the `Payload` type.
 
 ```
 plugins/
