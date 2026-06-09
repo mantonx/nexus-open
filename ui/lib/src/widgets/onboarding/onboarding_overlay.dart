@@ -4,10 +4,9 @@ import 'package:provider/provider.dart';
 import '../../models/settings_state.dart';
 import '../../theme/app_tokens.dart';
 import '../common/common.dart';
-import '../settings/tabs/location_tab.dart';
 
 /// Full-screen onboarding shown on first launch.
-/// Steps: Welcome → Connect → Location → Done.
+/// Steps: Welcome → Connect → Done.
 class OnboardingOverlay extends StatefulWidget {
   const OnboardingOverlay({super.key});
 
@@ -17,7 +16,7 @@ class OnboardingOverlay extends StatefulWidget {
 
 class _OnboardingOverlayState extends State<OnboardingOverlay> {
   int _step = 0;
-  static const int _totalSteps = 4;
+  static const int _totalSteps = 3;
 
   void _next() => setState(() => _step++);
 
@@ -61,8 +60,7 @@ class _OnboardingOverlayState extends State<OnboardingOverlay> {
     switch (_step) {
       case 0: return _WelcomeStep(onNext: _next);
       case 1: return _ConnectStep(onNext: _next);
-      case 2: return _LocationStep(onNext: _next);
-      case 3: return _DoneStep(onFinish: _finish);
+      case 2: return _DoneStep(onFinish: _finish);
       default: return const SizedBox.shrink();
     }
   }
@@ -425,79 +423,6 @@ class _CodeBlock extends StatelessWidget {
           color: AppColors.accent,
         ),
       ),
-    );
-  }
-}
-
-class _LocationStep extends StatelessWidget {
-  const _LocationStep({required this.onNext});
-  final VoidCallback onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = context.watch<SettingsState>();
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppSpacing.xl, AppSpacing.xxl, AppSpacing.xl, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.10),
-                  borderRadius: AppRadius.smBr,
-                  border: Border.all(
-                    color: AppColors.accent.withValues(alpha: 0.25),
-                    width: 1,
-                  ),
-                ),
-                child: const Icon(Icons.location_on_outlined,
-                    size: AppIconSize.xl, color: AppColors.accent),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              Text(
-                'LOCATION',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: AppColors.accent,
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text('Choose your location',
-                  style: Theme.of(context).textTheme.headlineMedium),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Used for the weather plugin. You can change this later.',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ],
-          ),
-        ),
-        Expanded(
-          child: LocationTab(
-            onLocationSelected: (loc) => settings.updateConfig(location: loc),
-            initialLocation: settings.location,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppSpacing.xl, AppSpacing.sm, AppSpacing.xl, AppSpacing.lg),
-          child: NexusButton.primary(
-            label: 'Continue',
-            onPressed: onNext,
-            expand: true,
-          ),
-        ),
-      ],
     );
   }
 }

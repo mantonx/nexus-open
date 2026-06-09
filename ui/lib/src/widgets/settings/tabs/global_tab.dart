@@ -1,13 +1,10 @@
-// Global tab — display defaults, background images, and location.
+// Global tab — display defaults and background images.
 // These write directly to POST /api/config — no draft needed.
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../../../models/settings_state.dart';
 import '../../../theme/app_tokens.dart';
 import 'display_tab.dart';
 import 'images_tab.dart';
-import 'location_tab.dart';
 
 class GlobalTab extends StatefulWidget {
   const GlobalTab({super.key});
@@ -19,7 +16,7 @@ class GlobalTab extends StatefulWidget {
 class _GlobalTabState extends State<GlobalTab> with SingleTickerProviderStateMixin {
   late final TabController _tabs;
 
-  static const _labels = ['Display', 'Images', 'Location'];
+  static const _labels = ['Display', 'Images'];
 
   @override
   void initState() {
@@ -54,16 +51,9 @@ class _GlobalTabState extends State<GlobalTab> with SingleTickerProviderStateMix
         Expanded(
           child: TabBarView(
             controller: _tabs,
-            children: [
-              const DisplayTab(),
-              const ImagesTab(),
-              Builder(builder: (ctx) {
-                final settings = ctx.watch<SettingsState>();
-                return LocationTab(
-                  onLocationSelected: (loc) => settings.updateConfig(location: loc),
-                  initialLocation: settings.location,
-                );
-              }),
+            children: const [
+              DisplayTab(),
+              ImagesTab(),
             ],
           ),
         ),

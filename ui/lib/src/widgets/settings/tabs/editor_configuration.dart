@@ -364,6 +364,10 @@ class _SchemaField extends StatelessWidget {
             _toInt(currentValue) ?? _toInt(field.defaultValue) ?? 0;
         return _IntField(
             value: val, min: field.min, max: field.max, onChanged: onChanged);
+      case 'location':
+        final val =
+            currentValue as String? ?? field.defaultValue as String? ?? '';
+        return _LocationField(value: val, onChanged: (v) => onChanged(v));
       default:
         final val =
             currentValue as String? ?? field.defaultValue as String? ?? '';
@@ -531,4 +535,133 @@ class _StringFieldStatefulState extends State<_StringFieldStateful> {
         ),
         onSubmitted: widget.onChanged,
       );
+}
+
+// ── Location field: typeahead + map preview ───────────────────────────────────
+
+class _LocationField extends StatefulWidget {
+  const _LocationField({required this.value, required this.onChanged});
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_LocationField> createState() => _LocationFieldState();
+}
+
+class _LocationFieldState extends State<_LocationField> {
+  late final TextEditingController _ctrl;
+  final _mapController = MapController();
+  Place? _selectedPlace;
+
+  static const _defaultLat = 40.7128;
+  static const _defaultLon = -74.0060;
+  static const _defaultZoom = 4.0;
+  static const _selectedZoom = 11.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.value);
+    if (widget.value.isNotEmpty) _resolveInitial(widget.value);
+  }
+
+  @override
+  void didUpdateWidget(_LocationField old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value && _ctrl.text != widget.value) {
+      _ctrl.text = widget.value;
+      _resolveInitial(widget.value);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _resolveInitial(String query) async {
+    final results = await LocationService.searchPlaces(query);
+    if (!mounted || results.isEmpty) return;
+    setState(() => _selectedPlace = results.first);
+    _mapController.move(
+      LatLng(results.first.latitude, results.first.longitude),
+      _selectedZoom,
+    );
+  }
+
+  void _selectPlace(Place place) {
+    final display = LocationService.getDisplayString(place);
+    _ctrl.text = display;
+    setState(() => _selectedPlace = place);
+    widget.onChanged(display);
+    _mapController.move(
+      LatLng(place.latitude, place.longitude),
+      _selectedZoom,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final lat = _selectedPlace?.latitude ?? _defaultLat;
+    final lon = _selectedPlace?.longitude ?? _defaultLon;
+    final zoom = _selectedPlace != null ? _selectedZoom : _defaultZoom;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TypeAheadField<Place>(
+          textFieldConfiguration: TextFieldConfiguration(
+            controller: _ctrl,
+            style: theme.textTheme.bodySmall,
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              border: OutlineInputBorder(),
+              hintText: 'Search places…',
+            ),
+          ),
+          suggestionsCallback: LocationService.searchPlaces,
+          itemBuilder: (_, Place place) => ListTile(
+            dense: true,
+            title: Text(
+              LocationService.getDisplayString(place),
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          onSuggestionSelected: _selectPlace,
+          noItemsFoundBuilder: (_) => Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text('No places found', style: theme.textTheme.bodySmall),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        ClipRRect(
+          borderRadius: AppRadius.smBr,
+          child: SizedBox(
+            height: 240,
+            child: WorldMap(
+              latitude: lat,
+              longitude: lon,
+              width: double.infinity,
+              zoom: zoom,
+              controller: _mapController,
+              mapColor: cs.onSurface,
+              indicatorColor: AppColors.accent,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 3),
+          child: Text(
+            '© OpenStreetMap contributors',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: cs.onSurfaceVariant, fontSize: 8),
+          ),
+        ),
+      ],
+    );
+  }
 }

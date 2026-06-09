@@ -31,6 +31,7 @@ class _ZonePage extends StatelessWidget {
     required this.onReorder,
     required this.onNavigate,
     required this.catalogFor,
+    this.configuration,
   });
 
   final LayoutPage? page;
@@ -43,6 +44,7 @@ class _ZonePage extends StatelessWidget {
   final ValueChanged<List<String>> onReorder;
   final ValueChanged<int> onNavigate;
   final PluginCatalogEntry? Function(String) catalogFor;
+  final Widget? configuration;
 
   @override
   Widget build(BuildContext context) {
@@ -129,36 +131,40 @@ class _ZonePage extends StatelessWidget {
               ),
             ),
           ),
-          // Fill remaining height with a drop target so plugins can be
-          // dropped anywhere in the middle column, not just on the zone strip.
-          Expanded(
-            child: DragTarget<String>(
-              onWillAcceptWithDetails: (d) => zones.length < 6,
-              onAcceptWithDetails: (d) => onDropPlugin(d.data),
-              builder: (ctx, candidates, _) => candidates.isNotEmpty
-                  ? Container(
-                      margin: const EdgeInsets.only(top: AppSpacing.sm),
-                      decoration: BoxDecoration(
-                        color: AppColors.accent.withValues(alpha: 0.06),
-                        borderRadius: AppRadius.smBr,
-                        border: Border.all(
-                          color: AppColors.accent.withValues(alpha: 0.4),
-                          style: BorderStyle.solid,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          'Drop to add',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontSize: 10,
-                            color: AppColors.accent,
+          // Configuration panel for the selected zone, shown below the strip.
+          if (configuration != null) ...[
+            Divider(height: 1, color: theme.colorScheme.outline),
+            Expanded(child: configuration!),
+          ] else
+            // Fallback: fill remaining space as a drop target when no zone is selected.
+            Expanded(
+              child: DragTarget<String>(
+                onWillAcceptWithDetails: (d) => zones.length < 6,
+                onAcceptWithDetails: (d) => onDropPlugin(d.data),
+                builder: (ctx, candidates, _) => candidates.isNotEmpty
+                    ? Container(
+                        margin: const EdgeInsets.only(top: AppSpacing.sm),
+                        decoration: BoxDecoration(
+                          color: AppColors.accent.withValues(alpha: 0.06),
+                          borderRadius: AppRadius.smBr,
+                          border: Border.all(
+                            color: AppColors.accent.withValues(alpha: 0.4),
+                            style: BorderStyle.solid,
                           ),
                         ),
-                      ),
-                    )
-                  : const SizedBox.expand(),
+                        child: Center(
+                          child: Text(
+                            'Drop to add',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontSize: 10,
+                              color: AppColors.accent,
+                            ),
+                          ),
+                        ),
+                      )
+                    : const SizedBox.expand(),
+              ),
             ),
-          ),
         ],
       ),
     );
