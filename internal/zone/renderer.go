@@ -11,6 +11,7 @@ import (
 	"github.com/fogleman/gg"
 	"golang.org/x/image/font"
 
+	"github.com/mantonx/nexus-open/internal/design"
 	"github.com/mantonx/nexus-open/internal/fonts"
 	"github.com/mantonx/nexus-open/pkg/plugin"
 )
@@ -23,9 +24,11 @@ type Renderer struct {
 	height  int
 	align   Alignment
 
-	primaryFace   font.Face // scaled primary pt, HintingFull
-	multiLineFace font.Face // scaled multi-line pt, HintingFull
-	secondaryFace font.Face // scaled secondary pt, HintingFull
+	primaryFace   font.Face // value text — design.SizeValue (22pt)
+	unitFace      font.Face // unit suffix — design.SizeUnit (11pt)
+	labelFace     font.Face // zone label — design.SizeLabel (10pt)
+	multiLineFace font.Face // multi-line values (network speeds)
+	secondaryFace font.Face // kept for legacy callers; same as labelFace
 	iconFace      font.Face // FontAwesome fallback (may be nil)
 
 	primarySize   float64
@@ -44,23 +47,18 @@ type Renderer struct {
 // UpdateTheme replaces the renderer's theme for all subsequent Render calls.
 func (r *Renderer) UpdateTheme(theme Theme) {
 	r.theme = theme
-	scale := math.Min(1.0, float64(r.width)/refZoneWidth)
 	basePrimary := float64(theme.FontSizePrimary)
 	if basePrimary == 0 {
-		basePrimary = 24
+		basePrimary = float64(design.SizeValue)
 	}
 	baseSecondary := float64(theme.FontSizeSecondary)
 	if baseSecondary == 0 {
-		baseSecondary = 9
+		baseSecondary = float64(design.SizeLabel)
 	}
-	r.primarySize = math.Max(10, math.Round(basePrimary*scale))
-	r.secondarySize = math.Max(7, math.Round(baseSecondary*scale))
+	r.primarySize = basePrimary
+	r.secondarySize = baseSecondary
 	r.reloadFaces()
 }
-
-// refZoneWidth is the zone width at which font sizes and baselines were originally
-// tuned (4 zones across a 640px display). Narrower zones scale down proportionally.
-const refZoneWidth = 160.0
 
 // NewRenderer creates a new zone renderer.
 func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alignment) *Renderer {
@@ -72,29 +70,28 @@ func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alig
 		align:  align,
 	}
 
-	// Scale font sizes down for narrow zones; never scale up beyond the theme value.
+	// Font sizes are fixed to design tokens — the 48px display height is constant
+	// regardless of zone width. Truncation handles overflow, not font shrinkage.
 	basePrimary := float64(theme.FontSizePrimary)
 	if basePrimary == 0 {
-		basePrimary = 24
+		basePrimary = float64(design.SizeValue)
 	}
 	baseSecondary := float64(theme.FontSizeSecondary)
 	if baseSecondary == 0 {
-		baseSecondary = 9
+		baseSecondary = float64(design.SizeLabel)
 	}
 
-	scale := math.Min(1.0, float64(width)/refZoneWidth)
-	r.primarySize = math.Max(10, math.Round(basePrimary*scale))
-	r.secondarySize = math.Max(7, math.Round(baseSecondary*scale))
-	r.multiSize = math.Max(8, math.Round(12*scale))
-	r.iconSize = math.Max(10, math.Round(18*scale))
+	r.primarySize = basePrimary
+	r.secondarySize = baseSecondary
+	r.multiSize = 8.5
+	r.iconSize = 18
 
-	// Baselines tuned to the 48px zone height, scaled with zone width.
-	// At refZoneWidth: padL=8, padR=6, labelY=12, valueY=36, valueYSolo=27.
-	r.padL = math.Max(4, math.Round(8*scale))
-	r.padR = math.Max(3, math.Round(6*scale))
-	r.labelY = math.Round(float64(height) * 0.25)
-	r.valueY = math.Round(float64(height) * 0.75)
-	r.valueYSolo = math.Round(float64(height) * 0.5625) // ~27/48
+	// Baselines from design tokens (native 640×48 coordinate space).
+	r.padL = 8
+	r.padR = 6
+	r.labelY = float64(design.LabelBaselineY) // 15
+	r.valueY = float64(design.ValueBaselineY) // 38
+	r.valueYSolo = 32                         // centred when no label — between 15 and 38
 
 	r.reloadFaces()
 	return r
@@ -114,15 +111,16 @@ func (r *Renderer) reloadFaces() {
 
 	r.primaryFace = load(r.primarySize)
 
+	// Unit and label sizes are fixed to spec tokens, not scaled from theme.
+	r.unitFace = load(float64(design.SizeUnit))   // 11pt
+	r.labelFace = load(float64(design.SizeLabel)) // 10pt
+	r.secondaryFace = r.labelFace                 // alias for legacy callers
+
 	multiSize := r.multiSize
 	if multiSize == 0 {
 		multiSize = 12
 	}
 	r.multiLineFace = load(multiSize)
-
-	// Secondary label: use at least 13pt for legibility; scale up from secondarySize.
-	secLabelSize := math.Max(13, r.secondarySize+2)
-	r.secondaryFace = load(secLabelSize)
 
 	iconSize := r.iconSize
 	if iconSize == 0 {
@@ -159,28 +157,42 @@ func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
 	primary := strings.Split(payload.Primary, "\n")
 	isMulti := len(primary) > 1
 
-	// Zone identity colour — comes from theme accent (set per-zone via ThemeOverride).
-	accentColor := r.theme.GetAccentColor()
-	// Text colour: accent colour always for OK state (zone identity is the accent);
-	// severity override only for warn/crit states.
+	// Text colour: severity drives warn/crit; neutral value colour for OK state.
 	var textColor color.RGBA
 	switch payload.Severity {
 	case plugin.SeverityWarn, plugin.SeverityCrit:
 		textColor = r.severityColor(payload.Severity)
 	default:
-		textColor = accentColor
+		textColor = design.Value
 	}
 
-	// Layer 2: zone tint (very subtle accent wash).
-	r.drawTint(dc, accentColor, bg)
+	// Combo layout: label+value inline at top, full-height graph below.
+	if payload.GraphType == plugin.GraphTypeCombo {
+		r.drawComboGraph(dc, payload, textColor)
+		r.drawComboContent(dc, payload.Secondary, payload.Value, payload.ValueUnit, textColor)
+	} else {
+		// Layer 2: graph fill + line (if spark data present).
+		if len(payload.Spark) > 0 {
+			r.drawGraph(dc, payload, design.Info)
+		}
 
-	// Layer 3: graph fill + line (if spark data present).
-	if len(payload.Spark) > 0 {
-		r.drawGraph(dc, payload, accentColor)
+		// hasGraph triggers the split layout (value moves up to make room).
+		// segmented and bar_thresh live in the bottom strip — value stays at y=38.
+		bottomStripOnly := payload.GraphType == plugin.GraphTypeSegmented ||
+			payload.GraphType == plugin.GraphTypeBarThresh
+		hasGraph := len(payload.Spark) > 0 && !bottomStripOnly
+
+		// Layer 3b: caption (rate readout etc.) — info-blue, small, between label and sparkline.
+		// When a caption is present with a graph, draw only the label+caption; skip
+		// the normal value layout so the caption IS the data readout.
+		if payload.Caption != "" && hasGraph {
+			r.drawLabel(dc, payload.Secondary)
+			r.drawCaption(dc, payload.Caption)
+		} else {
+			// Layer 4: text content.
+			r.drawContent(dc, primary, isMulti, payload.Secondary, payload.Icon, payload.Value, payload.ValueUnit, textColor, hasGraph)
+		}
 	}
-
-	// Layer 4: text content.
-	r.drawContent(dc, primary, isMulti, payload.Secondary, payload.Icon, textColor, len(payload.Spark) > 0)
 
 	// Layer 5: progress bar (optional, bottom edge).
 	if payload.Progress > 0 {
@@ -192,27 +204,50 @@ func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
 
 // ── Layer renderers ───────────────────────────────────────────────────────────
 
-// drawTint draws a very subtle accent-colour wash over the entire zone.
-// Alpha scales with background darkness so it stays perceptible on any bg.
-func (r *Renderer) drawTint(dc *gg.Context, accent, bg color.RGBA) {
-	lum := (uint16(bg.R)*299 + uint16(bg.G)*587 + uint16(bg.B)*114) / 1000
-	alpha := 14.0 - float64(lum)*8.0/255.0
-	if alpha < 4 {
-		alpha = 4
+// drawLabel renders the zone label at the standard top-left position (y=15).
+func (r *Renderer) drawLabel(dc *gg.Context, text string) {
+	if text == "" {
+		return
 	}
-	dc.SetRGBA(
-		float64(accent.R)/255,
-		float64(accent.G)/255,
-		float64(accent.B)/255,
-		alpha/255,
-	)
-	dc.DrawRectangle(0, 0, float64(r.width), float64(r.height))
-	dc.Fill()
+	if r.labelFace != nil {
+		dc.SetFontFace(r.labelFace)
+	}
+	lr := float64(design.Label.R) / 255
+	lg := float64(design.Label.G) / 255
+	lb := float64(design.Label.B) / 255
+	dc.SetRGB(lr, lg, lb)
+	dc.DrawString(text, r.padL, r.labelY)
 }
 
-// drawGraph draws the Corsair-inspired graph: bottom-anchored gradient fill,
-// glow halo composited under a crisp 1.5px line.
+// drawCaption renders a small info-blue annotation line between the label (y=15)
+// and the sparkline (y≈32). Used for rate readouts like "↓222K ↑221K".
+func (r *Renderer) drawCaption(dc *gg.Context, text string) {
+	if r.multiLineFace != nil {
+		dc.SetFontFace(r.multiLineFace)
+	}
+	vr := float64(design.Value.R) / 255
+	vg := float64(design.Value.G) / 255
+	vb := float64(design.Value.B) / 255
+	dc.SetRGB(vr, vg, vb)
+	dc.DrawString(text, r.padL, 27)
+}
+
+// drawGraph dispatches to the appropriate graph renderer based on GraphType.
 func (r *Renderer) drawGraph(dc *gg.Context, payload plugin.Payload, col color.RGBA) {
+	switch payload.GraphType {
+	case plugin.GraphTypeSegmented:
+		r.drawSegmented(dc, payload.Spark, payload.Severity)
+		return
+	case plugin.GraphTypeBarThresh:
+		r.drawBarThresh(dc, payload.Spark, payload.Severity)
+		return
+	}
+	r.drawSparkline(dc, payload, col)
+}
+
+// drawSparkline draws the Corsair-inspired graph: bottom-anchored gradient fill,
+// glow halo composited under a crisp 1.5px line.
+func (r *Renderer) drawSparkline(dc *gg.Context, payload plugin.Payload, col color.RGBA) {
 	data := payload.Spark
 	n := len(data)
 	if n < 2 {
@@ -335,6 +370,185 @@ func (r *Renderer) drawGraph(dc *gg.Context, payload plugin.Payload, col color.R
 	dc.Stroke()
 }
 
+// drawSegmented draws a fixed-width row of rounded segments. Filled segments
+// are colored by value threshold; unfilled (future) slots are dim #2a2a2a.
+// The row always spans the zone width using the data length as slot count
+// (min 12 slots so the row is never sparse-looking).
+func (r *Renderer) drawSegmented(dc *gg.Context, data []float32, sev plugin.Severity) {
+	if len(data) == 0 {
+		return
+	}
+	const segH = 5.0
+	const gap = 2.0
+	const rr = 1.5
+	const minSlots = 12
+	W := float64(r.width)
+	H := float64(r.height)
+	total := len(data)
+	if total < minSlots {
+		total = minSlots
+	}
+	segW := math.Max(4.0, (W-gap*float64(total-1))/float64(total))
+	y := H - segH - 1
+	dim := color.RGBA{R: 0x2a, G: 0x2a, B: 0x2a, A: 0xff}
+
+	for i := 0; i < total; i++ {
+		x := float64(i) * (segW + gap)
+		var col color.RGBA
+		if i < len(data) {
+			v := data[i]
+			switch {
+			case v >= 0.85:
+				col = design.Crit
+			case v >= 0.6:
+				col = design.Warn
+			default:
+				col = design.Ok
+			}
+		} else {
+			col = dim
+		}
+		dc.SetColor(col)
+		dc.DrawRoundedRectangle(x, y, segW, segH, rr)
+		dc.Fill()
+	}
+}
+
+// drawBarThresh draws a single horizontal fill bar with tick marks at the warn
+// (70%) and crit (90%) thresholds. Bar colour follows the payload severity.
+func (r *Renderer) drawBarThresh(dc *gg.Context, data []float32, sev plugin.Severity) {
+	if len(data) == 0 {
+		return
+	}
+	v := data[len(data)-1]
+	const barH = 4.0
+	const rr = 2.0
+	W := float64(r.width)
+	H := float64(r.height)
+	y := H - barH - 1
+
+	// Track.
+	dc.SetColor(design.Divider)
+	dc.DrawRoundedRectangle(0, y, W-2, barH, rr)
+	dc.Fill()
+
+	// Fill — colour by severity.
+	var fillCol color.RGBA
+	switch sev {
+	case plugin.SeverityWarn:
+		fillCol = design.Warn
+	case plugin.SeverityCrit:
+		fillCol = design.Crit
+	default:
+		fillCol = design.OkBar
+	}
+	filled := (W - 2) * float64(clampFloat(v))
+	if filled > 0 {
+		dc.SetColor(fillCol)
+		dc.DrawRoundedRectangle(0, y, filled, barH, rr)
+		dc.Fill()
+	}
+
+	// Threshold tick at 70% (warn) and 90% (crit).
+	drawTick := func(pct float64, col color.RGBA) {
+		x := (W - 2) * pct
+		dc.SetColor(col)
+		dc.DrawRectangle(x, y-1, 1, barH+2)
+		dc.Fill()
+	}
+	// Mock: warn tick is neutral (#cfcfcf), crit tick is crit red.
+	drawTick(0.70, color.RGBA{R: 0xcf, G: 0xcf, B: 0xcf, A: 0xff})
+	drawTick(0.90, design.Crit)
+}
+
+// drawComboGraph draws load columns (fill=#262626) from loadSpark, then overlays
+// the temperature sparkline in textColor. Graph occupies the bottom ~34px of the
+// zone, leaving the top 14px for the inline label+value header.
+func (r *Renderer) drawComboGraph(dc *gg.Context, payload plugin.Payload, textColor color.RGBA) {
+	const graphTop = 14.0
+	W := float64(r.width)
+	H := float64(r.height)
+	graphH := H - graphTop
+
+	// Load columns — 4px wide with 2px gaps, anchored to bottom.
+	load := payload.LoadSpark
+	if len(load) > 0 {
+		const colW = 4.0
+		const colGap = 2.0
+		col := color.RGBA{R: 0x26, G: 0x26, B: 0x26, A: 0xff}
+		for i, v := range load {
+			h := graphH * float64(clampFloat(v))
+			if h < 1 {
+				h = 1
+			}
+			x := r.padL + float64(i)*(colW+colGap)
+			if x+colW > W {
+				break
+			}
+			dc.SetColor(col)
+			dc.DrawRectangle(x, H-h, colW, h)
+			dc.Fill()
+		}
+	}
+
+	// Temperature sparkline overlay.
+	spark := payload.Spark
+	if len(spark) >= 2 {
+		n := len(spark)
+		xStep := W / float64(n-1)
+		yOf := func(v float32) float64 { return H - float64(v)*graphH }
+		ar := float64(textColor.R) / 255
+		ag := float64(textColor.G) / 255
+		ab := float64(textColor.B) / 255
+		dc.MoveTo(0, yOf(spark[0]))
+		for i := 1; i < n; i++ {
+			dc.LineTo(float64(i)*xStep, yOf(spark[i]))
+		}
+		dc.SetRGBA(ar, ag, ab, 0.95)
+		dc.SetLineWidth(1.2)
+		dc.SetLineCapRound()
+		dc.SetLineJoinRound()
+		dc.Stroke()
+	}
+}
+
+// drawComboContent draws the inline header: label left-anchored and
+// value+unit right-anchored, both on the same baseline (y=13).
+// This matches the mock: "CPU" left, "71°" right, all within the top 14px.
+func (r *Renderer) drawComboContent(dc *gg.Context, label, value, valueUnit string, textColor color.RGBA) {
+	const headerY = 13.0
+	W := float64(r.width)
+	padL := r.padL
+	padR := r.padR
+
+	lr := float64(design.Label.R) / 255
+	lg := float64(design.Label.G) / 255
+	lb := float64(design.Label.B) / 255
+	tr := float64(textColor.R) / 255
+	tg := float64(textColor.G) / 255
+	tb := float64(textColor.B) / 255
+
+	// Label left.
+	if r.labelFace != nil {
+		dc.SetFontFace(r.labelFace)
+	}
+	dc.SetRGB(lr, lg, lb)
+	dc.DrawString(label, padL, headerY)
+
+	// Value+unit right-anchored.
+	// Mock font-size=12 for this compact header value — use unitFace as proxy.
+	if r.unitFace != nil {
+		dc.SetFontFace(r.unitFace)
+	}
+	display := value
+	if valueUnit != "" {
+		display = value + valueUnit
+	}
+	vw, _ := dc.MeasureString(display)
+	dc.SetRGB(tr, tg, tb)
+	dc.DrawString(display, W-padR-vw, headerY)
+}
+
 // boxBlur applies a fast separable box blur of the given radius to img in-place.
 func boxBlur(img *image.RGBA, radius int) {
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
@@ -408,10 +622,10 @@ func blendAlpha(dst, src *image.RGBA, opacity float64) {
 }
 
 // drawContent draws the primary value, optional icon, and secondary label.
-// Text is monochromatic: label uses a dimmed version of textColor (55% brightness),
-// value uses the full textColor. Horizontal alignment follows r.align.
+// When value+valueUnit are non-empty they are rendered as two runs at different
+// sizes/colours; otherwise primary[0] is rendered as a single fused string.
 func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
-	secondary, icon string, textColor color.RGBA, hasGraph bool) {
+	secondary, icon, value, valueUnit string, textColor color.RGBA, hasGraph bool) {
 
 	padL := r.padL
 	padR := r.padR
@@ -420,20 +634,18 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 	tg := float64(textColor.G) / 255
 	tb := float64(textColor.B) / 255
 
-	// Label: accent colour at 72% — readable without competing with the value.
-	const labelDim = 0.72
-	lr := tr * labelDim
-	lg := tg * labelDim
-	lb := tb * labelDim
+	// Label colour: token label grey, independent of severity.
+	lr := float64(design.Label.R) / 255
+	lg := float64(design.Label.G) / 255
+	lb := float64(design.Label.B) / 255
 
 	W := float64(r.width)
 	H := float64(r.height)
 
 	// Split layout: used when there is a label+graph, OR when the primary
-	// contains multiple lines (multi-source plugins). Multi-line primaries
-	// always use this path so both lines render at their fixed baselines.
+	// contains multiple lines (multi-source plugins).
 	if (hasGraph && secondary != "") || isMulti {
-		r.drawSplitLayout(dc, primary, isMulti, secondary, icon, tr, tg, tb, lr, lg, lb, W, H)
+		r.drawSplitLayout(dc, primary, isMulti, secondary, icon, value, valueUnit, tr, tg, tb, lr, lg, lb, W, H)
 		return
 	}
 
@@ -451,10 +663,10 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 		return
 	}
 
-	// Fallback: label near top-left, value in middle.
+	// Standard layout: label near top-left, value at bottom.
 	if secondary != "" {
-		if r.secondaryFace != nil {
-			dc.SetFontFace(r.secondaryFace)
+		if r.labelFace != nil {
+			dc.SetFontFace(r.labelFace)
 		}
 		label := r.truncateSpaced(dc, secondary, W-padL-padR, 1.0)
 		dc.SetRGB(lr, lg, lb)
@@ -470,7 +682,6 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 	}
 
 	x := padL
-	ax := 0.0
 
 	if icon != "" && r.iconFace != nil && r.align != AlignCenter {
 		glyph := resolveIconGlyph(icon)
@@ -486,41 +697,81 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 		}
 	}
 
-	var valueX float64
-	switch r.align {
-	case AlignCenter:
-		valueX = W / 2
-		ax = 0.5
-	case AlignRight:
-		valueX = W - padR
-		ax = 1.0
-	default:
-		valueX = x
-		ax = 0.0
-	}
-
-	maxW := W - padL - padR
-	text := r.truncate(primary[0], maxW, dc)
-
-	// Subtle dark scrim behind the value text so it reads over the gradient fill.
-	// Kept faint so it doesn't look like a box — just darkens the gradient slightly.
-	if hasGraph {
-		tw, _ := dc.MeasureString(text)
-		scrX := valueX
-		switch ax {
-		case 0.5:
-			scrX = valueX - tw/2
-		case 1.0:
-			scrX = valueX - tw
+	if value != "" {
+		r.drawValueUnit(dc, value, valueUnit, x, valueBaseline, textColor, hasGraph)
+	} else {
+		var valueX float64
+		ax := 0.0
+		switch r.align {
+		case AlignCenter:
+			valueX = W / 2
+			ax = 0.5
+		case AlignRight:
+			valueX = W - padR
+			ax = 1.0
+		default:
+			valueX = x
 		}
-		scrX -= 2
+		maxW := W - padL - padR
+		text := r.truncate(primary[0], maxW, dc)
+		if hasGraph {
+			tw, _ := dc.MeasureString(text)
+			scrX := valueX
+			switch ax {
+			case 0.5:
+				scrX = valueX - tw/2
+			case 1.0:
+				scrX = valueX - tw
+			}
+			dc.SetRGBA(0, 0, 0, 0.28)
+			dc.DrawRectangle(scrX-2, valueBaseline-22, tw+4, 24)
+			dc.Fill()
+		}
+		dc.SetRGB(tr, tg, tb)
+		dc.DrawStringAnchored(text, valueX, valueBaseline, ax, 0)
+	}
+}
+
+// drawValueUnit renders value in the primary face (textColor) then valueUnit
+// immediately after in the unit face (design.Unit colour, smaller).
+func (r *Renderer) drawValueUnit(dc *gg.Context, value, valueUnit string, x, baseline float64, textColor color.RGBA, hasGraph bool) {
+	tr := float64(textColor.R) / 255
+	tg := float64(textColor.G) / 255
+	tb := float64(textColor.B) / 255
+
+	if r.primaryFace != nil {
+		dc.SetFontFace(r.primaryFace)
+	}
+	vw, vh := dc.MeasureString(value)
+
+	if hasGraph {
+		unitW := 0.0
+		if valueUnit != "" && r.unitFace != nil {
+			dc.SetFontFace(r.unitFace)
+			unitW, _ = dc.MeasureString(valueUnit)
+			dc.SetFontFace(r.primaryFace)
+		}
 		dc.SetRGBA(0, 0, 0, 0.28)
-		dc.DrawRectangle(scrX, valueBaseline-22, tw+4, 24)
+		dc.DrawRectangle(x-2, baseline-vh, vw+unitW+4, vh+2)
 		dc.Fill()
 	}
 
+	if r.primaryFace != nil {
+		dc.SetFontFace(r.primaryFace)
+	}
 	dc.SetRGB(tr, tg, tb)
-	dc.DrawStringAnchored(text, valueX, valueBaseline, ax, 0)
+	dc.DrawString(value, x, baseline)
+
+	if valueUnit != "" {
+		ur := float64(design.Unit.R) / 255
+		ug := float64(design.Unit.G) / 255
+		ub := float64(design.Unit.B) / 255
+		if r.unitFace != nil {
+			dc.SetFontFace(r.unitFace)
+		}
+		dc.SetRGB(ur, ug, ub)
+		dc.DrawString(valueUnit, x+vw+2, baseline)
+	}
 }
 
 // drawProgressBar draws a 2px bar at the bottom edge.
@@ -558,7 +809,7 @@ func (r *Renderer) drawProgressBar(dc *gg.Context, progress float32, col color.R
 //
 // Works for both single-line and multi-line (network) values.
 func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti bool,
-	secondary, icon string,
+	secondary, icon, value, valueUnit string,
 	tr, tg, tb, lr, lg, lb float64,
 	W, H float64) {
 
@@ -567,9 +818,9 @@ func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti boo
 	labelY := r.labelY
 	valueY := r.valueY
 
-	// All split-layout zones: label top-left, icon+value centred below.
-	if r.secondaryFace != nil {
-		dc.SetFontFace(r.secondaryFace)
+	// All split-layout zones: label top-left, icon+value below.
+	if r.labelFace != nil {
+		dc.SetFontFace(r.labelFace)
 	}
 	label := r.truncateSpaced(dc, secondary, W-padL-padR, 1.0)
 	dc.SetRGB(lr, lg, lb)
@@ -581,7 +832,6 @@ func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti boo
 			dc.SetFontFace(r.multiLineFace)
 		}
 		rightX := W - padR - 8
-		// Place two lines evenly in the lower 60% of the zone height.
 		spacing := (H - labelY) / 3
 		baselines := []float64{labelY + spacing, labelY + spacing*2}
 		for i, line := range primary {
@@ -596,12 +846,6 @@ func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti boo
 	}
 
 	// Single line: icon + value centred horizontally below the label.
-	if r.primaryFace != nil {
-		dc.SetFontFace(r.primaryFace)
-	}
-	valueText := r.truncate(primary[0], W-padL*2, dc)
-	vw, _ := dc.MeasureString(valueText)
-
 	var iw float64
 	var glyph string
 	if icon != "" && r.iconFace != nil {
@@ -609,14 +853,42 @@ func (r *Renderer) drawSplitLayout(dc *gg.Context, primary []string, isMulti boo
 		if glyph != "" {
 			dc.SetFontFace(r.iconFace)
 			iw, _ = dc.MeasureString(glyph)
-			dc.SetFontFace(r.primaryFace)
 		}
 	}
 
 	const iconGap = 4.0
+
+	if value != "" {
+		// Measure value+unit group to centre it.
+		if r.primaryFace != nil {
+			dc.SetFontFace(r.primaryFace)
+		}
+		vw, _ := dc.MeasureString(value)
+		unitW := 0.0
+		if valueUnit != "" && r.unitFace != nil {
+			dc.SetFontFace(r.unitFace)
+			unitW, _ = dc.MeasureString(valueUnit)
+		}
+		groupW := iw + iconGap + vw + unitW
+		startX := (W - groupW) / 2
+		if glyph != "" && r.iconFace != nil {
+			dc.SetFontFace(r.iconFace)
+			dc.SetRGB(tr, tg, tb)
+			dc.DrawString(glyph, startX, valueY)
+		}
+		textColor := color.RGBA{R: uint8(tr * 255), G: uint8(tg * 255), B: uint8(tb * 255), A: 255}
+		r.drawValueUnit(dc, value, valueUnit, startX+iw+iconGap, valueY, textColor, true)
+		return
+	}
+
+	// Fallback: fused primary string.
+	if r.primaryFace != nil {
+		dc.SetFontFace(r.primaryFace)
+	}
+	valueText := r.truncate(primary[0], W-padL*2, dc)
+	vw, _ := dc.MeasureString(valueText)
 	groupW := iw + iconGap + vw
 	startX := (W - groupW) / 2
-
 	if glyph != "" && r.iconFace != nil {
 		dc.SetFontFace(r.iconFace)
 		dc.SetRGB(tr, tg, tb)
