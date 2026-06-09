@@ -9,6 +9,7 @@ import '../../services/nexus_api_service.dart';
 import '../../services/ws_service.dart';
 import '../../theme/app_tokens.dart';
 import '../common/common.dart';
+import '../display/detail_overlay.dart';
 import 'tabs/editor_tab.dart';
 import 'tabs/global_tab.dart';
 import 'tabs/device_tab.dart';
@@ -455,30 +456,35 @@ class _PreviewStripState extends State<_PreviewStrip> {
                             : null,
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (_uiImage != null)
-                            RawImage(
-                              image: _uiImage,
-                              fit: BoxFit.fill,
-                              filterQuality: FilterQuality.medium,
-                            )
-                          else
-                            const ColoredBox(color: Colors.black),
-                          if (_cursorPos != null)
-                            AnimatedOpacity(
-                              duration: const Duration(milliseconds: 180),
-                              opacity: _ringVisible ? 1.0 : 0.0,
-                              child: CustomPaint(
-                                painter: _CloseButtonHighlightPainter(
-                                  position: _cursorPos!,
-                                  accentColor: AppColors.hardwareAccent,
-                                  widgetSize: Size(displayW, displayH),
+                      child: DetailOverlay(
+                        active: _detailActive,
+                        displaySize: Size(displayW, displayH),
+                        onDismiss: () => _api.tapZone(_closeButtonHardwareX).catchError((_) {}),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (_uiImage != null)
+                              RawImage(
+                                image: _uiImage,
+                                fit: BoxFit.fill,
+                                filterQuality: FilterQuality.medium,
+                              )
+                            else
+                              const ColoredBox(color: Colors.black),
+                            if (_cursorPos != null)
+                              AnimatedOpacity(
+                                duration: const Duration(milliseconds: 180),
+                                opacity: _ringVisible ? 1.0 : 0.0,
+                                child: CustomPaint(
+                                  painter: _CloseButtonHighlightPainter(
+                                    position: _cursorPos!,
+                                    accentColor: AppColors.hardwareAccent,
+                                    widgetSize: Size(displayW, displayH),
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'nexus_tokens.g.dart';
+
 // ── Spacing ───────────────────────────────────────────────────────────────────
 // All spacing values are multiples of the 4px base unit.
 // Use these everywhere — no raw numeric literals in widget files.
@@ -143,6 +145,74 @@ class AppColors {
   static const Color textPrimary   = Color(0xFFE8E8ED);
   static const Color textSecondary = Color(0xFFAAADB3);
   static const Color textMuted     = Color(0xFF5A5A62);
+}
+
+// ── Hardware display severity ─────────────────────────────────────────────────
+//
+// ZoneSeverity mirrors the Go plugin.Severity string values.
+// It belongs here — NOT in AppColors — because it drives NexusColors,
+// the hardware display namespace.
+
+/// Severity level emitted by a plugin Payload.
+/// Maps directly to the JSON "severity" field values.
+enum ZoneSeverity { ok, warn, crit }
+
+extension ZoneSeverityX on ZoneSeverity {
+  static ZoneSeverity fromString(String? s) => switch (s) {
+        'warn' => ZoneSeverity.warn,
+        'crit' => ZoneSeverity.crit,
+        _ => ZoneSeverity.ok,
+      };
+}
+
+/// Color triplet for a single severity level on the hardware display.
+/// value → primary text color
+/// bar   → bar/fill color (graphs, progress)
+/// dim   → secondary text, unit suffix
+class NexusStateColors {
+  const NexusStateColors({
+    required this.value,
+    required this.bar,
+    required this.dim,
+  });
+
+  final Color value;
+  final Color bar;
+  final Color dim;
+}
+
+/// Maps ZoneSeverity → the correct NexusColors triplet.
+/// Use this everywhere the renderer picks a color from severity.
+/// Never hardcode colors; always go through this helper.
+class NexusStateColor {
+  NexusStateColor._();
+
+  static const NexusStateColors ok = NexusStateColors(
+    value: NexusColors.ok,
+    bar: NexusColors.okBar,
+    dim: NexusColors.label,
+  );
+
+  static const NexusStateColors warn = NexusStateColors(
+    value: NexusColors.warn,
+    bar: NexusColors.warn,
+    dim: NexusColors.warnDim,
+  );
+
+  static const NexusStateColors crit = NexusStateColors(
+    value: NexusColors.crit,
+    bar: NexusColors.crit,
+    dim: NexusColors.critDim,
+  );
+
+  static NexusStateColors forSeverity(ZoneSeverity s) => switch (s) {
+        ZoneSeverity.ok => ok,
+        ZoneSeverity.warn => warn,
+        ZoneSeverity.crit => crit,
+      };
+
+  static NexusStateColors fromString(String? s) =>
+      forSeverity(ZoneSeverityX.fromString(s));
 }
 
 // ── Semantic colour extension ─────────────────────────────────────────────────
