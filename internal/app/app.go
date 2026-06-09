@@ -313,6 +313,7 @@ func (a *App) initialize() error {
 	a.apiServer.SetSwipeSimulator(a.zoneManager)
 	a.apiServer.SetZoneTapper(a.zoneManager)
 	a.apiServer.SetDetailFrameProvider(a.zoneManager)
+	a.apiServer.SetFrameProvider(a.zoneManager)
 	a.zoneManager.SetDetailStateCallback(func(active bool) {
 		a.apiServer.BroadcastDetailState(active, zone.DetailCloseX*2, zone.DetailCloseY*2)
 	})

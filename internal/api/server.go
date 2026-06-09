@@ -68,6 +68,11 @@ type DetailFrameProvider interface {
 	GetDetailFrame() *image.RGBA
 }
 
+// FrameProvider returns the most recently composed full-display frame.
+type FrameProvider interface {
+	GetLastFrame() *image.RGBA
+}
+
 // Navigator is the subset of zone.Manager needed for page navigation from the UI.
 type Navigator interface {
 	GetCurrentPage() int
@@ -114,6 +119,7 @@ type Server struct {
 	swipeSim        SwipeSimulator        // for /api/debug/swipe
 	zoneTapper      ZoneTapper            // for /api/debug/tap
 	detailProvider  DetailFrameProvider   // for /api/debug/render-detail
+	frameProvider   FrameProvider         // for /api/debug/frame
 	navigator       Navigator             // for /api/navigate/page
 	layoutStore     LayoutStore           // for /api/layout/*
 	layoutReloader  LayoutReloader        // for live reloads after layout edits
@@ -231,6 +237,11 @@ func (s *Server) SetDetailFrameProvider(p DetailFrameProvider) {
 	s.detailProvider = p
 }
 
+// SetFrameProvider wires in the zone manager for the debug frame endpoint.
+func (s *Server) SetFrameProvider(p FrameProvider) {
+	s.frameProvider = p
+}
+
 // SetZoneStatusProvider wires in the sampler so zone status can be queried.
 func (s *Server) SetZoneStatusProvider(p ZoneStatusProvider) {
 	s.zoneStatus = p
@@ -344,6 +355,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/debug/tap", s.handleDebugTap)
 	mux.HandleFunc("/api/debug/tap-zone", s.handleDebugTapZone)
 	mux.HandleFunc("/api/debug/render-detail", s.handleDebugRenderDetail)
+	mux.HandleFunc("/api/debug/frame", s.handleDebugFrame)
 
 	// Preview navigation — page switching from Flutter UI
 	mux.HandleFunc("/api/navigate/page", s.handleNavigatePage)

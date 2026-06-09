@@ -243,6 +243,32 @@ func (s *Server) handleDebugRenderDetail(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// handleDebugFrame returns the most recently composed full-display frame as PNG.
+// GET /api/debug/frame
+//
+// Useful for visually inspecting the current hardware output without needing
+// the physical device or a WebSocket client.
+func (s *Server) handleDebugFrame(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.frameProvider == nil {
+		s.respondError(w, "Frame provider not available", http.StatusServiceUnavailable)
+		return
+	}
+	frame := s.frameProvider.GetLastFrame()
+	if frame == nil {
+		s.respondError(w, "No frame available yet", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := png.Encode(w, frame); err != nil {
+		s.logger.Error("debug/frame: png encode failed", "error", err)
+	}
+}
+
 // handleSwipeCancel cancels an in-progress live swipe.
 // POST /api/debug/swipe/cancel
 func (s *Server) handleSwipeCancel(w http.ResponseWriter, r *http.Request) {
