@@ -1,0 +1,17 @@
+{
+  "name": "nexus-open-design",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Style Dictionary token pipeline for Nexus Open",
+  "scripts": {
+    "build": "node sd.config.js"
+  },
+  "devDependencies": {
+    "style-dictionary": "^4.3.0"
+  },
+  "allowScripts": {
+    "@bundled-es-modules/glob@10.4.2": true,
+    "style-dictionary@4.4.0": true
+  }
+}

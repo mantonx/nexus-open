@@ -114,10 +114,15 @@ func (m *ClockPlugin) Sample() (plugin.Payload, error) {
 	// Phase-lock the blink to wall-clock seconds so sampler jitter can't desync it.
 	colonVisible := !m.blinkColon || now.Second()%2 == 0
 
+	timeVal, timeSuffix := m.formatTimeSplit(now, colonVisible, false)
+	timeValSec, _ := m.formatTimeSplit(now, colonVisible, true)
+
 	switch m.face {
 	case ClockFaceTimeOnly:
 		return plugin.Payload{
-			Primary:   m.formatTime(now, colonVisible, false),
+			Primary:   timeVal + timeSuffix,
+			Value:     timeVal,
+			ValueUnit: timeSuffix,
 			Severity:  plugin.SeverityOK,
 			TTL:       2 * time.Second,
 			Icon:      "clock",
@@ -126,7 +131,9 @@ func (m *ClockPlugin) Sample() (plugin.Payload, error) {
 
 	case ClockFaceWithSeconds:
 		return plugin.Payload{
-			Primary:   m.formatTime(now, colonVisible, true),
+			Primary:   timeValSec + timeSuffix,
+			Value:     timeValSec,
+			ValueUnit: timeSuffix,
 			Secondary: now.Format("Mon, Jan 02"),
 			Severity:  plugin.SeverityOK,
 			TTL:       2 * time.Second,
@@ -137,7 +144,7 @@ func (m *ClockPlugin) Sample() (plugin.Payload, error) {
 	case ClockFaceDateFirst:
 		return plugin.Payload{
 			Primary:   now.Format("Mon, Jan 02"),
-			Secondary: m.formatTime(now, colonVisible, false),
+			Secondary: timeVal + timeSuffix,
 			Severity:  plugin.SeverityOK,
 			TTL:       2 * time.Second,
 			Icon:      "clock",
@@ -146,7 +153,9 @@ func (m *ClockPlugin) Sample() (plugin.Payload, error) {
 
 	default: // ClockFaceDigital
 		return plugin.Payload{
-			Primary:   m.formatTime(now, colonVisible, false),
+			Primary:   timeVal + timeSuffix,
+			Value:     timeVal,
+			ValueUnit: timeSuffix,
 			Secondary: now.Format("Mon, Jan 02"),
 			Severity:  plugin.SeverityOK,
 			TTL:       2 * time.Second,
@@ -162,7 +171,9 @@ func (m *ClockPlugin) Sample() (plugin.Payload, error) {
 // and causes only a ~1px width shift at display sizes — far less jarring than a box.
 const colonHidden = " "
 
-func (m *ClockPlugin) formatTime(t time.Time, showColon bool, withSeconds bool) string {
+// formatTimeSplit returns the digits and the AM/PM suffix as separate strings.
+// For 24-hour format the suffix is always empty.
+func (m *ClockPlugin) formatTimeSplit(t time.Time, showColon bool, withSeconds bool) (digits, suffix string) {
 	colon := ":"
 	if !showColon {
 		colon = colonHidden
@@ -171,15 +182,15 @@ func (m *ClockPlugin) formatTime(t time.Time, showColon bool, withSeconds bool) 
 	case ClockFormat24Hour:
 		base := t.Format("15") + colon + t.Format("04")
 		if withSeconds {
-			return base + colon + t.Format("05")
+			return base + colon + t.Format("05"), ""
 		}
-		return base
+		return base, ""
 	default: // 12-hour
 		base := t.Format("3") + colon + t.Format("04")
 		if withSeconds {
-			return base + colon + t.Format("05 PM")
+			return base + colon + t.Format("05"), t.Format(" PM")
 		}
-		return base + t.Format(" PM")
+		return base, t.Format(" PM")
 	}
 }
 
