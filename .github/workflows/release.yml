@@ -98,13 +98,13 @@ jobs:
 
       - name: Install appimagetool
         run: |
-          curl -Lo /usr/local/bin/appimagetool \
+          curl -Lo /tmp/appimagetool \
             https://github.com/AppImage/appimagetool/releases/latest/download/appimagetool-x86_64.AppImage
-          chmod +x /usr/local/bin/appimagetool
+          chmod +x /tmp/appimagetool
           # appimagetool is itself an AppImage; extract it so it runs without FUSE in CI
-          /usr/local/bin/appimagetool --appimage-extract
-          mv squashfs-root /usr/local/lib/appimagetool-extracted
-          ln -sf /usr/local/lib/appimagetool-extracted/AppRun /usr/local/bin/appimagetool
+          cd /tmp && /tmp/appimagetool --appimage-extract
+          sudo mv /tmp/squashfs-root /usr/local/lib/appimagetool-extracted
+          sudo ln -sf /usr/local/lib/appimagetool-extracted/AppRun /usr/local/bin/appimagetool
 
       - name: Build packages (deb + rpm + pacman + appimage)
         run: ./build-package.sh --deb --rpm --pacman --appimage
