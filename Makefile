@@ -164,6 +164,9 @@ setup:
 	else \
 		echo "watchexec already installed: $$(watchexec --version)"; \
 	fi
+	@echo "Installing git hooks..."
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/*
 	@echo "✓ Setup complete. Run 'make dev-backend', 'make dev-ui', and 'make dev-ui-reload' to start."
 
 # Check runtime health (end-user) and dev toolchain (contributor).
