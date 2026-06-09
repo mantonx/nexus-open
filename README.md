@@ -35,7 +35,6 @@ The device is not officially supported on Linux — this project reverse-enginee
 
 - Go 1.25+
 - Flutter 3.24+
-- `libusb-1.0-dev`
 - Corsair iCUE Nexus (USB VID `0x1b1c`, PID `0x1b8e`)
 
 ### Run from source

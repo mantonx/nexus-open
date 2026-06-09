@@ -4,7 +4,6 @@
 
 - Go 1.25+
 - Flutter 3.24+
-- `libusb-1.0-dev`
 
 Two additional tools are required for the hot-reload workflow. Run `make setup` to install them:
 
