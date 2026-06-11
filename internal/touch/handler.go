@@ -180,6 +180,7 @@ func (h *Handler) handleTap(event Event) {
 	// the dismiss target, so we don't require a stationary finger.
 	if showingDetail {
 		h.logger.Info("tap dismissed detail overlay", "dx", event.SlideX)
+		h.zoneManager.StartTapRipple(event.TapX)
 		h.zoneManager.ClearDetail()
 		return
 	}
@@ -216,7 +217,7 @@ func (h *Handler) handleTap(event Event) {
 	for _, z := range page.Zones {
 		if tapX >= z.X && tapX < z.X+z.Width {
 			h.logger.Info("tap on zone", "zone", z.ID, "x", tapX, "action", z.OnTap)
-			h.executeTapAction(z)
+			h.executeTapAction(z, tapX)
 			return
 		}
 	}
@@ -225,14 +226,17 @@ func (h *Handler) handleTap(event Event) {
 
 // executeTapAction runs the tap action for a zone, using the plugin's Tapper
 // implementation as the authority when on_tap is not explicitly configured.
-func (h *Handler) executeTapAction(z zone.ZoneConfig) {
+// The ripple is only started when the zone has an actionable tap response.
+func (h *Handler) executeTapAction(z zone.ZoneConfig, tapX int) {
 	switch h.zoneManager.EffectiveTapAction(z) {
 	case zone.TapActionCycle:
+		h.zoneManager.StartTapRipple(tapX)
 		if err := h.zoneManager.CycleZonePlugin(z.ID); err != nil {
 			h.logger.Warn("cycle zone plugin failed", "zone", z.ID, "error", err)
 		}
 	case zone.TapActionDetail:
 		if h.detailInFlight.CompareAndSwap(false, true) {
+			h.zoneManager.StartTapRipple(tapX)
 			go func() {
 				defer h.detailInFlight.Store(false)
 				h.logger.Info("TAP_DIAG: calling HandleZoneTap", "zone", z.ID)

@@ -136,12 +136,13 @@ func (m *WeatherPlugin) formatPayload(data *WeatherData) plugin.Payload {
 	}
 
 	return plugin.Payload{
-		Primary:   tempVal + tempUnit,
-		Value:     tempVal,
-		ValueUnit: tempUnit,
-		Secondary: loc,
-		Severity:  plugin.SeverityOK,
-		Icon:      data.Icon,
-		Timestamp: time.Now(),
+		Primary:    tempVal + tempUnit,
+		Value:      tempVal,
+		ValueUnit:  tempUnit,
+		Secondary:  loc,
+		Severity:   plugin.SeverityOK,
+		Icon:       data.Icon,
+		Expandable: true,
+		Timestamp:  time.Now(),
 	}
 }

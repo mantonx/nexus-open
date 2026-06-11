@@ -36,7 +36,22 @@ func (ExecPlugin) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, error
 
 // rpcClient is the host-side stub that calls the plugin over net/rpc.
 type rpcClient struct {
-	client *rpc.Client
+	client      *rpc.Client
+	tapProbed   bool
+	tapSupported bool
+}
+
+// SupportsTap returns true if the remote plugin implements Tapper.
+// The result is probed once via RPC and cached for all subsequent calls.
+func (c *rpcClient) SupportsTap() bool {
+	if c.tapProbed {
+		return c.tapSupported
+	}
+	var supported bool
+	err := c.client.Call("Plugin.SupportsTap", new(any), &supported)
+	c.tapProbed = true
+	c.tapSupported = err == nil && supported
+	return c.tapSupported
 }
 
 func (c *rpcClient) Describe() (Descriptor, error) {
@@ -83,6 +98,12 @@ func (s *pluginRPC) Sample(args any, resp *Payload) error {
 
 func (s *pluginRPC) Configure(cfg map[string]any, resp *any) error {
 	return s.Impl.Configure(cfg)
+}
+
+func (s *pluginRPC) SupportsTap(args any, resp *bool) error {
+	_, ok := s.Impl.(Tapper)
+	*resp = ok
+	return nil
 }
 
 func (s *pluginRPC) OnTap(args any, resp *DetailPayload) error {

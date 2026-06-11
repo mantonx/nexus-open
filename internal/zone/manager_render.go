@@ -115,6 +115,7 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 		frame := m.detailTransition.Render()
 		m.detailMu.Unlock()
 		m.logger.Debug("rendering detail transition")
+		m.compositeRipple(frame)
 		return frame, nil
 	}
 	if m.detailActive {
@@ -139,8 +140,13 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	m.transitionMu.RUnlock()
 
 	// Fast path: nothing changed since last render — return cached frame.
+	// Skip cache when a ripple is active; every tick needs a fresh composite.
+	m.rippleMu.Lock()
+	rippleActive := m.ripple.active
+	m.rippleMu.Unlock()
+
 	m.lastFrameMu.Lock()
-	if !m.frameDirty && m.lastFrame != nil {
+	if !m.frameDirty && !rippleActive && m.lastFrame != nil {
 		cached := m.lastFrame
 		m.lastFrameMu.Unlock()
 		return cached, nil
@@ -155,10 +161,18 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 		return nil, err
 	}
 
-	m.lastFrameMu.Lock()
-	m.lastFrame = frame
-	m.frameDirty = false
-	m.lastFrameMu.Unlock()
+	// Composite tap ripple on top of the finished frame; keep dirty while active.
+	if m.compositeRipple(frame) {
+		m.lastFrameMu.Lock()
+		m.lastFrame = frame
+		// Leave frameDirty true — render loop will re-composite next tick.
+		m.lastFrameMu.Unlock()
+	} else {
+		m.lastFrameMu.Lock()
+		m.lastFrame = frame
+		m.frameDirty = false
+		m.lastFrameMu.Unlock()
+	}
 
 	return frame, nil
 }

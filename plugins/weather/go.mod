@@ -1,25 +1,25 @@
 module nexus-weather
 
-go 1.25.2
+go 1.26.0
 
 replace github.com/mantonx/nexus-open => ../..
 
 require (
+	github.com/fogleman/gg v1.3.0
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/hashicorp/go-plugin v1.8.0
 	github.com/mantonx/nexus-open v0.0.0-20260605212857-bd16564f204a
+	golang.org/x/image v0.42.0
 )
 
 require (
 	github.com/fatih/color v1.19.0 // indirect
-	github.com/fogleman/gg v1.3.0 // indirect
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/oklog/run v1.2.0 // indirect
-	golang.org/x/image v0.42.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.38.0 // indirect

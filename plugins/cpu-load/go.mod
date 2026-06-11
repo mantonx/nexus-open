@@ -1,6 +1,6 @@
 module nexus-cpu-load
 
-go 1.25.2
+go 1.26.0
 
 replace github.com/mantonx/nexus-open => ../..
 

@@ -155,7 +155,8 @@ setup:
 	else \
 		echo "overmind already installed: $$(overmind --version)"; \
 	fi
-	@echo "Checking for watchexec (Flutter auto-reload watcher)..."
+	@echo "Checking for watchexec (Flutter auto-reload watcher)..."Hatter12
+
 	@if ! command -v watchexec > /dev/null; then \
 		echo "watchexec not found. Install it with:"; \
 		echo "  Arch:         sudo pacman -S watchexec"; \

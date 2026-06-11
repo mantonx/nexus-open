@@ -107,6 +107,10 @@ type Manager struct {
 	detailTimer      *time.Timer
 	detailMu         sync.Mutex
 
+	// Tap ripple animation — brief expanding ring composited over the frame on tap.
+	ripple   TapRipple
+	rippleMu sync.Mutex
+
 	// Plugin lookup — set after construction via SetPluginLookup.
 	// Kept as an interface so the zone package does not import the sampler.
 	pluginLookup PluginLookup
@@ -176,6 +180,8 @@ func (m *Manager) ShowDetail(payload plugin.DetailPayload) {
 
 // ClearDetail dismisses the detail overlay with a slide-down transition.
 func (m *Manager) ClearDetail() {
+	m.waitForRipple()
+
 	// Snapshot lastFrame before acquiring detailMu — same lock-order rule as ShowDetail.
 	m.lastFrameMu.Lock()
 	pageFrame := m.lastFrame
@@ -284,11 +290,13 @@ func (m *Manager) HandleZoneTap(zoneID string) error {
 				detail.ZoneID = zoneID
 				age := time.Since(time.Unix(fetchedAt, 0))
 				if age < detailCacheTTL {
-					// Fresh — serve immediately.
+					// Fresh — hold for ripple then show.
+					m.waitForRipple()
 					m.ShowDetail(detail)
 					return nil
 				}
-				// Stale — serve immediately, revalidate in background.
+				// Stale — hold for ripple, serve immediately, revalidate in background.
+				m.waitForRipple()
 				m.ShowDetail(detail)
 				go m.revalidateDetailCache(zoneID, tapper)
 				return nil
@@ -349,7 +357,13 @@ func (m *Manager) EffectiveTapAction(z ZoneConfig) TapAction {
 	}
 	if m.pluginLookup != nil {
 		if p, ok := m.pluginLookup.GetPlugin(z.ID); ok {
-			if _, isTapper := p.(plugin.Tapper); isTapper {
+			type tapSupporter interface{ SupportsTap() bool }
+			if ts, ok := p.(tapSupporter); ok {
+				if ts.SupportsTap() {
+					return TapActionDetail
+				}
+			} else if _, isTapper := p.(plugin.Tapper); isTapper {
+				// Builtin plugins satisfy Tapper directly via Go type assertion.
 				return TapActionDetail
 			}
 		}
@@ -377,8 +391,10 @@ func (m *Manager) HandleZoneTapAtX(x int) error {
 		if x >= z.X && x < z.X+z.Width {
 			switch m.EffectiveTapAction(z) {
 			case TapActionCycle:
+				m.StartTapRipple(x)
 				return m.CycleZonePlugin(z.ID)
 			case TapActionDetail:
+				m.StartTapRipple(x)
 				return m.HandleZoneTap(z.ID)
 			}
 			return nil
