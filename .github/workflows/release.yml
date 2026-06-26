@@ -198,13 +198,23 @@ jobs:
             > /tmp/release-notes.md
           cat /tmp/release-notes.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ needs.build.outputs.version }}"
-          gh release create "v${VERSION}" \
-            --title "Nexus Open v${VERSION}" \
-            --notes-file /tmp/release-notes.md \
-            --clobber \
-            dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.AppImage dist/SHA256SUMS
+          if gh release view "v${VERSION}" > /dev/null 2>&1; then
+            # Release already exists (e.g. created manually before CI finished).
+            # Edit the notes and upload assets without re-publishing — avoids
+            # re-firing the release:published event before assets are attached.
+            gh release edit "v${VERSION}" \
+              --title "Nexus Open v${VERSION}" \
+              --notes-file /tmp/release-notes.md
+            gh release upload "v${VERSION}" --clobber \
+              dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.AppImage dist/SHA256SUMS
+          else
+            gh release create "v${VERSION}" \
+              --title "Nexus Open v${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.AppImage dist/SHA256SUMS
+          fi
