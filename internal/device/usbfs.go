@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -90,16 +91,22 @@ func usbOpen(vid, pid uint16) (*usbHandle, string, string, error) {
 
 	h := &usbHandle{fd: fd}
 
-	if err := h.detachKernelDriver(0); err != nil {
-		// Non-fatal: no kernel driver active is the common case.
-		_ = err
-	}
-
 	iface := uint32(0)
-	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd),
-		ioctlClaimInterface, uintptr(unsafe.Pointer(&iface))); errno != 0 {
+	_, _, claimErrno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd),
+		ioctlClaimInterface, uintptr(unsafe.Pointer(&iface)))
+	if claimErrno == unix.EBUSY {
+		// A kernel driver holds the interface; detach it and retry once.
+		if detachErr := h.detachKernelDriver(0); detachErr != nil {
+			_ = unix.Close(fd)
+			return nil, "", "", classifyOpenError(fmt.Errorf("detach kernel driver: %w", detachErr))
+		}
+		time.Sleep(100 * time.Millisecond)
+		_, _, claimErrno = unix.Syscall(unix.SYS_IOCTL, uintptr(fd),
+			ioctlClaimInterface, uintptr(unsafe.Pointer(&iface)))
+	}
+	if claimErrno != 0 {
 		_ = unix.Close(fd)
-		return nil, "", "", classifyOpenError(fmt.Errorf("claim interface 0: %w", errno))
+		return nil, "", "", classifyOpenError(fmt.Errorf("claim interface 0: %w", claimErrno))
 	}
 
 	// Prime EP 0x81 IN so the device accepts EP 0x02 OUT writes.
