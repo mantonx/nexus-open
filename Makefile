@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help setup doctor build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui dev-ui-reload deb appimage rpm generate-api models all changelog
+.PHONY: help setup doctor build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui dev-ui-reload deb appimage rpm generate-api models all changelog release
 
 # Configuration
 APP_NAME := nexus-open
@@ -113,7 +113,7 @@ build-ui: $(BIN_DIR)
 # Build all external plugins
 build-plugins:
 	@echo "Building external plugins..."
-	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load; do \
+	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load music; do \
 		if [ -d plugins/$$mod ]; then \
 			echo "  → plugins/$$mod"; \
 			(cd plugins/$$mod && go build -o $$mod .) || exit 1; \
@@ -393,7 +393,7 @@ install: build-release build-ui build-plugins
 	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/lib/. $(INSTALL_DATA)/lib/
 	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/data/. $(INSTALL_DATA)/data/
 	@echo "Installing plugins to $(INSTALL_DATA)/plugins..."
-	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load; do \
+	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load music; do \
 		if [ -f plugins/$$mod/$$mod ]; then \
 			mkdir -p $(INSTALL_DATA)/plugins/$$mod; \
 			cp plugins/$$mod/$$mod $(INSTALL_DATA)/plugins/$$mod/$$mod; \
@@ -418,7 +418,7 @@ clean:
 	@rm -rf $(BIN_DIR) $(BUILD_DIR) $(DIST_DIR)
 	@rm -f coverage.out coverage.html
 	@rm -f $(APP_NAME) $(APP_NAME)-*
-	@for p in cpu-temp gpu-temp network weather cpu-load gpu-load; do \
+	@for p in cpu-temp gpu-temp network weather cpu-load gpu-load music; do \
 		rm -f plugins/$$p/$$p; \
 	done
 	@echo "✓ Cleaned"
@@ -469,6 +469,51 @@ changelog:
 		git-cliff -o CHANGELOG.md; \
 		echo "✓ CHANGELOG.md updated"; \
 	fi
+
+# Publish a new release.
+# Usage: make release VERSION=0.3.0
+#
+# What it does (in order — stops on any error):
+#   1. Validates the version argument and that the tree is clean
+#   2. Updates CHANGELOG.md via git-cliff
+#   3. Bumps pkgver/pkgrel in packaging/arch/PKGBUILD and packaging/rpm/nexus-open.spec
+#   4. Commits the release files
+#   5. Creates an annotated git tag
+#   6. Pushes the commit and tag to origin
+#
+# CI takes over from there: builds packages, creates the GitHub release with
+# all assets attached, then publishes to AUR. Do not create the GitHub release
+# manually — the AUR workflow fires on release:published and requires the
+# tarball to already be attached.
+release:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Usage: make release VERSION=0.3.0"; exit 1; \
+	fi
+	@echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$' \
+		|| { echo "VERSION must be X.Y.Z (no leading v)"; exit 1; }
+	@if ! command -v git-cliff > /dev/null; then \
+		echo "git-cliff not found — install with: cargo install git-cliff"; exit 1; \
+	fi
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Working tree is not clean — commit or stash changes first"; exit 1; \
+	fi
+	@echo "--- Updating CHANGELOG.md for v$(VERSION)..."
+	@git-cliff --tag "v$(VERSION)" -o CHANGELOG.md
+	@echo "--- Bumping packaging versions to $(VERSION)..."
+	@sed -i "s/^pkgver=.*/pkgver=$(VERSION)/" packaging/arch/PKGBUILD
+	@sed -i "s/^pkgrel=.*/pkgrel=1/" packaging/arch/PKGBUILD
+	@sed -i "s/^Version:.*/Version:        $(VERSION)/" packaging/rpm/nexus-open.spec
+	@echo "--- Committing release files..."
+	@git add CHANGELOG.md packaging/arch/PKGBUILD packaging/rpm/nexus-open.spec
+	@git commit -m "release: v$(VERSION)"
+	@echo "--- Tagging v$(VERSION)..."
+	@git tag -a "v$(VERSION)" -m "v$(VERSION)"
+	@echo "--- Pushing to origin..."
+	@git push origin main
+	@git push origin "v$(VERSION)"
+	@echo ""
+	@echo "✓ v$(VERSION) tagged and pushed — CI will build packages and publish the release."
+	@echo "  Watch progress: https://github.com/mantonx/nexus-open/actions"
 
 # Regenerate type-safe DB query code from schema.sql + queries/*.sql
 generate-store:
