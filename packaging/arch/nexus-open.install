@@ -33,7 +33,12 @@ post_install() {
 }
 
 post_upgrade() {
-    post_install
+    install -Dm644 "$_udev_src" "$_udev_dst"
+    udevadm control --reload-rules 2>/dev/null || true
+
+    while IFS= read -r uid; do
+        systemctl --user -M "${uid}@.host" restart nexus-open.service 2>/dev/null || true
+    done < <(loginctl list-sessions --no-legend | awk '{print $2}' | sort -u)
 }
 
 pre_remove() {
