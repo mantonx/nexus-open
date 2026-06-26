@@ -206,4 +206,5 @@ jobs:
           gh release create "v${VERSION}" \
             --title "Nexus Open v${VERSION}" \
             --notes-file /tmp/release-notes.md \
+            --clobber \
             dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.AppImage dist/SHA256SUMS
