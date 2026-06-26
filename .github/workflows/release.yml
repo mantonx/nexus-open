@@ -115,6 +115,8 @@ jobs:
           sudo ln -sf /usr/local/lib/appimagetool-extracted/AppRun /usr/local/bin/appimagetool
 
       - name: Build packages (deb + rpm + pacman + appimage)
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: ./build-package.sh --deb --rpm --pacman --appimage
 
       - name: Generate checksums
