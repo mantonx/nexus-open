@@ -24,8 +24,16 @@ jobs:
 
       - name: Resolve version
         id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          VERSION=$(git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
+          if [[ -n "$INPUT_TAG" ]]; then
+            # workflow_dispatch: use the explicit tag input, strip leading 'v'
+            VERSION="${INPUT_TAG#v}"
+          else
+            # tag push: the ref is refs/tags/vX.Y.Z — strip refs/tags/v
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building release v$VERSION"
 
