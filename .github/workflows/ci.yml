@@ -23,7 +23,7 @@ jobs:
       packaging: ${{ steps.filter.outputs.packaging }}
       openapi: ${{ steps.filter.outputs.openapi }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -58,10 +58,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache apt packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-go-deps-v1
@@ -87,10 +87,10 @@ jobs:
     needs: [changes, lint]
     if: needs.changes.outputs.go == 'true' && needs.lint.result == 'success'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache apt packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-go-deps-v1
@@ -129,7 +129,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.flutter == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2.23.0
@@ -138,7 +138,7 @@ jobs:
           cache: true
 
       - name: Cache pub dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
@@ -153,7 +153,7 @@ jobs:
         run: npm ci && npm run build
 
       - name: Cache build_runner output
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ui/.dart_tool/build
           key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
@@ -172,7 +172,7 @@ jobs:
         run: flutter test --no-pub
 
       - name: Cache apt packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-ubuntu-24.04-flutter-build-v1
@@ -204,10 +204,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.openapi == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache apt packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-go-deps-v1
@@ -223,7 +223,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
 
       - name: Cache go-openapi binary
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/go/bin/go-openapi
           key: go-openapi-v0.32.3-${{ runner.os }}
@@ -260,7 +260,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -297,7 +297,7 @@ jobs:
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download Flutter bundle
         # Only download when the flutter job actually ran and produced an artifact.
@@ -318,7 +318,7 @@ jobs:
 
       - name: Cache pub dependencies (fallback)
         if: needs.flutter.result == 'skipped'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
@@ -326,7 +326,7 @@ jobs:
 
       - name: Cache build_runner output (fallback)
         if: needs.flutter.result == 'skipped'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ui/.dart_tool/build
           key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
@@ -354,7 +354,7 @@ jobs:
           flutter build linux --release --dart-define=APP_VERSION="$VERSION"
 
       - name: Cache apt packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-ubuntu-24.04-pkg-build-v1
@@ -374,7 +374,7 @@ jobs:
           cache: true
 
       - name: Cache fpm gem
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/gem
           key: gem-fpm-ubuntu-24.04-2.2.1
@@ -418,7 +418,7 @@ jobs:
             flag: --test-pacman
             image: archlinux@sha256:a9a1e6db522cf5f8018c920d035e2bfbf8e39c485ee737ce0388990898f2f042
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download packages
         uses: actions/download-artifact@v8
