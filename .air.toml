@@ -5,7 +5,7 @@ tmp_dir = "tmp"
 [build]
   args_bin = []
   bin = "./tmp/nexus-open"
-  cmd = "go build -o ./tmp/nexus-open ./cmd/nexus-open"
+  cmd = "bash scripts/build-changed-plugins.sh && go build -o ./tmp/nexus-open ./cmd/nexus-open"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "ui", "build", "bin", "docs", "packaging", "scripts"]
   exclude_file = []
@@ -25,7 +25,7 @@ tmp_dir = "tmp"
   # Builds to ./tmp/plugins/<name>/<name> via atomic rename — the running daemon
   # never sees a partial binary. NEXUS_PLUGINS_DIR keeps dev artifacts out of
   # the XDG install path.
-  pre_cmd = ["bash scripts/build-changed-plugins.sh"]
+  pre_cmd = []
   rerun = false
   rerun_delay = 500
   send_interrupt = true

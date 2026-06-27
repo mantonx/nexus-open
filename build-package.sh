@@ -115,6 +115,20 @@ build_staging() {
     # Daemon binary
     install -Dm755 "$DAEMON_BIN" "$STAGING_DIR/usr/bin/nexus-open"
 
+    # Plugins
+    info "Building plugins..."
+    mkdir -p "$STAGING_DIR/usr/lib/nexus-open/plugins"
+    for mod in cpu-temp gpu-temp network weather cpu-load gpu-load media; do
+        if [[ ! -d "$REPO_DIR/plugins/$mod" ]]; then continue; fi
+        _ldf="-trimpath -ldflags \"-s -w\""
+        if [[ "$mod" == "media" && -n "${TMDB_TOKEN:-}" ]]; then
+            _ldf="-trimpath -ldflags \"-s -w -X main.tmdbToken=${TMDB_TOKEN}\""
+        fi
+        eval "(cd \"$REPO_DIR/plugins/$mod\" && go build $_ldf -o \"$STAGING_DIR/usr/lib/nexus-open/plugins/nexus-$mod\" .)" \
+            && ok "  Built plugin: nexus-$mod" \
+            || warn "  Failed to build plugin: $mod"
+    done
+
     # Flutter UI bundle (optional)
     if [[ -d "$UI_BUNDLE" ]]; then
         mkdir -p "$STAGING_DIR/usr/lib/nexus-open"

@@ -117,6 +117,7 @@ jobs:
       - name: Build packages (deb + rpm + pacman + appimage)
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
         run: ./build-package.sh --deb --rpm --pacman --appimage
 
       - name: Generate checksums
