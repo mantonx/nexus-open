@@ -232,7 +232,6 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
   Future<void> _reorderZones(int oldIndex, int newIndex) async {
     final page = _currentPage;
     if (page == null) return;
-    if (newIndex > oldIndex) newIndex -= 1;
 
     setState(() {
       final z = page.zones.removeAt(oldIndex);
@@ -305,7 +304,7 @@ class _LayoutEditorTabState extends State<LayoutEditorTab> {
             child: ReorderableListView.builder(
               padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-              onReorder: _reorderZones,
+              onReorderItem: _reorderZones,
               itemCount: page.zones.length,
               itemBuilder: (ctx, i) {
                 final z = page.zones[i];

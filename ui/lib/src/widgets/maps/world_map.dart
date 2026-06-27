@@ -37,11 +37,10 @@ class WorldMap extends StatelessWidget {
               mapController: controller,
               key: ValueKey('$latitude-$longitude-$zoom'),
               options: MapOptions(
-                center: currentLocation,
-                zoom: zoom,
+                initialCenter: currentLocation,
+                initialZoom: zoom,
                 maxZoom: 18,
                 minZoom: 2,
-                interactiveFlags: InteractiveFlag.all,
               ),
               children: [
                 TileLayer(
@@ -55,7 +54,7 @@ class WorldMap extends StatelessWidget {
                       point: currentLocation,
                       width: 40,
                       height: 40,
-                      builder: (context) => Icon(
+                      child: Icon(
                         Icons.location_on,
                         color: indicatorColor,
                         size: 30,
@@ -75,7 +74,7 @@ class WorldMap extends StatelessWidget {
                     heroTag: 'zoomIn',
                     onPressed: () => controller?.moveAndRotate(
                       currentLocation,
-                      (controller?.zoom ?? zoom) + 1,
+                      (controller?.camera.zoom ?? zoom) + 1,
                       0,
                     ),
                     child: const Icon(Icons.add),
@@ -85,7 +84,7 @@ class WorldMap extends StatelessWidget {
                     heroTag: 'zoomOut',
                     onPressed: () => controller?.moveAndRotate(
                       currentLocation,
-                      (controller?.zoom ?? zoom) - 1,
+                      (controller?.camera.zoom ?? zoom) - 1,
                       0,
                     ),
                     child: const Icon(Icons.remove),

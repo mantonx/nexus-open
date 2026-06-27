@@ -25,8 +25,8 @@ class _ImagesTabState extends State<ImagesTab> {
   }
 
   Future<void> _pickAndUploadImage(SettingsState state) async {
-    final result = await FilePicker.platform
-        .pickFiles(type: FileType.image, allowMultiple: false);
+    final result = await FilePicker.pickFiles(
+        type: FileType.image, allowMultiple: false);
     if (result == null || result.files.isEmpty) return;
 
     setState(() => _uploading = true);

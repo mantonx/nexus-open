@@ -613,8 +613,10 @@ class _LocationFieldState extends State<_LocationField> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TypeAheadField<Place>(
-          textFieldConfiguration: TextFieldConfiguration(
-            controller: _ctrl,
+          controller: _ctrl,
+          builder: (context, controller, focusNode) => TextField(
+            controller: controller,
+            focusNode: focusNode,
             style: theme.textTheme.bodySmall,
             decoration: const InputDecoration(
               isDense: true,
@@ -631,11 +633,7 @@ class _LocationFieldState extends State<_LocationField> {
               style: theme.textTheme.bodySmall,
             ),
           ),
-          onSuggestionSelected: _selectPlace,
-          noItemsFoundBuilder: (_) => Padding(
-            padding: const EdgeInsets.all(8),
-            child: Text('No places found', style: theme.textTheme.bodySmall),
-          ),
+          onSelected: _selectPlace,
         ),
         const SizedBox(height: AppSpacing.sm),
         ClipRRect(

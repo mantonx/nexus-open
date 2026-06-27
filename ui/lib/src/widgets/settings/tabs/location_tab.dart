@@ -114,15 +114,16 @@ class _LocationTabState extends State<LocationTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TypeAheadFormField<Place>(
-                  textFieldConfiguration: TextFieldConfiguration(
-                    controller: _cityController,
-                    focusNode: _searchFocusNode,
+                TypeAheadField<Place>(
+                  controller: _cityController,
+                  focusNode: _searchFocusNode,
+                  builder: (context, controller, focusNode) => TextFormField(
+                    controller: controller,
+                    focusNode: focusNode,
                     style: theme.textTheme.bodyLarge,
                     decoration: InputDecoration(
                       labelText: 'City or address',
                       hintText: 'Search for a city…',
-                      // Mirror the app's InputDecorationTheme exactly
                       filled: true,
                       fillColor: cs.surfaceContainerHigh,
                       contentPadding: AppSpacing.paddingHMdVSm,
@@ -162,12 +163,7 @@ class _LocationTabState extends State<LocationTab> {
                     subtitle: Text(place.type,
                         style: theme.textTheme.bodySmall),
                   ),
-                  onSuggestionSelected: _updateMapLocation,
-                  noItemsFoundBuilder: (_) => Padding(
-                    padding: AppSpacing.paddingMd,
-                    child: Text('No locations found',
-                        style: theme.textTheme.bodySmall),
-                  ),
+                  onSelected: _updateMapLocation,
                 ),
                 if (_selectedPlace != null) ...[
                   const SizedBox(height: AppSpacing.xs),
