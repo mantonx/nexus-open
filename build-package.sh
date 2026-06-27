@@ -52,8 +52,9 @@ ICON_DIR="$REPO_DIR/internal/tray"
 UDEV_RULES="$REPO_DIR/packaging/udev/99-corsair-nexus.rules"
 DESKTOP_FILE="$REPO_DIR/packaging/desktop/nexus-open.desktop"
 SERVICE_FILE="$REPO_DIR/packaging/systemd/nexus-open.service"
-POSTINST="$REPO_DIR/packaging/deb/DEBIAN/postinst"
-PRERM="$REPO_DIR/packaging/deb/DEBIAN/prerm"
+POST_INSTALL="$REPO_DIR/packaging/scripts/post-install"
+POST_UPGRADE="$REPO_DIR/packaging/scripts/post-upgrade"
+PRE_REMOVE="$REPO_DIR/packaging/scripts/pre-remove"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -225,10 +226,9 @@ build_deb() {
         --depends "libgl1" \
         --depends "libegl1" \
         --depends "libgles2" \
-        --after-install "$POSTINST" \
-        --before-remove "$PRERM" \
-        --deb-systemd-enable \
-        --deb-systemd-auto-start
+        --after-install  "$POST_INSTALL" \
+        --after-upgrade  "$POST_UPGRADE" \
+        --before-remove  "$PRE_REMOVE"
     DEB_FILE=$(ls -t "$OUT_DIR"/${PKG_NAME}_*.deb 2>/dev/null | head -1)
     ok "Built: $DEB_FILE"
 }
@@ -247,8 +247,9 @@ build_rpm() {
         --depends "mesa-libEGL" \
         --depends "mesa-libGLES" \
         --rpm-summary "$PKG_DESCRIPTION" \
-        --after-install "$POSTINST" \
-        --before-remove "$PRERM"
+        --after-install  "$POST_INSTALL" \
+        --after-upgrade  "$POST_UPGRADE" \
+        --before-remove  "$PRE_REMOVE"
     RPM_FILE=$(ls -t "$OUT_DIR"/${PKG_NAME}-*.rpm 2>/dev/null | head -1)
     ok "Built: $RPM_FILE"
 }
@@ -263,8 +264,9 @@ build_pacman() {
         --depends "libayatana-appindicator" \
         --depends "gtk3" \
         --depends "mesa" \
-        --after-install "$POSTINST" \
-        --before-remove "$PRERM"
+        --after-install  "$POST_INSTALL" \
+        --after-upgrade  "$POST_UPGRADE" \
+        --before-remove  "$PRE_REMOVE"
     PACMAN_FILE=$(ls -t "$OUT_DIR"/${PKG_NAME}-*.pkg.tar.* 2>/dev/null | head -1)
     ok "Built: $PACMAN_FILE"
 }
@@ -314,6 +316,8 @@ run_runtime_test() {
                 && echo 'DESKTOP_FILE_OK' || { echo 'DESKTOP_FILE_MISSING'; exit 1; }
             test -f /usr/lib/systemd/user/nexus-open.service \
                 && echo 'SYSTEMD_SERVICE_OK' || { echo 'SYSTEMD_SERVICE_MISSING'; exit 1; }
+            test -f /usr/lib/nexus-open/plugins/nexus-media \
+                && echo 'PLUGINS_OK' || { echo 'PLUGINS_MISSING'; exit 1; }
 
             # ── daemon API (mock device, headless) ───────────────────────────
             NEXUS_MOCK_DEVICE=1 /usr/bin/nexus-open &
@@ -360,6 +364,9 @@ run_runtime_test() {
             test -f /usr/bin/nexus-open \
                 && { echo 'UNINSTALL_FAILED: daemon binary still present'; exit 1; } \
                 || echo 'UNINSTALL_OK'
+            test -f /usr/lib/nexus-open/plugins/nexus-media \
+                && { echo 'UNINSTALL_FAILED: plugins still present'; exit 1; } \
+                || echo 'PLUGINS_UNINSTALL_OK'
         " 2>&1 | grep -Ev '^(>|Warning|.*keysym|.*xkbcomp|Errors from)'
 }
 

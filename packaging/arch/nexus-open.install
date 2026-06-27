@@ -1,6 +1,14 @@
 _udev_src=/usr/share/nexus-open/99-corsair-nexus.rules
 _udev_dst=/usr/lib/udev/rules.d/99-corsair-nexus.rules
 
+# Run a systemctl --user command for every active user session.
+# Package hooks run as root — -M uid@.host reaches each user's systemd instance.
+_for_each_user() {
+    while IFS= read -r uid; do
+        systemctl --user -M "${uid}@.host" "$@" 2>/dev/null || true
+    done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}' | sort -u)
+}
+
 pre_install() {
     # Remove any existing udev rule (owned or unowned) so pacman never
     # sees a conflict. The rule is installed by post_install, not pacman.
@@ -17,18 +25,12 @@ post_install() {
     udevadm trigger --subsystem-match=usb 2>/dev/null || true
     udevadm trigger --subsystem-match=hidraw 2>/dev/null || true
 
-    # Enable and start the service for any active user sessions.
-    # pacman never runs systemctl --user preset-all, so we enable explicitly.
-    while IFS= read -r uid; do
-        systemctl --user -M "${uid}@.host" enable nexus-open.service 2>/dev/null || true
-        systemctl --user -M "${uid}@.host" start nexus-open.service 2>/dev/null || true
-    done < <(loginctl list-sessions --no-legend | awk '{print $2}' | sort -u)
+    _for_each_user enable nexus-open.service
+    _for_each_user start  nexus-open.service
 
     echo ""
     echo "==> Nexus Open installed!"
-    echo ""
-    echo "Unplug and replug your iCUE Nexus — uaccess grants access automatically"
-    echo "in your desktop session. No group membership needed."
+    echo "    Unplug and replug your iCUE Nexus for udev access to take effect."
     echo ""
 }
 
@@ -36,12 +38,20 @@ post_upgrade() {
     install -Dm644 "$_udev_src" "$_udev_dst"
     udevadm control --reload-rules 2>/dev/null || true
 
-    while IFS= read -r uid; do
-        systemctl --user -M "${uid}@.host" restart nexus-open.service 2>/dev/null || true
-    done < <(loginctl list-sessions --no-legend | awk '{print $2}' | sort -u)
+    _for_each_user restart nexus-open.service
 }
 
 pre_remove() {
+    _for_each_user stop    nexus-open.service
+    _for_each_user disable nexus-open.service
+
     rm -f "$_udev_dst"
     udevadm control --reload-rules 2>/dev/null || true
+}
+
+post_remove() {
+    command -v update-desktop-database > /dev/null 2>&1 && \
+        update-desktop-database -q /usr/share/applications || true
+    command -v gtk-update-icon-cache > /dev/null 2>&1 && \
+        gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
 }

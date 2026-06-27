@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+
+# Stop and disable the service for every active user session before files
+# are removed. Package scripts run as root — -M uid@.host reaches each
+# user's systemd instance.
+if command -v loginctl > /dev/null 2>&1; then
+    while IFS= read -r uid; do
+        systemctl --user -M "${uid}@.host" stop    nexus-open.service 2>/dev/null || true
+        systemctl --user -M "${uid}@.host" disable nexus-open.service 2>/dev/null || true
+    done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}' | sort -u)
+fi
+
+# Remove the udev rule immediately so the device reverts to default permissions.
+rm -f /usr/lib/udev/rules.d/99-corsair-nexus.rules
+if command -v udevadm > /dev/null 2>&1; then
+    udevadm control --reload-rules 2>/dev/null || true
+fi

@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+# Reload udev so the new rules take effect immediately.
+if command -v udevadm > /dev/null 2>&1; then
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=usb 2>/dev/null || true
+    udevadm trigger --subsystem-match=hidraw 2>/dev/null || true
+fi
+
+# Update desktop and icon caches if available.
+command -v update-desktop-database > /dev/null 2>&1 && \
+    update-desktop-database -q /usr/share/applications || true
+command -v gtk-update-icon-cache > /dev/null 2>&1 && \
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+
+# Enable and start the service for every active user session.
+# Package scripts run as root so plain `systemctl --user` targets root's session.
+# -M uid@.host reaches each user's systemd instance correctly.
+if command -v loginctl > /dev/null 2>&1; then
+    while IFS= read -r uid; do
+        systemctl --user -M "${uid}@.host" enable nexus-open.service 2>/dev/null || true
+        systemctl --user -M "${uid}@.host" start  nexus-open.service 2>/dev/null || true
+    done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}' | sort -u)
+fi
+
+echo ""
+echo "Nexus Open installed!"
+echo "Unplug and replug your iCUE Nexus for udev access to take effect."
+echo ""
