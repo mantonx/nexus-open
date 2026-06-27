@@ -11,7 +11,7 @@ Thanks for taking an interest in contributing! This is a hardware interfacing pr
 ## Development Setup
 
 ```bash
-# Prerequisites: Go 1.25+, Flutter 3.24+
+# Prerequisites: Go 1.26+, Flutter 3.24+
 git clone https://github.com/mantonx/nexus-open.git
 cd nexus-open
 make setup   # installs air, overmind, watchexec
