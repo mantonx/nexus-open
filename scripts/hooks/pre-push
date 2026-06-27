@@ -25,7 +25,7 @@ trap restore_service EXIT
 LINTER=$(command -v golangci-lint 2>/dev/null || echo "$HOME/go/bin/golangci-lint")
 if [ -x "$LINTER" ]; then
   echo "Running golangci-lint..."
-  "$LINTER" run || FAILED=1
+  "$LINTER" run || { echo ""; echo "Lint failed. Fix issues above or run 'git push --no-verify' to skip."; exit 1; }
 else
   echo "⚠  golangci-lint not found — skipping lint"
 fi
