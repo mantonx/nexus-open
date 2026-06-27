@@ -3,6 +3,27 @@
 All notable changes to Nexus Open are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - 2026-06-27
+
+### Added
+
+- Media): add media plugin source and tap-mock dev utility
+- Media): add TMDb poster art lookup and Firefox MPRIS support
+- Touch): improve touch handling
+- Plugins): migrate to flat plugin layout with nexus- prefix
+
+### Fixed
+
+- Fix(test): replace deadline context with cancellable context in TestApp_Lifecycle
+- Fix(lint): resolve golangci-lint failures
+- Fix(zone): eliminate clock AM/PM blink caused by shared builtin instances
+- Fix(pkg): restart service on upgrade, not just start
+- Correct v0.2.0 PKGBUILD sha256; add workflow_dispatch to aur-publish
+- Fix(ci): pass exact version to build-package.sh via RELEASE_VERSION
+- Fix(ci): resolve version from tag ref, not git describe
+- Fix(ci): prevent AUR publish race by never re-firing release:published
+- Fix(ci): add --clobber to release step to allow overwriting manual pre-releases
+
 ## [0.2.0] - 2026-06-26
 
 ### Added
@@ -180,6 +201,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Skip expensive jobs on unrelated changes via paths-filter + build_runner cache
 - Cache pub deps and fpm gem in CI to reduce build times
 
+[0.3.0]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mantonx/nexus-open/releases/tag/v0.2.0
 [0.0.1]: https://github.com/mantonx/nexus-open/releases/tag/v0.0.1
 
