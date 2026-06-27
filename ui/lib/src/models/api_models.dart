@@ -11,7 +11,7 @@ part 'api_models.g.dart';
 // ── DisplayConfig ────────────────────────────────────────────────────────────
 
 @freezed
-class DisplayConfig with _$DisplayConfig {
+sealed class DisplayConfig with _$DisplayConfig {
   const factory DisplayConfig({
     @JsonKey(name: 'font_family') @Default('GoRegular') String fontFamily,
     @JsonKey(name: 'font_size') @Default(11.0) double fontSize,
@@ -27,7 +27,7 @@ class DisplayConfig with _$DisplayConfig {
 // ── NexusConfig (Config schema) ──────────────────────────────────────────────
 
 @freezed
-class NexusConfig with _$NexusConfig {
+sealed class NexusConfig with _$NexusConfig {
   const factory NexusConfig({
     @JsonKey(name: 'time_format') @Default('24h') String timeFormat,
     @Default('imperial') String unit,
@@ -45,7 +45,7 @@ class NexusConfig with _$NexusConfig {
 // ── DeviceInfo ───────────────────────────────────────────────────────────────
 
 @freezed
-class DeviceInfo with _$DeviceInfo {
+sealed class DeviceInfo with _$DeviceInfo {
   const factory DeviceInfo({
     @Default('iCUE Nexus') String model,
     @Default('') String firmware,
@@ -62,7 +62,7 @@ class DeviceInfo with _$DeviceInfo {
 // ── BrightnessRequest ────────────────────────────────────────────────────────
 
 @freezed
-class BrightnessRequest with _$BrightnessRequest {
+sealed class BrightnessRequest with _$BrightnessRequest {
   const factory BrightnessRequest({
     @Default(75) int brightness,
   }) = _BrightnessRequest;
@@ -74,7 +74,7 @@ class BrightnessRequest with _$BrightnessRequest {
 // ── ApiError ─────────────────────────────────────────────────────────────────
 
 @freezed
-class ApiError with _$ApiError {
+sealed class ApiError with _$ApiError {
   const factory ApiError({
     @Default('error') String error,
     String? message,
@@ -310,7 +310,7 @@ class PluginCatalogEntry {
 // ── ApiSuccess ───────────────────────────────────────────────────────────────
 
 @freezed
-class ApiSuccess with _$ApiSuccess {
+sealed class ApiSuccess with _$ApiSuccess {
   const factory ApiSuccess({
     @Default('success') String status,
     String? message,
