@@ -88,16 +88,30 @@ build_binary_static() {
         ./cmd/nexus-open
     ok "Built: $DAEMON_BIN (static)"
 
+    # Build plugins into plugins/ alongside the daemon binary.
+    # These are included in the tarball so AUR and direct installs get them.
+    info "Building plugins for tarball..."
+    mkdir -p "$REPO_DIR/plugins-dist"
+    for mod in cpu-temp gpu-temp network weather cpu-load gpu-load media; do
+        if [[ ! -d "$REPO_DIR/plugins/$mod" ]]; then continue; fi
+        _ldf="-trimpath -ldflags \"-s -w\""
+        if [[ "$mod" == "media" && -n "${TMDB_TOKEN:-}" ]]; then
+            _ldf="-trimpath -ldflags \"-s -w -X main.tmdbToken=${TMDB_TOKEN}\""
+        fi
+        eval "(cd \"$REPO_DIR/plugins/$mod\" && go build $_ldf -o \"$REPO_DIR/plugins-dist/nexus-$mod\" .)" \
+            && ok "  Built plugin: nexus-$mod" \
+            || warn "  Failed to build plugin: $mod"
+    done
+
     # Produce a standalone tarball for direct installs and AUR.
-    # Includes the binary plus all packaging files needed by the PKGBUILD
-    # (udev rule, systemd service, desktop file, license) so the PKGBUILD
-    # needs no build tools — just go, makedepends-free.
+    # Includes the daemon, plugins, and all packaging files needed by the PKGBUILD.
     mkdir -p "$OUT_DIR"
     local tarball="$OUT_DIR/${PKG_NAME}-${PKG_VERSION}-linux-amd64.tar.gz"
     tar -czf "$tarball" \
         -C "$REPO_DIR" \
         --transform "s|^|nexus-open-${PKG_VERSION}/|" \
         nexus-open \
+        plugins-dist \
         packaging/udev/99-corsair-nexus.rules \
         packaging/systemd/nexus-open.service \
         packaging/desktop/nexus-open.desktop \

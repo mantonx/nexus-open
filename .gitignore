@@ -7,6 +7,7 @@ tmp/
 # Binaries (root-level compiled output from cmd/ builds)
 /nexus-open
 /nexus-open-*
+/plugins-dist/
 /swipe-sim
 /zone-test
 /zone-demo

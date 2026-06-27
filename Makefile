@@ -420,7 +420,7 @@ uninstall:
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
-	@rm -rf $(BIN_DIR) $(BUILD_DIR) $(DIST_DIR)
+	@rm -rf $(BIN_DIR) $(BUILD_DIR) $(DIST_DIR) plugins-dist
 	@rm -f coverage.out coverage.html
 	@rm -f $(APP_NAME) $(APP_NAME)-*
 	@rm -rf $(BIN_DIR)/plugins

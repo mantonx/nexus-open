@@ -17,6 +17,11 @@ package() {
     install -Dm755 nexus-open \
         "${pkgdir}/usr/bin/nexus-open"
 
+    for plugin in plugins-dist/nexus-*; do
+        install -Dm755 "$plugin" \
+            "${pkgdir}/usr/lib/nexus-open/plugins/$(basename "$plugin")"
+    done
+
     install -Dm644 packaging/udev/99-corsair-nexus.rules \
         "${pkgdir}/usr/share/nexus-open/99-corsair-nexus.rules"
 
