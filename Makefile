@@ -301,7 +301,7 @@ dev-ui:
 		echo "Error: token not found at ~/.config/nexus-open/token — is the backend running?"; \
 		exit 1; \
 	fi
-	@cd ui && flutter run -d linux --pid-file /tmp/nexus-flutter.pid
+	@cd ui && GDK_BACKEND=x11 flutter run -d linux --pid-file /tmp/nexus-flutter.pid
 
 # Watch ui/lib for Dart changes and signal flutter run to hot-reload.
 # SIGUSR1 = hot reload (preserves state), SIGUSR2 = hot restart (full reset).
