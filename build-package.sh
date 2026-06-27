@@ -130,18 +130,13 @@ build_staging() {
     # Daemon binary
     install -Dm755 "$DAEMON_BIN" "$STAGING_DIR/usr/bin/nexus-open"
 
-    # Plugins
-    info "Building plugins..."
+    # Plugins — copy from plugins-dist/ built by build_binary_static
+    info "Staging plugins..."
     mkdir -p "$STAGING_DIR/usr/lib/nexus-open/plugins"
-    for mod in cpu-temp gpu-temp network weather cpu-load gpu-load media; do
-        if [[ ! -d "$REPO_DIR/plugins/$mod" ]]; then continue; fi
-        _ldf="-trimpath -ldflags \"-s -w\""
-        if [[ "$mod" == "media" && -n "${TMDB_TOKEN:-}" ]]; then
-            _ldf="-trimpath -ldflags \"-s -w -X main.tmdbToken=${TMDB_TOKEN}\""
-        fi
-        eval "(cd \"$REPO_DIR/plugins/$mod\" && go build $_ldf -o \"$STAGING_DIR/usr/lib/nexus-open/plugins/nexus-$mod\" .)" \
-            && ok "  Built plugin: nexus-$mod" \
-            || warn "  Failed to build plugin: $mod"
+    for f in "$REPO_DIR/plugins-dist"/nexus-*; do
+        [[ -f "$f" ]] || continue
+        install -m755 "$f" "$STAGING_DIR/usr/lib/nexus-open/plugins/"
+        ok "  Staged plugin: $(basename "$f")"
     done
 
     # Flutter UI bundle (optional)
@@ -215,8 +210,6 @@ fpm_common() {
 # ── deb ───────────────────────────────────────────────────────────────────────
 
 build_deb() {
-    build_binary_static
-    build_staging  # re-stage with the freshly built binary
     info "Building .deb..."
     mkdir -p "$OUT_DIR"
     fpm_common deb \
@@ -527,21 +520,17 @@ FPM="$HOME/.local/share/gem/ruby/3.4.0/bin/fpm"
 echo "Building Nexus Open v${PKG_VERSION} packages..."
 echo ""
 
-# All formats use the same static binary. Build it once, then stage/package.
-# deb calls build_binary_static + build_staging internally; do it here for
-# rpm/pacman/appimage so they share the same artifact.
-if $BUILD_RPM || $BUILD_PACMAN || $BUILD_APPIMAGE; then
+# Build binary and staging once — all formats share the same artifacts.
+if $BUILD_DEB || $BUILD_RPM || $BUILD_PACMAN || $BUILD_APPIMAGE; then
     build_binary_static
     build_staging
+    $BUILD_DEB    && build_deb
     $BUILD_RPM    && build_rpm
     $BUILD_PACMAN && build_pacman
+    # AppImage delegates to its own script which manages its own AppDir.
+    # Requires appimagetool in PATH or ~/bin.
+    $BUILD_APPIMAGE && build_appimage
 fi
-
-$BUILD_DEB && build_deb
-
-# AppImage: delegates to scripts/build-appimage.sh which manages its own AppDir.
-# Requires appimagetool in PATH or ~/bin.
-$BUILD_APPIMAGE && build_appimage
 
 if $RUN_TESTS; then
     echo ""
