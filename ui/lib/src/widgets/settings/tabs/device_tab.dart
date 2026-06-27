@@ -85,6 +85,14 @@ class _DeviceTabState extends State<DeviceTab> {
               ],
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
+          NexusSection(
+            title: 'Software',
+            child: _InfoRow(
+              label: 'Version',
+              value: const String.fromEnvironment('APP_VERSION', defaultValue: 'dev'),
+            ),
+          ),
           if (_info!.connectError != null && _info!.connectError!.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
             NexusCard(
