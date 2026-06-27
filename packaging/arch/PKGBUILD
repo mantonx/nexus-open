@@ -23,6 +23,18 @@ package() {
             "${pkgdir}/usr/lib/nexus-open/plugins/$(basename "$plugin")"
     done
 
+    # Flutter UI bundle
+    if [[ -d ui-bundle ]]; then
+        cp -r ui-bundle/. "${pkgdir}/usr/lib/nexus-open/"
+        # Rename the Flutter binary and wrap it to force XWayland
+        mv "${pkgdir}/usr/lib/nexus-open/ui" "${pkgdir}/usr/lib/nexus-open/ui.real"
+        cat > "${pkgdir}/usr/lib/nexus-open/ui" << 'WRAPPER'
+#!/usr/bin/env bash
+exec env WAYLAND_DISPLAY= "$(dirname "$0")/ui.real" "$@"
+WRAPPER
+        chmod +x "${pkgdir}/usr/lib/nexus-open/ui"
+    fi
+
     install -Dm644 packaging/udev/99-corsair-nexus.rules \
         "${pkgdir}/usr/share/nexus-open/99-corsair-nexus.rules"
 
