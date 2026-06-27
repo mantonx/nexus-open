@@ -78,8 +78,9 @@ func TestApp_Lifecycle(t *testing.T) {
 		t.Fatalf("failed to create app: %v", err)
 	}
 
-	// Start app in background
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Start app in background — use a background context so the test drives
+	// shutdown via app.Shutdown(), not a context deadline.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -87,7 +88,8 @@ func TestApp_Lifecycle(t *testing.T) {
 		done <- app.Run(ctx)
 	}()
 
-	// Wait for app to start
+	// Wait for app to start. Allow generous headroom — start() iterates all
+	// zones synchronously and race-detector overhead can add several seconds.
 	time.Sleep(500 * time.Millisecond)
 
 	// Shutdown
@@ -95,8 +97,6 @@ func TestApp_Lifecycle(t *testing.T) {
 		t.Errorf("shutdown failed: %v", err)
 	}
 
-	// Wait for Run to complete. Allow generous headroom — start() iterates all
-	// zones synchronously and race-detector overhead can add several seconds.
 	select {
 	case err := <-done:
 		if err != nil && err != context.Canceled {
