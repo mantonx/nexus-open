@@ -68,9 +68,10 @@ die()   { echo "✗ $*" >&2; exit 1; }
 build_binary() {
     info "Building Go daemon (native)..."
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
     go build \
         -trimpath \
-        -ldflags "-X main.version=${PKG_VERSION} -X main.commit=${COMMIT}" \
+        -ldflags "-X main.version=${PKG_VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
         -o "$DAEMON_BIN" \
         ./cmd/nexus-open
     ok "Built: $DAEMON_BIN"
@@ -82,9 +83,10 @@ build_binary() {
 build_binary_static() {
     info "Building static Go daemon (CGO_ENABLED=0)..."
     COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
     CGO_ENABLED=0 go build \
         -trimpath \
-        -ldflags "-s -w -X main.version=${PKG_VERSION} -X main.commit=${COMMIT}" \
+        -ldflags "-s -w -X main.version=${PKG_VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
         -o "$DAEMON_BIN" \
         ./cmd/nexus-open
     ok "Built: $DAEMON_BIN (static)"
