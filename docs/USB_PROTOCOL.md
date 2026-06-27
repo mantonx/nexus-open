@@ -4,8 +4,7 @@ This document describes how Nexus Open communicates with the iCUE Nexus touch
 bar — a 640×48 pixel LCD strip with a resistive touch surface, connected over
 USB (VID `0x1b1c`, PID `0x1b8e`).
 
-The protocol was reverse engineered via Wireshark USB capture against the
-official iCUE software on Windows.
+The protocol was reverse engineered via Wireshark USB capture on Linux.
 
 ## Transport
 
