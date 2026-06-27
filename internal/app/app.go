@@ -442,11 +442,6 @@ func (a *App) startDeviceWatcher() {
 	}()
 }
 
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
-
 // dirHasPlugins returns true only when path is a directory that contains at
 // least one regular executable file. An empty or stale directory does not
 // qualify — this prevents a leftover ~/.local/share/nexus-open/plugins/ from
