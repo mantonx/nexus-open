@@ -268,11 +268,11 @@ func (a *App) initialize() error {
 			}
 			systemData := "/usr/lib/nexus-open/plugins"
 			switch {
-			case dirExists(sibling):
+			case dirHasPlugins(sibling):
 				a.pluginsDir = sibling
-			case dirExists(xdgData):
+			case dirHasPlugins(xdgData):
 				a.pluginsDir = xdgData
-			case dirExists(systemData):
+			case dirHasPlugins(systemData):
 				a.pluginsDir = systemData
 			default:
 				// Fall back to sibling even if absent — binary validation will
@@ -445,6 +445,26 @@ func (a *App) startDeviceWatcher() {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// dirHasPlugins returns true only when path is a directory that contains at
+// least one regular executable file. An empty or stale directory does not
+// qualify — this prevents a leftover ~/.local/share/nexus-open/plugins/ from
+// shadowing the system install at /usr/lib/nexus-open/plugins/.
+func dirHasPlugins(path string) bool {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if info, err := e.Info(); err == nil && info.Mode()&0111 != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveLayoutPath finds the fallback zone layout YAML using the same
