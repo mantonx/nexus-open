@@ -229,3 +229,74 @@ jobs:
               --notes-file /tmp/release-notes.md \
               dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.AppImage dist/SHA256SUMS
           fi
+
+  # ── AUR — runs after GitHub release assets are attached ──────────────────────
+  aur:
+    name: Publish to AUR
+    runs-on: ubuntu-24.04
+    needs: [build, publish]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve tarball URL
+        id: meta
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          echo "tarball_url=https://github.com/mantonx/nexus-open/releases/download/v${VERSION}/nexus-open-${VERSION}-linux-amd64.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256 of release tarball
+        id: sha256
+        env:
+          TARBALL_URL: ${{ steps.meta.outputs.tarball_url }}
+        run: |
+          SHA=$(curl -fsSL "$TARBALL_URL" | sha256sum | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update PKGBUILD and .SRCINFO
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ steps.sha256.outputs.sha256 }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([._-][a-zA-Z0-9]+)*$ ]] \
+            || { echo "Invalid VERSION: $VERSION"; exit 1; }
+          [[ "$SHA256" =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "Invalid SHA256: $SHA256"; exit 1; }
+
+          cd packaging/arch
+          sed -i "s|^pkgver=.*|pkgver=${VERSION}|" PKGBUILD
+          sed -i "s|^pkgrel=.*|pkgrel=1|" PKGBUILD
+          sed -i "s|^sha256sums=.*|sha256sums=('${SHA256}')|" PKGBUILD
+          docker run --rm \
+            -v "$PWD:/pkg" \
+            -w /pkg \
+            archlinux:latest bash -c "
+              pacman -Sy --noconfirm --quiet base-devel 2>/dev/null | tail -1
+              useradd -m builder
+              chown -R builder /pkg
+              su builder -c 'makepkg --printsrcinfo > .SRCINFO'
+            "
+
+      - name: Push to AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          cat >> ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+            StrictHostKeyChecking no
+          EOF
+
+          git clone ssh://aur@aur.archlinux.org/nexus-open.git /tmp/aur-nexus-open
+          cp packaging/arch/PKGBUILD /tmp/aur-nexus-open/PKGBUILD
+          cp packaging/arch/.SRCINFO /tmp/aur-nexus-open/.SRCINFO
+          cd /tmp/aur-nexus-open
+          git config user.name "mantonx"
+          git config user.email "matthew.panton@gmail.com"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet || git commit -m "Update to v${VERSION}"
+          git push
