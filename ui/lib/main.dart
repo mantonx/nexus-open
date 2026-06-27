@@ -51,7 +51,7 @@ void main() async {
   // Register VM service extension for screenshot tour — forces onboarding
   // to show regardless of backend firstRun state. Debug builds only.
   if (kDebugMode) {
-    developer.registerExtension('ext.nexus.showOnboarding', (_, __) async {
+    developer.registerExtension('ext.nexus.showOnboarding', (_, _) async {
       _appKey.currentState?._settings?.forceFirstRun();
       return developer.ServiceExtensionResponse.result('{"status":"ok"}');
     });

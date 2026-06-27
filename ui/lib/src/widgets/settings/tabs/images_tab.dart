@@ -197,7 +197,7 @@ class _ImageTile extends StatelessWidget {
             child: Image.network(
               '${NexusApiService.baseUrl}/api/images/$filename',
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+              errorBuilder: (_, _, _) => Container(
                 color: cs.surfaceContainerHigh,
                 child: Icon(Icons.broken_image,
                     size: AppIconSize.xl,

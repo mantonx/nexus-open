@@ -16,11 +16,11 @@ class NexusButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
-    required _Variant variant,
+    required this._variant,
     this.icon,
     this.loading = false,
     this.expand = false,
-  }) : _variant = variant;
+  });
 
   factory NexusButton.primary({
     Key? key,
