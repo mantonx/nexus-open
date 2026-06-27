@@ -3,7 +3,6 @@ package zone
 import (
 	"image"
 	"image/draw"
-	"math"
 	"time"
 
 	"github.com/fogleman/gg"
@@ -84,7 +83,7 @@ func (m *Manager) compositeRipple(dst *image.RGBA) bool {
 	t := float64(elapsed) / float64(rippleDuration) // 0→1 over lifetime
 
 	// Ease out: fast expansion, slow fade.
-	eased := 1 - math.Pow(1-t, 2)
+	eased := 1 - (1-t)*(1-t)
 	radius := rippleMaxRadius * eased
 
 	// Opacity: full at t=0.15, fades to 0 at t=1.

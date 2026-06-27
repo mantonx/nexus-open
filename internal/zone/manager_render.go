@@ -269,7 +269,7 @@ func (m *Manager) renderZoneImages(theme Theme) (*image.RGBA, error) {
 		// zones (e.g. the clock) from being re-rendered every tick just because
 		// a different zone's marquee is active.
 		if zone.cachedImg != nil &&
-			zone.cachedPayload == payload.Timestamp &&
+			zone.cachedPayload.Equal(payload.Timestamp) &&
 			!zone.Renderer.IsAnimating() {
 			zoneImages[zoneID] = zone.cachedImg
 			continue

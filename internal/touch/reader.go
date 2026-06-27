@@ -259,7 +259,6 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	xi := int(math.Round(xs))
 
 	// Gesture detection thresholds
-	const tapMaxDur    = 1 * time.Second
 	const longPressDur = 500 * time.Millisecond
 
 	// Adaptive swipe threshold based on velocity (snappier at higher speeds).

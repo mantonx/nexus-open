@@ -45,10 +45,6 @@ func TestApp_New(t *testing.T) {
 		t.Fatalf("failed to create app: %v", err)
 	}
 
-	if app == nil {
-		t.Fatal("expected non-nil app")
-	}
-
 	// Verify components were initialized
 	if app.cfg == nil {
 		t.Error("expected config to be initialized")

@@ -87,7 +87,7 @@ func fetchFrame(token string) (*image.RGBA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/debug/frame: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GET /api/debug/frame: status %d", resp.StatusCode)
 	}
@@ -164,7 +164,7 @@ func fetchDetailFrame(token string) (*image.RGBA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GET /api/debug/render-detail: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GET /api/debug/render-detail: status %d", resp.StatusCode)
 	}
@@ -290,8 +290,11 @@ func writePNG(path string, img image.Image) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return png.Encode(f, img)
+	if err := png.Encode(f, img); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func lerpColor(a, b color.RGBA, t float64) color.RGBA {
