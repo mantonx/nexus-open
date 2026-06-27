@@ -59,7 +59,6 @@ func (h *SparkHistory) Normalized(loPct, hiPct int, minRange float32) []float32 
 	if rng < minRange {
 		mid := (mn + mx) / 2
 		mn = mid - minRange/2
-		mx = mid + minRange/2
 		rng = minRange
 	}
 
