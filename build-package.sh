@@ -259,6 +259,9 @@ build_rpm() {
 build_pacman() {
     info "Building .pacman..."
     mkdir -p "$OUT_DIR"
+    # Pacman versions cannot contain hyphens; replace with underscores for dev builds.
+    local saved_ver="$PKG_VERSION"
+    PKG_VERSION="${PKG_VERSION//-/_}"
     fpm_common pacman \
         --depends "libusb" \
         --depends "libayatana-appindicator" \
@@ -267,6 +270,7 @@ build_pacman() {
         --after-install  "$POST_INSTALL" \
         --after-upgrade  "$POST_UPGRADE" \
         --before-remove  "$PRE_REMOVE"
+    PKG_VERSION="$saved_ver"
     PACMAN_FILE=$(ls -t "$OUT_DIR"/${PKG_NAME}-*.pkg.tar.* 2>/dev/null | head -1)
     ok "Built: $PACMAN_FILE"
 }
@@ -306,18 +310,35 @@ run_runtime_test() {
             ${install_block}
 
             # ── binary sanity ────────────────────────────────────────────────
-            ldd /usr/bin/nexus-open | grep 'not found' && { echo 'MISSING LIBS'; exit 1; } || echo 'daemon libs OK'
-            /usr/bin/nexus-open --version
+            ldd /usr/bin/nexus-open | grep 'not found' \
+                && { echo 'MISSING_LIBS'; exit 1; } || echo 'LIBS_OK'
+            VERSION_OUT=\$(/usr/bin/nexus-open --version 2>&1)
+            echo \"\$VERSION_OUT\" | grep -qE 'v[0-9]+\.[0-9]+\.[0-9]+' \
+                && echo 'VERSION_OK' || { echo \"VERSION_BAD: \$VERSION_OUT\"; exit 1; }
 
-            # ── packaging files ──────────────────────────────────────────────
+            # ── packaging files present ───────────────────────────────────────
             test -f /usr/lib/udev/rules.d/99-corsair-nexus.rules \
                 && echo 'UDEV_RULES_OK' || { echo 'UDEV_RULES_MISSING'; exit 1; }
+            grep -q 'corsair\|CORSAIR\|1b1c' /usr/lib/udev/rules.d/99-corsair-nexus.rules \
+                && echo 'UDEV_RULES_CONTENT_OK' || { echo 'UDEV_RULES_CONTENT_BAD'; exit 1; }
             test -f /usr/share/applications/nexus-open.desktop \
                 && echo 'DESKTOP_FILE_OK' || { echo 'DESKTOP_FILE_MISSING'; exit 1; }
             test -f /usr/lib/systemd/user/nexus-open.service \
                 && echo 'SYSTEMD_SERVICE_OK' || { echo 'SYSTEMD_SERVICE_MISSING'; exit 1; }
-            test -f /usr/lib/nexus-open/plugins/nexus-media \
-                && echo 'PLUGINS_OK' || { echo 'PLUGINS_MISSING'; exit 1; }
+
+            # ── all plugins present and executable ────────────────────────────
+            PLUGIN_FAIL=0
+            for p in nexus-cpu-temp nexus-gpu-temp nexus-network nexus-weather nexus-cpu-load nexus-gpu-load nexus-media; do
+                path=\"/usr/lib/nexus-open/plugins/\$p\"
+                if [ ! -f \"\$path\" ]; then
+                    echo \"PLUGIN_MISSING: \$p\"; PLUGIN_FAIL=1
+                elif [ ! -x \"\$path\" ]; then
+                    echo \"PLUGIN_NOT_EXECUTABLE: \$p\"; PLUGIN_FAIL=1
+                else
+                    echo \"PLUGIN_OK: \$p\"
+                fi
+            done
+            [ \"\$PLUGIN_FAIL\" -eq 0 ] || exit 1
 
             # ── daemon API (mock device, headless) ───────────────────────────
             NEXUS_MOCK_DEVICE=1 /usr/bin/nexus-open &
@@ -327,11 +348,35 @@ run_runtime_test() {
                 sleep 1
             done
             curl -sf http://localhost:1985/api/health | grep -q '\"status\":\"ok\"' \
-                && echo 'DAEMON_API_health_OK' || { echo 'DAEMON_API_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
-            curl -sf http://localhost:1985/api/config | grep -q 'background_color' \
-                && echo 'DAEMON_API_config_OK' || { echo 'DAEMON_API_config_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
-            curl -sf http://localhost:1985/api/device/info | grep -q 'firmware' \
-                && echo 'DAEMON_API_device_OK' || { echo 'DAEMON_API_device_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+                && echo 'API_HEALTH_OK' || { echo 'API_HEALTH_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+
+            # Read the auth token the daemon wrote on startup
+            TOKEN=\$(cat /root/.config/nexus-open/token 2>/dev/null || echo '')
+            [ -n \"\$TOKEN\" ] \
+                && echo 'API_TOKEN_OK' || { echo 'API_TOKEN_MISSING'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+            AUTH=\"X-Nexus-Token: \$TOKEN\"
+
+            curl -sf -H \"\$AUTH\" http://localhost:1985/api/config | grep -q 'background_color' \
+                && echo 'API_CONFIG_OK' || { echo 'API_CONFIG_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+            curl -sf -H \"\$AUTH\" http://localhost:1985/api/device/info | grep -q 'firmware' \
+                && echo 'API_DEVICE_OK' || { echo 'API_DEVICE_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+
+            # ── plugins discoverable via catalog ──────────────────────────────
+            # /api/plugins returns []CatalogEntry; exec plugins appear as
+            # {"id":"exec:nexus-NAME","kind":"exec",...}. Give the daemon a
+            # moment to scan the plugins dir before querying.
+            sleep 2
+            CATALOG=\$(curl -sf -H \"\$AUTH\" http://localhost:1985/api/plugins 2>/dev/null || echo '')
+            [ -n \"\$CATALOG\" ] \
+                && echo 'API_PLUGINS_RESPONDED' || { echo 'API_PLUGINS_FAILED'; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+            CATALOG_FAIL=0
+            for p in nexus-cpu-temp nexus-gpu-temp nexus-network nexus-weather nexus-cpu-load nexus-gpu-load nexus-media; do
+                echo \"\$CATALOG\" | grep -q \"exec:\$p\" \
+                    && echo \"CATALOG_OK: \$p\" \
+                    || { echo \"CATALOG_MISSING: \$p\"; CATALOG_FAIL=1; }
+            done
+            [ \"\$CATALOG_FAIL\" -eq 0 ] || { echo \"\$CATALOG\"; kill \$DAEMON_PID 2>/dev/null; exit 1; }
+
             kill \$DAEMON_PID 2>/dev/null; wait \$DAEMON_PID 2>/dev/null || true
 
             # ── Flutter UI (Xvfb + Mesa llvmpipe + screenshot) ───────────────
@@ -345,7 +390,6 @@ run_runtime_test() {
             sleep 8
             if kill -0 \$UI_PID 2>/dev/null; then
                 echo 'FLUTTER_ALIVE'
-                # screenshot — install scrot if available, fall back to import (ImageMagick)
                 ${screenshot_pkg} 2>&1 | tail -1 || true
                 if command -v scrot &>/dev/null; then
                     DISPLAY=:99 scrot /screenshots/${label}.png 2>/dev/null && echo 'SCREENSHOT_OK' || echo 'SCREENSHOT_FAILED'
@@ -363,10 +407,16 @@ run_runtime_test() {
             ${uninstall_block}
             test -f /usr/bin/nexus-open \
                 && { echo 'UNINSTALL_FAILED: daemon binary still present'; exit 1; } \
-                || echo 'UNINSTALL_OK'
+                || echo 'UNINSTALL_BINARY_OK'
             test -f /usr/lib/nexus-open/plugins/nexus-media \
                 && { echo 'UNINSTALL_FAILED: plugins still present'; exit 1; } \
-                || echo 'PLUGINS_UNINSTALL_OK'
+                || echo 'UNINSTALL_PLUGINS_OK'
+            test -f /usr/lib/systemd/user/nexus-open.service \
+                && { echo 'UNINSTALL_FAILED: service file still present'; exit 1; } \
+                || echo 'UNINSTALL_SERVICE_OK'
+            test -f /usr/lib/udev/rules.d/99-corsair-nexus.rules \
+                && { echo 'UNINSTALL_FAILED: udev rule still present'; exit 1; } \
+                || echo 'UNINSTALL_UDEV_OK'
         " 2>&1 | grep -Ev '^(>|Warning|.*keysym|.*xkbcomp|Errors from)'
 }
 

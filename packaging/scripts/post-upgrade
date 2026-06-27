@@ -14,7 +14,8 @@ command -v gtk-update-icon-cache > /dev/null 2>&1 && \
 
 # Restart the service for every active user session.
 if command -v loginctl > /dev/null 2>&1; then
+    loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}' | sort -u | \
     while IFS= read -r uid; do
         systemctl --user -M "${uid}@.host" restart nexus-open.service 2>/dev/null || true
-    done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}' | sort -u)
+    done
 fi

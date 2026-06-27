@@ -18,10 +18,11 @@ command -v gtk-update-icon-cache > /dev/null 2>&1 && \
 # Package scripts run as root so plain `systemctl --user` targets root's session.
 # -M uid@.host reaches each user's systemd instance correctly.
 if command -v loginctl > /dev/null 2>&1; then
+    loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}' | sort -u | \
     while IFS= read -r uid; do
         systemctl --user -M "${uid}@.host" enable nexus-open.service 2>/dev/null || true
         systemctl --user -M "${uid}@.host" start  nexus-open.service 2>/dev/null || true
-    done < <(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $2}' | sort -u)
+    done
 fi
 
 echo ""
