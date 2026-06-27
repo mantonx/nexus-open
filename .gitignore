@@ -64,3 +64,4 @@ ui/lib/**/*.g.dart
 dist/
 .pkg-staging/
 /test-screenshots/
+.claude/settings.local.json

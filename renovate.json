@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Group all golang.org/x/* updates into one PR",
+      "matchPackagePrefixes": ["golang.org/x/"],
+      "groupName": "golang.org/x dependencies"
+    },
+    {
+      "description": "Group all modernc (SQLite) updates into one PR",
+      "matchPackagePrefixes": ["modernc.org/"],
+      "groupName": "modernc.org dependencies"
+    },
+    {
+      "description": "Group GitHub Actions updates into one PR",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Auto-merge patch updates for Go modules after CI passes",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Auto-merge patch updates for GitHub Actions after CI passes",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    }
+  ],
+  "gomod": {
+    "enabled": true
+  },
+  "flutter": {
+    "enabled": true
+  }
+}

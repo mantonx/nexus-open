@@ -19,22 +19,19 @@ import (
 
 // CPUTempPlugin monitors CPU temperature
 type CPUTempPlugin struct {
-	history    []float32  // Sparkline data (last 60 samples)
-	historyMu  sync.Mutex // Protect history
-	maxHistory int        // Maximum history length
-	unit       string     // "metric" (Celsius) or "imperial" (Fahrenheit)
-	unitMu     sync.RWMutex
-	graphType  plugin.GraphType // Graph visualization type
-	graphMu    sync.RWMutex
+	history   plugin.SparkHistory
+	unit      string // "metric" (Celsius) or "imperial" (Fahrenheit)
+	unitMu    sync.RWMutex
+	graphType plugin.GraphType
+	graphMu   sync.RWMutex
 }
 
 // NewCPUTempPlugin creates a new CPU temperature module
 func NewCPUTempPlugin() *CPUTempPlugin {
 	return &CPUTempPlugin{
-		history:    make([]float32, 0, 60),
-		maxHistory: 60,
-		unit:       "metric",                    // default to Celsius
-		graphType:  plugin.GraphTypeSparkline, // default to sparkline
+		history:   plugin.NewSparkHistory(60),
+		unit:      "metric",
+		graphType: plugin.GraphTypeSparkline,
 	}
 }
 
@@ -220,63 +217,9 @@ func (m *CPUTempPlugin) readMacTemp() (float64, error) {
 	return 40.0 + (level * 0.6), nil
 }
 
-// addToHistory adds a temperature sample to history
-func (m *CPUTempPlugin) addToHistory(temp float64) {
-	m.historyMu.Lock()
-	defer m.historyMu.Unlock()
+func (m *CPUTempPlugin) addToHistory(temp float64) { m.history.Push(float32(temp)) }
 
-	m.history = append(m.history, float32(temp))
-
-	// Keep only last N samples
-	if len(m.history) > m.maxHistory {
-		m.history = m.history[len(m.history)-m.maxHistory:]
-	}
-}
-
-// getSparkline returns sparkline data normalised to a stable range.
-// Uses the 10th/90th percentile of history as the scale bounds so a single
-// spike doesn't compress all other values to a flatline.
-func (m *CPUTempPlugin) getSparkline() []float32 {
-	m.historyMu.Lock()
-	defer m.historyMu.Unlock()
-
-	if len(m.history) == 0 {
-		return nil
-	}
-
-	mn, mx := percentileRange(m.history, 5, 95)
-	rng := mx - mn
-	if rng < 2.0 {
-		mid := (mn + mx) / 2
-		mn = mid - 1.0
-		mx = mid + 1.0
-		rng = 2.0
-	}
-
-	spark := make([]float32, len(m.history))
-	for i, v := range m.history {
-		s := (v - mn) / rng
-		if s < 0 { s = 0 }
-		if s > 1 { s = 1 }
-		spark[i] = s
-	}
-	return spark
-}
-
-// percentileRange returns the lo-th and hi-th percentile values from data.
-func percentileRange(data []float32, loPct, hiPct int) (float32, float32) {
-	sorted := make([]float32, len(data))
-	copy(sorted, data)
-	// Simple insertion sort — history is at most 60 elements.
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
-	loIdx := loPct * (len(sorted) - 1) / 100
-	hiIdx := hiPct * (len(sorted) - 1) / 100
-	return sorted[loIdx], sorted[hiIdx]
-}
+func (m *CPUTempPlugin) getSparkline() []float32 { return m.history.Normalized(5, 95, 2.0) }
 
 // getSeverity returns severity based on temperature
 func (m *CPUTempPlugin) getSeverity(temp float64) plugin.Severity {

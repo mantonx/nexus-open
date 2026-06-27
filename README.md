@@ -41,7 +41,7 @@ The device is not officially supported on Linux — this project reverse-enginee
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Flutter 3.24+
 - Corsair iCUE Nexus (USB VID `0x1b1c`, PID `0x1b8e`)
 

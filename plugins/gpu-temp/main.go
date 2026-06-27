@@ -19,9 +19,7 @@ import (
 
 // GPUTempPlugin monitors GPU temperature
 type GPUTempPlugin struct {
-	history    []float32  // Sparkline data (last 60 samples)
-	historyMu  sync.Mutex // Protect history
-	maxHistory int        // Maximum history length
+	history plugin.SparkHistory
 
 	vendorOnce sync.Once
 	vendor     string // Detected GPU vendor (nvidia/amd/intel/generic)
@@ -36,10 +34,9 @@ type GPUTempPlugin struct {
 // NewGPUTempPlugin creates a new GPU temperature module
 func NewGPUTempPlugin() *GPUTempPlugin {
 	return &GPUTempPlugin{
-		history:    make([]float32, 0, 60),
-		maxHistory: 60,
-		graphType:  plugin.GraphTypeSparkline,
-		unit:       "metric",
+		history:   plugin.NewSparkHistory(60),
+		graphType: plugin.GraphTypeSparkline,
+		unit:      "metric",
 	}
 }
 
@@ -252,60 +249,9 @@ func readHwmonTemp(devPath string) (float64, error) {
 	return float64(milliTemp) / 1000.0, nil
 }
 
-// addToHistory adds a temperature sample to history
-func (m *GPUTempPlugin) addToHistory(temp float64) {
-	m.historyMu.Lock()
-	defer m.historyMu.Unlock()
+func (m *GPUTempPlugin) addToHistory(temp float64) { m.history.Push(float32(temp)) }
 
-	m.history = append(m.history, float32(temp))
-
-	// Keep only last N samples
-	if len(m.history) > m.maxHistory {
-		m.history = m.history[len(m.history)-m.maxHistory:]
-	}
-}
-
-// getSparkline returns sparkline data normalised using the 5th/95th percentile
-// so single spikes don't compress everything else to a flatline.
-func (m *GPUTempPlugin) getSparkline() []float32 {
-	m.historyMu.Lock()
-	defer m.historyMu.Unlock()
-
-	if len(m.history) == 0 {
-		return nil
-	}
-
-	mn, mx := percentileRange(m.history, 5, 95)
-	rng := mx - mn
-	if rng < 2.0 {
-		mid := (mn + mx) / 2
-		mn = mid - 1.0
-		mx = mid + 1.0
-		rng = 2.0
-	}
-
-	spark := make([]float32, len(m.history))
-	for i, v := range m.history {
-		s := (v - mn) / rng
-		if s < 0 { s = 0 }
-		if s > 1 { s = 1 }
-		spark[i] = s
-	}
-	return spark
-}
-
-func percentileRange(data []float32, loPct, hiPct int) (float32, float32) {
-	sorted := make([]float32, len(data))
-	copy(sorted, data)
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j] < sorted[j-1]; j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
-		}
-	}
-	loIdx := loPct * (len(sorted) - 1) / 100
-	hiIdx := hiPct * (len(sorted) - 1) / 100
-	return sorted[loIdx], sorted[hiIdx]
-}
+func (m *GPUTempPlugin) getSparkline() []float32 { return m.history.Normalized(5, 95, 2.0) }
 
 // getSeverity returns severity based on temperature
 func (m *GPUTempPlugin) getSeverity(temp float64) plugin.Severity {

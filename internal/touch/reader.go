@@ -268,9 +268,6 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 		swipeStartFrac = 0.07 // keep short taps from triggering swipes
 	}
 
-	// Tap threshold matches swipe threshold exactly — no dead zone between them.
-	tapMaxMoveFrac := swipeStartFrac
-
 	events := []Event{}
 
 	// State machine for gesture detection
@@ -366,11 +363,7 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 				TapX:      xi,
 				SlideX:    dx,
 			})
-			if abs(dx) < t.px(tapMaxMoveFrac) {
-				t.logger.Info("tap detected", "x", xi, "raw_x", rawX, "raw_max", t.rawMax, "duration_ms", dur.Milliseconds())
-			} else {
-				t.logger.Info("TAP_DIAG: sliding tap emitted", "x", xi, "raw_x", rawX, "dx", dx, "duration_ms", dur.Milliseconds())
-			}
+			t.logger.Info("tap detected", "x", xi, "raw_x", rawX, "raw_max", t.rawMax, "duration_ms", dur.Milliseconds())
 		}
 		t.swipeActive = false
 		return events, nil

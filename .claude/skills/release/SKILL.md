@@ -55,9 +55,30 @@ make release VERSION=<version>
 
 The Makefile validates inputs and stops on any error. If it fails, report the exact error — do not attempt to run the steps manually.
 
-### 4. Report completion
+### 4. Draft a release description
+
+Before reporting completion, draft a 2–4 sentence human-readable description of what this release is *about*. This goes at the top of the GitHub release notes, above the changelog entries.
+
+A good description answers: what's the headline feature or theme? Is anything a breaking change? Who should care?
+
+Example:
+> Adds the media plugin: now-playing display with album art from TMDb and Firefox MPRIS integration. Migrates all plugins to a flat `nexus-` naming scheme — breaking change for anyone with customised plugin paths.
+
+Show the draft to the user and ask them to confirm or edit it. Once confirmed, save it to `/tmp/release-description.md`.
+
+### 5. Report completion
 
 Tell the user the tag has been pushed and link to the Actions page:
 `https://github.com/mantonx/nexus-open/actions`
 
 Remind them: CI takes 10–15 minutes. The GitHub release and AUR package will be live once it completes. Do not touch the release on GitHub while CI is running.
+
+### 6. Update the GitHub release notes after CI
+
+Once CI finishes and the GitHub release exists, prepend the confirmed description to the release notes:
+
+```bash
+PREV_TAG=$(git tag --sort=-v:refname | grep -v "v<VERSION>" | head -1)
+git-cliff "${PREV_TAG}..v<VERSION>" --strip all > /tmp/changelog.md
+cat /tmp/release-description.md <(echo) /tmp/changelog.md | GITHUB_TOKEN="" gh release edit "v<VERSION>" --notes-file -
+```

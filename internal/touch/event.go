@@ -1,4 +1,6 @@
 // Package touch provides touch input handling and gesture recognition.
+// Package touch provides HID touch input reading, gesture recognition, and
+// zone-aware event dispatch for the Corsair iCUE Nexus display.
 package touch
 
 import "time"

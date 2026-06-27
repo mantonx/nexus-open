@@ -4,7 +4,6 @@ package touch
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -174,12 +173,6 @@ func (h *Handler) handleEvent(event Event) {
 // handleTap routes a tap to the zone at event.TapX and executes its OnTap action.
 func (h *Handler) handleTap(event Event) {
 	showingDetail := h.zoneManager.IsShowingDetail()
-	inFlight := h.detailInFlight.Load()
-	h.logger.Info("TAP_DIAG: handleTap entry",
-		"x", event.TapX,
-		"slide_dx", event.SlideX,
-		"showing_detail", showingDetail,
-		"detail_in_flight", inFlight)
 
 	// While detail is shown, route the tap to the plugin (which may handle
 	// prev/next controls). The plugin decides whether to keep the overlay open.
@@ -193,7 +186,7 @@ func (h *Handler) handleTap(event Event) {
 	// For zone targeting, require a stationary-enough touch (SlideX within tap
 	// threshold) so sliding touches don't accidentally activate zones.
 	if abs(event.SlideX) > tapMaxMovePixels {
-		h.logger.Info("TAP_DIAG: sliding tap ignored for zone targeting", "dx", event.SlideX)
+		h.logger.Debug("sliding tap ignored for zone targeting", "dx", event.SlideX)
 		return
 	}
 
@@ -202,21 +195,11 @@ func (h *Handler) handleTap(event Event) {
 	cfg := h.zoneManager.GetConfig()
 	pageIdx := h.zoneManager.GetCurrentPage()
 	if pageIdx >= len(cfg.Pages) {
-		h.logger.Warn("TAP_DIAG: page index out of range", "page_idx", pageIdx, "pages", len(cfg.Pages))
+		h.logger.Warn("tap: page index out of range", "page_idx", pageIdx, "pages", len(cfg.Pages))
 		return
 	}
 	page := cfg.Pages[pageIdx]
 	page.ComputeOffsets()
-
-	h.logger.Info("TAP_DIAG: zone layout",
-		"page", page.Name,
-		"zones", func() []string {
-			out := make([]string, len(page.Zones))
-			for i, z := range page.Zones {
-				out[i] = fmt.Sprintf("%s[x=%d w=%d]", z.ID, z.X, z.Width)
-			}
-			return out
-		}())
 
 	// Find which zone contains tapX.
 	for _, z := range page.Zones {
@@ -226,7 +209,7 @@ func (h *Handler) handleTap(event Event) {
 			return
 		}
 	}
-	h.logger.Info("TAP_DIAG: tap outside all zones", "x", tapX)
+	h.logger.Debug("tap outside all zones", "x", tapX)
 }
 
 // executeTapAction runs the tap action for a zone, using the plugin's Tapper
@@ -244,18 +227,17 @@ func (h *Handler) executeTapAction(z zone.ZoneConfig, tapX int) {
 			h.zoneManager.StartTapRipple(tapX)
 			go func() {
 				defer h.detailInFlight.Store(false)
-				h.logger.Info("TAP_DIAG: calling HandleZoneTap", "zone", z.ID)
 				start := time.Now()
 				if err := h.zoneManager.HandleZoneTap(z.ID); err != nil {
-					h.logger.Warn("TAP_DIAG: HandleZoneTap error",
+					h.logger.Warn("HandleZoneTap error",
 						"zone", z.ID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
 				} else {
-					h.logger.Info("TAP_DIAG: HandleZoneTap complete",
+					h.logger.Debug("HandleZoneTap complete",
 						"zone", z.ID, "duration_ms", time.Since(start).Milliseconds())
 				}
 			}()
 		} else {
-			h.logger.Info("TAP_DIAG: detail tap dropped — OnTap already in flight", "zone", z.ID)
+			h.logger.Debug("detail tap dropped — OnTap already in flight", "zone", z.ID)
 		}
 	case zone.TapActionNone, "":
 		// No action configured — silently ignore.
@@ -268,11 +250,10 @@ func (h *Handler) executeTapAction(z zone.ZoneConfig, tapX int) {
 func (h *Handler) handleLiveSwipe(event Event) {
 	isLeft := event.Button == 1
 
-	h.logger.Debug("🪄 SWIPE LIVE",
+	h.logger.Debug("swipe live",
 		"progress_pct", int(event.SwipeProgress*100),
 		"pixels", event.SwipePixels,
-		"direction", map[bool]string{true: "left", false: "right"}[isLeft],
-		"timestamp_ms", event.Timestamp.UnixMilli())
+		"direction", map[bool]string{true: "left", false: "right"}[isLeft])
 
 	// Update the zone manager with live swipe progress
 	if err := h.zoneManager.UpdateLiveSwipe(event.SwipeProgress, isLeft); err != nil {
@@ -287,41 +268,28 @@ func (h *Handler) handleSwipeComplete(event Event, isLeft bool) {
 	velocity := event.Velocity
 	directionLabel := map[bool]string{true: "LEFT", false: "RIGHT"}[isLeft]
 
-	h.logger.Info("🛬 SWIPE RELEASE",
-		"direction", directionLabel,
-		"progress_pct", int(progress*100),
-		"velocity_px_s", int(velocity),
-		"pixels", event.SwipePixels,
-		"duration_ms", event.Duration.Milliseconds())
-
-	// Use multi-heuristic decision algorithm to determine commit vs cancel
 	shouldCommit, reason := h.swipeConfig.shouldCommitSwipe(progress, velocity)
 
 	if shouldCommit {
-		// Commit the swipe - finalize the live transition smoothly with momentum
-		h.logger.Info("✅ SWIPE COMMIT",
+		h.logger.Info("swipe commit",
 			"direction", directionLabel,
-			"progress", int(progress*100),
+			"progress_pct", int(progress*100),
 			"velocity_px_s", int(velocity),
-			"pixels", event.SwipePixels,
 			"reason", reason)
 
-		// Finalize the live swipe with momentum-based duration
-		// This handles the page change internally and smoothly completes the animation
 		if err := h.zoneManager.FinalizeLiveSwipe(progress, velocity, isLeft); err != nil {
-			h.logger.Error("❌ FinalizeLiveSwipe() failed", "error", err)
+			h.logger.Error("FinalizeLiveSwipe failed", "error", err)
 			return
 		}
 	} else {
-		// Cancel the swipe - snap back to current page
-		h.logger.Info("↩️ SWIPE CANCEL",
-			"progress", int(progress*100),
+		h.logger.Info("swipe cancel",
+			"direction", directionLabel,
+			"progress_pct", int(progress*100),
 			"velocity_px_s", int(velocity),
-			"pixels", event.SwipePixels,
 			"reason", reason)
 
 		if err := h.zoneManager.CancelLiveSwipe(); err != nil {
-			h.logger.Error("failed to cancel swipe", "error", err)
+			h.logger.Error("CancelLiveSwipe failed", "error", err)
 		}
 	}
 }
