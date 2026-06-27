@@ -161,6 +161,11 @@ func (h *Handler) handleEvent(event Event) {
 		if h.swipeEnabled {
 			h.handleSwipeComplete(event, false) // false = right
 		}
+	case 3: // Long press — dismiss detail overlay if showing
+		if h.zoneManager.IsShowingDetail() {
+			h.logger.Info("long press dismissed detail overlay")
+			h.zoneManager.ClearDetail()
+		}
 	default:
 		h.logger.Debug("unknown touch event button", "button", event.Button)
 	}
@@ -176,12 +181,12 @@ func (h *Handler) handleTap(event Event) {
 		"showing_detail", showingDetail,
 		"detail_in_flight", inFlight)
 
-	// Any non-swipe release dismisses the detail overlay — the whole screen is
-	// the dismiss target, so we don't require a stationary finger.
+	// While detail is shown, route the tap to the plugin (which may handle
+	// prev/next controls). The plugin decides whether to keep the overlay open.
 	if showingDetail {
-		h.logger.Info("tap dismissed detail overlay", "dx", event.SlideX)
+		h.logger.Info("tap on detail overlay", "x", event.TapX, "dx", event.SlideX)
 		h.zoneManager.StartTapRipple(event.TapX)
-		h.zoneManager.ClearDetail()
+		h.zoneManager.HandleDetailTap(event.TapX, 24)
 		return
 	}
 

@@ -232,6 +232,7 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	down := touchState != 0
 
 
+
 	if rawX > t.maxRawSeen {
 		t.maxRawSeen = rawX
 		if rawX > t.rawMax {
@@ -258,7 +259,8 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 	xi := int(math.Round(xs))
 
 	// Gesture detection thresholds
-	const tapMaxDur = 1 * time.Second
+	const tapMaxDur    = 1 * time.Second
+	const longPressDur = 500 * time.Millisecond
 
 	// Adaptive swipe threshold based on velocity (snappier at higher speeds).
 	speed := math.Abs(t.euro.prevDx)                      // pixels/sec after normalization
@@ -344,11 +346,19 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 				"velocity_px_s", int(velocity),
 				"max_raw_x_seen", t.maxRawSeen,
 				"configured_raw_max", t.rawMax)
-		} else if dur <= tapMaxDur {
-			// Any non-swipe release within tap duration is emitted as a tap.
-			// The handler uses IsShowingDetail to decide whether to dismiss or
-			// require the tighter dx<threshold for zone targeting — keeping that
-			// policy decision out of the gesture classifier.
+		} else if dur >= longPressDur {
+			// Long press — not a swipe, held long enough to be intentional.
+			events = append(events, Event{
+				Button:    3,
+				Pressed:   false,
+				Duration:  dur,
+				Timestamp: now,
+				TapX:      xi,
+				SlideX:    dx,
+			})
+			t.logger.Info("long press detected", "x", xi, "duration_ms", dur.Milliseconds())
+		} else if dur < longPressDur {
+			// Short tap.
 			events = append(events, Event{
 				Button:    0,
 				Pressed:   false,
@@ -362,10 +372,6 @@ func (t *HIDTouchReader) Read(ctx context.Context) ([]Event, error) {
 			} else {
 				t.logger.Info("TAP_DIAG: sliding tap emitted", "x", xi, "raw_x", rawX, "dx", dx, "duration_ms", dur.Milliseconds())
 			}
-		} else {
-			t.logger.Info("TAP_DIAG: gesture canceled (long press, not swipe)",
-				"dx", dx,
-				"duration_ms", dur.Milliseconds())
 		}
 		t.swipeActive = false
 		return events, nil
