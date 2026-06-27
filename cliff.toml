@@ -14,7 +14,7 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group }}
 {% for commit in commits %}
-- {{ commit.message | split(pat="\n") | first | trim_start_matches(pat="feat: ") | trim_start_matches(pat="feat(") | trim_start_matches(pat="fix: ") | trim_start_matches(pat="perf: ") | trim_start_matches(pat="refactor: ") | upper_first | trim }}\
+- {{ commit.message | upper_first | trim }}\
 {% if commit.breaking %} **[BREAKING]**{% endif %}
 {%- endfor %}
 {% endfor %}\n
@@ -30,8 +30,8 @@ https://github.com/mantonx/nexus-open/releases/tag/{{ release.version }}
 trim = true
 
 [git]
-conventional_commits = false
-filter_unconventional = false
+conventional_commits = true
+filter_unconventional = true
 commit_parsers = [
   { message = "^feat", group = "Added" },
   { message = "^fix", group = "Fixed" },

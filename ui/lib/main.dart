@@ -140,7 +140,7 @@ class _OpenNextAppState extends State<OpenNextApp> with WindowListener {
             ? const OnboardingOverlay()
             : const SettingsPage();
     return MaterialApp(
-      title: 'Open Next',
+      title: 'Nexus Open',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: settings.themeMode,

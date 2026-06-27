@@ -3,71 +3,77 @@
 All notable changes to Nexus Open are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Harden USB write/close lifecycle
+
 ## [0.3.4] - 2026-06-27
 
 ### Added
 
-- Ui): show daemon build info in Device tab
-- Ui): show app version in Device tab Software section
-- Ui): show app version in navigation rail footer
-- Ci): generate AI prose summary for release notes via GitHub Models
+- Show daemon build info in Device tab
+- Show app version in Device tab Software section
+- Show app version in navigation rail footer
+- Generate AI prose summary for release notes via GitHub Models
 
 ### Fixed
 
-- Fix(dev): pass APP_VERSION dart-define in dev-ui target
-- Fix(dev): force GDK_BACKEND=x11 for flutter run — avoids epoxy crash on Wayland
+- Pass APP_VERSION dart-define in dev-ui target
+- Force GDK_BACKEND=x11 for flutter run — avoids epoxy crash on Wayland
 
 ## [0.3.3] - 2026-06-27
 
 ### Fixed
 
-- Fix(deps): update dependency geocoding to v4 (#34)
-- Fix(deps): update dependency google_fonts to v8 (#35)
-- Fix(deps): update dependency intl to ^0.20.0 (#22)
-- Fix(deps): update module github.com/mantonx/nexus-open to v0.3.2
-- Fix(renovate): remove invalid flutter key
-- Fix(plugin): remove ineffectual mx assignment in SparkHistory.Normalized
-- Fix(ci): generate release notes from tag range, not --unreleased
+- Update dependency geocoding to v4 (#34)
+- Update dependency google_fonts to v8 (#35)
+- Update dependency intl to ^0.20.0 (#22)
+- Update module github.com/mantonx/nexus-open to v0.3.2
+- Remove invalid flutter key
+- Remove ineffectual mx assignment in SparkHistory.Normalized
+- Generate release notes from tag range, not --unreleased
 
 ## [0.3.2] - 2026-06-27
 
 ### Fixed
 
-- Fix(app): remove unused dirExists
-- Fix(app): skip empty plugin dirs during resolution
+- Remove unused dirExists
+- Skip empty plugin dirs during resolution
 
 ### Performance
 
-- Perf(pkg): build plugins once, stage copies for all package formats
+- Build plugins once, stage copies for all package formats
 
 ## [0.3.1] - 2026-06-27
 
 ### Fixed
 
-- Fix(pkg): POSIX-safe lifecycle scripts and comprehensive runtime tests
-- Fix(pkg): reliable install/upgrade/uninstall lifecycle across all formats
-- Fix(pkg): include plugins in release tarball and PKGBUILD install
+- POSIX-safe lifecycle scripts and comprehensive runtime tests
+- Reliable install/upgrade/uninstall lifecycle across all formats
+- Include plugins in release tarball and PKGBUILD install
 
 ## [0.3.0] - 2026-06-27
 
 ### Added
 
-- Media): add media plugin source and tap-mock dev utility
-- Media): add TMDb poster art lookup and Firefox MPRIS support
-- Touch): improve touch handling
-- Plugins): migrate to flat plugin layout with nexus- prefix
+- Add media plugin source and tap-mock dev utility
+- Add TMDb poster art lookup and Firefox MPRIS support
+- Improve touch handling
+- Migrate to flat plugin layout with nexus- prefix
 
 ### Fixed
 
-- Fix(test): replace deadline context with cancellable context in TestApp_Lifecycle
-- Fix(lint): resolve golangci-lint failures
-- Fix(zone): eliminate clock AM/PM blink caused by shared builtin instances
-- Fix(pkg): restart service on upgrade, not just start
+- Replace deadline context with cancellable context in TestApp_Lifecycle
+- Resolve golangci-lint failures
+- Eliminate clock AM/PM blink caused by shared builtin instances
+- Restart service on upgrade, not just start
 - Correct v0.2.0 PKGBUILD sha256; add workflow_dispatch to aur-publish
-- Fix(ci): pass exact version to build-package.sh via RELEASE_VERSION
-- Fix(ci): resolve version from tag ref, not git describe
-- Fix(ci): prevent AUR publish race by never re-firing release:published
-- Fix(ci): add --clobber to release step to allow overwriting manual pre-releases
+- Pass exact version to build-package.sh via RELEASE_VERSION
+- Resolve version from tag ref, not git describe
+- Prevent AUR publish race by never re-firing release:published
+- Add --clobber to release step to allow overwriting manual pre-releases
 
 ## [0.2.0] - 2026-06-26
 
@@ -90,23 +96,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Add AppImage packaging
-- Ui): add design tokens, detail overlay widget, and settings polish
-- Plugins): add graph types, captions, and testdata fixtures
-- Plugin): extend payload API with caption, graph types, and validation
-- Design): add hardware display design token system
-- Debug): add GET /api/debug/frame endpoint to snapshot current display
-- Editor): location field typeahead + map preview, live config updates
-- Editor): fix zone colour picker — use accent for text, add weather plugin (#16)
-- Ui): preview strip with swipe arrows, zone tap, and detail close highlight
+- Add design tokens, detail overlay widget, and settings polish
+- Add graph types, captions, and testdata fixtures
+- Extend payload API with caption, graph types, and validation
+- Add hardware display design token system
+- Add GET /api/debug/frame endpoint to snapshot current display
+- Location field typeahead + map preview, live config updates
+- Fix zone colour picker — use accent for text, add weather plugin (#16)
+- Preview strip with swipe arrows, zone tap, and detail close highlight
 - Zone tap, detail overlay cache, detail_state WS broadcast
-- Security): bind to loopback, add capability token auth
+- Bind to loopback, add capability token auth
 - Tray lifecycle, perf optimisations, and stability fixes
-- Ui): start maximized with 1280×800 minimum, minimize instead of hide
-- Clock): analog face, multi-style config, live preview, and blink fix
+- Start maximized with 1280×800 minimum, minimize instead of hide
+- Analog face, multi-style config, live preview, and blink fix
 - Settings UI overhaul, draft layout system, and device tab fixes
-- Phase-2): zone model v2 — 6-zone cap + auto width redistribution
-- Phase-1): plugin config schema contract + Configure interface
-- Phase-0): consolidate plugin config into zones.config_json
+- Zone model v2 — 6-zone cap + auto width redistribution
+- Plugin config schema contract + Configure interface
+- Consolidate plugin config into zones.config_json
 - Fpm-based package builder + distro install tests (Ubuntu 22/24, Debian 12, Fedora 40, Arch)
 - KDE desktop integration — single-instance, systemd service, icon set
 - Resolve exec: plugin paths relative to pluginsDir, not CWD
@@ -150,21 +156,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add proper OpenAPI 3.0 specification
 - Add OpenAPI 3 specification (Phase 0)
 - Add zone-test live device testing tool
-- REFACTOR-Phase4): implement multi-page navigation and touch interactions
-- REFACTOR-Phase3): migrate CPU, Network, and Weather modules
-- Gpu-temp): add multi-vendor GPU support (AMD, Intel, generic sysfs)
-- REFACTOR-Phase3): GPU temperature module complete
-- Clock): add blinking colon for visual feedback
-- REFACTOR-Phase2): implement plugin system with RPC
-- REFACTOR-Phase1): implement core zone system for modular layout
-- FL-013): implement system tray with window show/hide control
-- V0.1.5): implement Font Awesome icons and display polish
-- V0.1.5): implement TrueType font rendering system
-- FL-001-012): Phase 4 - Flutter integration complete
+- Implement multi-page navigation and touch interactions
+- Migrate CPU, Network, and Weather modules
+- Add multi-vendor GPU support (AMD, Intel, generic sysfs)
+- GPU temperature module complete
+- Add blinking colon for visual feedback
+- Implement plugin system with RPC
+- Implement core zone system for modular layout
+- Implement system tray with window show/hide control
+- Implement Font Awesome icons and display polish
+- Implement TrueType font rendering system
+- Phase 4 - Flutter integration complete
 
 ### Changed
 
-- Refactor(renderer): adopt design tokens and expand graph rendering
+- Adopt design tokens and expand graph rendering
 - Replace cgo+libusb with pure-Go usbfs implementation
 - Rename module from nexus-next to nexus-open
 - Decouple draft from zone manager; fix race condition and layout bugs
@@ -173,25 +179,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Remove legacy display and instruments packages
 - Reorganize config packages for clarity
 - Restructure project architecture and improve touch handling
-- Refactor(API-001-007): Phase 3 - Modern API server with middleware
-- Refactor(BP-005,BP-006,BP-009,BP-011): Phase 2 - Backend refactoring complete
-- Refactor(BP-001,BP-003,BP-004): establish foundation with new structure
-- Refactor(BP-002): remove Wails artifacts and clean up main.go
+- Phase 3 - Modern API server with middleware
+- Phase 2 - Backend refactoring complete
+- Establish foundation with new structure
+- Remove Wails artifacts and clean up main.go
 
 ### Fixed
 
 - Desktop file Actions key and HardwareSettings category
-- Fix(app): ensure Run cleans up on context cancellation; fix test isolation
-- Fix(gpu): eliminate flicker via vendor caching and TTL headroom
-- Fix(touch): correct tap coordinates and derive detail action from plugin
-- Fix(security): govulncheck in CI, harden systemd unit, drop config echo
-- Fix(udev): tighten device permissions, clarify plugdev is headless-only
-- Fix(security): plugin path allowlist, file confinement, body limits, systemd hardening
-- Fix(lint): resolve errcheck and unused symbols flagged by golangci-lint
-- Fix(ui): set window size to 1400x800
-- Fix(makefile): install builds and deploys both backend and Flutter UI
-- Fix(makefile): install to ~/.local/bin and restart systemd service
-- Fix(renderer): scale fonts and layout to zone width
+- Ensure Run cleans up on context cancellation; fix test isolation
+- Eliminate flicker via vendor caching and TTL headroom
+- Correct tap coordinates and derive detail action from plugin
+- Govulncheck in CI, harden systemd unit, drop config echo
+- Tighten device permissions, clarify plugdev is headless-only
+- Plugin path allowlist, file confinement, body limits, systemd hardening
+- Resolve errcheck and unused symbols flagged by golangci-lint
+- Set window size to 1400x800
+- Install builds and deploys both backend and Flutter UI
+- Install to ~/.local/bin and restart systemd service
+- Scale fonts and layout to zone width
 - Restore touch/swipe via libusb EP 0x81 + split C into nexus_usb.c/h
 - Replace setup-git-cliff action with direct cargo install + cache
 - Skip fpm check in --test-only mode (test jobs don't need fpm)
@@ -238,7 +244,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Theme-aware colours throughout — no more dark-only hardcoding
 - Wire up WebSocket endpoint and add integration test suite
 - Theme-aware colours throughout — no more dark-only hardcoding
-- Fix(touch): improve gesture detection with press/release tracking
+- Improve gesture detection with press/release tracking
 
 ### Performance
 
