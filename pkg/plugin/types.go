@@ -284,3 +284,11 @@ type DetailPayload struct {
 type Tapper interface {
 	OnTap() (DetailPayload, error)
 }
+
+// DetailTapper is an optional interface plugins may implement to handle taps
+// within their detail overlay. The host calls OnDetailTap with the pixel
+// coordinates of the tap (in the 640×48 hardware coordinate space).
+// Return true to keep the detail open, false to dismiss it.
+type DetailTapper interface {
+	OnDetailTap(x, y int) (bool, error)
+}

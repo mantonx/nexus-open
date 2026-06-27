@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/fogleman/gg"
 	"golang.org/x/image/font"
@@ -13,6 +14,64 @@ import (
 	"github.com/mantonx/nexus-open/internal/fonts"
 	"github.com/mantonx/nexus-open/pkg/plugin"
 )
+
+const (
+	marqueeScrollPx   = 30.0            // pixels per second
+	marqueePauseStart = 3 * time.Second
+	marqueePauseEnd   = 2 * time.Second
+)
+
+// marqueePhase tracks which part of the scroll cycle a text slot is in.
+type marqueePhase int
+
+const (
+	marqueePhasingStart marqueePhase = iota // showing ellipsis, waiting to scroll
+	marqueePhaseScrolling                   // scrolling right-to-left
+	marqueePhasingEnd                       // tail visible, waiting to reset
+)
+
+// marqueeState holds the scroll animation state for a single text slot.
+type marqueeState struct {
+	text     string
+	phase    marqueePhase
+	offset   float64   // current scroll offset in pixels
+	phaseAt  time.Time // when the current phase started
+	lastTick time.Time
+}
+
+// advance updates offset/phase based on elapsed time and full text width.
+func (s *marqueeState) advance(fullW, maxW float64) {
+	now := time.Now()
+	if s.lastTick.IsZero() {
+		s.lastTick = now
+		s.phaseAt = now
+		return
+	}
+	dt := now.Sub(s.lastTick).Seconds()
+	s.lastTick = now
+
+	switch s.phase {
+	case marqueePhasingStart:
+		if now.Sub(s.phaseAt) >= marqueePauseStart {
+			s.phase = marqueePhaseScrolling
+			s.phaseAt = now
+		}
+	case marqueePhaseScrolling:
+		s.offset += marqueeScrollPx * dt
+		maxScroll := fullW - maxW
+		if s.offset >= maxScroll {
+			s.offset = maxScroll
+			s.phase = marqueePhasingEnd
+			s.phaseAt = now
+		}
+	case marqueePhasingEnd:
+		if now.Sub(s.phaseAt) >= marqueePauseEnd {
+			s.offset = 0
+			s.phase = marqueePhasingStart
+			s.phaseAt = now
+		}
+	}
+}
 
 // Renderer renders a single zone from a Payload using fogleman/gg.
 type Renderer struct {
@@ -40,6 +99,21 @@ type Renderer struct {
 	valueYSolo float64 // primary value baseline (single-line, no label)
 	iconSize   float64 // icon font size
 	multiSize  float64 // multi-line font size
+
+	// Per-slot marquee scroll state. Keys are "primary" and "secondary".
+	marquee map[string]*marqueeState
+}
+
+// IsAnimating returns true if any text slot is actively scrolling or in its
+// end pause. The start pause (showing static ellipsis) does not require
+// continuous re-renders — the frame is static until scrolling begins.
+func (r *Renderer) IsAnimating() bool {
+	for _, s := range r.marquee {
+		if s.phase != marqueePhasingStart {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateTheme replaces the renderer's theme for all subsequent Render calls.
@@ -91,6 +165,7 @@ func NewRenderer(logger *slog.Logger, theme Theme, width, height int, align Alig
 	r.valueY = float64(design.ValueBaselineY) // 38
 	r.valueYSolo = 32                         // centred when no label — between 15 and 38
 
+	r.marquee = make(map[string]*marqueeState)
 	r.reloadFaces()
 	return r
 }
@@ -194,7 +269,7 @@ func (r *Renderer) Render(payload plugin.Payload) (*image.RGBA, error) {
 
 	// Layer 5: progress bar (optional, bottom edge).
 	if payload.Progress > 0 {
-		r.drawProgressBar(dc, payload.Progress, textColor)
+		r.drawProgressBar(dc, payload.Progress, r.theme.GetAccentColor())
 	}
 
 	// Layer 6: dog-ear affordance — top-right corner fold indicating a tappable zone.
@@ -317,9 +392,8 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 		if r.labelFace != nil {
 			dc.SetFontFace(r.labelFace)
 		}
-		label := r.truncateSpaced(dc, secondary, W-padL-padR, 1.0)
 		dc.SetRGB(lr, lg, lb)
-		r.drawSpaced(dc, label, padL, r.labelY, 1.0)
+		r.drawMarquee(dc, "secondary", secondary, padL, r.labelY, W-padL-padR)
 		if r.primaryFace != nil {
 			dc.SetFontFace(r.primaryFace)
 		}
@@ -349,35 +423,9 @@ func (r *Renderer) drawContent(dc *gg.Context, primary []string, isMulti bool,
 	if value != "" {
 		r.drawValueUnit(dc, value, valueUnit, x, valueBaseline, textColor, hasGraph)
 	} else {
-		var valueX float64
-		ax := 0.0
-		switch r.align {
-		case AlignCenter:
-			valueX = W / 2
-			ax = 0.5
-		case AlignRight:
-			valueX = W - padR
-			ax = 1.0
-		default:
-			valueX = x
-		}
 		maxW := W - padL - padR
-		text := r.truncate(primary[0], maxW, dc)
-		if hasGraph {
-			tw, _ := dc.MeasureString(text)
-			scrX := valueX
-			switch ax {
-			case 0.5:
-				scrX = valueX - tw/2
-			case 1.0:
-				scrX = valueX - tw
-			}
-			dc.SetRGBA(0, 0, 0, 0.28)
-			dc.DrawRectangle(scrX-2, valueBaseline-22, tw+4, 24)
-			dc.Fill()
-		}
 		dc.SetRGB(tr, tg, tb)
-		dc.DrawStringAnchored(text, valueX, valueBaseline, ax, 0)
+		r.drawMarquee(dc, "primary", primary[0], x, valueBaseline, maxW)
 	}
 }
 
@@ -611,6 +659,42 @@ func (r *Renderer) truncate(text string, maxWidth float64, dc *gg.Context) strin
 		}
 	}
 	return ellipsis
+}
+
+// drawMarquee draws text at (x, y) clipped to maxW pixels wide.
+// If the text fits, it draws normally and clears any scroll state for the slot.
+// If it overflows, it shows the ellipsis during the start pause, then scrolls
+// the full text, then pauses at the end before resetting.
+// slot is a stable key ("primary" or "secondary") identifying this text position.
+func (r *Renderer) drawMarquee(dc *gg.Context, slot, text string, x, y, maxW float64) {
+	fullW, _ := dc.MeasureString(text)
+	if fullW <= maxW {
+		delete(r.marquee, slot)
+		dc.DrawString(text, x, y)
+		return
+	}
+
+	// Get or create scroll state; reset if text changed.
+	s, ok := r.marquee[slot]
+	if !ok || s.text != text {
+		s = &marqueeState{text: text}
+		r.marquee[slot] = s
+	}
+	s.advance(fullW, maxW)
+
+	if s.phase == marqueePhasingStart {
+		// Show truncated text with ellipsis during the initial pause.
+		dc.DrawString(r.truncate(text, maxW, dc), x, y)
+		return
+	}
+
+	// Scroll and end-pause phases: clip to [x, x+maxW] and draw full text
+	// shifted left by the current offset. DrawRectangle+Clip uses the current
+	// path as a clip mask; ResetClip removes it afterwards.
+	dc.DrawRectangle(x, 0, maxW, float64(r.height))
+	dc.Clip()
+	dc.DrawString(text, x-s.offset, y)
+	dc.ResetClip()
 }
 
 // severityColor maps payload severity to a text colour.

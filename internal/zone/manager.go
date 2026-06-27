@@ -3,7 +3,6 @@ package zone
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/draw"
@@ -100,12 +99,14 @@ type Manager struct {
 	choiceIndexMu sync.Mutex
 
 	// Detail overlay — shown when a Tapper zone is tapped.
-	detailActive     bool
-	detailShownAt    time.Time
-	detailFrame      *image.RGBA
-	detailTransition TransitionState
-	detailTimer      *time.Timer
-	detailMu         sync.Mutex
+	detailActive      bool
+	detailShownAt     time.Time
+	detailZoneID      string // zone whose detail is currently showing
+	detailFrame       *image.RGBA
+	detailTransition  TransitionState
+	detailTimer       *time.Timer
+	detailRefreshStop chan struct{} // closed to cancel the live-refresh goroutine
+	detailMu          sync.Mutex
 
 	// Tap ripple animation — brief expanding ring composited over the frame on tap.
 	ripple   TapRipple
@@ -123,9 +124,11 @@ type Manager struct {
 
 // Zone represents a single zone instance.
 type Zone struct {
-	Config   ZoneConfig
-	Renderer *Renderer
-	Plugin   string
+	Config        ZoneConfig
+	Renderer      *Renderer
+	Plugin        string
+	cachedImg     *image.RGBA  // last rendered image
+	cachedPayload time.Time    // Timestamp of the payload used to produce cachedImg
 }
 
 const (
@@ -161,6 +164,7 @@ func (m *Manager) ShowDetail(payload plugin.DetailPayload) {
 
 	m.detailFrame = frame
 	m.detailActive = true
+	m.detailZoneID = payload.ZoneID
 	m.detailShownAt = time.Now()
 	m.detailTransition.Duration = 200 * time.Millisecond
 	m.detailTransition.Start(TransitionSlideUp, oldFrame, frame, 1)
@@ -176,6 +180,59 @@ func (m *Manager) ShowDetail(payload plugin.DetailPayload) {
 	if m.onDetailState != nil {
 		go m.onDetailState(true)
 	}
+}
+
+// updateDetailFrame re-renders payload into detailFrame without triggering
+// a slide transition. Used by the live-refresh loop.
+func (m *Manager) updateDetailFrame(payload plugin.DetailPayload) {
+	m.configMu.RLock()
+	theme := m.config.Theme
+	m.configMu.RUnlock()
+
+	frame := RenderDetailFrame(m.logger, payload, theme)
+
+	m.detailMu.Lock()
+	defer m.detailMu.Unlock()
+	if m.detailActive {
+		m.detailFrame = frame
+	}
+}
+
+// StartDetailRefresh begins polling tapper every interval while the detail
+// overlay is active, updating the frame in place. Call immediately after
+// ShowDetail. A previous refresh goroutine (if any) is cancelled first.
+func (m *Manager) StartDetailRefresh(zoneID string, tapper plugin.Tapper, interval time.Duration) {
+	m.detailMu.Lock()
+	if m.detailRefreshStop != nil {
+		close(m.detailRefreshStop)
+	}
+	stop := make(chan struct{})
+	m.detailRefreshStop = stop
+	m.detailMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				m.detailMu.Lock()
+				active := m.detailActive
+				m.detailMu.Unlock()
+				if !active {
+					return
+				}
+				detail, err := tapper.OnTap()
+				if err != nil {
+					continue
+				}
+				detail.ZoneID = zoneID
+				m.updateDetailFrame(detail)
+			}
+		}
+	}()
 }
 
 // ClearDetail dismisses the detail overlay with a slide-down transition.
@@ -213,9 +270,51 @@ func (m *Manager) ClearDetail() {
 
 	// Mark inactive — RenderFrame will still render the slide-down transition.
 	m.detailActive = false
+	m.detailZoneID = ""
+
+	if m.detailRefreshStop != nil {
+		close(m.detailRefreshStop)
+		m.detailRefreshStop = nil
+	}
 
 	if m.onDetailState != nil {
 		go m.onDetailState(false)
+	}
+}
+
+// HandleDetailTap routes a tap within the active detail overlay to the plugin.
+// If the plugin implements DetailTapper, it calls OnDetailTap and dismisses only
+// if the plugin returns false. If the plugin does not implement DetailTapper,
+// the detail is dismissed unconditionally.
+func (m *Manager) HandleDetailTap(x, y int) {
+	m.detailMu.Lock()
+	zoneID := m.detailZoneID
+	active := m.detailActive
+	m.detailMu.Unlock()
+
+	if !active || zoneID == "" || m.pluginLookup == nil {
+		m.ClearDetail()
+		return
+	}
+
+	p, ok := m.pluginLookup.GetPlugin(zoneID)
+	if !ok {
+		m.ClearDetail()
+		return
+	}
+
+	dt, ok := p.(plugin.DetailTapper)
+	if !ok {
+		m.ClearDetail()
+		return
+	}
+
+	keep, err := dt.OnDetailTap(x, y)
+	if err != nil {
+		m.logger.Error("OnDetailTap error", "zone_id", zoneID, "error", err)
+	}
+	if !keep {
+		m.ClearDetail()
 	}
 }
 
@@ -253,21 +352,15 @@ func (m *Manager) SetPluginLookup(pl PluginLookup) {
 	m.pluginLookup = pl
 }
 
-// detailCacheTTL is how long a DB-persisted DetailPayload is considered fresh.
-// Longer than the plugin's in-memory TTL because the point of DB persistence
-// is to survive restarts, not to drive high-frequency refreshes.
-const detailCacheTTL = 30 * time.Minute
-
 // HandleZoneTap looks up the plugin for zoneID, calls OnTap if it implements
 // plugin.Tapper, and shows the result as a detail overlay. Safe to call from
 // any goroutine.
 //
-// Cache strategy (DB-backed):
-//  1. Load cached DetailPayload from DB.
-//  2. If cache is fresh (< detailCacheTTL), show it immediately — done.
-//  3. If cache is stale, show it immediately for responsiveness, then fetch
-//     fresh data in the background and update the overlay + DB.
-//  4. If no cache, fetch synchronously, show, and save to DB.
+// Detail payloads contain pre-rendered pixel frames (RawFrame) with ephemeral
+// content baked in (playback position, live temperatures, etc.). They must
+// always be fetched fresh — caching them produces stale visuals on re-tap.
+// Plugins that need to avoid repeated expensive work (network calls, geocoding)
+// maintain their own in-process cache and return quickly from OnTap.
 func (m *Manager) HandleZoneTap(zoneID string) error {
 	if m.pluginLookup == nil {
 		return fmt.Errorf("HandleZoneTap: plugin lookup not set")
@@ -281,30 +374,17 @@ func (m *Manager) HandleZoneTap(zoneID string) error {
 		return fmt.Errorf("HandleZoneTap: plugin for zone %q does not implement Tapper", zoneID)
 	}
 
-	// Try DB cache first.
-	if m.db != nil {
-		cached, fetchedAt, err := m.db.LoadPayloadCache(zoneID)
-		if err == nil && len(cached) > 0 {
-			var detail plugin.DetailPayload
-			if json.Unmarshal(cached, &detail) == nil && len(detail.RawFrame) > 0 {
-				detail.ZoneID = zoneID
-				age := time.Since(time.Unix(fetchedAt, 0))
-				if age < detailCacheTTL {
-					// Fresh — hold for ripple then show.
-					m.waitForRipple()
-					m.ShowDetail(detail)
-					return nil
-				}
-				// Stale — hold for ripple, serve immediately, revalidate in background.
-				m.waitForRipple()
-				m.ShowDetail(detail)
-				go m.revalidateDetailCache(zoneID, tapper)
-				return nil
-			}
-		}
+	// Respect the plugin's Expandable flag: if the last payload said the zone
+	// is not expandable (e.g. music plugin with nothing playing), silently skip.
+	m.payloadsMu.RLock()
+	lastPayload := m.payloads[zoneID]
+	m.payloadsMu.RUnlock()
+	if lastPayload != nil && !lastPayload.Expandable {
+		return nil
 	}
 
-	// No usable cache — fetch synchronously.
+	m.waitForRipple()
+
 	detail, err := tapper.OnTap()
 	if err == plugin.ErrNotTapper {
 		return fmt.Errorf("HandleZoneTap: plugin for zone %q returned ErrNotTapper", zoneID)
@@ -314,36 +394,8 @@ func (m *Manager) HandleZoneTap(zoneID string) error {
 	}
 	detail.ZoneID = zoneID
 	m.ShowDetail(detail)
-	m.saveDetailCache(zoneID, detail)
+	m.StartDetailRefresh(zoneID, tapper, time.Second)
 	return nil
-}
-
-// revalidateDetailCache fetches a fresh DetailPayload and updates the overlay
-// and DB cache. Called in a goroutine when a stale cache entry was served.
-func (m *Manager) revalidateDetailCache(zoneID string, tapper plugin.Tapper) {
-	detail, err := tapper.OnTap()
-	if err != nil {
-		m.logger.Warn("detail cache revalidation failed", "zone", zoneID, "error", err)
-		return
-	}
-	detail.ZoneID = zoneID
-	m.ShowDetail(detail)
-	m.saveDetailCache(zoneID, detail)
-}
-
-// saveDetailCache serialises detail and writes it to the DB cache.
-func (m *Manager) saveDetailCache(zoneID string, detail plugin.DetailPayload) {
-	if m.db == nil {
-		return
-	}
-	raw, err := json.Marshal(detail)
-	if err != nil {
-		m.logger.Warn("detail cache marshal failed", "zone", zoneID, "error", err)
-		return
-	}
-	if err := m.db.SavePayloadCache(zoneID, detail.ZoneID, raw, time.Now().Unix()); err != nil {
-		m.logger.Warn("detail cache save failed", "zone", zoneID, "error", err)
-	}
 }
 
 // effectiveTapAction returns the tap action for a zone. If the zone's

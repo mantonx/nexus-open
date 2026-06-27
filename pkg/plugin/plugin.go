@@ -79,6 +79,13 @@ func (c *rpcClient) OnTap() (DetailPayload, error) {
 	return resp, err
 }
 
+// OnDetailTap implements DetailTapper over RPC.
+func (c *rpcClient) OnDetailTap(x, y int) (bool, error) {
+	var keep bool
+	err := c.client.Call("Plugin.OnDetailTap", [2]int{x, y}, &keep)
+	return keep, err
+}
+
 // pluginRPC is the plugin-side handler that serves requests from the host.
 type pluginRPC struct {
 	Impl Plugin
@@ -116,6 +123,17 @@ func (s *pluginRPC) OnTap(args any, resp *DetailPayload) error {
 	return err
 }
 
+func (s *pluginRPC) OnDetailTap(args [2]int, resp *bool) error {
+	dt, ok := s.Impl.(DetailTapper)
+	if !ok {
+		*resp = false
+		return nil
+	}
+	keep, err := dt.OnDetailTap(args[0], args[1])
+	*resp = keep
+	return err
+}
+
 func init() {
 	gob.Register(Descriptor{})
 	gob.Register(ConfigSchema{})
@@ -125,4 +143,5 @@ func init() {
 	gob.Register(DetailPayload{})
 	gob.Register(map[string]any{})
 	gob.Register([]any{})
+	gob.Register([2]int{})
 }

@@ -140,13 +140,23 @@ func (m *Manager) RenderFrame() (*image.RGBA, error) {
 	m.transitionMu.RUnlock()
 
 	// Fast path: nothing changed since last render — return cached frame.
-	// Skip cache when a ripple is active; every tick needs a fresh composite.
+	// Skip cache when a ripple or marquee animation is active.
 	m.rippleMu.Lock()
 	rippleActive := m.ripple.active
 	m.rippleMu.Unlock()
 
+	m.configMu.RLock()
+	var marqueeActive bool
+	for _, z := range m.zones {
+		if z.Renderer.IsAnimating() {
+			marqueeActive = true
+			break
+		}
+	}
+	m.configMu.RUnlock()
+
 	m.lastFrameMu.Lock()
-	if !m.frameDirty && !rippleActive && m.lastFrame != nil {
+	if !m.frameDirty && !rippleActive && !marqueeActive && m.lastFrame != nil {
 		cached := m.lastFrame
 		m.lastFrameMu.Unlock()
 		return cached, nil
@@ -254,6 +264,17 @@ func (m *Manager) renderZoneImages(theme Theme) (*image.RGBA, error) {
 			}
 		}
 
+		// Re-use the cached image if the payload hasn't changed and the zone
+		// isn't actively animating (marquee scrolling). This prevents adjacent
+		// zones (e.g. the clock) from being re-rendered every tick just because
+		// a different zone's marquee is active.
+		if zone.cachedImg != nil &&
+			zone.cachedPayload == payload.Timestamp &&
+			!zone.Renderer.IsAnimating() {
+			zoneImages[zoneID] = zone.cachedImg
+			continue
+		}
+
 		img, err := zone.Renderer.Render(*payload)
 		if err != nil {
 			m.logger.Error("failed to render zone", "zone_id", zoneID, "error", err)
@@ -266,6 +287,8 @@ func (m *Manager) renderZoneImages(theme Theme) (*image.RGBA, error) {
 			)
 		}
 
+		zone.cachedImg = img
+		zone.cachedPayload = payload.Timestamp
 		zoneImages[zoneID] = img
 	}
 
