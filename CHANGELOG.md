@@ -3,6 +3,32 @@
 All notable changes to Nexus Open are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.4] - 2026-06-27
+
+### Added
+
+- Ui): show daemon build info in Device tab
+- Ui): show app version in Device tab Software section
+- Ui): show app version in navigation rail footer
+- Ci): generate AI prose summary for release notes via GitHub Models
+
+### Fixed
+
+- Fix(dev): pass APP_VERSION dart-define in dev-ui target
+- Fix(dev): force GDK_BACKEND=x11 for flutter run — avoids epoxy crash on Wayland
+
+## [0.3.3] - 2026-06-27
+
+### Fixed
+
+- Fix(deps): update dependency geocoding to v4 (#34)
+- Fix(deps): update dependency google_fonts to v8 (#35)
+- Fix(deps): update dependency intl to ^0.20.0 (#22)
+- Fix(deps): update module github.com/mantonx/nexus-open to v0.3.2
+- Fix(renovate): remove invalid flutter key
+- Fix(plugin): remove ineffectual mx assignment in SparkHistory.Normalized
+- Fix(ci): generate release notes from tag range, not --unreleased
+
 ## [0.3.2] - 2026-06-27
 
 ### Fixed
@@ -220,6 +246,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Skip expensive jobs on unrelated changes via paths-filter + build_runner cache
 - Cache pub deps and fpm gem in CI to reduce build times
 
+[0.3.4]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.4
+[0.3.3]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.3
 [0.3.2]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.2
 [0.3.1]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.1
 [0.3.0]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.0
