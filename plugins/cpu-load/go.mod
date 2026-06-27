@@ -6,7 +6,7 @@ replace github.com/mantonx/nexus-open => ../..
 
 require (
 	github.com/hashicorp/go-plugin v1.8.0
-	github.com/mantonx/nexus-open v0.0.0-20260605212857-bd16564f204a
+	github.com/mantonx/nexus-open v0.3.2
 	github.com/shirou/gopsutil v3.21.11+incompatible
 )
 
@@ -23,8 +23,8 @@ require (
 	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
