@@ -120,13 +120,19 @@ func (n *NexusDevice) connectOnce() error {
 
 // Disconnect closes the USB device connection.
 func (n *NexusDevice) Disconnect() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	if n.reconnecting {
 		close(n.stopReconnect)
 		n.reconnecting = false
 	}
+
+	// Acquire writeMu first to drain any in-flight frame or brightness write,
+	// then mu to update state and close the handle. This ordering prevents
+	// closing the fd under a concurrent write.
+	n.writeMu.Lock()
+	defer n.writeMu.Unlock()
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
 	if n.handle != nil {
 		n.handle.close()
@@ -157,13 +163,20 @@ func (n *NexusDevice) Health() error {
 
 // sendFrameToHandle writes data to h as 1024-byte chunked packets.
 // Callers must hold writeMu. No connection-state checks are performed.
-func sendFrameToHandle(h *usbHandle, data []byte) error {
+// Returns ctx.Err() if the context is cancelled between chunks.
+func sendFrameToHandle(ctx context.Context, h *usbHandle, data []byte) error {
 	const chunkSize = 1024
 	const headerSize = 8
 	const maxPayload = chunkSize - headerSize
 
 	totalChunks := (len(data) + maxPayload - 1) / maxPayload
 	for chunkNum := 0; chunkNum < totalChunks; chunkNum++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		start := chunkNum * maxPayload
 		end := start + maxPayload
 		if end > len(data) {
@@ -216,7 +229,7 @@ func (n *NexusDevice) SendFrame(ctx context.Context, data []byte) error {
 	n.writeMu.Lock()
 	defer n.writeMu.Unlock()
 
-	if err := sendFrameToHandle(h, data); err != nil {
+	if err := sendFrameToHandle(ctx, h, data); err != nil {
 		n.logger.Error("USB write failed", "error", err)
 		n.mu.Lock()
 		n.connected = false
@@ -295,7 +308,7 @@ func (n *NexusDevice) clearDisplay() {
 		return
 	}
 	blank := make([]byte, FrameSize)
-	if err := sendFrameToHandle(n.handle, blank); err != nil {
+	if err := sendFrameToHandle(context.Background(), n.handle, blank); err != nil {
 		n.logger.Warn("clearDisplay failed", "error", err)
 	}
 }
@@ -328,12 +341,15 @@ func (n *NexusDevice) monitorConnection() {
 		n.logger.Warn("device disconnected, attempting reconnect", "retry_in", backoff)
 
 		// Close the stale handle and let the device settle before reopening.
+		// Acquire writeMu first to drain any in-flight write before closing the fd.
+		n.writeMu.Lock()
 		n.mu.Lock()
 		if n.handle != nil {
 			n.handle.close()
 			n.handle = nil
 		}
 		n.mu.Unlock()
+		n.writeMu.Unlock()
 
 		select {
 		case <-n.stopReconnect:

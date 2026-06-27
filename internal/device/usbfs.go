@@ -139,6 +139,12 @@ func (h *usbHandle) writeFrame(pkt []byte) error {
 	if len(pkt) != 1024 {
 		return fmt.Errorf("frame packet must be 1024 bytes, got %d", len(pkt))
 	}
+	h.mu.Lock()
+	closed := h.closed
+	h.mu.Unlock()
+	if closed {
+		return fmt.Errorf("USB write: handle closed")
+	}
 	n, err := h.interruptTransfer(0x02, pkt, 1000)
 	if err != nil {
 		return fmt.Errorf("USB write: %w", err)
