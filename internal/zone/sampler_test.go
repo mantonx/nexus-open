@@ -209,12 +209,10 @@ func TestResolvePluginPath(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"exec:cpu-temp", "/srv/plugins/cpu-temp/cpu-temp", false},
-		{"exec:./plugins/cpu-temp/cpu-temp", "/srv/plugins/cpu-temp/cpu-temp", false},
-		{"exec:weather/weather", "/srv/plugins/weather/weather", false},
+		{"exec:nexus-cpu-temp", "/srv/plugins/nexus-cpu-temp", false},
 		{"exec:/usr/bin/sh", "", true},
 		{"exec:../../etc/passwd", "", true},
-		{"exec:./plugins/../../../etc/passwd", "", true},
+		{"exec:nexus-cpu-temp/extra", "", true},
 	}
 
 	for _, tc := range cases {

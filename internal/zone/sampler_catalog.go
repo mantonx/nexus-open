@@ -12,7 +12,7 @@ import (
 
 // CatalogEntry is one entry in the plugin catalog returned by GetCatalog.
 type CatalogEntry struct {
-	ID         string            `json:"id"`   // e.g. "builtin:clock" or "exec:cpu-temp"
+	ID         string            `json:"id"`   // e.g. "builtin:clock" or "exec:nexus-cpu-temp"
 	Kind       string            `json:"kind"` // "builtin" or "exec"
 	Descriptor plugin.Descriptor `json:"descriptor"`
 }
@@ -58,21 +58,21 @@ func (s *Sampler) GetCatalog() []CatalogEntry {
 		}
 	}
 
-	// Scan pluginsDir for exec plugin binaries.
+	// Scan pluginsDir for exec plugin binaries (flat: one binary per file).
 	if s.pluginsDir != "" {
 		dirEntries, err := os.ReadDir(s.pluginsDir)
 		if err == nil {
 			for _, de := range dirEntries {
-				if !de.IsDir() {
+				if de.IsDir() {
 					continue
 				}
 				name := de.Name()
-				binPath := filepath.Join(s.pluginsDir, name, name)
 				id := "exec:" + name
 				if seen[id] {
 					continue
 				}
 
+				binPath := filepath.Join(s.pluginsDir, name)
 				desc, err := pluginhost.DescribePlugin(binPath)
 				if err != nil {
 					s.logger.Debug("catalog: describe failed", "plugin", name, "error", err)

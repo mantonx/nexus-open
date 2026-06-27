@@ -17,7 +17,7 @@ pages:
     zones:
       - id: weather
         width: 160
-        plugin: exec:plugins/weather/weather
+        plugin: exec:nexus-weather
         refresh_ms: 300000
         align: left
         plugin_config:
@@ -26,7 +26,7 @@ pages:
 
       - id: cpu
         width: 160
-        plugin: exec:plugins/cpu-temp/cpu-temp
+        plugin: exec:nexus-cpu-temp
         refresh_ms: 2000
         align: center
         plugin_config:
@@ -34,7 +34,7 @@ pages:
 
       - id: gpu
         width: 160
-        plugin: exec:plugins/gpu-temp/gpu-temp
+        plugin: exec:nexus-gpu-temp
         refresh_ms: 2000
         align: center
         theme_override:

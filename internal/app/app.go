@@ -256,7 +256,7 @@ func (a *App) initialize() error {
 		"current_page", a.zoneManager.GetConfig().Pages[0].Name)
 
 	// 6. Resolve plugins directory.
-	// Priority: explicit flag > NEXUS_PLUGINS_DIR env > XDG data dir install > sibling to executable (dev).
+	// Priority: explicit flag > NEXUS_PLUGINS_DIR env > sibling to exe > XDG user data > /usr/lib/nexus-open/plugins (system package install).
 	if a.pluginsDir == "" {
 		if env := os.Getenv("NEXUS_PLUGINS_DIR"); env != "" {
 			a.pluginsDir = env
@@ -266,11 +266,14 @@ func (a *App) initialize() error {
 			if os.Getenv("XDG_DATA_HOME") == "" {
 				xdgData = filepath.Join(os.Getenv("HOME"), ".local", "share", "nexus-open", "plugins")
 			}
+			systemData := "/usr/lib/nexus-open/plugins"
 			switch {
 			case dirExists(sibling):
 				a.pluginsDir = sibling
 			case dirExists(xdgData):
 				a.pluginsDir = xdgData
+			case dirExists(systemData):
+				a.pluginsDir = systemData
 			default:
 				// Fall back to sibling even if absent — binary validation will
 				// surface a clear error per zone rather than failing at startup.

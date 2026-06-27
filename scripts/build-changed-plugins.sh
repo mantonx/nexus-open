@@ -11,6 +11,8 @@ PLUGINS_SRC="./plugins"
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT
 
+mkdir -p "$PLUGINS_DIR"
+
 built=0
 for src_dir in "$PLUGINS_SRC"/*/; do
     name=$(basename "$src_dir")
@@ -18,7 +20,7 @@ for src_dir in "$PLUGINS_SRC"/*/; do
     go_files=("$src_dir"*.go)
     [[ -f "${go_files[0]}" ]] || continue
 
-    dest="$PLUGINS_DIR/$name/$name"
+    dest="$PLUGINS_DIR/nexus-$name"
     # Rebuild if dest doesn't exist or any .go file in the plugin is newer.
     needs_build=false
     if [[ ! -f "$dest" ]]; then
@@ -34,9 +36,8 @@ for src_dir in "$PLUGINS_SRC"/*/; do
 
     if [[ "$needs_build" == true ]]; then
         echo "  → building plugin: $name"
-        tmp="$SCRATCH/$name"
+        tmp="$SCRATCH/nexus-$name"
         (cd "$src_dir" && go build -o "$tmp" .) || { echo "  ✗ $name build failed"; exit 1; }
-        mkdir -p "$PLUGINS_DIR/$name"
         mv "$tmp" "$dest"
         built=$((built + 1))
     fi

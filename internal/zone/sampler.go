@@ -28,8 +28,8 @@ type Sampler struct {
 	pluginHost        pluginhost.PluginHost
 	zoneCfg           *ConfigManager
 	pluginsDir        string // absolute path where exec: plugins live
-	modules           map[string]plugin.Plugin // zoneID -> plugin instance
-	builtins          map[string]plugin.Plugin // Built-in plugins by name
+	modules           map[string]plugin.Plugin        // zoneID -> plugin instance
+	builtins          map[string]func() plugin.Plugin // Built-in factories — called per zone so each zone gets its own instance
 	cancelFuncs       map[string]context.CancelFunc
 	mu                sync.RWMutex
 	ctx               context.Context
@@ -57,7 +57,7 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 		pluginsDir:        pluginsDir,
 		pluginHost:        pluginhost.NewHost(logger),
 		modules:           make(map[string]plugin.Plugin),
-		builtins:          make(map[string]plugin.Plugin),
+		builtins:          make(map[string]func() plugin.Plugin),
 		cancelFuncs:       make(map[string]context.CancelFunc),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -69,26 +69,25 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 		zoneErrors:        make(map[string]ZoneStatus),
 	}
 
-	// Register built-in modules
-	s.builtins["clock"] = builtin.NewClock()
-	s.builtins["clock24"] = builtin.NewClockWithFormat(builtin.ClockFormat24Hour)
-	s.builtins["placeholder"] = builtin.NewPlaceholder("Loading...")
+	// Register built-in factories — each zone gets its own instance via the factory,
+	// preventing Configure() calls on one zone from stomping another zone's state.
+	s.builtins["clock"] = func() plugin.Plugin { return builtin.NewClock() }
+	s.builtins["clock24"] = func() plugin.Plugin { return builtin.NewClockWithFormat(builtin.ClockFormat24Hour) }
+	s.builtins["placeholder"] = func() plugin.Plugin { return builtin.NewPlaceholder("Loading...") }
 
 	return s
 }
 
 // normalizePluginID converts legacy path-form exec IDs to the canonical short form.
 //
-//	exec:./plugins/cpu-temp/cpu-temp  →  exec:cpu-temp
-//	exec:cpu-temp                     →  exec:cpu-temp  (unchanged)
-//	builtin:clock                     →  builtin:clock  (unchanged)
+//	exec:./plugins/cpu-temp/nexus-cpu-temp  →  exec:nexus-cpu-temp
+//	exec:nexus-cpu-temp                     →  exec:nexus-cpu-temp  (unchanged)
+//	builtin:clock                           →  builtin:clock        (unchanged)
 func NormalizePluginID(id string) string {
 	if !strings.HasPrefix(id, "exec:") {
 		return id
 	}
 	rel := strings.TrimPrefix(id, "exec:")
-	rel = strings.TrimPrefix(rel, "./plugins/")
-	// rel is now either "cpu-temp/cpu-temp" or "cpu-temp"
 	name := filepath.Base(rel)
 	return "exec:" + name
 }
@@ -97,36 +96,21 @@ func NormalizePluginID(id string) string {
 // confirms it stays inside pluginsDir. Returns ("", error) if the spec is
 // absolute, contains directory traversal, or escapes the plugins directory.
 //
-// Accepted forms:
-//
-//	exec:cpu-temp                    → <pluginsDir>/cpu-temp/cpu-temp
-//	exec:./plugins/cpu-temp/cpu-temp → <pluginsDir>/cpu-temp/cpu-temp
+//	exec:nexus-cpu-temp  →  <pluginsDir>/nexus-cpu-temp
 func (s *Sampler) resolvePluginPath(spec string) (string, error) {
-	rel := strings.TrimPrefix(spec, "exec:")
+	name := strings.TrimPrefix(spec, "exec:")
 
 	// Absolute paths are never allowed — they bypass the plugins directory entirely.
-	if filepath.IsAbs(rel) {
+	if filepath.IsAbs(name) {
 		return "", fmt.Errorf("plugin spec must not be an absolute path: %q", spec)
 	}
 
-	// Strip the conventional ./plugins/ prefix if present.
-	rel = strings.TrimPrefix(rel, "./plugins/")
-
-	// rel is now either "cpu-temp/cpu-temp" or just "cpu-temp".
-	// If it contains no separator, expand to the canonical name/name form.
-	if !strings.Contains(rel, "/") {
-		rel = rel + "/" + rel
+	// Only a bare binary name is accepted — no subdirectory components.
+	if strings.ContainsRune(name, '/') {
+		return "", fmt.Errorf("plugin spec must not contain path separators: %q", spec)
 	}
 
-	resolved := filepath.Join(s.pluginsDir, rel)
-
-	// Confirm the resolved path is inside pluginsDir (catches .. traversal).
-	relCheck, err := filepath.Rel(s.pluginsDir, resolved)
-	if err != nil || strings.HasPrefix(relCheck, "..") {
-		return "", fmt.Errorf("plugin path %q escapes plugins directory", spec)
-	}
-
-	return resolved, nil
+	return filepath.Join(s.pluginsDir, name), nil
 }
 
 // Start begins sampling all zones across all pages. Keeping every plugin
@@ -169,13 +153,13 @@ func (s *Sampler) startZoneSampling(zoneConfig ZoneConfig) error {
 	var err error
 
 	if strings.HasPrefix(pluginSpec, "builtin:") {
-		// Built-in plugin
+		// Built-in plugin — call the factory to get a fresh instance per zone.
 		modName := strings.TrimPrefix(pluginSpec, "builtin:")
-		var ok bool
-		mod, ok = s.builtins[modName]
+		factory, ok := s.builtins[modName]
 		if !ok {
 			return fmt.Errorf("unknown built-in plugin: %s", modName)
 		}
+		mod = factory()
 		s.logger.Info("using built-in plugin", "zone_id", zoneConfig.ID, "plugin", modName)
 	} else if strings.HasPrefix(pluginSpec, "exec:") {
 		// External plugin

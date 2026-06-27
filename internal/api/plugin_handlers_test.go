@@ -54,7 +54,7 @@ func TestPluginCatalog_ReturnsCatalog(t *testing.T) {
 				},
 			},
 			{
-				ID:   "exec:cpu-temp",
+				ID:   "exec:nexus-cpu-temp",
 				Kind: "exec",
 				Descriptor: plugin.Descriptor{
 					Name:      "CPU Temperature",

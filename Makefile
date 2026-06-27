@@ -113,10 +113,15 @@ build-ui: $(BIN_DIR)
 # Build all external plugins
 build-plugins:
 	@echo "Building external plugins..."
-	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load music; do \
+	@mkdir -p $(BIN_DIR)/plugins
+	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load media; do \
 		if [ -d plugins/$$mod ]; then \
 			echo "  → plugins/$$mod"; \
-			(cd plugins/$$mod && go build -o $$mod .) || exit 1; \
+			_ldf="$(LDFLAGS)"; \
+			if [ "$$mod" = "media" ] && [ -n "$(TMDB_TOKEN)" ]; then \
+				_ldf="$$_ldf -X main.tmdbToken=$(TMDB_TOKEN)"; \
+			fi; \
+			(cd plugins/$$mod && go build -ldflags "$$_ldf" -o ../../$(BIN_DIR)/plugins/nexus-$$mod .) || exit 1; \
 		fi; \
 	done
 	@echo "✓ Plugins built"
@@ -393,10 +398,10 @@ install: build-release build-ui build-plugins
 	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/lib/. $(INSTALL_DATA)/lib/
 	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/data/. $(INSTALL_DATA)/data/
 	@echo "Installing plugins to $(INSTALL_DATA)/plugins..."
-	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load music; do \
-		if [ -f plugins/$$mod/$$mod ]; then \
-			mkdir -p $(INSTALL_DATA)/plugins/$$mod; \
-			cp plugins/$$mod/$$mod $(INSTALL_DATA)/plugins/$$mod/$$mod; \
+	@mkdir -p $(INSTALL_DATA)/plugins
+	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load media; do \
+		if [ -f $(BIN_DIR)/plugins/nexus-$$mod ]; then \
+			cp $(BIN_DIR)/plugins/nexus-$$mod $(INSTALL_DATA)/plugins/nexus-$$mod; \
 		fi; \
 	done
 	@echo "Installing layout config to $(INSTALL_DATA)..."
@@ -418,9 +423,7 @@ clean:
 	@rm -rf $(BIN_DIR) $(BUILD_DIR) $(DIST_DIR)
 	@rm -f coverage.out coverage.html
 	@rm -f $(APP_NAME) $(APP_NAME)-*
-	@for p in cpu-temp gpu-temp network weather cpu-load gpu-load music; do \
-		rm -f plugins/$$p/$$p; \
-	done
+	@rm -rf $(BIN_DIR)/plugins
 	@echo "✓ Cleaned"
 
 # Clean Flutter UI build artifacts

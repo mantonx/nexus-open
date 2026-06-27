@@ -27,7 +27,7 @@ pages:
     zones:
       - id: system.weather
         width: 160
-        plugin: exec:./plugins/weather/weather
+        plugin: exec:nexus-weather
         refresh_ms: 300000  # 5 minutes
         align: left
         theme_override:
@@ -35,7 +35,7 @@ pages:
 
       - id: system.cpu
         width: 160
-        plugin: exec:./plugins/cpu-temp/cpu-temp
+        plugin: exec:nexus-cpu-temp
         refresh_ms: 2000
         align: left
         theme_override:
@@ -43,7 +43,7 @@ pages:
 
       - id: system.gpu
         width: 160
-        plugin: exec:./plugins/gpu-temp/gpu-temp
+        plugin: exec:nexus-gpu-temp
         refresh_ms: 2000
         align: left
         theme_override:
@@ -51,7 +51,7 @@ pages:
 
       - id: system.network
         width: 160
-        plugin: exec:./plugins/network/network
+        plugin: exec:nexus-network
         refresh_ms: 2000
         align: left
         theme_override:
@@ -62,7 +62,7 @@ pages:
     zones:
       - id: performance.cpu
         width: 240
-        plugin: exec:./plugins/cpu-temp/cpu-temp
+        plugin: exec:nexus-cpu-temp
         refresh_ms: 1000
         align: center
         theme_override:
@@ -70,7 +70,7 @@ pages:
 
       - id: performance.gpu
         width: 240
-        plugin: exec:./plugins/gpu-temp/gpu-temp
+        plugin: exec:nexus-gpu-temp
         refresh_ms: 1000
         align: center
         theme_override:
@@ -78,7 +78,7 @@ pages:
 
       - id: performance.network
         width: 160
-        plugin: exec:./plugins/network/network
+        plugin: exec:nexus-network
         refresh_ms: 1000
         align: right
 
@@ -87,7 +87,7 @@ pages:
     zones:
       - id: load.cpu
         width: 160
-        plugin: exec:./plugins/cpu-load/cpu-load
+        plugin: exec:nexus-cpu-load
         refresh_ms: 1000
         align: left
         theme_override:
@@ -98,7 +98,7 @@ pages:
 
       - id: load.cpu-hybrid
         width: 160
-        plugin: exec:./plugins/cpu-load/cpu-load
+        plugin: exec:nexus-cpu-load
         refresh_ms: 1000
         align: left
         theme_override:
@@ -109,7 +109,7 @@ pages:
 
       - id: load.gpu
         width: 160
-        plugin: exec:./plugins/gpu-load/gpu-load
+        plugin: exec:nexus-gpu-load
         refresh_ms: 1000
         align: left
         theme_override:
@@ -121,7 +121,7 @@ pages:
 
       - id: load.gpu-mem
         width: 160
-        plugin: exec:./plugins/gpu-load/gpu-load
+        plugin: exec:nexus-gpu-load
         refresh_ms: 1000
         align: left
         theme_override:
