@@ -5,7 +5,7 @@ tmp_dir = "tmp"
 [build]
   args_bin = []
   bin = "./tmp/nexus-open"
-  cmd = "bash scripts/build-changed-plugins.sh && go build -o ./tmp/nexus-open ./cmd/nexus-open"
+  cmd = "bash scripts/build-changed-plugins.sh && bash scripts/build-daemon.sh"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "ui", "build", "bin", "docs", "packaging", "scripts"]
   exclude_file = []

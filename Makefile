@@ -5,7 +5,7 @@
 
 # Configuration
 APP_NAME := nexus-open
-VERSION := $(shell git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//' || echo "0.0.0-dev")
+VERSION := $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//;s/-[0-9]*-g[0-9a-f]*//' || echo "0.0.0-dev")
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 

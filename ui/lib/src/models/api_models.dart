@@ -307,6 +307,32 @@ class PluginCatalogEntry {
       );
 }
 
+// ── DaemonInfo ───────────────────────────────────────────────────────────────
+
+class DaemonInfo {
+  final String version;
+  final String commit;
+  final String buildTime;
+  final String goVersion;
+  final int pluginCount;
+
+  const DaemonInfo({
+    required this.version,
+    required this.commit,
+    required this.buildTime,
+    required this.goVersion,
+    required this.pluginCount,
+  });
+
+  factory DaemonInfo.fromJson(Map<String, dynamic> j) => DaemonInfo(
+        version: j['version'] as String? ?? '',
+        commit: j['commit'] as String? ?? '',
+        buildTime: j['build_time'] as String? ?? '',
+        goVersion: j['go_version'] as String? ?? '',
+        pluginCount: (j['plugin_count'] as num?)?.toInt() ?? 0,
+      );
+}
+
 // ── ApiSuccess ───────────────────────────────────────────────────────────────
 
 @freezed

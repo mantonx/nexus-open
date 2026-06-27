@@ -17,6 +17,7 @@ class DeviceTab extends StatefulWidget {
 
 class _DeviceTabState extends State<DeviceTab> {
   DeviceInfo? _info;
+  DaemonInfo? _daemon;
   bool _loading = true;
   String? _error;
   late NexusApiService _api;
@@ -42,8 +43,18 @@ class _DeviceTabState extends State<DeviceTab> {
 
   Future<void> _fetchInfo() async {
     try {
-      final info = await _api.getDeviceInfo();
-      if (mounted) setState(() { _info = info; _loading = false; _error = null; });
+      final results = await Future.wait([
+        _api.getDeviceInfo(),
+        _api.getDaemonInfo(),
+      ]);
+      if (mounted) {
+        setState(() {
+          _info = results[0] as DeviceInfo;
+          _daemon = results[1] as DaemonInfo;
+          _loading = false;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() { _loading = false; _error = e.toString(); });
     }
@@ -87,10 +98,20 @@ class _DeviceTabState extends State<DeviceTab> {
           ),
           const SizedBox(height: AppSpacing.sm),
           NexusSection(
-            title: 'Software',
-            child: _InfoRow(
-              label: 'Version',
-              value: const String.fromEnvironment('APP_VERSION', defaultValue: 'dev'),
+            title: 'Daemon',
+            child: Column(
+              children: [
+                _InfoRow(
+                  label: 'Version',
+                  value: const String.fromEnvironment('APP_VERSION', defaultValue: 'dev'),
+                ),
+                if (_daemon != null) ...[
+                  _InfoRow(label: 'Commit', value: _daemon!.commit),
+                  _InfoRow(label: 'Built', value: _daemon!.buildTime.replaceAll('_', ' ')),
+                  _InfoRow(label: 'Runtime', value: _daemon!.goVersion),
+                  _InfoRow(label: 'Plugins', value: '${_daemon!.pluginCount}'),
+                ],
+              ],
             ),
           ),
           if (_info!.connectError != null && _info!.connectError!.isNotEmpty) ...[

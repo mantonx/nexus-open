@@ -108,6 +108,13 @@ type LayoutReloader interface {
 }
 
 // Server manages the HTTP API server.
+// BuildInfo holds static metadata stamped at build time.
+type BuildInfo struct {
+	Version   string
+	Commit    string
+	BuildTime string
+}
+
 type Server struct {
 	server          *http.Server
 	logger          *slog.Logger
@@ -130,7 +137,8 @@ type Server struct {
 	windowClosedCh  chan struct{}
 	hub             *hub
 	lastConnectErr  error
-	token           string // capability token for X-Nexus-Token validation
+	token           string    // capability token for X-Nexus-Token validation
+	buildInfo       BuildInfo
 }
 
 // NewServer creates a new API server instance.
@@ -276,6 +284,11 @@ func (s *Server) SetPluginCatalog(p PluginCatalogProvider) {
 	s.pluginCatalog = p
 }
 
+// SetBuildInfo stores build-time metadata for the daemon info endpoint.
+func (s *Server) SetBuildInfo(info BuildInfo) {
+	s.buildInfo = info
+}
+
 // BroadcastPageState sends current page index and page list to all WS clients.
 // Called by the app's render loop whenever the page changes.
 func (s *Server) BroadcastPageState() {
@@ -313,6 +326,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Plugin catalog
 	mux.HandleFunc("/api/plugins", s.handlePluginCatalog)
+
+	// Daemon metadata
+	mux.HandleFunc("/api/daemon/info", s.handleDaemonInfo)
 
 	// Zone config endpoints
 	mux.HandleFunc("/api/zones/", s.handleZones)

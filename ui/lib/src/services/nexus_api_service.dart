@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import '../models/api_models.dart';
 import 'ws_service.dart' show WsPageStateEvent, WsPageInfo;
 
-export '../models/api_models.dart' show NexusConfig, DeviceInfo, ApiError;
+export '../models/api_models.dart' show NexusConfig, DeviceInfo, DaemonInfo, ApiError;
 
 /// API service for communicating with the Nexus Open backend.
 /// Uses [NexusConfig] and [DeviceInfo] from api_models.dart (freezed).
@@ -117,6 +117,21 @@ class NexusApiService {
       throw ApiException('Failed to delete image',
           statusCode: response.statusCode);
     }
+  }
+
+  /// Get daemon build/runtime info (version, commit, build time, Go version, plugin count)
+  Future<DaemonInfo> getDaemonInfo() async {
+    final response = await _client
+        .get(Uri.parse('$baseUrl/api/daemon/info'))
+        .timeout(timeout);
+
+    if (response.statusCode == 200) {
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      final data = (body['data'] ?? body) as Map<String, dynamic>;
+      return DaemonInfo.fromJson(data);
+    }
+    throw ApiException('Failed to get daemon info',
+        statusCode: response.statusCode);
   }
 
   /// Get device info (model, firmware, connect_error)

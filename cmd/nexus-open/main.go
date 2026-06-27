@@ -27,14 +27,16 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/mantonx/nexus-open/internal/api"
 	"github.com/mantonx/nexus-open/internal/app"
 	"github.com/mantonx/nexus-open/internal/tray"
 	"github.com/mantonx/nexus-open/internal/udev"
 )
 
 var (
-	version = "0.0.0-dev"
-	commit  = "dev"
+	version   = "0.0.0-dev"
+	commit    = "dev"
+	buildTime = "unknown"
 )
 
 func main() {
@@ -115,6 +117,12 @@ func main() {
 		logger.Error("failed to create application", "error", err)
 		os.Exit(1)
 	}
+
+	application.APIServer().SetBuildInfo(api.BuildInfo{
+		Version:   version,
+		Commit:    commit,
+		BuildTime: buildTime,
+	})
 
 	// Set up graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
