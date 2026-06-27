@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+FAILED=0
+
+# Stop the nexus-open service while tests run. The app tests use mock mode, but
+# zoneSampler.Start() blocks synchronously on plugin discovery. When the real
+# service is running in parallel it saturates I/O and the 2s test context
+# expires before start() returns, causing a spurious "context deadline exceeded".
+SERVICE_WAS_ACTIVE=0
+if systemctl --user is-active --quiet nexus-open.service 2>/dev/null; then
+  SERVICE_WAS_ACTIVE=1
+  echo "Stopping nexus-open.service for test run..."
+  systemctl --user stop nexus-open.service
+fi
+
+restore_service() {
+  if [ "$SERVICE_WAS_ACTIVE" -eq 1 ]; then
+    echo "Restarting nexus-open.service..."
+    systemctl --user start nexus-open.service
+  fi
+}
+trap restore_service EXIT
+
+LINTER=$(command -v golangci-lint 2>/dev/null || echo "$HOME/go/bin/golangci-lint")
+if [ -x "$LINTER" ]; then
+  echo "Running golangci-lint..."
+  "$LINTER" run || FAILED=1
+else
+  echo "⚠  golangci-lint not found — skipping lint"
+fi
+
+echo "Running full Go test suite (-race)..."
+NEXUS_MOCK_DEVICE=1 go test -race ./... || FAILED=1
+
+FLUTTER=$(command -v flutter 2>/dev/null || echo "")
+if [ -n "$FLUTTER" ]; then
+  echo "Running flutter test..."
+  (cd ui && "$FLUTTER" test --no-pub) || FAILED=1
+else
+  echo "⚠  flutter not found in PATH — skipping Flutter tests"
+fi
+
+if [ "$FAILED" -ne 0 ]; then
+  echo ""
+  echo "Tests failed. Fix the issues above or run 'git push --no-verify' to skip."
+  exit 1
+fi
