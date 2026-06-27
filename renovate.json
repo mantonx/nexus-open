@@ -6,13 +6,17 @@
   "packageRules": [
     {
       "description": "Group all golang.org/x/* updates into one PR",
-      "matchPackagePrefixes": ["golang.org/x/"],
-      "groupName": "golang.org/x dependencies"
+      "groupName": "golang.org/x dependencies",
+      "matchPackageNames": [
+        "golang.org/x/{/,}**"
+      ]
     },
     {
       "description": "Group all modernc (SQLite) updates into one PR",
-      "matchPackagePrefixes": ["modernc.org/"],
-      "groupName": "modernc.org dependencies"
+      "groupName": "modernc.org dependencies",
+      "matchPackageNames": [
+        "modernc.org/{/,}**"
+      ]
     },
     {
       "description": "Group GitHub Actions updates into one PR",
