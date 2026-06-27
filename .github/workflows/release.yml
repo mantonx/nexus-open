@@ -18,7 +18,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -44,14 +44,14 @@ jobs:
           cache: true
 
       - name: Cache pub dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.pub-cache
           key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
           restore-keys: pub-ubuntu-24.04-
 
       - name: Cache apt packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /var/cache/apt/archives
           key: apt-ubuntu-24.04-flutter-build-v1
@@ -70,7 +70,7 @@ jobs:
         run: npm ci && npm run build
 
       - name: Cache build_runner output
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ui/.dart_tool/build
           key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
@@ -92,7 +92,7 @@ jobs:
           cache: true
 
       - name: Cache fpm gem
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.local/share/gem
           key: gem-fpm-ubuntu-24.04-2.2.1
@@ -150,7 +150,7 @@ jobs:
             flag: --test-pacman
             image: archlinux@sha256:a9a1e6db522cf5f8018c920d035e2bfbf8e39c485ee737ce0388990898f2f042
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download packages
         uses: actions/download-artifact@v8
@@ -186,7 +186,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -240,7 +240,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build, publish]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Resolve tarball URL
         id: meta
