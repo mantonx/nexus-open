@@ -107,31 +107,18 @@ build_binary_static() {
     done
 
     # Produce a standalone tarball for direct installs and AUR.
-    # Includes the daemon, plugins, Flutter UI bundle, and packaging files.
+    # Includes the daemon, plugins, and all packaging files needed by the PKGBUILD.
     mkdir -p "$OUT_DIR"
     local tarball="$OUT_DIR/${PKG_NAME}-${PKG_VERSION}-linux-amd64.tar.gz"
-
-    local tar_args=(
-        -czf "$tarball"
-        -C "$REPO_DIR"
-        --transform "s|^|nexus-open-${PKG_VERSION}/|"
-        nexus-open
-        plugins-dist
-        packaging/udev/99-corsair-nexus.rules
-        packaging/systemd/nexus-open.service
-        packaging/desktop/nexus-open.desktop
+    tar -czf "$tarball" \
+        -C "$REPO_DIR" \
+        --transform "s|^|nexus-open-${PKG_VERSION}/|" \
+        nexus-open \
+        plugins-dist \
+        packaging/udev/99-corsair-nexus.rules \
+        packaging/systemd/nexus-open.service \
+        packaging/desktop/nexus-open.desktop \
         LICENSE
-    )
-
-    if [[ -d "$UI_BUNDLE" ]]; then
-        tar_args+=(-C "$REPO_DIR" --transform "s|^ui/build/linux/x64/release/bundle|nexus-open-${PKG_VERSION}/ui-bundle|" ui/build/linux/x64/release/bundle)
-        ok "Including Flutter UI bundle in tarball"
-    else
-        warn "Flutter UI not built — tarball will be daemon-only"
-        warn "Build with: cd ui && flutter build linux --release"
-    fi
-
-    tar "${tar_args[@]}"
     ok "Static tarball: $tarball"
 }
 
