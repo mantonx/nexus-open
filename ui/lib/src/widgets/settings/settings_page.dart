@@ -784,6 +784,17 @@ class _NexusRail extends StatelessWidget {
               ),
             ),
           ),
+
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Text(
+              'v${const String.fromEnvironment('APP_VERSION', defaultValue: 'dev')}',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontSize: 9,
+                color: Colors.white.withValues(alpha: 0.25),
+              ),
+            ),
+          ),
         ],
       ),
     );
