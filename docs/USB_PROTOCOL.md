@@ -28,8 +28,8 @@ routes interrupt-endpoint transfers correctly — it is the standard technique
 for interrupt endpoints via usbfs.
 
 After claiming the interface, Nexus Open primes EP `0x81` with a short
-read (100 ms timeout, errors ignored). This appears to be required by the
-device firmware before it will accept writes on EP `0x02`.
+read (100 ms timeout, errors ignored). Empirically, this is required before
+the device will accept writes on EP `0x02`.
 
 ## Frame Format
 
@@ -86,12 +86,12 @@ wLength        3
 Data           [0x03, 0x01, brightness]
 ```
 
-`brightness` is a raw byte in the range `0–100`. The device maps this linearly
-to backlight drive level. `0` turns the backlight off.
+`brightness` is a raw byte in the range `0–100`. `0` turns the backlight off.
 
 ## Touch Input
 
-Touch events arrive as 64-byte HID input reports on EP `0x81`. The fields
+Touch events arrive as 512-byte HID input reports on EP `0x81`
+(wMaxPacketSize=512; the device fills only the first few bytes). The fields
 Nexus Open reads:
 
 ```
@@ -100,16 +100,21 @@ Byte  Meaning
 0     Report ID (0x01)
 1     Report type (0x02)
 2     Touch marker (0x21 when touch data is present)
+3–4   Unknown — not read
 5     Touch state: 0 = not touching, non-zero = finger down
-6     X position, low byte  (range 0–639)
+6     X position, low byte  (raw range 0–486)
 7     X position, high byte
 ```
+
+The raw X coordinate ranges from 0 to 486 (observed device maximum) and is
+normalized to screen pixels (0–639) by `HIDTouchReader`. The reader
+auto-calibrates `rawMax` upward if it ever sees a higher value.
 
 The report is read with a 200 ms timeout. A timeout returns `(0, nil)` so
 the caller loops without error handling overhead. `ENODATA` from the ioctl
 is treated identically to `ETIMEDOUT`.
 
-The `touch.HIDTouchReader` (`internal/touch/`) debounces raw reports into
+`HIDTouchReader` (`internal/touch/reader.go`) debounces raw reports into
 `touch.Event` values carrying a tap X position, swipe pixel delta, live swipe
 progress, and final velocity. The gesture classifier distinguishes taps from
 swipes using configurable distance and velocity thresholds.
