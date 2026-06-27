@@ -36,6 +36,11 @@
       "matchUpdateTypes": ["patch"],
       "automerge": true,
       "automergeType": "pr"
+    },
+    {
+      "description": "latlong2 is pinned at ^0.9 — flutter_map v8 requires ^0.9.1 and is incompatible with ^0.10.0",
+      "matchPackageNames": ["latlong2"],
+      "enabled": false
     }
   ],
   "gomod": {
