@@ -36,8 +36,5 @@
   ],
   "gomod": {
     "enabled": true
-  },
-  "flutter": {
-    "enabled": true
   }
 }
