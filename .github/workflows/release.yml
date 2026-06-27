@@ -207,9 +207,21 @@ jobs:
           VERSION="${{ needs.build.outputs.version }}"
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "v${VERSION}" | head -1)
           if [[ -n "$PREV_TAG" ]]; then
-            git-cliff "${PREV_TAG}..v${VERSION}" --strip all > /tmp/release-notes.md
+            git-cliff "${PREV_TAG}..v${VERSION}" --strip all > /tmp/cliff-notes.md
           else
-            git-cliff --tag "v${VERSION}" --strip all > /tmp/release-notes.md
+            git-cliff --tag "v${VERSION}" --strip all > /tmp/cliff-notes.md
+          fi
+          cat /tmp/cliff-notes.md
+
+      - name: Write prose summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SUMMARY=$(python3 .github/scripts/ai-release-summary.py < /tmp/cliff-notes.md || true)
+          if [[ -n "$SUMMARY" ]]; then
+            printf '%s\n\n%s\n' "$SUMMARY" "$(cat /tmp/cliff-notes.md)" > /tmp/release-notes.md
+          else
+            cp /tmp/cliff-notes.md /tmp/release-notes.md
           fi
           cat /tmp/release-notes.md
 
