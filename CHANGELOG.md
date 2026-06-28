@@ -3,6 +3,12 @@
 All notable changes to Nexus Open are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.7] - 2026-06-28
+
+### Fixed
+
+- Kill orphaned UI processes before starting Flutter
+
 ## [0.3.6] - 2026-06-28
 
 ### Fixed
@@ -262,6 +268,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Skip expensive jobs on unrelated changes via paths-filter + build_runner cache
 - Cache pub deps and fpm gem in CI to reduce build times
 
+[0.3.7]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.7
 [0.3.6]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.6
 [0.3.5]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.5
 [0.3.4]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.4
