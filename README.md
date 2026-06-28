@@ -40,7 +40,8 @@ login. No Corsair software, no Wine, no background cloud process.
 | gpu-load  | GPU utilisation                                |
 | network   | Download and upload throughput                 |
 | weather   | Current conditions from open-meteo             |
-| clock     | Time and date                                  |
+| media     | Now playing via MPRIS/playerctl                |
+| clock     | Time and date (built in)                       |
 
 You can also write your own. A plugin is a Go binary that implements a
 three-method interface. Drop it anywhere and reference it in a YAML file.
