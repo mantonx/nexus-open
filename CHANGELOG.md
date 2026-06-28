@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Improve process lifecycle and connection UX
 - Kill orphaned UI processes before starting Flutter
 
 ## [0.3.6] - 2026-06-28
