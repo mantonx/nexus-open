@@ -7,7 +7,7 @@ reverse-engineered the protocol and built one.
 [![Release](https://img.shields.io/github/v/release/mantonx/nexus-open)](https://github.com/mantonx/nexus-open/releases/latest)
 [![AUR](https://img.shields.io/aur/version/nexus-open)](https://aur.archlinux.org/packages/nexus-open)
 [![CI](https://github.com/mantonx/nexus-open/actions/workflows/ci.yml/badge.svg)](https://github.com/mantonx/nexus-open/actions/workflows/ci.yml)
-![Go](https://img.shields.io/badge/go-1.26+-00ADD8)
+![Go](https://img.shields.io/github/go-mod/go-version/mantonx/nexus-open?color=00ADD8)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
