@@ -1,6 +1,6 @@
 # Nexus Open
 
-Linux support for the Corsair iCUE Nexus — the 640×48 pixel display strip that
+Linux support for the Corsair iCUE Nexus, the 640×48 pixel display strip that
 sits above your keyboard. Corsair doesn't make a Linux driver; this project
 reverse-engineered the protocol and built one.
 
@@ -17,7 +17,7 @@ reverse-engineered the protocol and built one.
 
 ## What you get
 
-Live stats on the display strip — CPU and GPU temperature and load, network
+Live stats on the display strip: CPU and GPU temperature and load, network
 throughput, and weather from open-meteo. Swipe left and right to switch between
 pages. Each zone is independently configurable: pick a plugin, choose a graph
 style (sparkline, bar, area), and set the colours.
@@ -40,7 +40,7 @@ login. No Corsair software, no Wine, no background cloud process.
 | weather   | Current conditions from open-meteo             |
 | clock     | Time and date                                  |
 
-You can also write your own — a plugin is a Go binary that implements a
+You can also write your own. A plugin is a Go binary that implements a
 three-method interface. Drop it anywhere and reference it in a YAML file.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for a walkthrough.
 
@@ -53,7 +53,7 @@ Download from the [releases page](https://github.com/mantonx/nexus-open/releases
 | `.pkg.tar.zst` | Arch Linux (or `yay -S nexus-open`)                 |
 | `.deb`         | Ubuntu 24.04+, Debian 13+                           |
 | `.rpm`         | Fedora 40+, RHEL 9+                                 |
-| `.tar.gz`      | Any distro — static binary, no runtime dependencies |
+| `.tar.gz`      | Any distro, static binary, no runtime dependencies  |
 
 After installing, unplug and replug the Nexus. The bundled udev rule grants
 access without adding your user to any group.
@@ -78,10 +78,10 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the full dev workflow.
 
 ## Known issues
 
-The display stays black after the daemon stops — the firmware has no command to
-restore the Corsair boot screen. Unplug and replug to get it back. The settings
-UI requires XWayland (handled automatically in the packaged binary).
+The display stays black after the daemon stops. The firmware has no command to
+restore the Corsair boot screen, so unplug and replug to get it back. The
+settings UI requires XWayland (handled automatically in the packaged binary).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
