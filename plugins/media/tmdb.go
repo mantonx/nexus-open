@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	tmdbSearchURL = "https://api.themoviedb.org/3/search/multi"
 	tmdbImageBase = "https://image.tmdb.org/t/p/w92"
 	tmdbTokenFile = ".config/nexus-open/tmdb-token"
 )
+
+var tmdbSearchURL = "https://api.themoviedb.org/3/search/multi"
 
 // bundledTMDbTokenHex holds the bundled API token XORed against the key "NXOR"
 // and encoded as a hex string. This is a speed bump — the token is recoverable
