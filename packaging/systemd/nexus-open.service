@@ -8,7 +8,9 @@ Wants=graphical-session.target
 Type=simple
 ExecStart=/usr/bin/nexus-open --tray
 Restart=on-failure
-RestartSec=3s
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=10
 
 # ── Privilege & execution hardening ──────────────────────────────────────────
 NoNewPrivileges=true

@@ -149,30 +149,65 @@ class _OpenNextAppState extends State<OpenNextApp> with WindowListener {
   }
 }
 
-class _LoadingScreen extends StatelessWidget {
+class _LoadingScreen extends StatefulWidget {
   const _LoadingScreen();
 
   @override
+  State<_LoadingScreen> createState() => _LoadingScreenState();
+}
+
+class _LoadingScreenState extends State<_LoadingScreen> {
+  bool _timedOut = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(seconds: 8), () {
+      if (mounted) setState(() => _timedOut = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Color(0xFF131316),
+    return Scaffold(
+      backgroundColor: const Color(0xFF131316),
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(
-              color: Color(0xFF4F9EFF),
-              strokeWidth: 2.5,
-            ),
-            SizedBox(height: 20),
+            if (!_timedOut)
+              const CircularProgressIndicator(
+                color: Color(0xFF4F9EFF),
+                strokeWidth: 2.5,
+              )
+            else
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFF5A623), size: 28),
+            const SizedBox(height: 20),
             Text(
-              'Connecting…',
-              style: TextStyle(
+              _timedOut ? 'Backend not responding' : 'Connecting…',
+              style: const TextStyle(
                 color: Color(0xFF6B6B7A),
                 fontSize: 13,
                 letterSpacing: 0.3,
               ),
             ),
+            if (_timedOut) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Check that nexus-open.service is running',
+                style: TextStyle(
+                  color: Color(0xFF4A4A58),
+                  fontSize: 11,
+                ),
+              ),
+            ],
           ],
         ),
       ),

@@ -242,7 +242,7 @@ func killOtherInstances(myPID int) {
 		comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
 		name := strings.TrimSpace(string(comm))
 
-		if name == "nexus-open" || strings.HasPrefix(exePath, pluginsDir) {
+		if name == "nexus-open" || name == "ui.real" || strings.HasPrefix(exePath, pluginsDir) {
 			if proc, err := os.FindProcess(pid); err == nil {
 				_ = proc.Signal(syscall.SIGTERM)
 			}

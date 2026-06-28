@@ -391,6 +391,12 @@ INSTALL_DATA   := $(HOME)/.local/share/$(APP_NAME)
 SYSTEMD_UNIT   := app-nexus\x2dopen\x2dautostart@autostart.service
 
 install: build-release build-ui build-plugins
+	@if pacman -Q nexus-open > /dev/null 2>&1; then \
+		echo "✗ nexus-open is installed via pacman/AUR."; \
+		echo "  'make install' and the AUR package share ~/.local/share/nexus-open"; \
+		echo "  and will conflict. Uninstall the package first: sudo pacman -R nexus-open"; \
+		exit 1; \
+	fi
 	@echo "Stopping service..."
 	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
 	@echo "Installing backend to $(INSTALL_BIN)..."
