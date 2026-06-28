@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -132,6 +134,11 @@ func (m *Manager) onExit() {
 
 // startFlutter launches the Flutter application
 func (m *Manager) startFlutter() error {
+	// Kill any orphaned UI processes left by a previous daemon instance
+	// (e.g. after a package upgrade that terminated the daemon without
+	// stopping its Flutter child).
+	killOrphanedUI()
+
 	// Find the Flutter executable
 	flutterPath, err := m.findFlutterExecutable()
 	if err != nil {
@@ -169,6 +176,32 @@ func (m *Manager) stopFlutter() {
 		_ = m.flutterCmd.Wait()
 	}
 	m.flutterRunning = false
+}
+
+// killOrphanedUI sends SIGTERM to any ui.real processes not owned by this
+// daemon — left behind when a previous daemon exited without stopping its
+// Flutter child (e.g. during a package upgrade).
+func killOrphanedUI() {
+	myPID := os.Getpid()
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == myPID {
+			continue
+		}
+		comm, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		if strings.TrimSpace(string(comm)) == "ui.real" {
+			if proc, err := os.FindProcess(pid); err == nil {
+				_ = proc.Signal(syscall.SIGTERM)
+			}
+		}
+	}
 }
 
 // findFlutterExecutable locates the Flutter executable
