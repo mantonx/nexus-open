@@ -99,7 +99,8 @@ build_binary_static() {
         if [[ ! -d "$REPO_DIR/plugins/$mod" ]]; then continue; fi
         _ldf="-trimpath -ldflags \"-s -w\""
         if [[ "$mod" == "media" && -n "${TMDB_TOKEN:-}" ]]; then
-            _ldf="-trimpath -ldflags \"-s -w -X main.tmdbToken=${TMDB_TOKEN}\""
+            _half=$(( ${#TMDB_TOKEN} / 2 ))
+            _ldf="-trimpath -ldflags \"-s -w -X main.tmdbTokenA=${TMDB_TOKEN:0:$_half} -X main.tmdbTokenB=${TMDB_TOKEN:$_half}\""
         fi
         eval "(cd \"$REPO_DIR/plugins/$mod\" && go build $_ldf -o \"$REPO_DIR/plugins-dist/nexus-$mod\" .)" \
             && ok "  Built plugin: nexus-$mod" \

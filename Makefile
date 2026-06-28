@@ -118,7 +118,8 @@ build-plugins:
 			echo "  → plugins/$$mod"; \
 			_ldf="$(LDFLAGS)"; \
 			if [ "$$mod" = "media" ] && [ -n "$(TMDB_TOKEN)" ]; then \
-				_ldf="$$_ldf -X main.tmdbToken=$(TMDB_TOKEN)"; \
+				_half=$$(expr length "$(TMDB_TOKEN)" / 2); \
+				_ldf="$$_ldf -X main.tmdbTokenA=$$(echo '$(TMDB_TOKEN)' | cut -c1-$$_half) -X main.tmdbTokenB=$$(echo '$(TMDB_TOKEN)' | cut -c$$(($$_half+1))-)"; \
 			fi; \
 			(cd plugins/$$mod && go build -ldflags "$$_ldf" -o ../../$(BIN_DIR)/plugins/nexus-$$mod .) || exit 1; \
 		fi; \

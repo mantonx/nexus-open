@@ -17,12 +17,22 @@ const (
 	tmdbTokenFile = ".config/nexus-open/tmdb-token"
 )
 
-// tmdbToken is injected at release build time via:
+// tmdbTokenParts holds the bundled API token split across multiple vars so it
+// doesn't appear as a single string in the binary. This is a speed bump only —
+// the token is recoverable from any build. Users can supply their own token at
+// ~/.config/nexus-open/tmdb-token instead.
 //
-//	go build -ldflags "-X main.tmdbToken=<token>"
+// To inject at release build time:
 //
-// In dev builds this is empty and the file fallback is used instead.
-var tmdbToken string
+//	go build -ldflags "-X main.tmdbTokenA=<first-half> -X main.tmdbTokenB=<second-half>"
+var (
+	tmdbTokenA string // first half, injected via ldflags
+	tmdbTokenB string // second half, injected via ldflags
+)
+
+func bundledTMDbToken() string {
+	return tmdbTokenA + tmdbTokenB
+}
 
 // tmdbCache caches poster URLs by title to avoid hitting the API on every sample.
 type tmdbCache struct {
@@ -68,8 +78,8 @@ func (c *tmdbCache) posterURL(title string) string {
 }
 
 func readTMDbToken() string {
-	if tmdbToken != "" {
-		return tmdbToken
+	if t := bundledTMDbToken(); t != "" {
+		return t
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
