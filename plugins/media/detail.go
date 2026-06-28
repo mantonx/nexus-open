@@ -8,6 +8,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"sync"
 	"net/http"
 	"os"
 	"strings"
@@ -26,16 +27,45 @@ import (
 //go:embed assets/fonts/FontAwesome-Solid.ttf
 var faSolidTTF []byte
 
+// artCache is an in-memory cache of decoded art images keyed by URL.
+// Avoids re-fetching and re-decoding on every OnTap call.
+// A nil value means a previously confirmed miss.
+var artCache struct {
+	sync.Mutex
+	entries map[string]image.Image
+}
+
+func init() {
+	artCache.entries = make(map[string]image.Image)
+}
+
 func fetchArt(artURL string, size int) (image.Image, error) {
 	if artURL == "" {
 		return nil, nil
 	}
 
+	artCache.Lock()
+	if img, ok := artCache.entries[artURL]; ok {
+		artCache.Unlock()
+		return img, nil
+	}
+	artCache.Unlock()
+
+	img := fetchAndDecodeArt(artURL, size)
+
+	artCache.Lock()
+	artCache.entries[artURL] = img
+	artCache.Unlock()
+
+	return img, nil
+}
+
+func fetchAndDecodeArt(artURL string, size int) image.Image {
 	var r io.ReadCloser
 	if path, ok := strings.CutPrefix(artURL, "file://"); ok {
 		f, err := os.Open(path)
 		if err != nil {
-			return nil, nil
+			return nil
 		}
 		r = f
 	} else {
@@ -45,7 +75,7 @@ func fetchArt(artURL string, size int) (image.Image, error) {
 			if resp != nil {
 				resp.Body.Close()
 			}
-			return nil, nil
+			return nil
 		}
 		r = resp.Body
 	}
@@ -53,12 +83,12 @@ func fetchArt(artURL string, size int) (image.Image, error) {
 
 	src, _, err := image.Decode(r)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 
 	dst := image.NewRGBA(image.Rect(0, 0, size, size))
 	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
-	return dst, nil
+	return dst
 }
 
 func (m *MediaPlugin) OnTap() (plugin.DetailPayload, error) {
