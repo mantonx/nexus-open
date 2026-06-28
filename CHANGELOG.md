@@ -3,6 +3,22 @@
 All notable changes to Nexus Open are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.8] - 2026-06-28
+
+### Changed
+
+- Code quality, pure-Go build, and test coverage improvements
+
+### Fixed
+
+- Drop -race from test job — incompatible with CGO_ENABLED=0
+- Art cache, negative cache, error backoff, MPRIS art first
+- XOR-obfuscate bundled TMDb token in binary
+- Split bundled TMDb token across two ldflags vars
+- Rename Flutter package to nexus_open, fix multipart upload token
+- Update module github.com/mantonx/nexus-open to v0.3.7 (#37)
+- Check db.Close error return in sampler test
+
 ## [0.3.7] - 2026-06-28
 
 ### Fixed
@@ -14,6 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Include Flutter UI bundle in AUR tarball and PKGBUILD
 - Include Flutter UI bundle in AUR tarball and PKGBUILD
 - Grant models: read permission for AI release summary
 
@@ -268,6 +285,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Skip expensive jobs on unrelated changes via paths-filter + build_runner cache
 - Cache pub deps and fpm gem in CI to reduce build times
 
+[0.3.8]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.8
 [0.3.7]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.7
 [0.3.6]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.6
 [0.3.5]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.5
@@ -278,3 +296,4 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 [0.3.0]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mantonx/nexus-open/releases/tag/v0.2.0
 [0.0.1]: https://github.com/mantonx/nexus-open/releases/tag/v0.0.1
+
