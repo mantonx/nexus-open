@@ -3,10 +3,20 @@
 All notable changes to Nexus Open are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.6] - 2026-06-28
 
 ### Fixed
 
+- Include Flutter UI bundle in AUR tarball and PKGBUILD
+- Include Flutter UI bundle in AUR tarball and PKGBUILD
+- Grant models: read permission for AI release summary
+
+## [0.3.5] - 2026-06-27
+
+### Fixed
+
+- Stamp buildTime ldflag in build-package.sh
+- Polish credibility issues
 - Harden USB write/close lifecycle
 
 ## [0.3.4] - 2026-06-27
@@ -252,6 +262,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Skip expensive jobs on unrelated changes via paths-filter + build_runner cache
 - Cache pub deps and fpm gem in CI to reduce build times
 
+[0.3.6]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.6
+[0.3.5]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.5
 [0.3.4]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.4
 [0.3.3]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.3
 [0.3.2]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.2

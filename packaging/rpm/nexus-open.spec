@@ -1,5 +1,5 @@
 Name:           nexus-open
-Version:        0.3.4
+Version:        0.3.6
 Release:        1%{?dist}
 Summary:        Open-source Linux controller for the Corsair iCUE Nexus display
 
