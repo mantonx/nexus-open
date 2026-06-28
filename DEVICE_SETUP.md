@@ -134,6 +134,23 @@ device not found, or device busy.
 
 ## Troubleshooting
 
+### Device not found
+
+Run `lsusb | grep 1b1c` to confirm the device is visible to the OS. If it shows
+up but the daemon can't open it, run `make doctor` to check USB permissions.
+
+### Port 1985 in use
+
+```bash
+ss -tlnp | grep 1985
+```
+
+Or start the daemon on a different port: `nexus-open --port 1986`.
+
+### Plugin shows blank
+
+Check `GET /api/zones/{id}/status` for the error message.
+
 ### Permission denied after running setup-udev.sh
 
 Unplug and replug the USB cable — udev rules apply to newly-connected devices.

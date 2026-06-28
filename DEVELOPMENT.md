@@ -1,5 +1,35 @@
 # Development Guide
 
+## Architecture
+
+```text
+┌─────────────────┐   WebSocket (raw RGBA frames)   ┌──────────────────┐
+│   Flutter UI    │ ◄───────────────────────────────  │   Go daemon      │
+│  (settings,     │                                   │                  │
+│   live preview) │ ──── REST API :1985 ────────────► │  usbfs driver    │
+└─────────────────┘                                   └────────┬─────────┘
+                                                               │ go-plugin (net/RPC)
+                                              ┌────────────────▼──────────────────┐
+                                              │  Plugin subprocesses (one per zone) │
+                                              │  cpu-temp  cpu-load  gpu-temp      │
+                                              │  gpu-load  network   weather        │
+                                              └─────────────────────────────────────┘
+```
+
+The Go daemon talks to the device directly via Linux usbfs ioctls (`/dev/bus/usb`) —
+no libusb, no CGo, no shared libraries. Each frame is split into 121 × 1024-byte
+packets with an 8-byte header and an RGBA→BGRA swap, then written to EP 0x02 OUT.
+Touch events come back on EP 0x81 IN as HID reports. The protocol is documented
+in [docs/USB_PROTOCOL.md](docs/USB_PROTOCOL.md).
+
+Each display zone runs a separate Go binary over
+[go-plugin](https://github.com/hashicorp/go-plugin) (net/RPC). The daemon gives
+each sample call a deadline, shows a timeout payload if the plugin hangs, and
+restarts it with exponential backoff if it crashes.
+
+The Flutter settings UI receives the live 640×48 RGBA framebuffer over WebSocket —
+the preview is the exact bytes going to the hardware, not a separate render path.
+
 ## Prerequisites
 
 - Go 1.25+
