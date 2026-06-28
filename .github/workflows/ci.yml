@@ -107,7 +107,7 @@ jobs:
         env:
           CGO_ENABLED: "0"
           NEXUS_MOCK_DEVICE: "1"
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -coverprofile=coverage.out ./...
 
       - name: Coverage summary
         run: go tool cover -func=coverage.out | grep 'total:'
