@@ -13,7 +13,7 @@ reverse-engineered the protocol and built one.
 
 ![640×48 hardware display showing clock, weather, CPU, GPU, and network zones](docs/screenshots/display.png)
 
-![Flutter settings UI with layout editor and live hardware preview strip](docs/screenshots/settings-ui.png)
+![Settings app with layout editor and live hardware preview strip](docs/screenshots/settings-ui.png)
 
 ## What you get
 
@@ -22,9 +22,8 @@ throughput, and weather from open-meteo. Swipe left and right to switch between
 pages. Each zone is independently configurable: pick a plugin, choose a graph
 style (sparkline, bar, area), and set the colours.
 
-A Flutter settings app lets you rearrange the layout and swap plugins without
-restarting anything. The preview in the settings app shows the exact image going
-to the hardware in real time.
+A settings app lets you rearrange the layout and swap plugins without restarting
+anything. The preview shows the exact image going to the hardware in real time.
 
 The daemon runs quietly as a systemd user service and starts automatically on
 login. No Corsair software, no Wine, no background cloud process.
