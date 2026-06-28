@@ -6,7 +6,7 @@ replace github.com/mantonx/nexus-open => ../..
 
 require (
 	github.com/hashicorp/go-plugin v1.8.0
-	github.com/mantonx/nexus-open v0.3.2
+	github.com/mantonx/nexus-open v0.3.7
 	github.com/shirou/gopsutil v3.21.11+incompatible
 )
 
