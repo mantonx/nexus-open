@@ -86,6 +86,14 @@ The display stays black after the daemon stops. The firmware has no command to
 restore the Corsair boot screen, so unplug and replug to get it back. The
 settings UI requires XWayland (handled automatically in the packaged binary).
 
+## More
+
+- [docs/INSTALLATION.md](docs/INSTALLATION.md) — install, build from source, configuration
+- [DEVICE_SETUP.md](DEVICE_SETUP.md) — USB permissions and troubleshooting
+- [DEVELOPMENT.md](DEVELOPMENT.md) — architecture, hot-reload workflow, testing
+- [CONTRIBUTING.md](CONTRIBUTING.md) — writing plugins, submitting PRs
+- [docs/USB_PROTOCOL.md](docs/USB_PROTOCOL.md) — reverse-engineered protocol, frame format, touch HID reports
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -32,7 +32,7 @@ the preview is the exact bytes going to the hardware, not a separate render path
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - Flutter 3.24+
 
 Two additional tools are required for the hot-reload workflow. Run `make setup` to install them:

@@ -15,7 +15,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Include Flutter UI bundle in AUR tarball and PKGBUILD
-- Include Flutter UI bundle in AUR tarball and PKGBUILD
 - Grant models: read permission for AI release summary
 
 ## [0.3.5] - 2026-06-27
@@ -279,4 +278,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 [0.3.0]: https://github.com/mantonx/nexus-open/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mantonx/nexus-open/releases/tag/v0.2.0
 [0.0.1]: https://github.com/mantonx/nexus-open/releases/tag/v0.0.1
-

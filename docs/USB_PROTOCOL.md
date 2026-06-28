@@ -1,13 +1,14 @@
 # USB Protocol: Corsair iCUE Nexus
 
-This document describes how Nexus Open communicates with the iCUE Nexus touch
-bar — a 640×48 pixel LCD strip with a resistive touch surface, connected over
-USB (VID `0x1b1c`, PID `0x1b8e`).
+Corsair publishes no Linux SDK and no protocol documentation for the iCUE Nexus
+(VID `0x1b1c`, PID `0x1b8e`). This document is the result of reverse engineering
+the protocol from usbmon captures: with the `usbmon` kernel module loaded,
+Wireshark captures raw URBs on the device's bus. The device generates enough
+traffic on plug-in to reveal the frame and touch protocols without needing a
+reference implementation or disassembly.
 
-The protocol was reverse engineered on Linux using usbmon and Wireshark.
-With the `usbmon` kernel module loaded, Wireshark captures raw URBs on the
-device's bus. The device generates enough traffic on plug-in to reveal the
-frame and touch protocols without needing a reference implementation.
+The implementation is pure Go via Linux usbfs ioctls — no libusb, no CGo, no
+shared libraries. The relevant source is `internal/device/`.
 
 ## Transport
 
