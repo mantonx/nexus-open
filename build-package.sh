@@ -107,18 +107,33 @@ build_binary_static() {
     done
 
     # Produce a standalone tarball for direct installs and AUR.
-    # Includes the daemon, plugins, and all packaging files needed by the PKGBUILD.
+    # Includes the daemon, plugins, Flutter UI bundle, and packaging files.
     mkdir -p "$OUT_DIR"
     local tarball="$OUT_DIR/${PKG_NAME}-${PKG_VERSION}-linux-amd64.tar.gz"
-    tar -czf "$tarball" \
-        -C "$REPO_DIR" \
-        --transform "s|^|nexus-open-${PKG_VERSION}/|" \
-        nexus-open \
-        plugins-dist \
-        packaging/udev/99-corsair-nexus.rules \
-        packaging/systemd/nexus-open.service \
-        packaging/desktop/nexus-open.desktop \
-        LICENSE
+    local tar_root
+    tar_root=$(mktemp -d)
+    local pkg_dir="$tar_root/nexus-open-${PKG_VERSION}"
+    mkdir -p "$pkg_dir"
+
+    cp "$REPO_DIR/nexus-open" "$pkg_dir/"
+    cp -r "$REPO_DIR/plugins-dist" "$pkg_dir/"
+    cp -r "$REPO_DIR/packaging" "$pkg_dir/"
+    cp "$REPO_DIR/LICENSE" "$pkg_dir/"
+
+    if [[ -d "$UI_BUNDLE" ]]; then
+        cp -r "$UI_BUNDLE" "$pkg_dir/ui-bundle"
+        # Rename Flutter binary and add XWayland wrapper
+        mv "$pkg_dir/ui-bundle/ui" "$pkg_dir/ui-bundle/ui.real"
+        printf '#!/usr/bin/env bash\nexec env WAYLAND_DISPLAY= "$(dirname "$0")/ui.real" "$@"\n' \
+            > "$pkg_dir/ui-bundle/ui"
+        chmod +x "$pkg_dir/ui-bundle/ui"
+        ok "Including Flutter UI bundle in tarball"
+    else
+        warn "Flutter UI not built — tarball will be daemon-only"
+    fi
+
+    tar -czf "$tarball" -C "$tar_root" "nexus-open-${PKG_VERSION}"
+    rm -rf "$tar_root"
     ok "Static tarball: $tarball"
 }
 

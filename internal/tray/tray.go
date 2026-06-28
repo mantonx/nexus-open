@@ -190,13 +190,19 @@ func (m *Manager) findFlutterExecutable() (string, error) {
 		return installedPath, nil
 	}
 
-	// Priority 2: sibling to the daemon binary (single-dir deployment)
+	// Priority 2: system package install path (/usr/lib/nexus-open/ui-bundle/ui)
+	systemPath := "/usr/lib/nexus-open/ui-bundle/ui"
+	if _, err := os.Stat(systemPath); err == nil {
+		return systemPath, nil
+	}
+
+	// Priority 3: sibling to the daemon binary (single-dir deployment)
 	siblingPath := filepath.Join(exeDir, "ui")
 	if _, err := os.Stat(siblingPath); err == nil {
 		return siblingPath, nil
 	}
 
-	// Priority 3: development build path (running from repo root)
+	// Priority 4: development build path (running from repo root)
 	devPath := filepath.Join(exeDir, "..", "ui", "build", "linux", "x64", "release", "bundle", "ui")
 	if _, err := os.Stat(devPath); err == nil {
 		return devPath, nil

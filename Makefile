@@ -290,6 +290,8 @@ dev-backend:
 		echo "Error: 'air' not found. Install with: go install github.com/air-verse/air@$(AIR_VERSION)"; \
 		exit 1; \
 	fi; \
+	systemctl --user stop nexus-open.service 2>/dev/null || true; \
+	systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true; \
 	NEXUS_MOCK_DEVICE=0 NEXUS_DEBUG=1 "$$AIR"
 
 # Flutter hot-reload UI (runs flutter run in debug mode).

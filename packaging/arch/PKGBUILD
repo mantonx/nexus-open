@@ -34,4 +34,10 @@ package() {
 
     install -Dm644 LICENSE \
         "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+    if [[ -d ui-bundle ]]; then
+        cp -r ui-bundle "${pkgdir}/usr/lib/nexus-open/"
+        chmod 755 "${pkgdir}/usr/lib/nexus-open/ui-bundle/ui"
+        chmod 755 "${pkgdir}/usr/lib/nexus-open/ui-bundle/ui.real"
+    fi
 }
