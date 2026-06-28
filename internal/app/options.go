@@ -2,6 +2,15 @@ package app
 
 import "log/slog"
 
+// WithDeviceFactory sets a custom device constructor. The factory is called
+// during initialization with the app context and must return a connected device.
+// Use this in tests to inject a mock without relying on NEXUS_MOCK_DEVICE.
+func WithDeviceFactory(f DeviceFactory) Option {
+	return func(a *App) {
+		a.deviceFactory = f
+	}
+}
+
 // Option is a functional option for configuring the App.
 type Option func(*App)
 

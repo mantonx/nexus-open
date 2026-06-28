@@ -161,51 +161,61 @@ func (n *NexusDevice) Health() error {
 	return nil
 }
 
-// sendFrameToHandle writes data to h as 1024-byte chunked packets.
-// Callers must hold writeMu. No connection-state checks are performed.
-// Returns ctx.Err() if the context is cancelled between chunks.
-func sendFrameToHandle(ctx context.Context, h *usbHandle, data []byte) error {
+// buildPacket constructs one 1024-byte USB packet from a slice of RGBA frame
+// data. chunkNum is zero-based; totalChunks is the total number of packets
+// in this frame. The RGBA→BGRA swap required by the Corsair firmware is
+// applied here. The returned slice is always exactly 1024 bytes.
+func buildPacket(rgba []byte, chunkNum, totalChunks int) []byte {
 	const chunkSize = 1024
 	const headerSize = 8
 	const maxPayload = chunkSize - headerSize
 
+	start := chunkNum * maxPayload
+	end := start + maxPayload
+	if end > len(rgba) {
+		end = len(rgba)
+	}
+	payloadLen := end - start
+
+	packet := make([]byte, chunkSize)
+	packet[0] = 0x02
+	packet[1] = 0x05
+	packet[2] = 0x40
+	if chunkNum == totalChunks-1 {
+		packet[3] = 0x01
+	}
+	packet[4] = byte(chunkNum & 0xFF)
+	packet[5] = byte((chunkNum >> 8) & 0xFF)
+	packet[6] = byte(payloadLen & 0xFF)
+	packet[7] = byte((payloadLen >> 8) & 0xFF)
+
+	for i := 0; i < payloadLen; i += 4 {
+		if start+i+3 < len(rgba) {
+			packet[headerSize+i] = rgba[start+i+2]   // B
+			packet[headerSize+i+1] = rgba[start+i+1] // G
+			packet[headerSize+i+2] = rgba[start+i]   // R
+			packet[headerSize+i+3] = rgba[start+i+3] // A
+		}
+	}
+
+	return packet
+}
+
+// sendFrameToHandle writes data to h as 1024-byte chunked packets.
+// Callers must hold writeMu. No connection-state checks are performed.
+// Returns ctx.Err() if the context is cancelled between chunks.
+func sendFrameToHandle(ctx context.Context, h *usbHandle, data []byte) error {
+	const maxPayload = 1024 - 8
+
 	totalChunks := (len(data) + maxPayload - 1) / maxPayload
-	for chunkNum := 0; chunkNum < totalChunks; chunkNum++ {
+	for chunkNum := range totalChunks {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		start := chunkNum * maxPayload
-		end := start + maxPayload
-		if end > len(data) {
-			end = len(data)
-		}
-		payloadLen := end - start
-
-		packet := make([]byte, chunkSize)
-		packet[0] = 0x02
-		packet[1] = 0x05
-		packet[2] = 0x40
-		if chunkNum == totalChunks-1 {
-			packet[3] = 0x01
-		}
-		packet[4] = byte(chunkNum & 0xFF)
-		packet[5] = byte((chunkNum >> 8) & 0xFF)
-		packet[6] = byte(payloadLen & 0xFF)
-		packet[7] = byte((payloadLen >> 8) & 0xFF)
-
-		for i := 0; i < payloadLen; i += 4 {
-			if start+i+3 < len(data) {
-				packet[headerSize+i] = data[start+i+2]   // B
-				packet[headerSize+i+1] = data[start+i+1] // G
-				packet[headerSize+i+2] = data[start+i]   // R
-				packet[headerSize+i+3] = data[start+i+3] // A
-			}
-		}
-
-		if err := h.writeFrame(packet); err != nil {
+		if err := h.writeFrame(buildPacket(data, chunkNum, totalChunks)); err != nil {
 			return fmt.Errorf("chunk %d: %w", chunkNum, err)
 		}
 	}

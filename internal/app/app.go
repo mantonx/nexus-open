@@ -18,6 +18,9 @@ import (
 	"github.com/mantonx/nexus-open/internal/zone"
 )
 
+// DeviceFactory constructs and connects a device using the given context.
+type DeviceFactory func(ctx context.Context) (device.Device, error)
+
 // App is the main application container that holds all dependencies.
 // It follows the dependency injection pattern to manage component lifecycle.
 type App struct {
@@ -26,10 +29,11 @@ type App struct {
 	logger *slog.Logger
 
 	// Configuration
-	configPath string
-	apiPort    int
-	layoutPath string
-	pluginsDir string
+	configPath    string
+	apiPort       int
+	layoutPath    string
+	pluginsDir    string
+	deviceFactory DeviceFactory
 
 	// Components
 	store        *store.DB
@@ -44,6 +48,7 @@ type App struct {
 	// Lifecycle
 	shutdownOnce sync.Once
 	shutdownCh   chan struct{}
+	readyCh      chan struct{}
 	wg           sync.WaitGroup
 }
 
@@ -58,6 +63,7 @@ func New(opts ...Option) (*App, error) {
 		configPath: "",
 		apiPort:    1985,
 		shutdownCh: make(chan struct{}),
+		readyCh:    make(chan struct{}),
 	}
 
 	// Apply options
@@ -94,6 +100,13 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	a.Shutdown() //nolint:errcheck
 	return runErr
+}
+
+// Ready returns a channel that is closed once all components (API server, zone
+// sampler, render loop) have started. Callers can block on it instead of
+// polling the health endpoint.
+func (a *App) Ready() <-chan struct{} {
+	return a.readyCh
 }
 
 // APIServer returns the underlying API server, used by callers that need to
@@ -176,19 +189,34 @@ func (a *App) Shutdown() error {
 	return shutdownErr
 }
 
-// initialize sets up all application components.
+// initialize sets up all application components in dependency order.
 func (a *App) initialize() error {
 	a.logger.Debug("initializing application components")
+	if err := a.initStoreAndSettings(); err != nil {
+		return err
+	}
+	if err := a.initDevice(); err != nil {
+		return err
+	}
+	if err := a.initAPI(); err != nil {
+		return err
+	}
+	if err := a.initLayoutAndSampler(); err != nil {
+		return err
+	}
+	a.wireCallbacks()
+	a.initTouch()
+	return nil
+}
 
-	// 1. Open the SQLite store — single source of truth for all config.
-	// configPath is the DB path (empty = default ~/.config/nexus-open/nexus.db).
+// initStoreAndSettings opens the SQLite store and builds the settings manager.
+func (a *App) initStoreAndSettings() error {
 	var err error
 	a.store, err = store.Open(a.configPath, a.logger)
 	if err != nil {
 		return fmt.Errorf("failed to open store: %w", err)
 	}
 
-	// 2. Build settings manager from store.
 	a.cfg, err = settings.NewManager(a.store, a.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create config manager: %w", err)
@@ -206,47 +234,62 @@ func (a *App) initialize() error {
 			a.logger.Warn("settings: yaml import failed (continuing with defaults)", "error", err)
 		}
 	}
-	a.logger.Info("configuration loaded", "first_run", a.store.IsFirstRun())
 
-	// 3. Build zone config manager from the same store.
 	a.zoneCfg = zone.NewConfigManager(a.store, a.logger)
+	a.logger.Info("configuration loaded", "first_run", a.store.IsFirstRun())
+	return nil
+}
 
-	a.logger.Info("zone config manager initialized")
-
-	// 3. Create device connection
-	// Check if mock device mode is enabled (useful for development without hardware)
-	if os.Getenv("NEXUS_MOCK_DEVICE") == "1" {
-		a.logger.Info("using mock device (NEXUS_MOCK_DEVICE=1)")
-		mockDevice := device.NewMockDevice()
-		// Auto-connect the mock device
-		if err := mockDevice.Connect(a.ctx); err != nil {
-			return fmt.Errorf("failed to connect mock device: %w", err)
+// initDevice constructs and connects the hardware device.
+// If WithDeviceFactory was provided it is used; otherwise the env var
+// NEXUS_MOCK_DEVICE=1 selects the mock, and the real USB device is the default.
+func (a *App) initDevice() error {
+	if a.deviceFactory != nil {
+		dev, err := a.deviceFactory(a.ctx)
+		if err != nil {
+			return fmt.Errorf("device factory: %w", err)
 		}
-		a.device = mockDevice
-	} else {
-		deviceConfig := device.ConnectionConfig{
-			VendorID:         0x1b1c, // Corsair
-			ProductID:        0x1b8e, // iCUE Nexus
-			ReconnectRetries: 10,
-			ReconnectDelay:   5 * time.Second,
-		}
-		a.device = device.NewNexusDevice(a.logger, deviceConfig)
-		a.logger.Info("device created")
+		a.device = dev
+		a.logger.Info("device initialized via factory")
+		return nil
 	}
 
-	// 4. Create API server
+	if os.Getenv("NEXUS_MOCK_DEVICE") == "1" {
+		a.logger.Info("using mock device (NEXUS_MOCK_DEVICE=1)")
+		mock := device.NewMockDevice()
+		if err := mock.Connect(a.ctx); err != nil {
+			return fmt.Errorf("failed to connect mock device: %w", err)
+		}
+		a.device = mock
+		return nil
+	}
+
+	a.device = device.NewNexusDevice(a.logger, device.ConnectionConfig{
+		VendorID:         0x1b1c,
+		ProductID:        0x1b8e,
+		ReconnectRetries: 10,
+		ReconnectDelay:   5 * time.Second,
+	})
+	a.logger.Info("device created")
+	return nil
+}
+
+// initAPI creates the API server and registers the zone config manager.
+func (a *App) initAPI() error {
 	apiAddr := fmt.Sprintf("127.0.0.1:%d", a.apiPort)
 	a.apiServer = api.NewServer(apiAddr, a.cfg, a.device, a.logger)
-	a.logger.Info("API server created", "addr", apiAddr)
-
-	// Register zone config manager with API server so endpoints can read/write configs.
 	a.apiServer.SetZoneConfigManager(a.zoneCfg)
-	a.logger.Info("zone config manager registered with API server")
+	a.logger.Info("API server created", "addr", apiAddr)
+	return nil
+}
 
-	// 5. Create zone manager — loads from DB, falling back to YAML on first run.
+// initLayoutAndSampler creates the zone manager, resolves the plugins directory,
+// and creates the zone sampler.
+func (a *App) initLayoutAndSampler() error {
 	if a.layoutPath == "" {
 		a.layoutPath = resolveLayoutPath()
 	}
+	var err error
 	a.zoneManager, err = zone.NewManager(a.ctx, a.logger, a.store, a.layoutPath)
 	if err != nil {
 		return fmt.Errorf("failed to create zone manager: %w", err)
@@ -255,8 +298,8 @@ func (a *App) initialize() error {
 		"pages", len(a.zoneManager.GetConfig().Pages),
 		"current_page", a.zoneManager.GetConfig().Pages[0].Name)
 
-	// 6. Resolve plugins directory.
-	// Priority: explicit flag > NEXUS_PLUGINS_DIR env > sibling to exe > XDG user data > /usr/lib/nexus-open/plugins (system package install).
+	// Priority: explicit option > NEXUS_PLUGINS_DIR env > sibling to exe >
+	// XDG user data > /usr/lib/nexus-open/plugins (system package install).
 	if a.pluginsDir == "" {
 		if env := os.Getenv("NEXUS_PLUGINS_DIR"); env != "" {
 			a.pluginsDir = env
@@ -275,58 +318,50 @@ func (a *App) initialize() error {
 			case dirHasPlugins(systemData):
 				a.pluginsDir = systemData
 			default:
-				// Fall back to sibling even if absent — binary validation will
-				// surface a clear error per zone rather than failing at startup.
 				a.pluginsDir = sibling
 			}
 		}
 	}
 	a.logger.Info("plugins directory", "path", a.pluginsDir)
 
-	// 7. Create module sampler
 	a.zoneSampler = zone.NewSampler(a.ctx, a.logger, a.zoneManager, a.zoneCfg, a.pluginsDir)
 	a.logger.Info("zone sampler created")
+	return nil
+}
 
-	// On page change, just broadcast new page state. All plugins run
-	// continuously across all pages (started in Start()), so no sampler
-	// restart is needed — payloads are already current on arrival.
+// wireCallbacks connects the zone manager, sampler, and API server together.
+func (a *App) wireCallbacks() {
+	// Page change → broadcast new page state over WebSocket.
 	a.zoneManager.SetOnPageChange(func(pageIndex int) error {
 		go a.apiServer.BroadcastPageState()
 		return nil
 	})
 
-	// Restart the sampler for a single zone when a tap cycles its module.
+	// Zone tap cycle → restart that zone's sampler.
 	a.zoneManager.SetOnZoneCycle(func(zoneConfig zone.ZoneConfig) error {
 		return a.zoneSampler.RestartZone(zoneConfig)
 	})
 
-	// Register zone sampler as per-zone config notifier so API updates affect live modules.
+	// Wire sampler into API server as config notifier, status provider, and catalog.
 	a.apiServer.SetZoneConfigNotifier(a.zoneSampler)
-	a.logger.Info("zone config notifier registered with API server")
-
-	// Register zone sampler as status provider so /api/zones/:id/status works.
 	a.apiServer.SetZoneStatusProvider(a.zoneSampler)
-
-	// Register zone sampler as plugin catalog provider so /api/plugins works.
 	a.apiServer.SetPluginCatalog(a.zoneSampler)
 
-	// Wire zone manager for swipe simulation, tap simulation, navigation, and layout editing.
+	// Wire zone manager into API server for swipe/tap/navigation/layout.
 	a.apiServer.SetSwipeSimulator(a.zoneManager)
 	a.apiServer.SetZoneTapper(a.zoneManager)
 	a.apiServer.SetDetailFrameProvider(a.zoneManager)
 	a.apiServer.SetFrameProvider(a.zoneManager)
-	a.zoneManager.SetDetailStateCallback(func(active bool) {
-		a.apiServer.BroadcastDetailState(active, zone.DetailCloseX*2, zone.DetailCloseY*2)
-	})
 	a.apiServer.SetNavigator(a.zoneManager)
 	a.apiServer.SetLayoutStore(a.store)
 	a.apiServer.SetLayoutReloader(a.zoneManager)
 
-	// Propagate display config from settings into the zone manager theme,
-	// both immediately on startup and on every subsequent Flutter UI save.
+	a.zoneManager.SetDetailStateCallback(func(active bool) {
+		a.apiServer.BroadcastDetailState(active, zone.DetailCloseX*2, zone.DetailCloseY*2)
+	})
+
+	// Apply background image from settings immediately, then watch for future saves.
 	applySettingsTheme := func(cfg settings.Config) {
-		// Theme is defined entirely in the layout YAML (including per-zone
-		// ThemeOverride accents). Settings only controls the background image.
 		if cfg.BackgroundImage != "" && cfg.BackgroundImage != settings.DefaultBackgroundImage {
 			if dir, err := os.UserConfigDir(); err == nil {
 				imgPath := dir + "/nexus-open/images/" + cfg.BackgroundImage
@@ -338,29 +373,22 @@ func (a *App) initialize() error {
 			a.zoneManager.SetBackground("") //nolint:errcheck
 		}
 	}
-
-	// Apply saved settings immediately so hardware reflects stored config on startup.
 	applySettingsTheme(a.cfg.Get())
-
-	// Watch for future saves from the Flutter UI.
 	settingsCh := make(chan settings.Config, 4)
 	a.cfg.Watch(settingsCh)
 	go func() {
 		for cfg := range settingsCh {
 			applySettingsTheme(cfg)
-			a.logger.Debug("theme updated from settings",
-				"bg", cfg.BackgroundColor,
-				"fg", cfg.TextColor,
-			)
+			a.logger.Debug("theme updated from settings", "bg", cfg.BackgroundColor, "fg", cfg.TextColor)
 		}
 	}()
+}
 
-	// 7. Create touch handler and wire detail tap support.
+// initTouch creates the touch handler.
+func (a *App) initTouch() {
 	a.zoneManager.SetPluginLookup(a.zoneSampler)
 	a.touchHandler = touch.NewHandler(a.logger, a.device, a.zoneManager)
 	a.logger.Info("touch handler created")
-
-	return nil
 }
 
 // start begins operation of all components.
@@ -403,6 +431,7 @@ func (a *App) start() error {
 		a.startDeviceWatcher()
 	}
 
+	close(a.readyCh)
 	return nil
 }
 

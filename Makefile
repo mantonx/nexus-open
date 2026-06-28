@@ -1,7 +1,7 @@
 # Nexus Open - Makefile
 # Standardized build system for all targets
 
-.PHONY: help setup doctor build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui dev-ui-reload deb appimage rpm generate-api models all changelog release
+.PHONY: help setup doctor build build-debug build-release build-ui build-plugins build-all test test-race coverage clean clean-ui install uninstall run run-tray dev dev-backend dev-ui dev-ui-reload deb rpm generate-api models all changelog release
 
 # Configuration
 APP_NAME := nexus-open
@@ -27,7 +27,7 @@ GOPENAPI_VERSION     := v0.32.3
 # Build flags
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)
 GOFLAGS  := -trimpath
-GO_BUILD := CGO_ENABLED=1 go build
+GO_BUILD := CGO_ENABLED=0 go build
 
 # Default target
 help:
@@ -58,7 +58,6 @@ help:
 	@echo ""
 	@echo "Packaging:"
 	@echo "  make deb           - Build DEB package"
-	@echo "  make appimage      - Build AppImage"
 	@echo "  make rpm           - Build RPM package"
 	@echo "  make generate-api  - Regenerate api/openapi.yaml from annotations"
 	@echo "  make generate-store - Regenerate internal/store/db/ from schema + queries"
@@ -349,11 +348,6 @@ deb: $(DIST_DIR)
 	@echo "Building DEB package..."
 	@bash scripts/build-deb.sh
 
-# Build AppImage
-appimage: $(DIST_DIR)
-	@echo "Building AppImage..."
-	@bash scripts/build-appimage.sh
-
 # Build RPM package
 rpm: $(DIST_DIR)
 	@echo "Building RPM package..."
@@ -379,7 +373,7 @@ models:
 	@echo "✓ Models generated"
 
 # Build all packages
-all: deb appimage rpm
+all: deb rpm
 	@echo "✓ All packages built successfully!"
 	@ls -lh $(DIST_DIR)/
 

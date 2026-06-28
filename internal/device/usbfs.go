@@ -71,8 +71,6 @@ type usbHandle struct {
 	closed bool
 }
 
-func init() {} // no-op: libusb needed no global init in the cgo path either
-
 // sysfsUSBDevices is the path scanned by findDevice. Overridden in tests.
 var sysfsUSBDevices = "/sys/bus/usb/devices"
 

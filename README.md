@@ -1,23 +1,19 @@
 # Nexus Open
 
-Open-source Linux controller for the Corsair iCUE Nexus companion display.
+Linux controller for the Corsair iCUE Nexus companion display — a 640×48 pixel
+LCD strip with a resistive touch surface. Corsair doesn't support Linux; this
+project reverse-engineered the USB protocol from usbmon captures.
 
 [![Release](https://img.shields.io/github/v/release/mantonx/nexus-open)](https://github.com/mantonx/nexus-open/releases/latest)
-![License](https://img.shields.io/badge/license-MIT-blue)
+[![AUR](https://img.shields.io/aur/version/nexus-open)](https://aur.archlinux.org/packages/nexus-open)
 ![Go](https://img.shields.io/badge/go-1.26+-00ADD8)
 ![Flutter](https://img.shields.io/badge/flutter-3.24+-02569B)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange)
-[![AUR](https://img.shields.io/aur/version/nexus-open)](https://aur.archlinux.org/packages/nexus-open)
-
-## Overview
-
-Nexus Open is a native Linux application for the Corsair iCUE Nexus (640×48 pixel companion display). It streams live system metrics and custom content to the display, with a Flutter settings UI for configuration.
-
-The device is not officially supported on Linux — this project reverse-engineered the USB protocol to make it work.
+![License](https://img.shields.io/badge/license-MIT-blue)
 
 ## Screenshots
 
-**Hardware display** — 640×48 pixels; clock, weather, CPU, GPU temperature, and network throughput:
+**Hardware display** — clock, weather, CPU, GPU temp, and network on the 640×48 strip:
 
 ![640×48 hardware display showing clock, weather, CPU, GPU, and network zones](docs/screenshots/display.png)
 
@@ -25,17 +21,57 @@ The device is not officially supported on Linux — this project reverse-enginee
 
 ![Flutter settings UI with layout editor and live hardware preview strip](docs/screenshots/settings-ui.png)
 
+## How it works
+
+The Go daemon talks to the device directly via Linux usbfs ioctls
+(`/dev/bus/usb`) — no libusb, no CGo, no shared libraries. Each frame is split
+into 121 × 1024-byte packets with an 8-byte header and an RGBA→BGRA swap, then
+written to EP 0x02 OUT. Touch events come back on EP 0x81 IN as HID reports.
+The full protocol is in [docs/USB_PROTOCOL.md](docs/USB_PROTOCOL.md).
+
+Each display zone runs a separate Go binary over
+[go-plugin](https://github.com/hashicorp/go-plugin) (net/RPC). The daemon gives
+each sample call a deadline, shows a timeout payload if the plugin hangs, and
+restarts it with exponential backoff if it crashes. Adding a data source is a
+dropped binary and a line in the layout YAML — no daemon restart needed.
+
+The Flutter settings UI gets the live 640×48 RGBA framebuffer over WebSocket.
+There's no separate preview renderer; the preview is the exact bytes going to
+the hardware.
+
+Every release builds `.deb`, `.rpm`, `.pkg.tar.zst`, and `.tar.gz`, then CI
+installs each into a matching Docker container (Ubuntu, Fedora, Arch) and runs
+the daemon against a mock device to confirm the binary, udev rule, and systemd
+unit all work. Other CI gates: race detector, `govulncheck`, OpenAPI drift,
+sqlc drift, and Flutter analyze + test.
+
+## Architecture
+
+```text
+┌─────────────────┐   WebSocket (raw RGBA frames)   ┌──────────────────┐
+│   Flutter UI    │ ◄───────────────────────────────  │   Go daemon      │
+│  (settings,     │                                   │                  │
+│   live preview) │ ──── REST API :1985 ────────────► │  usbfs driver    │
+└─────────────────┘                                   └────────┬─────────┘
+                                                               │ go-plugin (net/RPC)
+                                              ┌────────────────▼──────────────────┐
+                                              │  Plugin subprocesses (one per zone) │
+                                              │  cpu-temp  cpu-load  gpu-temp      │
+                                              │  gpu-load  network   weather        │
+                                              └─────────────────────────────────────┘
+```
+
 ## Features
 
-- **Live system monitoring** — CPU and GPU temperature, load, and network throughput
-- **Weather display** — configurable location and units via open-meteo
-- **Sparklines and graphs** — per-zone graph types (sparkline, bar, area, segmented, combo)
-- **Multi-page layouts** — swipe between display pages with spring-physics transitions
-- **Flutter settings UI** — dark-mode, live 640×48 hardware preview via WebSocket
-- **Layout editor** — configure zones, plugins, and page order without restarting
-- **REST API** — full HTTP API for programmatic control; OpenAPI 3.0 spec at `/openapi.yaml`
-- **Plugin system** — write a plugin in Go, drop a binary, reference it in the layout YAML
-- **Headless mode** — runs as a systemd user service with no tray or UI required
+- Live CPU/GPU temperature, load, and network throughput
+- Weather via open-meteo (configurable location and units)
+- Per-zone graph types: sparkline, bar, area, segmented, combo
+- Multi-page layouts with spring-physics swipe transitions
+- Flutter settings UI with live 640×48 hardware preview
+- Layout editor — change zones and plugins without restarting
+- REST API with OpenAPI 3.0 spec
+- Plugin system — drop a Go binary, reference it in YAML
+- Runs headless as a systemd user service
 
 ## Quick Start
 
@@ -54,16 +90,15 @@ cd nexus-open
 # Install dev tools (air, overmind, watchexec)
 make setup
 
-# One-time: set up USB permissions
-sudo nexus-open --setup-udev   # or: sudo bash scripts/setup-udev.sh
+# One-time: install udev rules
+sudo nexus-open --setup-udev
 
-# Start full dev environment (Go hot-reload + Flutter hot-reload)
+# Start Go + Flutter with hot-reload
 make dev
 ```
 
-`make dev` starts the Go backend (via air), the Flutter UI, and a Dart file watcher under overmind. Changes to `.go` files rebuild the daemon in ~3 s; changes to `.dart` files hot-reload the UI in under a second.
-
-To develop without hardware:
+Go files rebuild in ~3 s; Dart files hot-reload in under a second. To run
+without hardware:
 
 ```bash
 NEXUS_MOCK_DEVICE=1 make dev
@@ -71,101 +106,78 @@ NEXUS_MOCK_DEVICE=1 make dev
 
 ### Install from package
 
-Download the latest release from the [GitHub releases page](https://github.com/mantonx/nexus-open/releases/latest).
+Download from the [releases page](https://github.com/mantonx/nexus-open/releases/latest).
 
-| Format | Who it's for |
-| --- | --- |
-| `.deb` | Debian, Ubuntu 24.04+ |
-| `.rpm` | Fedora, RHEL, openSUSE |
-| `.pkg.tar.zst` | Arch Linux |
-| `.AppImage` | Any distro (no install needed) |
-| `.tar.gz` | Manual / headless installs (static binary + udev rule) |
+| Format         | Distro                                                 |
+| -------------- | ------------------------------------------------------ |
+| `.deb`         | Debian, Ubuntu 24.04+                                  |
+| `.rpm`         | Fedora, RHEL, openSUSE                                 |
+| `.pkg.tar.zst` | Arch Linux                                             |
+| `.tar.gz`      | Manual / headless (static binary + udev rule)          |
 
-After installing, unplug and replug the Nexus — the bundled udev rule grants access automatically on any systemd desktop (no group membership needed).
+Unplug and replug the Nexus after installing — the bundled udev rule grants
+access automatically without group membership.
 
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for full instructions and USB permission setup.
+See [docs/INSTALLATION.md](docs/INSTALLATION.md) for details.
 
 ## Build Commands
 
 ```bash
-make build          # Development binary (with debug info)
-make build-release  # Optimised release binary (stripped)
-make build-ui       # Flutter UI only
-make build-plugins  # All external plugins
+make build          # Dev binary
+make build-release  # Stripped release binary
+make build-ui       # Flutter UI
+make build-plugins  # All plugin binaries
 make build-all      # Everything
 
-make test           # Run all tests
-make test-race      # Run with race detector
+make test           # Tests
+make test-race      # Tests with race detector
 make coverage       # Coverage report
 
-make dev            # Full hot-reload environment (Go + Flutter + watcher)
-make dev-backend    # Go hot-reload only (air)
-make dev-ui         # Flutter runner only
+make dev            # Go + Flutter hot-reload
+make dev-backend    # Go hot-reload only
+make dev-ui         # Flutter only
 
 make install        # Build + install to ~/.local/bin, restart service
-make doctor         # Check runtime health and dev toolchain
+make doctor         # Check runtime health and toolchain
 
 make deb            # DEB package
-make appimage       # AppImage
 make rpm            # RPM package
 ```
-
-## Architecture
-
-```text
-┌─────────────────┐    WebSocket (frame stream)   ┌─────────────────┐
-│   Flutter UI    │ ◄───────────────────────────── │   Go backend    │
-│  (settings,     │                                │  + USB device   │
-│   live preview) │ ──── REST API :1985 ──────────► │                 │
-└─────────────────┘                                └────────┬────────┘
-                                                            │ go-plugin (net/RPC)
-                                               ┌────────────▼────────────┐
-                                               │  Plugin subprocesses    │
-                                               │  cpu-temp  gpu-temp     │
-                                               │  cpu-load  gpu-load     │
-                                               │  network   weather      │
-                                               └─────────────────────────┘
-```
-
-The Flutter UI receives the hardware framebuffer as a live RGBA stream over WebSocket — there is no separate "preview render." Everything shown in the settings preview is the exact frame being sent to the device.
 
 ## Project Structure
 
 ```text
 nexus-open/
-├── cmd/nexus-open/         # Application entry point and CLI flags
+├── cmd/nexus-open/         # Entry point and CLI flags
 ├── internal/
 │   ├── app/                # Dependency wiring and lifecycle
-│   ├── api/                # REST API server and WebSocket hub
-│   ├── device/             # USB HID abstraction (real + mock)
+│   ├── api/                # REST API and WebSocket hub
+│   ├── device/             # Pure-Go usbfs driver (real + mock)
 │   ├── zone/               # Layout, renderer, sampler, transitions
-│   ├── plugins/            # Plugin host (go-plugin) and builtin plugins
-│   ├── store/              # SQLite persistence (settings, layout, configs)
-│   ├── settings/           # User settings manager
-│   ├── touch/              # Touch event reader and handler
-│   ├── tray/               # System tray integration
-│   └── design/             # Hardware display design tokens (generated)
-├── pkg/plugin/             # Public plugin interface (types, errors, protocol)
-├── plugins/                # External plugin source
-│   ├── cpu-temp/           # CPU temperature
-│   ├── cpu-load/           # CPU load percentage
-│   ├── gpu-temp/           # GPU temperature (AMD, Intel, NVIDIA)
-│   ├── gpu-load/           # GPU load and VRAM
-│   ├── network/            # Network throughput (↓/↑)
-│   ├── weather/            # Weather via open-meteo
-│   └── hello/              # Minimal example plugin
-├── ui/                     # Flutter application
+│   ├── plugins/            # Plugin host and builtin plugins
+│   ├── store/              # SQLite (settings, layout, zone configs)
+│   ├── settings/           # Settings manager
+│   ├── touch/              # Touch reader and gesture handler
+│   └── tray/               # System tray
+├── pkg/plugin/             # Public plugin interface
+├── plugins/
+│   ├── cpu-temp/
+│   ├── cpu-load/
+│   ├── gpu-temp/           # AMD, Intel, NVIDIA
+│   ├── gpu-load/
+│   ├── network/            # ↓/↑ throughput
+│   ├── weather/            # open-meteo
+│   └── hello/              # Minimal example
+├── ui/                     # Flutter app
 ├── configs/layouts/        # Layout YAML files
-├── design/                 # Style Dictionary token pipeline
-├── packaging/              # DEB, RPM, AppImage, Flatpak, Snap, AUR
-├── scripts/                # Build and setup scripts
-├── docs/                   # Documentation
-└── testdata/               # Golden frames and payload fixtures
+├── packaging/              # DEB, RPM, AUR PKGBUILD
+└── docs/
 ```
 
 ## Writing a Plugin
 
-Plugins are standalone Go binaries launched over net/RPC via [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin). The interface is in `pkg/plugin/`:
+Drop a Go binary anywhere, then reference it in a layout YAML with `exec:`.
+The interface:
 
 ```go
 type Plugin interface {
@@ -175,52 +187,72 @@ type Plugin interface {
 }
 ```
 
-See `plugins/hello/main.go` for a minimal working example. Reference your plugin binary in a layout YAML under `configs/layouts/` using an `exec:` specifier.
+See `plugins/hello/main.go` for a working example.
 
 ## REST API
 
-The backend listens on `127.0.0.1:1985`. Key endpoints:
+Listens on `127.0.0.1:1985`. Full spec at `/openapi.yaml` or `api/openapi.yaml`.
 
-| Endpoint | Description |
-| --- | --- |
-| `GET /api/health` | Health check and device status |
-| `GET /api/config` | Get user settings |
-| `POST /api/config` | Update user settings |
-| `GET /api/layout` | Current layout (pages + zones) |
-| `GET /api/plugins` | Plugin catalog with per-zone status |
-| `GET /api/zones/{id}/status` | Zone health and last error |
-| `GET /api/device/info` | Firmware version, connection state |
-| `GET /api/ws` | WebSocket — streams live 640×48 RGBA frames |
-| `GET /openapi.yaml` | OpenAPI 3.0 specification |
-
-Full documentation at `/openapi.yaml` when the backend is running, or in `api/openapi.yaml`.
+| Endpoint                     | Description                                 |
+| ---------------------------- | ------------------------------------------- |
+| `GET /api/health`            | Health check and device status              |
+| `GET /api/config`            | Settings                                    |
+| `POST /api/config`           | Update settings                             |
+| `GET /api/layout`            | Current layout (pages + zones)              |
+| `GET /api/plugins`           | Plugin catalog with per-zone status         |
+| `GET /api/zones/{id}/status` | Zone health and last error                  |
+| `GET /api/device/info`       | Connection state                            |
+| `GET /api/ws`                | WebSocket — live 640×48 RGBA frames         |
 
 ## Troubleshooting
 
-**Device not found** — Run `lsusb | grep 1b1c`. If the device doesn't appear, try a different USB port. If it appears but the app can't open it, run `make doctor` to check USB permissions.
+**Device not found** — `lsusb | grep 1b1c` to confirm it's visible. If it is
+but the daemon can't open it, run `make doctor` to check USB permissions.
 
-**USB permission denied** — Install udev rules and rejoin the `plugdev` group:
+**Permission denied** — reinstall the udev rule:
 
 ```bash
 sudo nexus-open --setup-udev
-sudo usermod -a -G plugdev $USER
 # Log out and back in
 ```
 
 See [DEVICE_SETUP.md](DEVICE_SETUP.md) for per-distro instructions.
 
-**Port 1985 in use** — `ss -tlnp | grep 1985` to find the conflicting process, or run on a different port with `nexus-open --port 1986`.
+**Port 1985 in use** — `ss -tlnp | grep 1985`, or use `nexus-open --port 1986`.
 
-**Plugin shows blank** — Check `GET /api/zones/{id}/status` for the error. Confirm the plugin binary is built (`make build-plugins`).
+**Plugin shows blank** — check `GET /api/zones/{id}/status` for the error.
+
+## Known Limitations
+
+**No "release to native" command.** On exit, the daemon sends a black frame
+but the firmware has no command to restore the iCUE boot screen. Touching the
+device after shutdown triggers a firmware USB reset — unplug and replug to
+reconnect.
+
+**Reconnect needs a settle delay.** The firmware takes ~2 seconds to reset its
+USB state after a disconnect. Reconnecting sooner causes repeated failed opens
+that require a physical replug. The reconnect loop waits automatically.
+
+**Settings UI requires XWayland.** The Flutter GTK3 embedder crashes on native
+Wayland. The packaged binary wraps the Flutter binary to unset `WAYLAND_DISPLAY`,
+so XWayland is used automatically. Tested compositors: GNOME, KDE Plasma, Sway,
+Hyprland. The daemon and hardware display are unaffected by display server.
+
+**Tested distros:** Arch Linux (primary), Ubuntu 24.04, Fedora 40. Older
+distros with glibc < 2.34 or GTK < 3.24 may have issues with the Flutter UI;
+the daemon has no such dependency.
+
+**x86-64 only.** The usbfs ioctl numbers in `internal/device/usbfs.go` are
+amd64-specific. Other architectures would need verified values.
+
+**Not affiliated with Corsair.** iCUE Nexus is a Corsair trademark. The
+protocol was reverse-engineered from usbmon captures with no reference
+implementation.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [DEVELOPMENT.md](DEVELOPMENT.md) for environment setup.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
----
-
-*Not affiliated with Corsair. iCUE Nexus is a trademark of Corsair.*

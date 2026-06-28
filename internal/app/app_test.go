@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/mantonx/nexus-open/internal/device"
 )
 
 // repoRoot walks up from this file's location to find the repo root (contains go.mod).
@@ -30,8 +32,19 @@ func defaultLayoutPath() string {
 	return filepath.Join(repoRoot(), "configs/layouts/multi-page.yaml")
 }
 
+// mockDeviceFactory returns a WithDeviceFactory option that injects a
+// pre-connected mock device, replacing the NEXUS_MOCK_DEVICE env var.
+func mockDeviceFactory() Option {
+	return WithDeviceFactory(func(ctx context.Context) (device.Device, error) {
+		m := device.NewMockDevice()
+		if err := m.Connect(ctx); err != nil {
+			return nil, err
+		}
+		return m, nil
+	})
+}
+
 func TestApp_New(t *testing.T) {
-	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -39,6 +52,7 @@ func TestApp_New(t *testing.T) {
 		WithConfigPath(""),
 		WithAPIPort(19850),
 		WithLayoutPath(defaultLayoutPath()),
+		mockDeviceFactory(),
 	)
 
 	if err != nil {
@@ -64,7 +78,6 @@ func TestApp_New(t *testing.T) {
 }
 
 func TestApp_Lifecycle(t *testing.T) {
-	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -73,6 +86,7 @@ func TestApp_Lifecycle(t *testing.T) {
 		WithAPIPort(19851),
 		WithLayoutPath(defaultLayoutPath()),
 		WithPluginsDir(t.TempDir()),
+		mockDeviceFactory(),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -88,9 +102,11 @@ func TestApp_Lifecycle(t *testing.T) {
 		done <- app.Run(ctx)
 	}()
 
-	// Wait for app to start. Allow generous headroom — start() iterates all
-	// zones synchronously and race-detector overhead can add several seconds.
-	time.Sleep(500 * time.Millisecond)
+	select {
+	case <-app.Ready():
+	case <-time.After(10 * time.Second):
+		t.Fatal("app did not become ready in time")
+	}
 
 	// Shutdown
 	if err := app.Shutdown(); err != nil {
@@ -108,7 +124,6 @@ func TestApp_Lifecycle(t *testing.T) {
 }
 
 func TestApp_MultipleShutdowns(t *testing.T) {
-	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -117,6 +132,7 @@ func TestApp_MultipleShutdowns(t *testing.T) {
 		WithAPIPort(19852),
 		WithLayoutPath(defaultLayoutPath()),
 		WithPluginsDir(t.TempDir()),
+		mockDeviceFactory(),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -126,7 +142,11 @@ func TestApp_MultipleShutdowns(t *testing.T) {
 	defer cancel()
 
 	go func() { _ = app.Run(ctx) }()
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-app.Ready():
+	case <-time.After(10 * time.Second):
+		t.Fatal("app did not become ready in time")
+	}
 
 	// First shutdown
 	if err := app.Shutdown(); err != nil {
@@ -140,7 +160,6 @@ func TestApp_MultipleShutdowns(t *testing.T) {
 }
 
 func TestApp_ContextCancellation(t *testing.T) {
-	t.Setenv("NEXUS_MOCK_DEVICE", "1")
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	app, err := New(
@@ -149,6 +168,7 @@ func TestApp_ContextCancellation(t *testing.T) {
 		WithAPIPort(19853),
 		WithLayoutPath(defaultLayoutPath()),
 		WithPluginsDir(t.TempDir()),
+		mockDeviceFactory(),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)
@@ -161,8 +181,11 @@ func TestApp_ContextCancellation(t *testing.T) {
 		done <- app.Run(ctx)
 	}()
 
-	// Wait for startup
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-app.Ready():
+	case <-time.After(10 * time.Second):
+		t.Fatal("app did not become ready in time")
+	}
 
 	// Cancel context
 	cancel()
@@ -190,6 +213,7 @@ func TestApp_Options(t *testing.T) {
 		WithConfigPath(""),
 		WithAPIPort(12345),
 		WithLayoutPath(defaultLayoutPath()),
+		mockDeviceFactory(),
 	)
 	if err != nil {
 		t.Fatalf("failed to create app: %v", err)

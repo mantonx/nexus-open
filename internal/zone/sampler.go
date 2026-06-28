@@ -42,6 +42,10 @@ type Sampler struct {
 	triggerChannels   map[string]chan struct{}   // zoneID -> trigger channel for immediate sampling
 	zoneErrors        map[string]ZoneStatus     // zoneID -> last known status
 	zoneErrorsMu      sync.RWMutex
+
+	// crashBackoffStart is the initial backoff duration for plugin crash restarts.
+	// Defaults to crashBackoffInit (1s). Overridable in tests to avoid real waits.
+	crashBackoffStart time.Duration
 }
 
 // NewSampler creates a new plugin sampler. pluginsDir is the absolute path to
@@ -67,6 +71,7 @@ func NewSampler(ctx context.Context, logger *slog.Logger, manager *Manager, zone
 		zoneWidths:        make(map[string]int),
 		triggerChannels:   make(map[string]chan struct{}),
 		zoneErrors:        make(map[string]ZoneStatus),
+		crashBackoffStart: crashBackoffInit,
 	}
 
 	// Register built-in factories — each zone gets its own instance via the factory,
@@ -224,7 +229,7 @@ func (s *Sampler) sampleLoop(ctx context.Context, zoneID string, mod plugin.Plug
 	isExec := strings.HasPrefix(s.pluginSpec[zoneID], "exec:")
 	s.mu.RUnlock()
 
-	backoff := crashBackoffInit
+	backoff := s.crashBackoffStart
 
 	for {
 		select {
@@ -320,6 +325,9 @@ func (s *Sampler) RestartZone(zoneConfig ZoneConfig) error {
 		delete(s.pluginSpec, zoneConfig.ID)
 	}
 	s.mu.Unlock()
+
+	// Evict the old subprocess so it doesn't linger until global StopAll.
+	s.pluginHost.Evict(zoneConfig.ID)
 
 	return s.startZoneSampling(zoneConfig)
 }

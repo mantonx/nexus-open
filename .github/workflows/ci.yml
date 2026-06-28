@@ -75,9 +75,6 @@ jobs:
           go-version: "1.26.x"
           cache: true
 
-      - name: Install system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
-
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9.2.1
         with:
@@ -91,21 +88,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Cache apt packages
-        uses: actions/cache@v6
-        with:
-          path: /var/cache/apt/archives
-          key: apt-${{ runner.os }}-go-deps-v1
-          restore-keys: apt-${{ runner.os }}-go-deps-
-
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: "1.26.x"
           cache: true
-
-      - name: Install system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
 
       - name: Vet
         run: go vet ./...
@@ -118,7 +105,7 @@ jobs:
 
       - name: Test
         env:
-          CGO_ENABLED: "1"
+          CGO_ENABLED: "0"
           NEXUS_MOCK_DEVICE: "1"
         run: go test -race -coverprofile=coverage.out ./...
 
@@ -220,9 +207,6 @@ jobs:
         with:
           go-version: "1.26.x"
           cache: true
-
-      - name: Install system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev
 
       - name: Cache go-openapi binary
         uses: actions/cache@v6
@@ -365,9 +349,7 @@ jobs:
       - name: Install packaging dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y \
-            libusb-1.0-0-dev libudev-dev libayatana-appindicator3-dev \
-            rpm libarchive-tools
+          sudo apt-get install -y rpm libarchive-tools
 
       - name: Set up Go
         uses: actions/setup-go@v6
