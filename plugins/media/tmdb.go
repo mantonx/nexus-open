@@ -17,21 +17,33 @@ const (
 	tmdbTokenFile = ".config/nexus-open/tmdb-token"
 )
 
-// tmdbTokenParts holds the bundled API token split across multiple vars so it
-// doesn't appear as a single string in the binary. This is a speed bump only —
-// the token is recoverable from any build. Users can supply their own token at
-// ~/.config/nexus-open/tmdb-token instead.
+// bundledTMDbTokenHex holds the bundled API token XORed against the key "NXOR"
+// and encoded as a hex string. This is a speed bump — the token is recoverable
+// from any build, but it won't appear as a recognisable string under `strings`.
+// Users can supply their own token at ~/.config/nexus-open/tmdb-token instead.
 //
-// To inject at release build time:
+// To inject at release build time, encode the token first:
 //
-//	go build -ldflags "-X main.tmdbTokenA=<first-half> -X main.tmdbTokenB=<second-half>"
-var (
-	tmdbTokenA string // first half, injected via ldflags
-	tmdbTokenB string // second half, injected via ldflags
-)
+//	scripts/xor-token.sh <token>
+//
+// Then pass the output to:
+//
+//	go build -ldflags "-X main.bundledTMDbTokenHex=<hex>"
+var bundledTMDbTokenHex string
 
 func bundledTMDbToken() string {
-	return tmdbTokenA + tmdbTokenB
+	if bundledTMDbTokenHex == "" {
+		return ""
+	}
+	key := []byte("NXOR")
+	src := bundledTMDbTokenHex
+	out := make([]byte, len(src)/2)
+	for i := range out {
+		var b byte
+		fmt.Sscanf(src[i*2:i*2+2], "%02x", &b)
+		out[i] = b ^ key[i%len(key)]
+	}
+	return string(out)
 }
 
 // tmdbCache caches poster URLs by title to avoid hitting the API on every sample.
