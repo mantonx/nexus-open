@@ -1,5 +1,5 @@
-name: open_next
-description: Open Next - Linux desktop application
+name: nexus_open
+description: Nexus Open - Linux desktop application
 publish_to: 'none'
 
 version: 0.0.0+0

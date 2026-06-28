@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:provider/provider.dart';
-import 'package:open_next/main.dart' as app;
-import 'package:open_next/src/models/settings_state.dart';
+import 'package:nexus_open/main.dart' as app;
+import 'package:nexus_open/src/models/settings_state.dart';
 
 // When NEXUS_WITH_BACKEND=1, the Go backend drives firstRun state via the
 // health endpoint — no need to force it manually.

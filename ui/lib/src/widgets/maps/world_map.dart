@@ -45,7 +45,7 @@ class WorldMap extends StatelessWidget {
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'open_next',
+                  userAgentPackageName: 'nexus_open',
                   maxZoom: 19,
                 ),
                 MarkerLayer(

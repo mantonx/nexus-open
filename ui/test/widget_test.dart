@@ -7,11 +7,11 @@ import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:open_next/src/models/settings_state.dart';
-import 'package:open_next/src/services/nexus_api_service.dart';
-import 'package:open_next/src/services/ws_service.dart';
-import 'package:open_next/src/widgets/settings/tabs/display_tab.dart';
-import 'package:open_next/src/widgets/settings/tabs/plugins_tab.dart';
+import 'package:nexus_open/src/models/settings_state.dart';
+import 'package:nexus_open/src/services/nexus_api_service.dart';
+import 'package:nexus_open/src/services/ws_service.dart';
+import 'package:nexus_open/src/widgets/settings/tabs/display_tab.dart';
+import 'package:nexus_open/src/widgets/settings/tabs/plugins_tab.dart';
 // AppTheme is intentionally not imported here — google_fonts 5.1.0 has a
 // compile-time incompatibility with Dart 3.11 in test mode. Tests use a
 // plain ThemeData() instead. Upgrade google_fonts to fix (see pubspec.yaml).

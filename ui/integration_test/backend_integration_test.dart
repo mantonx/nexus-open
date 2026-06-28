@@ -27,9 +27,9 @@ import 'package:integration_test/integration_test.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:provider/provider.dart';
-import 'package:open_next/main.dart' as app;
-import 'package:open_next/src/models/settings_state.dart';
-import 'package:open_next/src/services/ws_service.dart';
+import 'package:nexus_open/main.dart' as app;
+import 'package:nexus_open/src/models/settings_state.dart';
+import 'package:nexus_open/src/services/ws_service.dart';
 
 final _withBackend = Platform.environment['NEXUS_WITH_BACKEND'] == '1';
 const _baseUrl = 'http://localhost:1985';

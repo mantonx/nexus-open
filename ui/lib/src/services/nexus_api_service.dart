@@ -78,7 +78,7 @@ class NexusApiService {
     request.files
         .add(await http.MultipartFile.fromPath('image', imageFile.path));
 
-    final streamedResponse = await request.send().timeout(timeout);
+    final streamedResponse = await _client.send(request).timeout(timeout);
     final response = await http.Response.fromStream(streamedResponse);
 
     if (response.statusCode == 200) {
