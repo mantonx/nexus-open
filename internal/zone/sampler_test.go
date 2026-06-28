@@ -534,7 +534,7 @@ func TestSampler_RestartPreservesZoneConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Seed the page + zone rows so SetZonePluginConfig has a row to UPDATE.
 	pageID, err := db.CreatePage("P", 0)
