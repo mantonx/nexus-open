@@ -48,39 +48,26 @@ echo 'export PATH=/usr/local/go/bin:$PATH' >> ~/.bashrc && source ~/.bashrc
 sudo dnf install golang git
 ```
 
-### Build steps
+### Build and install
 
 ```bash
 git clone https://github.com/mantonx/nexus-open.git
 cd nexus-open
 
-# Install dev tooling (air, overmind, watchexec)
-make setup
-
-# One-time: install udev rules and set USB permissions
-sudo nexus-open --setup-udev   # or: sudo bash scripts/setup-udev.sh
-
-# Start the full hot-reload dev environment
-make dev
+# Build everything and install system-wide (same layout as the distro packages)
+make install
 ```
 
-To build a production binary without the UI:
+`make install` builds the Go backend, Flutter UI, and all plugins, then installs
+them to `/usr/bin`, `/usr/lib/nexus-open/`, and `/usr/lib/systemd/user/` using
+`sudo`. The service is enabled and started automatically.
 
-```bash
-make build-release
-sudo install -m755 nexus-open /usr/local/bin/nexus-open
-```
-
-To also build the Flutter settings UI:
-
-```bash
-make build-ui   # outputs to ui/build/linux/x64/release/bundle/
-```
+Unplug and replug the Nexus after installing so the udev rule takes effect.
 
 ## Running as a service
 
 ```bash
-# Enable and start
+# Enable and start (done automatically by make install)
 systemctl --user enable --now nexus-open.service
 
 # View logs
@@ -119,13 +106,8 @@ sudo apt remove nexus-open
 sudo dnf remove nexus-open
 ```
 
-**Manual (tar.gz install):**
+**Built from source:**
 
 ```bash
-systemctl --user stop nexus-open.service
-systemctl --user disable nexus-open.service
-sudo rm /usr/local/bin/nexus-open
-sudo rm /etc/udev/rules.d/99-corsair-nexus.rules
-sudo udevadm control --reload-rules
-rm -rf ~/.local/share/nexus-open
+make uninstall
 ```

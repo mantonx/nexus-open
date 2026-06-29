@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -101,6 +103,97 @@ func TestWaitForFlutterSucceeds(t *testing.T) {
 	m := newTestManager(srv.Listener.Addr().String())
 	if err := m.waitForFlutter(time.Second); err != nil {
 		t.Fatalf("expected success, got: %v", err)
+	}
+}
+
+func TestFlutterSearchPathsOrder(t *testing.T) {
+	paths := flutterSearchPaths("/usr/bin")
+	if len(paths) == 0 {
+		t.Fatal("expected at least one search path")
+	}
+	if paths[0] != "/usr/lib/nexus-open/ui-bundle/ui" {
+		t.Errorf("expected system path first, got %q", paths[0])
+	}
+	for _, p := range paths[1:] {
+		if p == "/usr/lib/nexus-open/ui-bundle/ui" {
+			t.Error("system path appears more than once")
+		}
+		if filepath.IsAbs(p) && p == paths[0] {
+			t.Errorf("duplicate path: %q", p)
+		}
+	}
+}
+
+func TestFindFlutterExecutableSiblingBeforeDevPath(t *testing.T) {
+	dir := t.TempDir()
+	paths := flutterSearchPaths(dir)
+
+	// Create fake executables at sibling (paths[1]) and dev (paths[2]).
+	for _, p := range paths[1:] {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Walk from paths[1] onward (skip system path which we can't control).
+	found := ""
+	for _, p := range paths[1:] {
+		if _, err := os.Stat(p); err == nil {
+			found = p
+			break
+		}
+	}
+	if found != paths[1] {
+		t.Errorf("expected sibling path %q first, got %q", paths[1], found)
+	}
+}
+
+func TestFindFlutterExecutableSystemBeforeSibling(t *testing.T) {
+	// Verify system path is listed before sibling in the search order.
+	paths := flutterSearchPaths("/some/dir")
+	if len(paths) < 2 {
+		t.Fatal("expected at least 2 paths")
+	}
+	systemIdx := -1
+	siblingIdx := -1
+	for i, p := range paths {
+		if p == "/usr/lib/nexus-open/ui-bundle/ui" {
+			systemIdx = i
+		}
+		if p == "/some/dir/ui" {
+			siblingIdx = i
+		}
+	}
+	if systemIdx < 0 {
+		t.Fatal("system path not in search list")
+	}
+	if siblingIdx < 0 {
+		t.Fatal("sibling path not in search list")
+	}
+	if systemIdx >= siblingIdx {
+		t.Errorf("system path (index %d) must come before sibling (index %d)", systemIdx, siblingIdx)
+	}
+}
+
+func TestFindFlutterExecutableNotFound(t *testing.T) {
+	dir := t.TempDir() // empty — nothing exists
+	found := ""
+	for _, p := range flutterSearchPaths(dir) {
+		if _, err := os.Stat(p); err == nil {
+			found = p
+			break
+		}
+	}
+	// system path (/usr/lib/nexus-open/ui-bundle/ui) is installed on this machine,
+	// so skip the "not found" assertion if it exists.
+	if _, err := os.Stat("/usr/lib/nexus-open/ui-bundle/ui"); err == nil {
+		t.Skip("system path exists on this machine — skipping not-found test")
+	}
+	if found != "" {
+		t.Errorf("expected no path found in empty dir, got %q", found)
 	}
 }
 

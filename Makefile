@@ -66,8 +66,8 @@ help:
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean         - Remove build artifacts"
-	@echo "  make install       - Build and install backend + UI, restart service"
-	@echo "  make uninstall     - Stop service and remove installed binary"
+	@echo "  make install       - Build and install system-wide (requires sudo), restart service"
+	@echo "  make uninstall     - Stop service and remove system-wide install (requires sudo)"
 	@echo ""
 	@echo "Version: $(VERSION) (commit: $(COMMIT))"
 
@@ -189,7 +189,7 @@ doctor:
 	elif pgrep -x nexus-open > /dev/null 2>&1; then \
 		ok "daemon running (standalone)"; \
 	else \
-		bad "daemon not running — run 'make install' then start the service, or 'make dev-backend'"; \
+		bad "daemon not running — run 'make install' to install system-wide, or 'make dev-backend' for dev"; \
 	fi; \
 	\
 	if curl -sf -H "X-Nexus-Token: $$(cat ~/.config/nexus-open/token 2>/dev/null)" \
@@ -281,8 +281,8 @@ doctor:
 
 # Development mode with live reload (requires github.com/air-verse/air)
 # Rebuilds and restarts the Go daemon + plugins on any .go file change.
-# The installed plugins in ~/.local/share/nexus-open/plugins are used at runtime;
-# run 'make install' once first so the layout config and plugins are in place.
+# Plugins are loaded from /usr/lib/nexus-open/plugins at runtime;
+# run 'make install' once first so the system layout is in place.
 dev-backend:
 	@AIR=$$(command -v air 2>/dev/null || echo ~/go/bin/air); \
 	if [ ! -x "$$AIR" ]; then \
@@ -290,7 +290,6 @@ dev-backend:
 		exit 1; \
 	fi; \
 	systemctl --user stop nexus-open.service 2>/dev/null || true; \
-	systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true; \
 	NEXUS_MOCK_DEVICE=0 NEXUS_DEBUG=1 "$$AIR"
 
 # Flutter hot-reload UI (runs flutter run in debug mode).
@@ -377,47 +376,78 @@ all: deb rpm
 	@echo "✓ All packages built successfully!"
 	@ls -lh $(DIST_DIR)/
 
-# Install to user service location and restart the systemd service.
-# The service runs from ~/.local/bin/nexus-open and the UI from
-# ~/.local/share/nexus-open/ui.real -- both must be updated together.
-INSTALL_BIN    := $(HOME)/.local/bin/$(APP_NAME)
-INSTALL_DATA   := $(HOME)/.local/share/$(APP_NAME)
-SYSTEMD_UNIT   := app-nexus\x2dopen\x2dautostart@autostart.service
+# Install system-wide (requires sudo). Uses the same layout as the distro packages:
+#   /usr/bin/nexus-open
+#   /usr/lib/nexus-open/plugins/
+#   /usr/lib/nexus-open/ui-bundle/   (ui wrapper + ui.real for XWayland)
+#   /usr/lib/systemd/user/nexus-open.service
+#   /usr/share/nexus-open/configs/   (layout YAML for first-run seeding)
+#   /usr/share/applications/nexus-open.desktop
+#   /usr/share/icons/hicolor/        (app icons)
+#   /usr/lib/udev/rules.d/99-corsair-nexus.rules
+SYS_BIN       := /usr/bin
+SYS_LIB       := /usr/lib/nexus-open
+SYS_UNIT      := /usr/lib/systemd/user/nexus-open.service
+SYS_DESKTOP   := /usr/share/applications/nexus-open.desktop
+SYS_UDEV      := /usr/lib/udev/rules.d/99-corsair-nexus.rules
 
 install: build-release build-ui build-plugins
-	@if pacman -Q nexus-open > /dev/null 2>&1; then \
-		echo "✗ nexus-open is installed via pacman/AUR."; \
-		echo "  'make install' and the AUR package share ~/.local/share/nexus-open"; \
-		echo "  and will conflict. Uninstall the package first: sudo pacman -R nexus-open"; \
-		exit 1; \
-	fi
 	@echo "Stopping service..."
-	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
-	@echo "Installing backend to $(INSTALL_BIN)..."
-	@cp $(BIN_DIR)/$(APP_NAME) $(INSTALL_BIN)
-	@chmod 755 $(INSTALL_BIN)
-	@echo "Installing Flutter UI to $(INSTALL_DATA)..."
-	@cp $(UI_DIR)/build/linux/x64/release/bundle/ui $(INSTALL_DATA)/ui.real
-	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/lib/. $(INSTALL_DATA)/lib/
-	@cp -r $(UI_DIR)/build/linux/x64/release/bundle/data/. $(INSTALL_DATA)/data/
-	@echo "Installing plugins to $(INSTALL_DATA)/plugins..."
-	@mkdir -p $(INSTALL_DATA)/plugins
+	@systemctl --user stop nexus-open.service 2>/dev/null || true
+	@echo "Installing binary to $(SYS_BIN)..."
+	@sudo install -Dm755 $(BIN_DIR)/$(APP_NAME) $(SYS_BIN)/$(APP_NAME)
+	@echo "Installing plugins to $(SYS_LIB)/plugins..."
+	@sudo mkdir -p $(SYS_LIB)/plugins
 	@for mod in cpu-temp gpu-temp network weather cpu-load gpu-load media; do \
 		if [ -f $(BIN_DIR)/plugins/nexus-$$mod ]; then \
-			cp $(BIN_DIR)/plugins/nexus-$$mod $(INSTALL_DATA)/plugins/nexus-$$mod; \
+			sudo install -Dm755 $(BIN_DIR)/plugins/nexus-$$mod $(SYS_LIB)/plugins/nexus-$$mod; \
 		fi; \
 	done
-	@echo "Installing layout config to $(INSTALL_DATA)..."
-	@mkdir -p $(INSTALL_DATA)/configs/layouts
-	@cp configs/layouts/multi-page.yaml $(INSTALL_DATA)/configs/layouts/
+	@echo "Installing Flutter UI bundle to $(SYS_LIB)/ui-bundle..."
+	@sudo mkdir -p $(SYS_LIB)/ui-bundle
+	@sudo cp -r $(UI_BUILD_DIR)/. $(SYS_LIB)/ui-bundle/
+	@sudo mv $(SYS_LIB)/ui-bundle/ui $(SYS_LIB)/ui-bundle/ui.real
+	@printf '#!/usr/bin/env bash\nexec env WAYLAND_DISPLAY= "$$(dirname "$$0")/ui.real" "$$@"\n' | sudo tee $(SYS_LIB)/ui-bundle/ui > /dev/null
+	@sudo chmod 755 $(SYS_LIB)/ui-bundle/ui $(SYS_LIB)/ui-bundle/ui.real
+	@echo "Installing layout configs to /usr/share/nexus-open/..."
+	@sudo mkdir -p /usr/share/nexus-open
+	@sudo cp -r configs/. /usr/share/nexus-open/
+	@echo "Installing icons..."
+	@for size in 16 22 32 48 64 128 256; do \
+		if [ -f internal/tray/icon-$$size.png ]; then \
+			sudo install -Dm644 internal/tray/icon-$$size.png \
+				/usr/share/icons/hicolor/$${size}x$${size}/apps/nexus-open.png; \
+		fi; \
+	done
+	@command -v gtk-update-icon-cache > /dev/null 2>&1 && sudo gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+	@echo "Installing systemd unit..."
+	@sudo install -Dm644 packaging/systemd/nexus-open.service $(SYS_UNIT)
+	@sudo systemctl daemon-reload 2>/dev/null || true
+	@echo "Installing desktop entry..."
+	@sudo install -Dm644 packaging/desktop/nexus-open.desktop $(SYS_DESKTOP)
+	@echo "Installing udev rule..."
+	@sudo install -Dm644 packaging/udev/99-corsair-nexus.rules $(SYS_UDEV)
+	@sudo udevadm control --reload-rules 2>/dev/null || true
 	@echo "Restarting service..."
-	@systemctl --user start "$(SYSTEMD_UNIT)"
+	@systemctl --user enable --now nexus-open.service
 	@echo "✓ Installed and restarted"
 
-# Uninstall from user locations
+# Uninstall system-wide install (requires sudo).
 uninstall:
-	@systemctl --user stop "$(SYSTEMD_UNIT)" 2>/dev/null || true
-	@rm -f $(INSTALL_BIN)
+	@systemctl --user stop    nexus-open.service 2>/dev/null || true
+	@systemctl --user disable nexus-open.service 2>/dev/null || true
+	@sudo rm -f  $(SYS_BIN)/$(APP_NAME)
+	@sudo rm -rf $(SYS_LIB)
+	@sudo rm -f  $(SYS_UNIT)
+	@sudo rm -f  $(SYS_DESKTOP)
+	@sudo rm -f  $(SYS_UDEV)
+	@sudo rm -rf /usr/share/nexus-open
+	@for size in 16 22 32 48 64 128 256; do \
+		sudo rm -f /usr/share/icons/hicolor/$${size}x$${size}/apps/nexus-open.png; \
+	done
+	@command -v gtk-update-icon-cache > /dev/null 2>&1 && sudo gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+	@sudo systemctl daemon-reload 2>/dev/null || true
+	@sudo udevadm control --reload-rules 2>/dev/null || true
 	@echo "✓ Uninstalled"
 
 # Clean build artifacts

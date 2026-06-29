@@ -204,43 +204,27 @@ func killOrphanedUI() {
 	}
 }
 
+// flutterSearchPaths returns the ordered list of candidate Flutter executable
+// paths given the directory of the running daemon binary.
+func flutterSearchPaths(exeDir string) []string {
+	return []string{
+		"/usr/lib/nexus-open/ui-bundle/ui",
+		filepath.Join(exeDir, "ui"),
+		filepath.Join(exeDir, "..", "ui", "build", "linux", "x64", "release", "bundle", "ui"),
+	}
+}
+
 // findFlutterExecutable locates the Flutter executable
 func (m *Manager) findFlutterExecutable() (string, error) {
-	// Get the directory of the current executable
 	exePath, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	exeDir := filepath.Dir(exePath)
-
-	// Priority 1: XDG install path (~/.local/share/nexus-open/ui)
-	xdgData := os.Getenv("XDG_DATA_HOME")
-	if xdgData == "" {
-		xdgData = filepath.Join(os.Getenv("HOME"), ".local", "share")
+	for _, p := range flutterSearchPaths(filepath.Dir(exePath)) {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
 	}
-	installedPath := filepath.Join(xdgData, "nexus-open", "ui")
-	if _, err := os.Stat(installedPath); err == nil {
-		return installedPath, nil
-	}
-
-	// Priority 2: system package install path (/usr/lib/nexus-open/ui-bundle/ui)
-	systemPath := "/usr/lib/nexus-open/ui-bundle/ui"
-	if _, err := os.Stat(systemPath); err == nil {
-		return systemPath, nil
-	}
-
-	// Priority 3: sibling to the daemon binary (single-dir deployment)
-	siblingPath := filepath.Join(exeDir, "ui")
-	if _, err := os.Stat(siblingPath); err == nil {
-		return siblingPath, nil
-	}
-
-	// Priority 4: development build path (running from repo root)
-	devPath := filepath.Join(exeDir, "..", "ui", "build", "linux", "x64", "release", "bundle", "ui")
-	if _, err := os.Stat(devPath); err == nil {
-		return devPath, nil
-	}
-
 	return "", fmt.Errorf("flutter UI binary not found; run 'cd ui && flutter build linux --release'")
 }
 

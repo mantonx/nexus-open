@@ -100,7 +100,7 @@ kill -USR2 $(cat /tmp/nexus-flutter.pid)
 | --- | --- | --- |
 | `NEXUS_MOCK_DEVICE` | `0` | Set to `1` to skip USB and use the in-process mock device |
 | `NEXUS_DEBUG` | `0` | Set to `1` for verbose structured log output |
-| `NEXUS_PLUGINS_DIR` | auto | Override the plugin binary directory (default: `~/.local/share/nexus-open/plugins`) |
+| `NEXUS_PLUGINS_DIR` | auto | Override the plugin binary directory (default: `/usr/lib/nexus-open/plugins`) |
 
 ## Running Individual Components
 
@@ -143,13 +143,13 @@ go test ./test/fixture/ -update
 
 ## Install / Full Deploy
 
-Use `make install` when you need to update the installed service binary, UI bundle, and plugins together — for example after changing the layout YAML or adding a new plugin for the first time:
+Use `make install` when you need to update the installed service binary, UI bundle, and plugins together — for example after changing the layout YAML or adding a new plugin for the first time. It installs system-wide to `/usr/bin` and `/usr/lib/nexus-open/` (same layout as the distro packages) and requires `sudo`:
 
 ```bash
-make install   # builds everything, stops service, installs, restarts
+make install   # builds everything, stops service, installs system-wide, restarts
 ```
 
-For day-to-day code changes, `make dev` is faster and doesn't touch the installed service.
+For day-to-day code changes, `make dev` is faster and doesn't touch the installed system files.
 
 ## Health Check
 

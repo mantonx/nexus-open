@@ -159,15 +159,17 @@ build_staging() {
 
     # Flutter UI bundle (optional)
     if [[ -d "$UI_BUNDLE" ]]; then
-        mkdir -p "$STAGING_DIR/usr/lib/nexus-open"
-        cp -r "$UI_BUNDLE/." "$STAGING_DIR/usr/lib/nexus-open/"
-        # Wrap the Flutter binary for XWayland (same as install.sh)
-        mv "$STAGING_DIR/usr/lib/nexus-open/ui" "$STAGING_DIR/usr/lib/nexus-open/ui.real"
-        cat > "$STAGING_DIR/usr/lib/nexus-open/ui" << 'WRAPPER'
+        mkdir -p "$STAGING_DIR/usr/lib/nexus-open/ui-bundle"
+        cp -r "$UI_BUNDLE/." "$STAGING_DIR/usr/lib/nexus-open/ui-bundle/"
+        # Wrap the Flutter binary so it forces X11/XWayland — the GTK3 embedder
+        # crashes on native Wayland sockets.
+        mv "$STAGING_DIR/usr/lib/nexus-open/ui-bundle/ui" \
+           "$STAGING_DIR/usr/lib/nexus-open/ui-bundle/ui.real"
+        cat > "$STAGING_DIR/usr/lib/nexus-open/ui-bundle/ui" << 'WRAPPER'
 #!/usr/bin/env bash
 exec env WAYLAND_DISPLAY= "$(dirname "$0")/ui.real" "$@"
 WRAPPER
-        chmod +x "$STAGING_DIR/usr/lib/nexus-open/ui"
+        chmod +x "$STAGING_DIR/usr/lib/nexus-open/ui-bundle/ui"
         ok "Included Flutter UI bundle"
     else
         warn "Flutter UI not built — package will be daemon-only"
@@ -307,7 +309,7 @@ build_appimage() {
 run_runtime_test() {
     local image="$1" install_block="$2" flutter_deps_block="$3"
     local uninstall_block="$4" screenshot_pkg="$5" label="$6"
-    local ui_path="/usr/lib/nexus-open/ui"
+    local ui_path="/usr/lib/nexus-open/ui-bundle/ui"
     local shots_dir="$REPO_DIR/test-screenshots"
     mkdir -p "$shots_dir"
 
@@ -336,6 +338,31 @@ run_runtime_test() {
                 && echo 'DESKTOP_FILE_OK' || { echo 'DESKTOP_FILE_MISSING'; exit 1; }
             test -f /usr/lib/systemd/user/nexus-open.service \
                 && echo 'SYSTEMD_SERVICE_OK' || { echo 'SYSTEMD_SERVICE_MISSING'; exit 1; }
+
+            # ── Flutter UI bundle layout ──────────────────────────────────────
+            test -f /usr/lib/nexus-open/ui-bundle/ui \
+                && echo 'UI_WRAPPER_OK' || { echo 'UI_WRAPPER_MISSING'; exit 1; }
+            test -f /usr/lib/nexus-open/ui-bundle/ui.real \
+                && echo 'UI_REAL_OK' || { echo 'UI_REAL_MISSING'; exit 1; }
+            grep -q 'WAYLAND_DISPLAY=' /usr/lib/nexus-open/ui-bundle/ui \
+                && echo 'UI_WRAPPER_CONTENT_OK' || { echo 'UI_WRAPPER_CONTENT_BAD: missing WAYLAND_DISPLAY= line'; exit 1; }
+            # Check ELF magic bytes (\x7fELF) without requiring the 'file' command.
+            head -c4 /usr/lib/nexus-open/ui-bundle/ui.real | grep -qP '^\x7fELF' \
+                && echo 'UI_REAL_ELF_OK' || { echo 'UI_REAL_NOT_ELF'; exit 1; }
+
+            # ── layout configs ────────────────────────────────────────────────
+            test -d /usr/share/nexus-open/configs \
+                && echo 'CONFIGS_OK' || { echo 'CONFIGS_MISSING'; exit 1; }
+
+            # ── icons (at least one hicolor size) ─────────────────────────────
+            ICON_FOUND=0
+            for size in 16 22 32 48 64 128 256; do
+                if [ -f \"/usr/share/icons/hicolor/\${size}x\${size}/apps/nexus-open.png\" ]; then
+                    ICON_FOUND=1; break
+                fi
+            done
+            [ \"\$ICON_FOUND\" -eq 1 ] \
+                && echo 'ICONS_OK' || { echo 'ICONS_MISSING'; exit 1; }
 
             # ── all plugins present and executable ────────────────────────────
             PLUGIN_FAIL=0
@@ -422,6 +449,9 @@ run_runtime_test() {
             test -f /usr/lib/nexus-open/plugins/nexus-media \
                 && { echo 'UNINSTALL_FAILED: plugins still present'; exit 1; } \
                 || echo 'UNINSTALL_PLUGINS_OK'
+            test -f /usr/lib/nexus-open/ui-bundle/ui \
+                && { echo 'UNINSTALL_FAILED: UI bundle still present'; exit 1; } \
+                || echo 'UNINSTALL_UI_OK'
             test -f /usr/lib/systemd/user/nexus-open.service \
                 && { echo 'UNINSTALL_FAILED: service file still present'; exit 1; } \
                 || echo 'UNINSTALL_SERVICE_OK'
