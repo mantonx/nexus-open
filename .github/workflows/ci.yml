@@ -70,7 +70,7 @@ jobs:
           restore-keys: apt-${{ runner.os }}-go-deps-
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
           cache: true
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
           cache: true
@@ -114,7 +114,7 @@ jobs:
 
   flutter:
     name: Flutter
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: changes
     if: needs.changes.outputs.flutter == 'true'
     steps:
@@ -203,7 +203,7 @@ jobs:
           restore-keys: apt-${{ runner.os }}-go-deps-
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
           cache: true
@@ -249,7 +249,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
           cache: true
@@ -275,7 +275,7 @@ jobs:
   # Uploads packages as artifacts so the matrix test jobs don't need to rebuild.
   package-build:
     name: Build Packages
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [changes, lint, test, flutter, sqlc-drift]
     if: |
       always() &&
@@ -352,7 +352,7 @@ jobs:
           sudo apt-get install -y rpm libarchive-tools
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
           cache: true
@@ -384,7 +384,7 @@ jobs:
   # Downloads pre-built packages and delegates to build-package.sh --test-<fmt>.
   package-test:
     name: Runtime Test (${{ matrix.label }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: package-build
     if: always() && needs.package-build.result == 'success'
     timeout-minutes: 15
