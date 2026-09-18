@@ -14,7 +14,7 @@ jobs:
   # ── Build Go binary + Flutter UI, produce all three package formats ──────────
   build:
     name: Build Packages
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -86,7 +86,7 @@ jobs:
             --dart-define=APP_VERSION="${{ steps.version.outputs.version }}"
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
           cache: true
@@ -133,7 +133,7 @@ jobs:
   # ── Runtime tests — gate the release on all three distros passing ────────────
   test:
     name: Runtime Test (${{ matrix.label }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: build
     timeout-minutes: 15
     strategy:
@@ -181,7 +181,7 @@ jobs:
   # ── Publish — only runs when all runtime tests pass ──────────────────────────
   publish:
     name: Publish Release
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [build, test]
     permissions:
       contents: write
@@ -250,7 +250,7 @@ jobs:
   # ── AUR — runs after GitHub release assets are attached ──────────────────────
   aur:
     name: Publish to AUR
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: [build, publish]
     steps:
       - uses: actions/checkout@v7
