@@ -43,5 +43,9 @@ jobs:
             target
           key: cargo-${{ matrix.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-${{ matrix.os }}-
+      # Slint's font lookup builds against fontconfig: its build script asks
+      # pkg-config for it even though the library is loaded at run time.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfontconfig-dev
       - run: cargo clippy --workspace --all-targets --locked
       - run: cargo test --workspace --locked
