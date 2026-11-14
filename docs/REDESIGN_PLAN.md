@@ -690,3 +690,14 @@ golang` finds nothing outside the changelog.
   docs/STORAGE.md (daemon as sole writer, tables plus per-type JSON fields,
   page actions by ID, snapshot undo, TOML kept as the import/export format).
   Phase 4's editor waits on it.
+- 2026-11-14 — Storage design agreed (docs/STORAGE.md). Matt: hand-editing
+  must beat a lossy export/import, so `nexusctl edit` opens the state as
+  TOML in $EDITOR and comments directly above a table are stored as that
+  item's note; several layouts; undo history in the database. Step 1 built:
+  `nexus-store` (rusqlite 0.42, bundled SQLite) with schema v1, migrations
+  by `user_version` (a newer database is refused), import of a `Config` and
+  its notes into rows with page actions by ID, load back to `Config`, and
+  TOML text with notes in both directions. Matt's live file round-trips
+  exactly (5 pages, 2 takeovers); all its comments were copies of the
+  bundled help, which a legacy import now drops (`without_lines_in`). The
+  bundled default's help is now `##` lines, never kept as notes.

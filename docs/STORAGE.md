@@ -150,6 +150,9 @@ sharing layouts.
 
 ## Schema (version 1)
 
+The migrations in `crates/nexus-store/src/schema.rs` are authoritative;
+this copy is for reading.
+
 ```sql
 PRAGMA user_version = 1;
 
@@ -197,6 +200,7 @@ CREATE TABLE takeover (
 CREATE TABLE takeover_signal (
   takeover_id INTEGER NOT NULL REFERENCES takeover(id) ON DELETE CASCADE,
   signal      TEXT NOT NULL CHECK (trim(signal) <> ''),
+  position    INTEGER NOT NULL,
   PRIMARY KEY (takeover_id, signal)
 ) WITHOUT ROWID;
 
@@ -238,6 +242,7 @@ CREATE TABLE source (
           CHECK (json_valid(argv) AND json_type(argv) = 'array'
                  AND json_array_length(argv) > 0),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  position INTEGER NOT NULL,
   note    TEXT NOT NULL DEFAULT ''
 );
 

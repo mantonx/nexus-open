@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::WIDTH;
 use crate::fonts::FontChoice;
@@ -20,7 +20,7 @@ pub const DEFAULT: &str = include_str!("../assets/default.toml");
 /// Narrowest widget that still fits a label and a value.
 pub const MIN_WIDGET_WIDTH: u32 = 40;
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
@@ -41,7 +41,7 @@ pub struct Config {
 
 /// A program the daemon runs that publishes signals: one JSON object per
 /// line on its standard output. See docs/EXTERNAL_SOURCES.md.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
     /// Letters, digits, `-` and `_`: it names the program in logs and, on
@@ -49,12 +49,23 @@ pub struct Source {
     pub name: String,
     /// The program and its arguments. No shell, as for a `run` action.
     pub run: Vec<String>,
+    /// Off keeps the source in the config without running it.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(b: &bool) -> bool {
+    *b
 }
 
 /// A row of widgets that covers the whole strip for a few seconds when one
 /// of its signals changes: the new track, the new volume. A touch keeps it
 /// up; a swipe or the timer puts the page back.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Takeover {
     pub name: String,
@@ -71,7 +82,7 @@ pub struct Takeover {
 pub const TAKEOVER_SECONDS: std::ops::RangeInclusive<f64> = 0.5..=60.0;
 
 /// The `[weather]` section: a place name to look up, or coordinates.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Weather {
     /// "City" or "City, region, country". Looked up once per change.
@@ -81,16 +92,16 @@ pub struct Weather {
     pub longitude: Option<f64>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
-    #[serde(deserialize_with = "font_from_id")]
+    #[serde(deserialize_with = "font_from_id", serialize_with = "font_to_id")]
     pub font: FontChoice,
     pub temperature: Temperature,
     pub clock: ClockFormat,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Temperature {
     #[default]
@@ -98,7 +109,7 @@ pub enum Temperature {
     Fahrenheit,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ClockFormat {
     #[default]
     #[serde(rename = "24h")]
@@ -107,7 +118,7 @@ pub enum ClockFormat {
     H12,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Page {
     pub name: String,
@@ -116,7 +127,7 @@ pub struct Page {
 }
 
 /// One zone on a page. `type` picks the variant.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Widget {
     /// Date, time and AM/PM from the system clock.
@@ -220,7 +231,7 @@ impl Widget {
 
 /// What a tap or a long press on a widget does. Written as a one-key table:
 /// `tap = { page = "Clock" }`, `hold = { media = "next" }`.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase", deny_unknown_fields)]
 pub enum Action {
     /// Show a page: "next", "prev", or a page's name.
@@ -238,7 +249,7 @@ pub enum Action {
 }
 
 /// What a slider sets.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase", deny_unknown_fields)]
 pub enum SliderControl {
     /// The default audio output's volume, 0–100%, set as the finger moves.
@@ -254,7 +265,7 @@ pub enum SliderControl {
 /// Stands for the slider's value, 0–100, in a `run` slider's arguments.
 pub const SLIDER_VALUE: &str = "{value}";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MediaCommand {
     PlayPause,
@@ -263,11 +274,15 @@ pub enum MediaCommand {
     Stop,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GraphStyle {
     Area,
     Line,
+}
+
+fn font_to_id<S: Serializer>(font: &FontChoice, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(font.id())
 }
 
 fn font_from_id<'de, D: Deserializer<'de>>(d: D) -> Result<FontChoice, D::Error> {
@@ -305,7 +320,9 @@ impl Config {
         self.pages.iter().position(|p| p.name == name)
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    /// Checks the rules the types cannot express. `parse` runs it; a
+    /// config built another way (from the store) runs it itself.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.pages.is_empty() {
             return Err(ConfigError(
                 "no pages; add at least one [[page]] with a name".into(),

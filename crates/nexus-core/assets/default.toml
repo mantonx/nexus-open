@@ -1,34 +1,34 @@
-# Nexus Open layout.
-#
-# The strip is 640 px wide. Each page is a row of widgets, left to right; a
-# page's widget widths must add up to 640 or less. Swipe to change page.
-#
-# Signals are named readings published by sources, in base units:
-#   cpu.temp, gpu.temp, weather.temp   degrees Celsius
-#   cpu.load, gpu.load, mem.used       percent
-#   net.down, net.up                   bytes per second
-#   media.title, media.artist, media.status (text), media.position,
-#   media.length (seconds): read by the "media" widget
-# Thresholds (warn, crit) use those base units too.
-#
-# Any widget can act on a tap and on a long press (hold), for example:
-#   tap = { page = "Clock" }               next, prev, or a page name
-#   tap = { media = "play-pause" }         play-pause, next, previous, stop
-#   tap = { run = ["pavucontrol"] }        a program and its arguments, no shell
-#   hold = { open = "https://example.org" } a URL or file, in the default app
-#   tap = { publish = { signal = "mode", value = "focus" } }
+## Nexus Open layout.
+##
+## The strip is 640 px wide. Each page is a row of widgets, left to right; a
+## page's widget widths must add up to 640 or less. Swipe to change page.
+##
+## Signals are named readings published by sources, in base units:
+##   cpu.temp, gpu.temp, weather.temp   degrees Celsius
+##   cpu.load, gpu.load, mem.used       percent
+##   net.down, net.up                   bytes per second
+##   media.title, media.artist, media.status (text), media.position,
+##   media.length (seconds): read by the "media" widget
+## Thresholds (warn, crit) use those base units too.
+##
+## Any widget can act on a tap and on a long press (hold), for example:
+##   tap = { page = "Clock" }               next, prev, or a page name
+##   tap = { media = "play-pause" }         play-pause, next, previous, stop
+##   tap = { run = ["pavucontrol"] }        a program and its arguments, no shell
+##   hold = { open = "https://example.org" } a URL or file, in the default app
+##   tap = { publish = { signal = "mode", value = "focus" } }
 
 [settings]
 font = "ibm-plex-sans"       # ibm-plex-sans, atkinson-hyperlegible, roboto, noto-sans, lato
 temperature = "celsius"      # celsius or fahrenheit
 clock = "24h"                # 24h or 12h
 
-# Weather comes from Open-Meteo, which is sent this location (or the
-# coordinates) and nothing else. Uncomment and set it to show weather.temp:
-# [weather]
-# location = "Lisbon"          # or "City, region, country" to pick the right one
-# latitude = 38.72             # optional: coordinates instead of a name
-# longitude = -9.14
+## Weather comes from Open-Meteo, which is sent this location (or the
+## coordinates) and nothing else. Uncomment and set it to show weather.temp:
+## [weather]
+## location = "Lisbon"          # or "City, region, country" to pick the right one
+## latitude = 38.72             # optional: coordinates instead of a name
+## longitude = -9.14
 
 [[page]]
 name = "System"
@@ -161,20 +161,20 @@ width = 213
 label = "Volume"
 controls = "volume"
 
-# External sources are programs that publish signals: one JSON object per
-# line, such as {"disk.used": {"value": 71, "unit": "percent"}}. They run in
-# this folder and are restarted if they exit. See docs/EXTERNAL_SOURCES.md
-# and examples/sources/ in the source code. For example:
-#
-# [[source]]
-# name = "disk"
-# run = ["sh", "disk.sh"]
+## External sources are programs that publish signals: one JSON object per
+## line, such as {"disk.used": {"value": 71, "unit": "percent"}}. They run in
+## this folder and are restarted if they exit. See docs/EXTERNAL_SOURCES.md
+## and examples/sources/ in the source code. For example:
+##
+## [[source]]
+## name = "disk"
+## run = ["sh", "disk.sh"]
 
-# Takeovers briefly cover the whole strip when a signal changes: a new
-# track, a new volume. Not when a reading first arrives, and not while the
-# page on the strip already shows that signal. A touch keeps one up for its
-# full time again; a swipe, or the time running out, puts the page back.
-# Widgets are written as on a page.
+## Takeovers briefly cover the whole strip when a signal changes: a new
+## track, a new volume. Not when a reading first arrives, and not while the
+## page on the strip already shows that signal. A touch keeps one up for its
+## full time again; a swipe, or the time running out, puts the page back.
+## Widgets are written as on a page.
 
 [[takeover]]
 name = "Now playing"

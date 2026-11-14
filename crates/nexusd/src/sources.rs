@@ -69,7 +69,7 @@ impl Sources {
         for (name, running) in before {
             if sources
                 .iter()
-                .any(|s| s.name == name && s.run == running.run)
+                .any(|s| s.enabled && s.name == name && s.run == running.run)
             {
                 self.running.insert(name, running);
             } else {
@@ -79,7 +79,7 @@ impl Sources {
                 forget(&published, &self.tx);
             }
         }
-        for source in sources {
+        for source in sources.iter().filter(|s| s.enabled) {
             if !self.running.contains_key(&source.name) {
                 let running = Running::start(source, &self.dir, self.tx.clone());
                 self.running.insert(source.name.clone(), running);
