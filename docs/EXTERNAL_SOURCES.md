@@ -89,7 +89,7 @@ Rules:
   dropped.
 - **Lines longer than 64 KB are dropped.**
 - **Only what changed needs printing.** A signal keeps its last value until
-  the next one. Printing the same value again is harmless.
+  the next one, for as long as the program runs. Printing the same value again is harmless.
 - **Numbers build history.** Every number is kept for the widget's graph
   (the last 60 readings), so print at the rate the graph should move: every
   second for a live load graph, every few minutes for a disk.
@@ -126,8 +126,17 @@ journalctl --user -u nexusd -f
   logged with its status.
 - **Stops it** when the source is removed or changed, and when the daemon
   stops.
-- **Keeps the last values** if it exits or is removed: the strip shows the
-  last reading rather than going blank.
+- **Keeps the last values for a minute** if it goes down: a quick restart
+  does not blank the strip. A source down for 60 seconds (exited, failing
+  to start, or restarting without printing a reading) has its signals
+  cleared, so the strip shows "—" rather than a value that has stopped
+  being true, and the log says so. They come back with its next reading.
+- **Clears its signals at once** when it is removed from the config or its
+  `run` changes.
+
+A source counts as up while it is running, so a program that hangs without
+exiting keeps its last values. If that matters for yours, have it exit when
+it cannot read what it reports.
 
 On Linux, when the daemon runs as its systemd service, each source runs as
 its own user unit, `nexus-source-NAME`, outside the daemon's sandbox. It can

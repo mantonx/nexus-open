@@ -95,6 +95,11 @@ impl Signals {
             .unwrap_or_default()
     }
 
+    /// Drops a signal and its history, as if never published.
+    pub fn remove(&mut self, name: &str) {
+        self.entries.remove(name);
+    }
+
     /// Every signal name, sorted, for `nexusctl` and the signal browser.
     pub fn names(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.entries.keys().map(String::as_str).collect();

@@ -679,3 +679,9 @@ golang` finds nothing outside the changelog.
   changed `run` restarts it, removing it stops it, and SIGKILL of the
   daemon stops it (BindsTo) and it returns with the daemon. Phase 3 is
   built; its gate is the daily-driver trial to 2026-11-28.
+- 2026-11-14 — Matt chose stale-signal clearing for sources: a source down
+  for 60 s (exited, not starting, or restarting without a reading) has its
+  signals forgotten (`Input::Forget`; widgets show "—" and a return counts
+  as a first reading, so no takeover). Removing a source or changing its
+  `run` forgets them at once. Verified on the service: forgotten 60.000 s
+  after the first exit, mid-backoff; removal cleared at once.

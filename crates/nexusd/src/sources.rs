@@ -3,6 +3,11 @@
 //! starts it, publishes what it prints, logs what it says on stderr, and
 //! starts it again if it exits, waiting longer each time it keeps failing.
 //!
+//! A source down for a minute (exited, failing to start, or restarting
+//! without printing anything) has its signals forgotten, so the strip shows
+//! "—" rather than a reading that has stopped being true. Removing a source,
+//! or changing its program, forgets them at once.
+//!
 //! Programs run in the config folder, so `run = ["python3", "stars.py"]`
 //! finds a script kept next to nexus.toml. Under systemd they run as their
 //! own user unit, outside the daemon's sandbox, named after the source and
@@ -10,7 +15,7 @@
 //! them too. Stopping `systemd-run` itself would not; it leaves the unit
 //! running (checked).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -30,6 +35,8 @@ const FIRST_RETRY: Duration = Duration::from_secs(2);
 const MAX_RETRY: Duration = Duration::from_secs(60);
 /// A run this long counts as healthy: the next failure waits FIRST_RETRY.
 const HEALTHY: Duration = Duration::from_secs(60);
+/// How long a source may be down before its signals are forgotten.
+const STALE: Duration = Duration::from_secs(60);
 /// Longest line read, stdout or stderr. Longer ones are dropped, so a
 /// program printing without newlines cannot fill the daemon's memory.
 const MAX_LINE: usize = 64 * 1024;
@@ -58,8 +65,20 @@ impl Sources {
     /// Makes the running programs match the config: stops removed or
     /// changed ones, starts new ones, leaves the rest alone.
     pub fn apply(&mut self, sources: &[Source]) {
-        self.running
-            .retain(|name, r| sources.iter().any(|s| &s.name == name && s.run == r.run));
+        let before = std::mem::take(&mut self.running);
+        for (name, running) in before {
+            if sources
+                .iter()
+                .any(|s| s.name == name && s.run == running.run)
+            {
+                self.running.insert(name, running);
+            } else {
+                // Stop it first, so it publishes nothing after the forgets.
+                let published = Arc::clone(&running.published);
+                drop(running);
+                forget(&published, &self.tx);
+            }
+        }
         for source in sources {
             if !self.running.contains_key(&source.name) {
                 let running = Running::start(source, &self.dir, self.tx.clone());
@@ -74,6 +93,8 @@ struct Running {
     run: Vec<String>,
     unit: Option<String>,
     child: Arc<Mutex<Option<Child>>>,
+    /// Every signal it has published and not had forgotten.
+    published: Arc<Mutex<HashSet<String>>>,
     /// Never sent on: dropping it is what tells the supervisor to stop.
     _stop: Sender<()>,
 }
@@ -86,7 +107,9 @@ impl Running {
             owner,
         });
         let child = Arc::new(Mutex::new(None));
+        let published = Arc::new(Mutex::new(HashSet::new()));
         let job = Job {
+            published: Arc::clone(&published),
             name: source.name.clone(),
             argv: resolve(&source.run, dir),
             dir: dir.to_path_buf(),
@@ -103,6 +126,7 @@ impl Running {
             run: source.run.clone(),
             unit: unit.map(|u| u.name),
             child,
+            published,
             _stop: stop,
         }
     }
@@ -133,6 +157,7 @@ struct Job {
     dir: PathBuf,
     unit: Option<Unit>,
     child: Arc<Mutex<Option<Child>>>,
+    published: Arc<Mutex<HashSet<String>>>,
     stopped: Receiver<()>,
     tx: Sender<Msg>,
 }
@@ -141,12 +166,17 @@ impl Job {
     fn supervise(self) {
         let unit = self.unit.as_ref().map(|u| u.name.as_str());
         let mut retry = FIRST_RETRY;
+        // When it last stopped delivering readings, and whether its
+        // signals were forgotten since.
+        let mut down_since: Option<Instant> = None;
+        let mut forgotten = false;
         loop {
             // A unit left over from a daemon that was killed outright.
             if let Some(unit) = unit {
                 stop_unit(unit);
             }
             let started = Instant::now();
+            let mut delivered = false;
             let why = match self.command().spawn() {
                 Ok(mut child) => {
                     let (out, err) = (child.stdout.take(), child.stderr.take());
@@ -166,10 +196,11 @@ impl Job {
                                 });
                             });
                     }
-                    if let Some(out) = out
-                        && !self.publish(out)
-                    {
-                        return; // the daemon is shutting down
+                    if let Some(out) = out {
+                        match self.publish(out) {
+                            Some(any) => delivered = any,
+                            None => return, // stopped, or the daemon is gone
+                        }
                     }
                     let status = lock(&self.child).take().map(|mut c| c.wait());
                     match status {
@@ -186,15 +217,34 @@ impl Job {
             if started.elapsed() >= HEALTHY {
                 retry = FIRST_RETRY;
             }
+            // A run that printed readings was up until now; one that did
+            // not leaves the source down since whenever it went down.
+            if delivered || down_since.is_none() {
+                down_since = Some(Instant::now());
+                forgotten = false;
+            }
             eprintln!(
                 "nexusd: source {}: {why}; starting it again in {} s",
                 self.name,
                 retry.as_secs()
             );
-            if !matches!(
-                self.stopped.recv_timeout(retry),
-                Err(RecvTimeoutError::Timeout)
-            ) {
+            let restart_at = Instant::now() + retry;
+            if let Some(since) = down_since
+                && !forgotten
+                && since + STALE < restart_at
+            {
+                if !self.sleep_until(since + STALE) {
+                    return;
+                }
+                eprintln!(
+                    "nexusd: source {}: down for {} s; its signals now show no data",
+                    self.name,
+                    STALE.as_secs()
+                );
+                forget(&self.published, &self.tx);
+                forgotten = true;
+            }
+            if !self.sleep_until(restart_at) {
                 return;
             }
             retry = (retry * 2).min(MAX_RETRY);
@@ -228,15 +278,24 @@ impl Job {
     }
 
     /// Publishes each line's readings until the program closes its output.
-    /// False once the daemon has gone.
-    fn publish(&self, out: impl Read) -> bool {
+    /// Whether any line had readings, or `None` once this source has been
+    /// stopped or the daemon has gone.
+    fn publish(&self, out: impl Read) -> Option<bool> {
         let mut mistakes = 0u32;
-        read_lines(out, |line| match parse_line(line) {
-            Ok(readings) => readings.into_iter().all(|(name, value)| {
-                self.tx
-                    .send(Msg::Engine(Input::Signal(name, value)))
-                    .is_ok()
-            }),
+        let mut any = false;
+        let open = read_lines(out, |line| match parse_line(line) {
+            // Checked per line: a stopped source must not put back what
+            // was just forgotten.
+            Ok(_) if self.is_stopped() => false,
+            Ok(readings) => {
+                any |= !readings.is_empty();
+                readings.into_iter().all(|(name, value)| {
+                    lock(&self.published).insert(name.clone());
+                    self.tx
+                        .send(Msg::Engine(Input::Signal(name, value)))
+                        .is_ok()
+                })
+            }
             Err(e) => {
                 mistakes += 1;
                 if mistakes <= MAX_LOGGED {
@@ -250,7 +309,17 @@ impl Job {
                 }
                 true
             }
-        })
+        });
+        open.then_some(any)
+    }
+
+    /// Waits until `when`; false if stopped first.
+    fn sleep_until(&self, when: Instant) -> bool {
+        let wait = when.saturating_duration_since(Instant::now());
+        matches!(
+            self.stopped.recv_timeout(wait),
+            Err(RecvTimeoutError::Timeout)
+        )
     }
 
     fn is_stopped(&self) -> bool {
@@ -287,6 +356,13 @@ fn read_lines(stream: impl Read, mut f: impl FnMut(&str) -> bool) -> bool {
         if !f(&String::from_utf8_lossy(&buf)) {
             return false;
         }
+    }
+}
+
+/// Tells the engine a source's signals are gone.
+fn forget(published: &Mutex<HashSet<String>>, tx: &Sender<Msg>) {
+    for name in lock(published).drain() {
+        let _ = tx.send(Msg::Engine(Input::Forget(name)));
     }
 }
 

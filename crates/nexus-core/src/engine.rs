@@ -43,6 +43,9 @@ const DAMPING: f32 = 36.0;
 pub enum Input {
     /// A source published a reading.
     Signal(String, Value),
+    /// A signal's source is gone: its widgets show "—" until it is
+    /// published again, which then counts as a first reading.
+    Forget(String),
     /// A touch sample: finger down or not, panel x (0–639), and monotonic
     /// time in seconds.
     Touch { down: bool, x: f32, at: f64 },
@@ -221,6 +224,11 @@ impl Engine {
                 if changed && !blank && !on_page {
                     self.take_over(&name);
                 }
+            }
+            Input::Forget(name) => {
+                let visible = signals_used(self.shown()).any(|s| s == name);
+                self.dirty |= visible;
+                self.signals.remove(&name);
             }
             Input::Touch { down, x, at } => {
                 // Any touch keeps a takeover up for its full time again.
@@ -1261,5 +1269,20 @@ mod tests {
         });
         e.handle(title("Second"));
         assert_eq!(e.takeover(), None);
+    }
+
+    #[test]
+    fn a_forgotten_signal_shows_no_data_and_returns_as_new() {
+        let mut e = covered();
+        let now = at("16:17:05");
+        e.handle(title("First"));
+        e.handle(Input::ShowPage(1)); // the media page
+        e.frame(&now, 0.0);
+        e.handle(Input::Forget("media.title".into()));
+        assert!(e.signals().get("media.title").is_none());
+        assert!(e.frame(&now, 0.1).is_some(), "redrawn without it");
+        e.handle(Input::ShowPage(0));
+        e.handle(title("Second"));
+        assert_eq!(e.takeover(), None, "back again is a first reading");
     }
 }
