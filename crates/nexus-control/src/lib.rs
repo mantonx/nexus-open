@@ -90,12 +90,10 @@ impl Request {
                     .ok_or("publish needs a signal name and a value")?;
                 let value = value.trim();
                 let (number, unit) = value.split_once(' ').unwrap_or((value, ""));
+                // Not a unit name: the whole value is text.
                 let unit = match unit.trim() {
                     "" => Some(Unit::None),
-                    "celsius" => Some(Unit::Celsius),
-                    "percent" => Some(Unit::Percent),
-                    "bytes-per-second" => Some(Unit::BytesPerSecond),
-                    _ => None, // not a unit: the whole value is text
+                    name => Unit::from_name(name),
                 };
                 let value = match (number.parse::<f64>(), unit) {
                     (Ok(n), Some(unit)) if n.is_finite() => Value::Number(n, unit),

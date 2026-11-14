@@ -99,8 +99,7 @@ fn launch(argv: &[String], wait: bool) {
     let Some((program, args)) = argv.split_first() else {
         return;
     };
-    let under_systemd = cfg!(target_os = "linux") && std::env::var_os("INVOCATION_ID").is_some();
-    let mut command = if under_systemd {
+    let mut command = if systemd_unit().is_some() {
         let mut c = Command::new("systemd-run");
         c.args(["--user", "--collect", "--quiet"]);
         if wait {
@@ -132,6 +131,21 @@ fn launch(argv: &[String], wait: bool) {
         }
         Err(e) => eprintln!("nexusd: tap action: cannot start {program}: {e}"),
     }
+}
+
+/// The daemon's own systemd unit, when it runs as a service; `None` when
+/// started by hand. Read from its cgroup, whose last part is the unit.
+pub fn systemd_unit() -> Option<String> {
+    if !cfg!(target_os = "linux") || std::env::var_os("INVOCATION_ID").is_none() {
+        return None;
+    }
+    let cgroup = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    cgroup
+        .trim_end()
+        .rsplit('/')
+        .next()
+        .filter(|unit| unit.ends_with(".service"))
+        .map(str::to_string)
 }
 
 /// The command that opens a URL or file with the desktop's default app.

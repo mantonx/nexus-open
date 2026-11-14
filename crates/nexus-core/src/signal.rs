@@ -25,6 +25,20 @@ pub enum Unit {
     BytesPerSecond,
 }
 
+impl Unit {
+    /// The unit with this name, as written by `nexusctl publish` and
+    /// external sources: none, celsius, percent, bytes-per-second.
+    pub fn from_name(name: &str) -> Option<Unit> {
+        match name {
+            "none" => Some(Unit::None),
+            "celsius" => Some(Unit::Celsius),
+            "percent" => Some(Unit::Percent),
+            "bytes-per-second" => Some(Unit::BytesPerSecond),
+            _ => None,
+        }
+    }
+}
+
 /// One reading.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {

@@ -21,6 +21,7 @@ mod control;
 #[cfg(target_os = "linux")]
 mod preview;
 mod run;
+mod sources;
 #[cfg(target_os = "linux")]
 mod trace;
 

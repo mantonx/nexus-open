@@ -663,3 +663,19 @@ golang` finds nothing outside the changelog.
   `volume.level` (signal only; the real volume was untouched): covered at
   once, page back after 2 s. Instant cut for now; a transition is Phase 4
   polish. Remaining Phase 3 item: external sources.
+- 2026-11-14 — Phase 3 step 7: external sources. `[[source]]` with `name`
+  and `run` (argv). Protocol (docs/EXTERNAL_SOURCES.md): one JSON object
+  per line, signal name → number, text or `{value, unit}`; a mistake drops
+  the whole line; lines over 64 KB are dropped unread. The daemon restarts
+  an exited source after 2 s doubling to 60 s (reset after a healthy
+  minute), logs its stderr, and applies config changes by diff. Programs
+  run in the config folder. Under systemd each runs as its own user unit
+  `nexus-source-NAME` outside the sandbox (`systemd-run --pipe`) with
+  `BindsTo=` the daemon's unit. Found: killing `systemd-run --pipe` leaves
+  its unit running, so sources are stopped by unit name. Examples in
+  `examples/sources/` (POSIX shell disk use; Python GitHub stars). Verified
+  on the service: signals published, working directory, stderr and bad
+  lines logged, exit status 3 seen through systemd-run, backoff 2 → 4 s, a
+  changed `run` restarts it, removing it stops it, and SIGKILL of the
+  daemon stops it (BindsTo) and it returns with the daemon. Phase 3 is
+  built; its gate is the daily-driver trial to 2026-11-28.

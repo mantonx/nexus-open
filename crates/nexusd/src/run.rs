@@ -69,6 +69,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     let (tx, rx) = mpsc::channel();
     control::serve(listener, tx.clone());
     let (config, config_error) = first_config(&path)?;
+    let sources = crate::sources::Sources::new(tx.clone(), &path);
     let mut daemon = Daemon {
         engine: Engine::new(config),
         path,
@@ -84,7 +85,9 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         last_frame: Instant::now(),
         weather: None,
         effects: crate::actions::Effects::new(),
+        sources,
     };
+    daemon.sources.apply(&daemon.engine.config().sources);
     // Kept alive for as long as the daemon runs; dropping it stops watching.
     let _watcher = watch_config(&daemon.path, tx.clone())?;
     if options.demo {
@@ -122,6 +125,8 @@ struct Daemon {
     effects: crate::actions::Effects,
     /// Tells the weather source where to look; `None` in demo mode.
     weather: Option<Sender<Option<config::Weather>>>,
+    /// The config's external source programs.
+    sources: crate::sources::Sources,
 }
 
 impl Daemon {
@@ -380,6 +385,7 @@ impl Daemon {
                 {
                     let _ = weather.send(config.weather.clone());
                 }
+                self.sources.apply(&config.sources);
                 if &config != self.engine.config() {
                     self.engine.handle(Input::Config(Box::new(config)));
                 }

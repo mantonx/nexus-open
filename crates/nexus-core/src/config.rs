@@ -34,6 +34,21 @@ pub struct Config {
     /// Rows that briefly cover the strip when a signal changes.
     #[serde(rename = "takeover", default)]
     pub takeovers: Vec<Takeover>,
+    /// Programs that publish signals.
+    #[serde(rename = "source", default)]
+    pub sources: Vec<Source>,
+}
+
+/// A program the daemon runs that publishes signals: one JSON object per
+/// line on its standard output. See docs/EXTERNAL_SOURCES.md.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    /// Letters, digits, `-` and `_`: it names the program in logs and, on
+    /// Linux, its systemd unit.
+    pub name: String,
+    /// The program and its arguments. No shell, as for a `run` action.
+    pub run: Vec<String>,
 }
 
 /// A row of widgets that covers the whole strip for a few seconds when one
@@ -345,6 +360,26 @@ impl Config {
             }
             self.check_widgets(&at, &t.widgets)?;
         }
+        let mut names = HashSet::new();
+        for source in &self.sources {
+            let at = format!("source \"{}\"", source.name);
+            let fits = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+            if source.name.is_empty() || !source.name.chars().all(fits) {
+                return Err(ConfigError(format!(
+                    "{at}: a source name is letters, digits, - and _ only"
+                )));
+            }
+            if !names.insert(source.name.as_str()) {
+                return Err(ConfigError(format!(
+                    "{at} appears twice; source names must be unique"
+                )));
+            }
+            if source.run.first().is_none_or(|p| p.trim().is_empty()) {
+                return Err(ConfigError(format!(
+                    "{at}: run needs a program, as in run = [\"python3\", \"stars.py\"]"
+                )));
+            }
+        }
         if let Some(w) = &self.weather {
             w.validate()?;
         }
@@ -641,6 +676,24 @@ mod tests {
             ),
         ] {
             let e = t(&body).unwrap_err().0;
+            assert!(e.contains(says), "{body}: {e}");
+        }
+    }
+
+    #[test]
+    fn sources_are_checked() {
+        let src = |body: &str| Config::parse(&format!("[[page]]\nname = \"A\"\n{body}"));
+        let ok = src("[[source]]\nname = \"disk\"\nrun = [\"sh\", \"disk.sh\"]\n").unwrap();
+        assert_eq!(ok.sources[0].run, ["sh", "disk.sh"]);
+        for (body, says) in [
+            ("[[source]]\nname = \"my disk\"\nrun = [\"x\"]\n", "letters, digits"),
+            ("[[source]]\nname = \"d\"\nrun = []\n", "run needs a program"),
+            (
+                "[[source]]\nname = \"d\"\nrun = [\"x\"]\n[[source]]\nname = \"d\"\nrun = [\"y\"]\n",
+                "appears twice",
+            ),
+        ] {
+            let e = src(body).unwrap_err().0;
             assert!(e.contains(says), "{body}: {e}");
         }
     }

@@ -161,6 +161,15 @@ width = 213
 label = "Volume"
 controls = "volume"
 
+# External sources are programs that publish signals: one JSON object per
+# line, such as {"disk.used": {"value": 71, "unit": "percent"}}. They run in
+# this folder and are restarted if they exit. See docs/EXTERNAL_SOURCES.md
+# and examples/sources/ in the source code. For example:
+#
+# [[source]]
+# name = "disk"
+# run = ["sh", "disk.sh"]
+
 # Takeovers briefly cover the whole strip when a signal changes: a new
 # track, a new volume. Not when a reading first arrives, and not while the
 # page on the strip already shows that signal. A touch keeps one up for its

@@ -14,6 +14,7 @@ use std::time::Duration;
 use nexus_core::signal::Value;
 
 mod cpu_sensor;
+pub mod external;
 mod gpu;
 mod machine;
 #[cfg(target_os = "linux")]
