@@ -386,8 +386,7 @@ Then ship:
 - A converter from the old layout YAML, or a documented manual migration.
   **GATE**: ask which.
 - Docs: install, config reference, plugin protocol.
-- Update `CLAUDE.md` for the Rust workspace and remove the Go-only sections.
-- **GATE**: archive the Go and Flutter code only after Matt says so.
+- Retiring the Go and Flutter code is Phase 8, after this release.
 
 Exit test: a clean machine install from a package brings up the strip, the
 release artifact is verified by installing it, not by CI exit codes, and
@@ -409,6 +408,55 @@ The Linux release ships first. Then, per OS:
   on both.
 - **GATE**: Windows work starts only once there is a Windows machine to test
   on with the Nexus.
+
+## Phase 8 — Retire the legacy app; a first-class repo
+
+Matt, 2026-11-14: "At the end of this entire tract of work, we should retire
+the legacy code and cleanup the repo to be a first-class app." It runs once
+the Rust Linux release has replaced the Go package. It does not wait for
+macOS or Windows (Phase 6), since the Go app is Linux-only and nothing
+depends on it after that.
+
+- **Keep history, not code:** tag the last commit with the Go app as
+  `legacy-go-final` and push the tag. Everything below is then a deletion
+  from the tree, never from history.
+- **Remove the Go and Flutter app:** `cmd/`, `internal/`, `pkg/`, `api/`,
+  `plugins/`, `ui/`, `configs/`, `data/`, `test/`, `testdata/`, `go.mod`,
+  `go.sum`, `.golangci.yml`, `.air.toml`, `Procfile`, `sqlc.yaml`,
+  `build-package.sh`, `nexus-open-dev.desktop`, and the Go parts of
+  `scripts/`. Check `design/` and `docs/` file by file: keep what still
+  describes the product (`docs/USB_PROTOCOL.md`), drop what describes the
+  old app.
+- **Clean the working tree:** build output (`coverage.out`, the
+  `nexus-open` binary, `swipe-sim`, `bin/`, `build/`, `dist/`,
+  `plugins-dist/`, `test-screenshots/`) deleted and covered by
+  `.gitignore`.
+- **One build system:** Cargo only. Replace the Makefile with a short one
+  (or none) over cargo; `scripts/nexusd-dev-install.sh` stays for
+  development.
+- **Packaging:** `packaging/` holds only the Rust app's files. The AUR
+  package keeps the name `nexus-open`, so existing users upgrade in place.
+  The udev rule is renumbered below 73.
+- **CI:** one Rust workflow and one release workflow; the Go `ci.yml` and
+  `release.yml` go. The pre-push hook runs `cargo fmt --check`, clippy and
+  tests, which ends the `--no-verify` pushes.
+- **Docs for a newcomer:** README (what it is, install, first run,
+  screenshot), DEVELOPMENT, CONTRIBUTING, SECURITY, DEVICE_SETUP, the config
+  reference and the external-source protocol, all describing the Rust app
+  only. CHANGELOG continues.
+- **Agent instructions:** rewrite `CLAUDE.md` for the Rust workspace (drop
+  overmind, air, Flutter hot reload and the zone lock ordering), and update
+  the memory notes that describe the Go development setup.
+- **Branch:** merge `redesign` into `main`. **GATE**: Matt approves the
+  merge and the version number.
+- **Matt's machine:** remove the old Go package and its leftover files
+  (`config.yaml`, `zone-configs.yaml`, `nexus.db`, the stale autostart
+  override). **GATE**: ask before deleting any of his files.
+
+Exit test: a fresh clone contains only the Rust app, its packaging and its
+docs; `cargo test` and CI are the only checks; the README gets a new user
+from clone or package to a lit strip; and `git grep -i -e flutter -e
+golang` finds nothing outside the changelog.
 
 ## Phase 7 — Later, unscheduled
 
@@ -562,3 +610,7 @@ The Linux release ships first. Then, per OS:
   `scripts/nexusd-dev-install.sh` builds, installs to `~/.local/bin`, and
   restarts it; rerun after each change. **GATE clock started:** the
   two-week daily-driver trial runs to 2026-11-28.
+- 2026-11-14 — Matt asked for the legacy code to be retired and the repo
+  cleaned up into a first-class app at the end of the rebuild. Recorded as
+  Phase 8, replacing the archive gate in Phase 5; it follows the Linux
+  release rather than macOS/Windows.
