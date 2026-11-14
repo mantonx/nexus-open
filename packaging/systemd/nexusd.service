@@ -1,0 +1,51 @@
+[Unit]
+Description=Nexus Open daemon: drives the Corsair iCUE Nexus touch strip
+Documentation=https://github.com/mantonx/nexus-open
+# The media source needs the session bus; the strip itself does not need a
+# desktop, so this starts with the user session rather than the graphical one.
+After=dbus.socket
+Conflicts=nexus-open.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/nexusd run
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=5
+
+# ── Privilege ──────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+PrivateTmp=true
+UMask=0077
+
+# ── Files: read-only system; writes only to its config and its socket ─────
+ProtectSystem=strict
+ReadWritePaths=%h/.config/nexus-open %t
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+
+# ── Devices: the strip (hidraw) and, for GPU readings, NVIDIA's control
+# devices. Everything else is denied. AMD GPUs are read from sysfs, which
+# needs no device access.
+DevicePolicy=closed
+DeviceAllow=char-hidraw rw
+DeviceAllow=char-nvidiactl rw
+DeviceAllow=char-nvidia rw
+
+# ── Network: the control socket and session bus (unix), weather (inet);
+# netlink for sysinfo's network counters.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=default.target

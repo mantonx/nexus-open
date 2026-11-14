@@ -556,3 +556,9 @@ The Linux release ships first. Then, per OS:
   Skips `playerctld`, which mirrors another player. Known gap: VLC sends no
   `Seeked` for a seek while paused, so that seek shows when play resumes.
   Verified with VLC (play, pause, seek, quit) and Matt's browser.
+- 2026-11-14 — Phase 3 step 3: `nexusd` is Matt's daily driver, as a
+  sandboxed user service (`packaging/systemd/nexusd.service`, exposure 4.3
+  "OK"; device access limited to hidraw and NVIDIA's control devices).
+  `scripts/nexusd-dev-install.sh` builds, installs to `~/.local/bin`, and
+  restarts it; rerun after each change. **GATE clock started:** the
+  two-week daily-driver trial runs to 2026-11-28.
