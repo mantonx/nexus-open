@@ -686,8 +686,14 @@ mod tests {
         let ok = src("[[source]]\nname = \"disk\"\nrun = [\"sh\", \"disk.sh\"]\n").unwrap();
         assert_eq!(ok.sources[0].run, ["sh", "disk.sh"]);
         for (body, says) in [
-            ("[[source]]\nname = \"my disk\"\nrun = [\"x\"]\n", "letters, digits"),
-            ("[[source]]\nname = \"d\"\nrun = []\n", "run needs a program"),
+            (
+                "[[source]]\nname = \"my disk\"\nrun = [\"x\"]\n",
+                "letters, digits",
+            ),
+            (
+                "[[source]]\nname = \"d\"\nrun = []\n",
+                "run needs a program",
+            ),
             (
                 "[[source]]\nname = \"d\"\nrun = [\"x\"]\n[[source]]\nname = \"d\"\nrun = [\"y\"]\n",
                 "appears twice",

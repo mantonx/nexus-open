@@ -106,9 +106,15 @@ mod tests {
             ("[1, 2]", "not a JSON object"),
             (r#"{"a b": 1}"#, "no spaces"),
             (r#"{"x": true}"#, "must be a number"),
-            (r#"{"ok": 1, "x": {"value": 1, "unit": "kelvin"}}"#, "kelvin"),
+            (
+                r#"{"ok": 1, "x": {"value": 1, "unit": "kelvin"}}"#,
+                "kelvin",
+            ),
             (r#"{"x": {"unit": "percent"}}"#, "needs a \"value\""),
-            (r#"{"x": {"value": 1, "units": "percent"}}"#, "unknown field \"units\""),
+            (
+                r#"{"x": {"value": 1, "units": "percent"}}"#,
+                "unknown field \"units\"",
+            ),
         ] {
             let e = parse_line(line).unwrap_err();
             assert!(e.contains(says), "{line}: {e}");

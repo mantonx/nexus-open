@@ -349,18 +349,24 @@ mod tests {
         assert_eq!(lines(&format!("a\n{long}\nb\n")), ["a", "b"]);
         let exact = "y".repeat(MAX_LINE - 1);
         assert_eq!(lines(&format!("{exact}\nb\n")), [exact.as_str(), "b"]);
-        assert_eq!(lines(&format!("a\n{long}")), ["a"], "no tail of a long line");
+        assert_eq!(
+            lines(&format!("a\n{long}")),
+            ["a"],
+            "no tail of a long line"
+        );
     }
 
     #[test]
     fn relative_programs_are_found_in_the_config_folder() {
-        let dir = Path::new("/home/u/.config/nexus-open");
+        // A real absolute path on every platform.
+        let dir = std::env::temp_dir();
         let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let absolute = dir.join("tool").display().to_string();
         assert_eq!(
-            resolve(&argv(&["./disk.sh", "x"]), dir)[0],
-            "/home/u/.config/nexus-open/./disk.sh"
+            resolve(&argv(&["./disk.sh", "x"]), &dir)[0],
+            dir.join("./disk.sh").display().to_string()
         );
-        assert_eq!(resolve(&argv(&["python3", "a.py"]), dir)[0], "python3");
-        assert_eq!(resolve(&argv(&["/usr/bin/env"]), dir)[0], "/usr/bin/env");
+        assert_eq!(resolve(&argv(&["python3", "a.py"]), &dir)[0], "python3");
+        assert_eq!(resolve(&argv(&[&absolute]), &dir)[0], absolute);
     }
 }
