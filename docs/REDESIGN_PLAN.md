@@ -508,3 +508,15 @@ The Linux release ships first. Then, per OS:
 - 2026-11-14 — Gesture addition: a release with the finger moving back
   against the swipe at 300 px/s or more cancels it (reversible swipes). All
   other thresholds are the Go app's.
+- 2026-11-14 — Milestone 4 checks run by Claude on hardware. First frame
+  18 ms after `nexusd run` starts (socket 2 ms; target 500 ms). Idle over
+  60 s without demo data, System page (clock only): 0.05% CPU, 10 MB RSS.
+  Settings window idle: 0.03% CPU, 127 MB RSS, of which 92 MB is shared
+  libraries and the GL driver, 21 MB its own. Over AT-SPI the window exposes
+  both labels, the preview image named with the current page, and two
+  focusable buttons whose `click` action changes the daemon's page both
+  ways. First run wrote the default config; `nexusctl doctor` passed every
+  check. Raw hidraw reports were silent while the strip was untouched (no
+  phantom touches). Still Matt's: swipe feel, replug under 2 s, Tab/Space
+  in the window (keys cannot be injected into a native Wayland window
+  without root), and Orca speaking.
