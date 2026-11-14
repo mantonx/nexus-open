@@ -3,62 +3,86 @@
 //! NVIDIA cards are read through NVML, the library `nvidia-smi` itself
 //! uses, loaded at runtime: a machine without the NVIDIA driver simply has
 //! no NVML. AMD cards on Linux are read from sysfs. Only the first GPU
-//! found is read.
+//! found is read. macOS has neither yet, so there is never a GPU there.
 
-use nexus_core::signal::{Unit, Value};
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub use readable::Gpu;
 
-use crate::Reading;
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+pub use unreadable::Gpu;
 
-pub enum Gpu {
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
-    Nvidia(Box<nvml_wrapper::Nvml>),
-    #[cfg(target_os = "linux")]
-    Amd(amd::Card),
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+mod unreadable {
+    use crate::Reading;
+
+    /// No GPU can be read on this system.
+    pub enum Gpu {}
+
+    impl Gpu {
+        pub fn find() -> Option<Gpu> {
+            None
+        }
+
+        pub fn sample(&mut self, _: &mut Vec<Reading>) {}
+    }
 }
 
-impl Gpu {
-    /// The first GPU that can be read, if any.
-    pub fn find() -> Option<Gpu> {
-        #[cfg(any(target_os = "linux", target_os = "windows"))]
-        if let Ok(nvml) = nvml_wrapper::Nvml::init()
-            && nvml.device_count().is_ok_and(|n| n > 0)
-        {
-            return Some(Gpu::Nvidia(Box::new(nvml)));
-        }
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod readable {
+    use nexus_core::signal::{Unit, Value};
+
+    #[cfg(target_os = "linux")]
+    use super::amd;
+    use crate::Reading;
+
+    pub enum Gpu {
+        Nvidia(Box<nvml_wrapper::Nvml>),
         #[cfg(target_os = "linux")]
-        if let Some(card) = amd::Card::find() {
-            return Some(Gpu::Amd(card));
-        }
-        None
+        Amd(amd::Card),
     }
 
-    pub fn sample(&mut self, out: &mut Vec<Reading>) {
-        let (temp, load) = match self {
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
-            Gpu::Nvidia(nvml) => {
-                use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
-                let Ok(device) = nvml.device_by_index(0) else {
-                    return;
-                };
-                (
-                    device
-                        .temperature(TemperatureSensor::Gpu)
-                        .ok()
-                        .map(f64::from),
-                    device.utilization_rates().ok().map(|u| f64::from(u.gpu)),
-                )
+    impl Gpu {
+        /// The first GPU that can be read, if any.
+        pub fn find() -> Option<Gpu> {
+            if let Ok(nvml) = nvml_wrapper::Nvml::init()
+                && nvml.device_count().is_ok_and(|n| n > 0)
+            {
+                return Some(Gpu::Nvidia(Box::new(nvml)));
             }
             #[cfg(target_os = "linux")]
-            Gpu::Amd(card) => (card.temperature(), card.load()),
-        };
-        if let Some(t) = temp {
-            out.push(("gpu.temp", Value::Number(t, Unit::Celsius)));
+            if let Some(card) = amd::Card::find() {
+                return Some(Gpu::Amd(card));
+            }
+            None
         }
-        if let Some(l) = load {
-            out.push((
-                "gpu.load",
-                Value::Number(l.clamp(0.0, 100.0), Unit::Percent),
-            ));
+
+        pub fn sample(&mut self, out: &mut Vec<Reading>) {
+            let (temp, load) = match self {
+                Gpu::Nvidia(nvml) => {
+                    use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
+                    let Ok(device) = nvml.device_by_index(0) else {
+                        return;
+                    };
+                    (
+                        device
+                            .temperature(TemperatureSensor::Gpu)
+                            .ok()
+                            .map(f64::from),
+                        device.utilization_rates().ok().map(|u| f64::from(u.gpu)),
+                    )
+                }
+                #[cfg(target_os = "linux")]
+                Gpu::Amd(card) => (card.temperature(), card.load()),
+            };
+            if let Some(t) = temp {
+                out.push(("gpu.temp", Value::Number(t, Unit::Celsius)));
+            }
+            if let Some(l) = load {
+                out.push((
+                    "gpu.load",
+                    Value::Number(l.clamp(0.0, 100.0), Unit::Percent),
+                ));
+            }
         }
     }
 }
