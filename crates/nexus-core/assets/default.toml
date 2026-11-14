@@ -7,6 +7,8 @@
 #   cpu.temp, gpu.temp, weather.temp   degrees Celsius
 #   cpu.load, gpu.load, mem.used       percent
 #   net.down, net.up                   bytes per second
+#   media.title, media.artist, media.status (text), media.position,
+#   media.length (seconds): read by the "media" widget
 # Thresholds (warn, crit) use those base units too.
 
 [settings]
@@ -26,17 +28,21 @@ name = "System"
 
 [[page.widget]]
 type = "clock"
-width = 128
+width = 107
+
+[[page.widget]]
+type = "media"
+width = 107
 
 [[page.widget]]
 type = "value"
-width = 128
+width = 107
 label = "Weather"
 signal = "weather.temp"
 
 [[page.widget]]
 type = "value"
-width = 128
+width = 107
 label = "CPU"
 signal = "cpu.temp"
 graph = "area"
@@ -45,7 +51,7 @@ crit = 90
 
 [[page.widget]]
 type = "value"
-width = 128
+width = 106
 label = "GPU"
 signal = "gpu.temp"
 graph = "area"
@@ -54,7 +60,7 @@ crit = 90
 
 [[page.widget]]
 type = "rate"
-width = 128
+width = 106
 label = "Net"
 down = "net.down"
 up = "net.up"

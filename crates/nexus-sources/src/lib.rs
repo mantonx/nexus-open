@@ -16,9 +16,21 @@ use nexus_core::signal::Value;
 mod cpu_sensor;
 mod gpu;
 mod machine;
+#[cfg(target_os = "linux")]
+mod media;
 mod weather;
 
 pub use weather::spawn as spawn_weather;
+
+/// Starts publishing the `media.*` signals from the system's media players.
+/// Linux only for now (MPRIS); elsewhere the media widget shows "Nothing
+/// playing".
+pub fn spawn_media(publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
+    #[cfg(target_os = "linux")]
+    media::spawn(publish);
+    #[cfg(not(target_os = "linux"))]
+    drop(publish);
+}
 
 /// One reading: a signal name and its value.
 pub type Reading = (&'static str, Value);

@@ -541,3 +541,18 @@ The Linux release ships first. Then, per OS:
   over the 40 MB target. The alternative, `nvidia-smi` every second, is
   the process churn the Go daemon paid for in CPU. Needs Matt's call on the
   target.
+- 2026-11-14 — Matt: temperatures in °F on his strip (`temperature =
+  "fahrenheit"`, already a setting). Memory target amended: 40 MB plus the
+  GPU driver's own allocations (NVML), as proposed.
+- 2026-11-14 — `cpu_sensor::pick` written by Claude after Matt saw the dash
+  on the strip; prefers Intel package, AMD Tdie/Tctl, ARM cpu_thermal, and
+  never a motherboard zone.
+- 2026-11-14 — Phase 3 step 2: media. A `media` widget (artist, title with
+  ellipsis, progress bar; title dimmed when paused) restored to the System
+  page as in the Go layout (6 zones, 107/106 px). MPRIS source over zbus
+  5.19's blocking API (zbus 6 dropped it; its connections only progress
+  inside `block_on`). Event-driven: player start/quit, property changes and
+  seeks wake it; while playing it advances the position itself each second.
+  Skips `playerctld`, which mirrors another player. Known gap: VLC sends no
+  `Seeked` for a seek while paused, so that seek shows when play resumes.
+  Verified with VLC (play, pause, seek, quit) and Matt's browser.

@@ -9,7 +9,7 @@ use tiny_skia::{FillRule, Paint, PathBuilder, Stroke, Transform};
 
 use crate::canvas::{Canvas, to_color};
 use crate::text::{Font, TextEngine};
-use crate::theme::{Rgb, Theme};
+use crate::theme::{Rgb, TextStyle, Theme};
 use crate::{HEIGHT, WIDTH};
 
 /// The fonts a renderer draws with.
@@ -66,7 +66,24 @@ pub enum WidgetView {
         caption: String,
         graph: Option<Graph>,
     },
+    /// The track playing, or `None` when nothing is.
+    Media(Option<Track>),
 }
+
+/// A track as the media widget shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Track {
+    pub title: String,
+    /// Empty when the player gives none.
+    pub artist: String,
+    /// 0.0–1.0 through the track; `None` when the length is unknown.
+    pub progress: Option<f32>,
+    /// False while paused: the title is dimmed.
+    pub playing: bool,
+}
+
+/// Shown by the media widget when no player has a track.
+pub const NOTHING_PLAYING: &str = "Nothing playing";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Zone {
@@ -177,6 +194,72 @@ impl Renderer {
                     p.value,
                 );
             }
+            WidgetView::Media(track) => self.media(canvas, x, width, track.as_ref()),
+        }
+    }
+
+    /// Artist on the label line, title below it, and a progress bar along
+    /// the bottom edge. Text that does not fit ends in an ellipsis.
+    fn media(&mut self, canvas: &mut Canvas, x: f32, width: f32, track: Option<&Track>) {
+        let g = &self.theme.grid;
+        let room = width - g.pad_left - g.pad_left;
+        let (left, label_y, caption_y) = (x + g.pad_left, g.label_baseline, g.caption_baseline);
+        let ts = self.theme.type_scale.clone();
+        let p = self.theme.palette.clone();
+        let Some(track) = track else {
+            self.label(canvas, x, "Media");
+            let text = self.fit(&ts.caption, NOTHING_PLAYING, room);
+            let at = (left, caption_y);
+            self.text
+                .draw(canvas, &self.text_fonts, &ts.caption, &text, at, p.unit);
+            return;
+        };
+        let artist = self.fit(&ts.label, &track.artist, room);
+        let at = (left, label_y);
+        self.text
+            .draw(canvas, &self.text_fonts, &ts.label, &artist, at, p.label);
+        let title = self.fit(&ts.caption, &track.title, room);
+        let color = if track.playing { p.value } else { p.unit };
+        let at = (left, caption_y);
+        self.text
+            .draw(canvas, &self.text_fonts, &ts.caption, &title, at, color);
+
+        if let Some(progress) = track.progress {
+            // Two pixels high, inside the zone but clear of the divider.
+            let (bar_x, bar_w) = (x as u32 + 1, width as u32 - 1);
+            let y = HEIGHT - 2;
+            canvas.fill_rect(bar_x, y, bar_w, 2, p.divider);
+            let done = (bar_w as f32 * progress).round() as u32;
+            canvas.fill_rect(
+                bar_x,
+                y,
+                done,
+                2,
+                if track.playing { p.info } else { p.unit },
+            );
+        }
+    }
+
+    /// `text`, shortened with an ellipsis if it is wider than `room`.
+    fn fit(&mut self, style: &TextStyle, text: &str, room: f32) -> String {
+        if self.text.measure(&self.text_fonts, style, text) <= room {
+            return text.to_string();
+        }
+        // Longest prefix that fits with the ellipsis, found by halving.
+        let ends: Vec<usize> = text.char_indices().map(|(i, _)| i).skip(1).collect();
+        let (mut lo, mut hi) = (0, ends.len());
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            let candidate = format!("{}…", text[..ends[mid - 1]].trim_end());
+            if self.text.measure(&self.text_fonts, style, &candidate) <= room {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        match lo {
+            0 => "…".to_string(),
+            n => format!("{}…", text[..ends[n - 1]].trim_end()),
         }
     }
 

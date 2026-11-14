@@ -3044,6 +3044,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "ureq",
+ "zbus",
 ]
 
 [[package]]

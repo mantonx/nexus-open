@@ -90,6 +90,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         spawn_demo(publisher(tx));
     } else {
         nexus_sources::spawn_machine(publisher(tx.clone()));
+        nexus_sources::spawn_media(publisher(tx.clone()));
         let weather = nexus_sources::spawn_weather(publisher(tx));
         let _ = weather.send(daemon.engine.config().weather.clone());
         daemon.weather = Some(weather);

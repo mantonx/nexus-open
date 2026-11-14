@@ -10,10 +10,21 @@ use jiff::Zoned;
 
 use crate::config::{ClockFormat, GraphStyle, Page, Settings, Temperature, Widget};
 use crate::signal::{Signals, Unit, Value};
-use crate::widget::{Graph, Severity, WidgetView, Zone};
+use crate::widget::{Graph, Severity, Track, WidgetView, Zone};
 
 /// Shown where a reading has not arrived yet. Calm, not an error.
 pub const NO_DATA: &str = "—";
+
+/// The signals a media source publishes and the media widget reads.
+/// `media.status` is "playing", "paused" or "stopped"; position and length
+/// are in seconds, length 0 when unknown (a live stream).
+pub const MEDIA_SIGNALS: [&str; 5] = [
+    "media.title",
+    "media.artist",
+    "media.status",
+    "media.position",
+    "media.length",
+];
 
 /// Builds the zones for one page.
 pub fn bind_page(page: &Page, signals: &Signals, settings: &Settings, now: &Zoned) -> Vec<Zone> {
@@ -37,6 +48,7 @@ pub fn shows_clock(page: &Page) -> bool {
 pub fn signals_used(page: &Page) -> impl Iterator<Item = &str> {
     page.widgets.iter().flat_map(|w| match w {
         Widget::Clock { .. } => vec![],
+        Widget::Media { .. } => MEDIA_SIGNALS.to_vec(),
         Widget::Value { signal, .. } => vec![signal.as_str()],
         Widget::Rate { down, up, .. } => vec![down.as_str(), up.as_str()],
     })
@@ -45,6 +57,7 @@ pub fn signals_used(page: &Page) -> impl Iterator<Item = &str> {
 fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zoned) -> WidgetView {
     match widget {
         Widget::Clock { .. } => clock(settings.clock, now),
+        Widget::Media { .. } => media(signals),
         Widget::Value {
             label,
             signal,
@@ -95,6 +108,31 @@ fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zo
             }
         }
     }
+}
+
+fn media(signals: &Signals) -> WidgetView {
+    let text = |name| match signals.get(name) {
+        Some(Value::Text(t)) => t.trim().to_string(),
+        _ => String::new(),
+    };
+    let number = |name| match signals.get(name) {
+        Some(Value::Number(n, _)) => *n,
+        _ => 0.0,
+    };
+    let status = text("media.status");
+    let title = text("media.title");
+    if title.is_empty() || status.is_empty() || status == "stopped" {
+        return WidgetView::Media(None);
+    }
+    let length = number("media.length");
+    let progress =
+        (length > 0.0).then(|| (number("media.position") / length).clamp(0.0, 1.0) as f32);
+    WidgetView::Media(Some(Track {
+        title,
+        artist: text("media.artist"),
+        progress,
+        playing: status == "playing",
+    }))
 }
 
 fn clock(format: ClockFormat, now: &Zoned) -> WidgetView {
@@ -223,6 +261,35 @@ mod tests {
     }
 
     #[test]
+    fn media_shows_track_progress_and_pause() {
+        let mut s = Signals::new();
+        assert_eq!(media(&s), WidgetView::Media(None), "no player yet");
+        s.set("media.title", Value::Text("Teardrop".into()));
+        s.set("media.artist", Value::Text("Massive Attack".into()));
+        s.set("media.status", Value::Text("playing".into()));
+        s.set("media.position", Value::Number(75.0, Unit::None));
+        s.set("media.length", Value::Number(300.0, Unit::None));
+        assert_eq!(
+            media(&s),
+            WidgetView::Media(Some(Track {
+                title: "Teardrop".into(),
+                artist: "Massive Attack".into(),
+                progress: Some(0.25),
+                playing: true,
+            }))
+        );
+        // A live stream has no length: no bar, rather than a wrong one.
+        s.set("media.status", Value::Text("paused".into()));
+        s.set("media.length", Value::Number(0.0, Unit::None));
+        let WidgetView::Media(Some(t)) = media(&s) else {
+            unreachable!()
+        };
+        assert_eq!((t.progress, t.playing), (None, false));
+        s.set("media.status", Value::Text("stopped".into()));
+        assert_eq!(media(&s), WidgetView::Media(None));
+    }
+
+    #[test]
     fn rates_stay_short() {
         assert_eq!(format_rate(0.0), "0B/s");
         assert_eq!(format_rate(512.0), "512B/s");
@@ -249,8 +316,9 @@ mod tests {
     fn missing_signals_show_a_calm_placeholder() {
         let config = Config::default_layout();
         let zones = bind_page(&config.pages[0], &Signals::new(), &config.settings, &now());
-        assert_eq!(zones.len(), 5);
-        let WidgetView::Value { value, graph, .. } = &zones[2].view else {
+        assert_eq!(zones.len(), 6);
+        assert_eq!(zones[1].view, WidgetView::Media(None), "nothing playing");
+        let WidgetView::Value { value, graph, .. } = &zones[3].view else {
             panic!("CPU is a value widget")
         };
         assert_eq!((value.as_str(), graph), (NO_DATA, &None));
@@ -260,10 +328,9 @@ mod tests {
     fn page_signal_list() {
         let config = Config::default_layout();
         let used: Vec<&str> = signals_used(&config.pages[0]).collect();
-        assert_eq!(
-            used,
-            ["weather.temp", "cpu.temp", "gpu.temp", "net.down", "net.up"]
-        );
+        let mut expected = MEDIA_SIGNALS.to_vec();
+        expected.extend(["weather.temp", "cpu.temp", "gpu.temp", "net.down", "net.up"]);
+        assert_eq!(used, expected);
         assert!(shows_clock(&config.pages[0]));
         assert!(!shows_clock(&config.pages[2]));
     }

@@ -106,14 +106,18 @@ pub enum Widget {
         down: String,
         up: String,
     },
+    /// What is playing: title, artist and progress, from the `media.*`
+    /// signals.
+    Media { width: u32 },
 }
 
 impl Widget {
     pub fn width(&self) -> u32 {
         match self {
-            Widget::Clock { width } | Widget::Value { width, .. } | Widget::Rate { width, .. } => {
-                *width
-            }
+            Widget::Clock { width }
+            | Widget::Media { width }
+            | Widget::Value { width, .. }
+            | Widget::Rate { width, .. } => *width,
         }
     }
 }
