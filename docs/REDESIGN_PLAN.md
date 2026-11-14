@@ -630,3 +630,11 @@ golang` finds nothing outside the changelog.
   brush-) are replayed by a test. Needs Matt's recordings to set the real
   threshold. "Send a key" is not built: on Wayland it needs root (uinput)
   or a portal prompt; `run` with a tool like `wpctl` covers volume.
+- 2026-11-14 — First touch recording from Matt (53 touches): 27 taps
+  (46–198 ms, still), 20 swipes, 6 single-report lift bounces (8–12 ms).
+  All read correctly with the 30 ms brush guard; without it the bounces
+  fire taps (checked). The strip reports every ~9.6 ms (~100 Hz), not the
+  500 Hz the unit tests assume. Saved as `tests/traces/{tap-matt,
+  swipe-matt,brush-lift-bounce}.trace`; `cargo run -p nexus-core --example
+  replay -- FILE` prints how each touch is read. Still wanted: a
+  `brush-typing` trace.

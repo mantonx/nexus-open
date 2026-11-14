@@ -1,0 +1,15 @@
+# Single-report contacts recorded as a finger lifted or bounced after a tap or swipe;
+# each would have fired a tap without the brush guard (Matt, 2026-11-14).
+# seconds down x; touches spaced 1 s apart, original timing within each
+0.0000 1 639
+0.0083 0 0
+1.0083 1 629
+1.0166 0 0
+2.0166 1 507
+2.0289 0 0
+3.0289 1 261
+3.0406 0 0
+4.0406 1 542
+4.0489 0 0
+5.0489 1 497
+5.0581 0 0

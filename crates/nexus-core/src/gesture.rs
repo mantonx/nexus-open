@@ -12,8 +12,10 @@ const WIDTH: f32 = crate::WIDTH as f32;
 const LONG_PRESS: f64 = 0.5;
 /// Shorter presses are ignored as brushes: the strip sits above the
 /// keyboard, and a knuckle grazing it while typing must not fire an action.
-/// PROVISIONAL: to be set from recorded traces of real taps and brushes
-/// (`nexusd trace`), which then become tests.
+/// From Matt's recordings (tests/traces): the strip reports every ~10 ms,
+/// his shortest deliberate tap lasted 46 ms (5 reports), and a finger
+/// bouncing as it lifts leaves single-report contacts of 8–12 ms. Brushes
+/// while typing are not recorded yet; revisit with a `brush-typing` trace.
 const MIN_TAP: f64 = 0.03;
 /// Touches starting this soon after a swipe ends are ignored: a fast flick
 /// lifts the finger while reports are still in flight, and the tail would
