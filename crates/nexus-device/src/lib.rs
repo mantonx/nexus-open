@@ -1,10 +1,15 @@
-//! Access to the Corsair iCUE Nexus: the real device over Linux hidraw, and
-//! an in-memory simulator with the same interface.
+//! Access to the Corsair iCUE Nexus, and an in-memory simulator with the same
+//! interface.
+//!
+//! The protocol and simulator are portable. Device access is per OS: Linux
+//! uses hidraw today; macOS and Windows backends come later and sit behind
+//! the same `Surface` trait. Keep OS-specific code inside `cfg`-gated modules.
 
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
+#[cfg(target_os = "linux")]
 pub mod hidraw;
 pub mod protocol;
 pub mod simulator;
@@ -25,6 +30,8 @@ pub enum DeviceError {
     Disconnected,
     /// A frame of the wrong size; holds the size given.
     BadFrame(usize),
+    /// Device access is not implemented on this operating system yet.
+    Unsupported,
     Io(io::Error),
 }
 
@@ -43,6 +50,10 @@ impl fmt::Display for DeviceError {
                 f,
                 "frame is {len} bytes; expected {}",
                 protocol::FRAME_BYTES
+            ),
+            DeviceError::Unsupported => write!(
+                f,
+                "talking to the iCUE Nexus is not implemented on this operating system yet"
             ),
             DeviceError::Io(e) => write!(f, "device I/O error: {e}"),
         }

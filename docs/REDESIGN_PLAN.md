@@ -27,7 +27,9 @@ changes from a polled stats dashboard into an event-driven touch surface:
 - Temporary takeovers (media scrub, volume, notifications) over the stable
   layout. The layout does not rearrange itself based on context.
 - Plugins in any language.
-- Linux first. Windows and macOS stay possible but are not built in this plan.
+- Designed for Linux, macOS and Windows. Ships on Linux first, then macOS,
+  then Windows. Each release must meet the 9/10 bar on real hardware on that
+  OS. Matt can test on Linux and macOS; Windows needs a test machine first.
 
 Out of scope: WASM plugins, a focused-window context engine, a web UI
 (Matt rejected web; the UI must be native), support for other display hardware.
@@ -391,10 +393,25 @@ Exit test: a clean machine install from a package brings up the strip, the
 release artifact is verified by installing it, not by CI exit codes, and
 every item in the 9/10 bar is passing or waived by Matt.
 
-## Phase 6 — Later, unscheduled
+## Phase 6 — macOS, then Windows
 
-- Windows and macOS device backends and per-OS sources. iCUE already supports
-  both, so this is an alternative there, not the only option.
+The Linux release ships first. Then, per OS:
+
+- Device backend behind the `Surface` trait (IOKit HID on macOS, the HID
+  API on Windows; neither needs a driver). Check whether macOS asks for the
+  Input Monitoring permission, since the Nexus also presents a keyboard.
+- Built-in sources: CPU and GPU temperature and load, network, memory,
+  disk, media. Windows has no simple CPU temperature API; decide how to
+  handle that before starting.
+- Startup (LaunchAgent, Windows autostart), the control channel (Unix socket
+  or named pipe), and an installer.
+- Detect iCUE holding the device and explain the conflict, since iCUE runs
+  on both.
+- **GATE**: Windows work starts only once there is a Windows machine to test
+  on with the Nexus.
+
+## Phase 7 — Later, unscheduled
+
 - Focused-window signals per compositor.
 - Other display hardware behind the surface interface.
 
@@ -404,6 +421,10 @@ every item in the 9/10 bar is passing or waived by Matt.
   stop and ask.
 - Do not build parallel rendering paths. The UI displays frames the core
   rendered.
+- Keep every crate building on Linux, macOS and Windows. OS-specific code
+  lives in `cfg(target_os = ...)` modules behind a shared trait, never
+  scattered through shared code. CI (`.github/workflows/rust.yml`) checks
+  all three on every push.
 - Prefer deleting scope to adding it. If a phase is growing, say so.
 - Commit and push to the `redesign` branch as work progresses (Matt asked
   for this on 2026-11-14). Never push to `main`.
@@ -435,3 +456,12 @@ every item in the 9/10 bar is passing or waived by Matt.
   Matt dropped Go ("we moved on"). DejaVu Sans is the fixed fallback for
   missing characters; Font Awesome Solid supplies icons. See
   `crates/nexus-core/src/fonts.rs` and `crates/nexus-core/assets/fonts/`.
+- 2026-11-14 — Platforms: design for Linux, macOS and Windows; ship Linux
+  first, then macOS, then Windows. Matt can test on Linux and macOS only, so
+  Windows waits for a test machine. Linux-only code is now `cfg`-gated and
+  CI builds and tests the Rust workspace on all three.
+- 2026-11-14 — Milestone 2 (device) partly verified: frames reach the strip
+  over hidraw (`/dev/hidraw15`) in about 15 ms each. Still to check: Matt
+  confirming the image on the panel, touch (blocked on `parse_touch`), and
+  replug recovery under 2 s.
+
