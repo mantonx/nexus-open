@@ -1,6 +1,7 @@
 # Storage: SQLite as the source of truth
 
-Status: **proposed**, for Matt's review. Replaces `nexus.toml` as the place
+Status: **agreed** 2026-11-14 (Matt: hand-editing must be better than a
+lossy export and import; several layouts; undo history in the database). Replaces `nexus.toml` as the place
 settings, layouts, takeovers and sources live.
 
 ## Goals
@@ -13,7 +14,10 @@ settings, layouts, takeovers and sources live.
 - Layouts can still be shared, imported, exported and shipped as starter
   layouts.
 
-Not goals: editing the database by hand, or syncing it between machines.
+- Editing by hand stays first-class: as TOML in your own editor, with your
+  comments kept.
+
+Not goals: editing the database file itself, or syncing it between machines.
 
 ## Decisions
 
@@ -84,8 +88,7 @@ export format:
   same in the UI.
 - Starter layouts and the first-run default are bundled TOML files.
 - The docs' examples stay valid.
-- Power users edit by exporting, editing and importing. Comments do not
-  survive the round trip.
+- `nexusctl edit` uses it for editing by hand (decision 7).
 
 The existing parser and validator stay as they are. Export needs `Serialize`
 on the config types.
@@ -104,6 +107,47 @@ and data folders. The two apps must never open each other's file.
 
 The systemd unit gets `ReadWritePaths=%h/.local/share/nexus-open`.
 
+### 7. Editing by hand: `nexusctl edit`, with comments kept as notes
+
+`nexusctl edit` works like `git commit` or `kubectl edit`. It writes what is
+on the strip as TOML to a temporary file and opens it in `$VISUAL` or
+`$EDITOR`. When the editor closes:
+
+- **Unchanged:** nothing happens.
+- **Valid:** the daemon applies it as one edit, undoable like any other, and
+  the strip updates.
+- **Invalid:** the file reopens with the reason at the top as a comment, and
+  your text as you left it, until it is fixed or emptied (which cancels).
+- **Changed meanwhile** (in the window, or by another `nexusctl`): refused
+  rather than overwriting, and the file reopens with a note saying so. Every
+  state has a revision number, and the edit names the revision it started
+  from.
+
+The file holds the settings, the sources, and the layout on the strip.
+`nexusctl edit --layout NAME` edits another layout.
+
+**Comments are kept as notes.** Layouts, pages, widgets, takeovers and
+sources each have a `note`. The comment lines directly above a `[settings]`,
+`[[page]]`, `[[page.widget]]`, `[[takeover]]`, `[[takeover.widget]]` or
+`[[source]]` line are that item's note. The next edit or export writes them
+back in the same place, and the settings window shows and edits them in the
+inspector. So a comment survives edits made in the window, which a text file
+edited by both a person and a program cannot promise.
+
+- Lines starting with `##` are help that the export writes at the top of the
+  file (what the keys mean). They are never stored.
+- A comment anywhere else (at the end of a line, or between keys) cannot be
+  attached to anything, so it is not kept. `nexusctl edit` says so and names
+  the line, rather than dropping it silently.
+
+**Row IDs survive a hand edit.** The edited text is applied as changes, not
+as a replacement: pages, takeovers and sources are matched by name, and
+widgets by position within their page. Only what changed gets new rows, so
+the window's selection and the undo history stay meaningful.
+
+`nexusctl export` and `import` use the same format, notes included, for
+sharing layouts.
+
 ## Schema (version 1)
 
 ```sql
@@ -119,14 +163,16 @@ CREATE TABLE settings (
   weather_location  TEXT,
   weather_latitude  REAL CHECK (weather_latitude BETWEEN -90 AND 90),
   weather_longitude REAL CHECK (weather_longitude BETWEEN -180 AND 180),
-  active_layout     INTEGER NOT NULL REFERENCES layout(id)
+  active_layout     INTEGER NOT NULL REFERENCES layout(id),
+  note              TEXT NOT NULL DEFAULT ''
 );
 
 -- A set of pages and takeovers. One is on the strip; others are starter
 -- layouts, imports, or saved alternatives.
 CREATE TABLE layout (
   id   INTEGER PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE CHECK (trim(name) <> '')
+  name TEXT NOT NULL UNIQUE CHECK (trim(name) <> ''),
+  note TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE page (
@@ -134,6 +180,7 @@ CREATE TABLE page (
   layout_id INTEGER NOT NULL REFERENCES layout(id) ON DELETE CASCADE,
   position  INTEGER NOT NULL,
   name      TEXT NOT NULL CHECK (trim(name) <> ''),
+  note      TEXT NOT NULL DEFAULT '',
   UNIQUE (layout_id, name)
 );
 
@@ -143,6 +190,7 @@ CREATE TABLE takeover (
   position  INTEGER NOT NULL,
   name      TEXT NOT NULL CHECK (trim(name) <> ''),
   seconds   REAL NOT NULL CHECK (seconds BETWEEN 0.5 AND 60),
+  note      TEXT NOT NULL DEFAULT '',
   UNIQUE (layout_id, name)
 );
 
@@ -162,6 +210,7 @@ CREATE TABLE widget (
               CHECK (type IN ('clock', 'value', 'rate', 'slider', 'media')),
   width       INTEGER NOT NULL CHECK (width BETWEEN 40 AND 640),
   props       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props)),
+  note        TEXT NOT NULL DEFAULT '',
   CHECK ((page_id IS NULL) <> (takeover_id IS NULL))
 );
 CREATE INDEX widget_on_page     ON widget(page_id, position);
@@ -188,7 +237,8 @@ CREATE TABLE source (
   argv    TEXT NOT NULL
           CHECK (json_valid(argv) AND json_type(argv) = 'array'
                  AND json_array_length(argv) > 0),
-  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1))
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  note    TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE history (
@@ -304,12 +354,8 @@ a one-line way to add one.
 3. The settings window edits through the socket (Phase 4 continues from
    here).
 
-## For Matt
+## Decided with Matt
 
-1. **Hand-editing becomes export, edit and import.** Comments do not survive.
-   OK?
-2. **Several layouts** are in the schema from the start (starter layouts,
-   imports, alternatives), with one on the strip. Or one layout only, for
-   now?
-3. **Undo surviving a restart.** It is free with history in the database. Or
-   should history start fresh each session?
+1. Hand-editing must be better than a lossy export and import: decision 7.
+2. Several layouts from the start.
+3. Undo history lives in the database and survives restarts.
