@@ -178,6 +178,9 @@ impl Daemon {
             if reload {
                 self.reload();
             }
+            for action in self.engine.take_actions() {
+                crate::actions::carry_out(action);
+            }
         }
     }
 
@@ -306,6 +309,27 @@ impl Daemon {
             }
             Request::Publish(name, value) => {
                 self.engine.handle(Input::Signal(name, value));
+                Ok(json!(null))
+            }
+            Request::Touch { x, hold } => {
+                // A still finger sampled every 10 ms, then lifted: long
+                // enough to clear the brush guard, or the long-press time.
+                let start = self.origin.elapsed().as_secs_f64();
+                let length = if hold { 0.6 } else { 0.08 };
+                let mut t = 0.0;
+                while t < length {
+                    self.engine.handle(Input::Touch {
+                        down: true,
+                        x,
+                        at: start + t,
+                    });
+                    t += 0.01;
+                }
+                self.engine.handle(Input::Touch {
+                    down: false,
+                    x: 0.0,
+                    at: start + length,
+                });
                 Ok(json!(null))
             }
             // Handled by the connection thread before it gets here.

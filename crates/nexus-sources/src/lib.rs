@@ -22,6 +22,15 @@ mod weather;
 
 pub use weather::spawn as spawn_weather;
 
+/// Sends a command to the media player the media widget shows. Linux only
+/// for now; elsewhere it does nothing.
+pub fn media_command(command: nexus_core::config::MediaCommand) {
+    #[cfg(target_os = "linux")]
+    media::command(command);
+    #[cfg(not(target_os = "linux"))]
+    let _ = command;
+}
+
 /// Starts publishing the `media.*` signals from the system's media players.
 /// Linux only for now (MPRIS); elsewhere the media widget shows "Nothing
 /// playing".

@@ -31,6 +31,8 @@ pub struct Palette {
     pub unit: Rgb,
     pub info: Rgb,
     pub info_area: Rgb,
+    /// Behind a zone while a finger rests on it and a tap would act.
+    pub pressed: Rgb,
     pub ok: Rgb,
     pub warn: Rgb,
     pub crit: Rgb,
@@ -93,6 +95,7 @@ impl Default for Theme {
                 unit: Rgb::hex(0x8a8a8a),
                 info: Rgb::hex(0x5aa0e0),
                 info_area: Rgb::hex(0x16344a),
+                pressed: Rgb::hex(0x1b2633),
                 ok: Rgb::hex(0x79c267),
                 warn: Rgb::hex(0xf0a830),
                 crit: Rgb::hex(0xe2625f),

@@ -5,6 +5,7 @@
 //! - `preview` shows the demo System page on the real strip, which is how the
 //!   renderer and fonts are judged on hardware and how replug recovery is
 //!   measured.
+//! - `trace` records raw touches for tuning gestures.
 //! - `ui` opens the settings window. It is the same binary so installs stay
 //!   one file; the window runs as its own process and the strip will keep
 //!   working with it closed.
@@ -15,10 +16,13 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use nexus_core::fonts::FontChoice;
 
+mod actions;
 mod control;
 #[cfg(target_os = "linux")]
 mod preview;
 mod run;
+#[cfg(target_os = "linux")]
+mod trace;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -53,6 +57,15 @@ enum Command {
     },
     /// Open the settings window.
     Ui,
+    /// Record raw touches to a file, alongside a running daemon, for tuning
+    /// taps, long presses and accidental brushes.
+    Trace {
+        /// Where to write the samples.
+        out: std::path::PathBuf,
+        /// How long to record.
+        #[arg(long, default_value_t = 30)]
+        seconds: u64,
+    },
 }
 
 fn main() -> ExitCode {
@@ -63,6 +76,7 @@ fn main() -> ExitCode {
         }
         Command::Run { config, demo } => run::run(run::Options { config, demo }),
         Command::Ui => nexus_ui::run().map_err(Into::into),
+        Command::Trace { out, seconds } => trace(&out, seconds),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -75,6 +89,14 @@ fn main() -> ExitCode {
 
 #[cfg(target_os = "linux")]
 use preview::preview;
+
+#[cfg(target_os = "linux")]
+use trace::trace;
+
+#[cfg(not(target_os = "linux"))]
+fn trace(_: &std::path::Path, _: u64) -> Result<(), Box<dyn std::error::Error>> {
+    Err(nexus_device::DeviceError::Unsupported.into())
+}
 
 #[cfg(not(target_os = "linux"))]
 fn preview(_: FontChoice, _: Option<Duration>, _: bool) -> Result<(), nexus_device::DeviceError> {

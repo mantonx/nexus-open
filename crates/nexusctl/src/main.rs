@@ -33,6 +33,11 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         value: Vec<String>,
     },
+    /// Tap the strip at x (0–639), as a finger would: runs that widget's
+    /// tap action.
+    Tap { x: f32 },
+    /// Long-press the strip at x (0–639): runs that widget's hold action.
+    Hold { x: f32 },
 }
 
 fn main() -> ExitCode {
@@ -44,6 +49,8 @@ fn main() -> ExitCode {
         Command::Page { target } => format!("page {target}"),
         Command::Reload => "reload".to_string(),
         Command::Publish { signal, value } => format!("publish {signal} {}", value.join(" ")),
+        Command::Tap { x } => format!("tap {x}"),
+        Command::Hold { x } => format!("hold {x}"),
     };
     let mut client = match Client::connect() {
         Ok(c) => c,

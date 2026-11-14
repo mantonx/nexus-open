@@ -113,10 +113,16 @@ impl Renderer {
     }
 
     /// Renders one page of zones, left to right, into a new 640×48 frame.
-    pub fn render_page(&mut self, zones: &[Zone]) -> Canvas {
+    /// The `pressed` zone gets a lit background: the instant answer to a
+    /// finger landing on something that acts.
+    pub fn render_page(&mut self, zones: &[Zone], pressed: Option<usize>) -> Canvas {
         let mut canvas = Canvas::new(WIDTH, HEIGHT, self.theme.palette.background);
         let mut x = 0u32;
         for (i, zone) in zones.iter().enumerate() {
+            if pressed == Some(i) {
+                let w = zone.width.min(WIDTH.saturating_sub(x));
+                canvas.fill_rect(x, 0, w, HEIGHT, self.theme.palette.pressed);
+            }
             if i > 0 {
                 let g = &self.theme.grid;
                 canvas.fill_rect(

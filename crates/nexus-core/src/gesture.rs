@@ -10,6 +10,11 @@ const WIDTH: f32 = crate::WIDTH as f32;
 
 /// Held at least this long without swiping, a press is a long press.
 const LONG_PRESS: f64 = 0.5;
+/// Shorter presses are ignored as brushes: the strip sits above the
+/// keyboard, and a knuckle grazing it while typing must not fire an action.
+/// PROVISIONAL: to be set from recorded traces of real taps and brushes
+/// (`nexusd trace`), which then become tests.
+const MIN_TAP: f64 = 0.03;
 /// Touches starting this soon after a swipe ends are ignored: a fast flick
 /// lifts the finger while reports are still in flight, and the tail would
 /// otherwise start a new swipe.
@@ -105,8 +110,10 @@ impl Recognizer {
                     })
                 } else if t - press.start_t >= LONG_PRESS {
                     Some(Gesture::LongPress { x: press.last_x })
-                } else {
+                } else if t - press.start_t >= MIN_TAP {
                     Some(Gesture::Tap { x: press.last_x })
+                } else {
+                    None
                 }
             }
             (false, None) => None,
@@ -279,6 +286,12 @@ mod tests {
         let still = vec![300.0; 20];
         assert_eq!(replay(&still, 0.0), [Gesture::Tap { x: 300.0 }]);
         assert_eq!(replay(&still, 0.6), [Gesture::LongPress { x: 300.0 }]);
+    }
+
+    #[test]
+    fn a_graze_is_not_a_tap() {
+        // Four samples, 6 ms: shorter than any deliberate tap.
+        assert_eq!(replay(&[300.0; 4], 0.0), []);
     }
 
     #[test]

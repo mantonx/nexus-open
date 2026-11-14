@@ -83,7 +83,13 @@ pub struct Page {
 #[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Widget {
     /// Date, time and AM/PM from the system clock.
-    Clock { width: u32 },
+    Clock {
+        width: u32,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
+    },
     /// One reading, such as a temperature, with optional graph and
     /// thresholds.
     Value {
@@ -98,6 +104,10 @@ pub enum Widget {
         warn: Option<f64>,
         #[serde(default)]
         crit: Option<f64>,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
     },
     /// Download and upload rates with a graph of the download rate.
     Rate {
@@ -105,21 +115,79 @@ pub enum Widget {
         label: String,
         down: String,
         up: String,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
     },
     /// What is playing: title, artist and progress, from the `media.*`
     /// signals.
-    Media { width: u32 },
+    Media {
+        width: u32,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
+    },
 }
 
 impl Widget {
     pub fn width(&self) -> u32 {
         match self {
-            Widget::Clock { width }
-            | Widget::Media { width }
+            Widget::Clock { width, .. }
+            | Widget::Media { width, .. }
             | Widget::Value { width, .. }
             | Widget::Rate { width, .. } => *width,
         }
     }
+
+    /// What a tap does, if anything.
+    pub fn tap(&self) -> Option<&Action> {
+        match self {
+            Widget::Clock { tap, .. }
+            | Widget::Media { tap, .. }
+            | Widget::Value { tap, .. }
+            | Widget::Rate { tap, .. } => tap.as_ref(),
+        }
+    }
+
+    /// What a long press does, if anything.
+    pub fn hold(&self) -> Option<&Action> {
+        match self {
+            Widget::Clock { hold, .. }
+            | Widget::Media { hold, .. }
+            | Widget::Value { hold, .. }
+            | Widget::Rate { hold, .. } => hold.as_ref(),
+        }
+    }
+}
+
+/// What a tap or a long press on a widget does. Written as a one-key table:
+/// `tap = { page = "Clock" }`, `hold = { media = "next" }`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
+pub enum Action {
+    /// Show a page: "next", "prev", or a page's name.
+    Page(String),
+    /// Start a program: the program, then its arguments. There is no shell,
+    /// so nothing in it is expanded or interpreted; write
+    /// `["sh", "-c", "…"]` to get one.
+    Run(Vec<String>),
+    /// Open a URL or a file in the desktop's default app.
+    Open(String),
+    /// Control the player the media widget shows.
+    Media(MediaCommand),
+    /// Set a signal to a value: a number if it reads as one, else text.
+    Publish { signal: String, value: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MediaCommand {
+    PlayPause,
+    Next,
+    Previous,
+    Stop,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -197,8 +265,50 @@ impl Config {
                 )));
             }
         }
+        for page in &self.pages {
+            for (i, w) in page.widgets.iter().enumerate() {
+                for (gesture, action) in [("tap", w.tap()), ("hold", w.hold())] {
+                    if let Some(action) = action {
+                        self.check_action(action).map_err(|m| {
+                            ConfigError(format!(
+                                "page \"{}\", widget {}, {gesture}: {m}",
+                                page.name,
+                                i + 1
+                            ))
+                        })?;
+                    }
+                }
+            }
+        }
         if let Some(w) = &self.weather {
             w.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl Config {
+    fn check_action(&self, action: &Action) -> Result<(), String> {
+        match action {
+            Action::Page(target) => {
+                let known =
+                    matches!(target.as_str(), "next" | "prev") || self.page_index(target).is_some();
+                if !known {
+                    return Err(format!(
+                        "no page called \"{target}\"; use a page name, \"next\" or \"prev\""
+                    ));
+                }
+            }
+            Action::Run(argv) if argv.first().is_none_or(|p| p.trim().is_empty()) => {
+                return Err("run needs a program, as in run = [\"pavucontrol\"]".into());
+            }
+            Action::Open(target) if target.trim().is_empty() => {
+                return Err("open needs a URL or a file".into());
+            }
+            Action::Publish { signal, .. } if signal.trim().is_empty() => {
+                return Err("publish needs a signal name".into());
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -227,6 +337,46 @@ impl Weather {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actions_parse_and_are_checked() {
+        let page = |tap: &str| {
+            Config::parse(&format!(
+                "[[page]]\nname = \"Main\"\n[[page.widget]]\ntype = \"clock\"\nwidth = 100\n{tap}\n"
+            ))
+        };
+        let tap = |src: &str| page(src).unwrap().pages[0].widgets[0].tap().cloned();
+        assert_eq!(
+            tap("tap = { page = \"next\" }"),
+            Some(Action::Page("next".into()))
+        );
+        assert_eq!(
+            tap("tap = { run = [\"pavucontrol\", \"-t\", \"3\"] }"),
+            Some(Action::Run(vec![
+                "pavucontrol".into(),
+                "-t".into(),
+                "3".into()
+            ]))
+        );
+        assert_eq!(
+            tap("tap = { media = \"play-pause\" }"),
+            Some(Action::Media(MediaCommand::PlayPause))
+        );
+        let held = page("hold = { open = \"https://example.org\" }").unwrap();
+        assert_eq!(
+            held.pages[0].widgets[0].hold(),
+            Some(&Action::Open("https://example.org".into()))
+        );
+        for (bad, says) in [
+            ("tap = { page = \"Nope\" }", "no page called \"Nope\""),
+            ("tap = { run = [] }", "run needs a program"),
+            ("tap = { media = \"louder\" }", "unknown variant"),
+            ("tap = { page = \"next\", run = [\"x\"] }", ""),
+        ] {
+            let e = page(bad).unwrap_err().0;
+            assert!(e.contains(says), "{bad}: {e}");
+        }
+    }
 
     #[test]
     fn weather_needs_a_place() {

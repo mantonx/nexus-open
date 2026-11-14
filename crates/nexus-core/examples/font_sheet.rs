@@ -35,7 +35,7 @@ fn main() {
 
     for (row, choice) in FontChoice::ALL.into_iter().enumerate() {
         let mut renderer = Renderer::new(Theme::default(), choice.load());
-        let frame = renderer.render_page(&system_page());
+        let frame = renderer.render_page(&system_page(), None);
         frame
             .save_png(out_dir.join(format!("{}.png", choice.id())))
             .expect("save page");

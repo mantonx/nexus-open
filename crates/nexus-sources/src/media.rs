@@ -12,6 +12,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use nexus_core::config::MediaCommand;
 use nexus_core::signal::{Unit, Value};
 use zbus::blocking::{Connection, MessageIterator, fdo::DBusProxy};
 use zbus::zvariant::{OwnedValue, Value as Variant};
@@ -129,6 +130,26 @@ pub fn spawn(mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
             }
         })
         .expect("spawning a thread");
+}
+
+/// Sends a play/pause, next, previous or stop to the player the media
+/// widget shows. Nothing happens if no player has a track.
+pub fn command(command: MediaCommand) {
+    let Ok(conn) = Connection::session() else {
+        return;
+    };
+    let Some(track) = choose(&read_all(&conn), None) else {
+        return;
+    };
+    let method = match command {
+        MediaCommand::PlayPause => "PlayPause",
+        MediaCommand::Next => "Next",
+        MediaCommand::Previous => "Previous",
+        MediaCommand::Stop => "Stop",
+    };
+    if let Err(e) = conn.call_method(Some(track.player.as_str()), PATH, Some(PLAYER), method, &()) {
+        eprintln!("nexusd: media: {} refused {method}: {e}", track.player);
+    }
 }
 
 /// Wakes `wake` on every player event: a player starting or quitting, a

@@ -41,6 +41,12 @@ pub enum Request {
     Page(PageTarget),
     Reload,
     Publish(String, Value),
+    /// A simulated touch at panel x (0–639): a tap, or a long press if
+    /// `hold`. It goes through the same gesture path as a real finger.
+    Touch {
+        x: f32,
+        hold: bool,
+    },
     Frames,
 }
 
@@ -92,9 +98,20 @@ impl Request {
                 };
                 Ok(Request::Publish(name.to_string(), value))
             }
+            "tap" | "hold" => {
+                let x: f32 = rest
+                    .parse()
+                    .ok()
+                    .filter(|x| (0.0..640.0).contains(x))
+                    .ok_or(format!("{word} needs an x position from 0 to 639"))?;
+                Ok(Request::Touch {
+                    x,
+                    hold: word == "hold",
+                })
+            }
             "" => Err("empty request".into()),
             other => Err(format!(
-                "unknown request \"{other}\"; expected status, signals, page, reload, publish or frames"
+                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold or frames"
             )),
         }
     }
@@ -240,6 +257,24 @@ pub fn write_frame(out: &mut impl Write, rgba: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_touches() {
+        assert_eq!(
+            Request::parse("tap 150"),
+            Ok(Request::Touch {
+                x: 150.0,
+                hold: false
+            })
+        );
+        assert_eq!(
+            Request::parse("hold 0"),
+            Ok(Request::Touch { x: 0.0, hold: true })
+        );
+        for bad in ["tap", "tap 640", "hold -1", "tap left"] {
+            assert!(Request::parse(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn parses_requests() {

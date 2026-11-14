@@ -10,6 +10,13 @@
 #   media.title, media.artist, media.status (text), media.position,
 #   media.length (seconds): read by the "media" widget
 # Thresholds (warn, crit) use those base units too.
+#
+# Any widget can act on a tap and on a long press (hold), for example:
+#   tap = { page = "Clock" }               next, prev, or a page name
+#   tap = { media = "play-pause" }         play-pause, next, previous, stop
+#   tap = { run = ["pavucontrol"] }        a program and its arguments, no shell
+#   hold = { open = "https://example.org" } a URL or file, in the default app
+#   tap = { publish = { signal = "mode", value = "focus" } }
 
 [settings]
 font = "ibm-plex-sans"       # ibm-plex-sans, atkinson-hyperlegible, roboto, noto-sans, lato
@@ -29,10 +36,13 @@ name = "System"
 [[page.widget]]
 type = "clock"
 width = 107
+tap = { page = "Clock" }
 
 [[page.widget]]
 type = "media"
 width = 107
+tap = { media = "play-pause" }
+hold = { media = "next" }
 
 [[page.widget]]
 type = "value"
@@ -126,3 +136,4 @@ name = "Clock"
 [[page.widget]]
 type = "clock"
 width = 640
+tap = { page = "System" }

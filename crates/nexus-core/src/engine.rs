@@ -18,11 +18,11 @@ use std::time::Duration;
 use jiff::Zoned;
 
 use crate::canvas::Canvas;
-use crate::config::Config;
+use crate::config::{Action, Config, Widget};
 use crate::fonts::FontChoice;
 use crate::gesture::{Gesture, Recognizer, should_commit};
 use crate::layout::{bind_page, shows_clock, signals_used};
-use crate::signal::{Signals, Value};
+use crate::signal::{Signals, Unit, Value};
 use crate::theme::Theme;
 use crate::widget::Renderer;
 
@@ -85,6 +85,11 @@ pub struct Engine {
     dirty: bool,
     /// The minute last drawn, for pages with a clock.
     drawn_minute: Option<i64>,
+    /// The zone a finger rests on, if a tap there would act. Drawn lit.
+    pressed: Option<usize>,
+    /// Actions only the caller can carry out (start a program, open a URL,
+    /// control media), collected by `take_actions`.
+    actions: Vec<Action>,
 }
 
 impl Engine {
@@ -102,7 +107,15 @@ impl Engine {
             stepped_at: None,
             dirty: true,
             drawn_minute: None,
+            pressed: None,
+            actions: Vec::new(),
         }
+    }
+
+    /// Actions from taps and long presses since the last call, for the
+    /// caller to carry out. Page changes and publishes are already done.
+    pub fn take_actions(&mut self) -> Vec<Action> {
+        std::mem::take(&mut self.actions)
     }
 
     pub fn config(&self) -> &Config {
@@ -132,7 +145,23 @@ impl Engine {
                 self.dirty |= visible;
             }
             Input::Touch { down, x, at } => {
-                if let Some(gesture) = self.gestures.update(down, x, at) {
+                let landing = down && !self.gestures.pressed();
+                let gesture = self.gestures.update(down, x, at);
+                // Light the zone as soon as the finger lands, so the strip
+                // answers before the gesture is known; a swipe turns it off.
+                let mut pressed = match () {
+                    _ if !self.gestures.pressed() => None,
+                    _ if landing && self.motion == Motion::Still => self.actionable_zone(x),
+                    _ => self.pressed,
+                };
+                if matches!(gesture, Some(Gesture::Drag { .. })) {
+                    pressed = None;
+                }
+                if pressed != self.pressed {
+                    self.pressed = pressed;
+                    self.dirty = true;
+                }
+                if let Some(gesture) = gesture {
                     self.gesture(gesture);
                 }
             }
@@ -164,7 +193,7 @@ impl Engine {
         let zones = bind_page(page, &self.signals, &self.config.settings, now);
         self.dirty = false;
         self.drawn_minute = minute;
-        Some(self.renderer.render_page(&zones))
+        Some(self.renderer.render_page(&zones, self.pressed))
     }
 
     /// How long until the picture changes without any input: no time at
@@ -208,8 +237,64 @@ impl Engine {
                 };
                 self.stepped_at = None;
             }
-            // Taps and long presses get actions in Phase 3.
-            Gesture::Tap { .. } | Gesture::LongPress { .. } => {}
+            Gesture::Tap { x } => {
+                if let Some(action) = self.widget_at(x).and_then(Widget::tap).cloned() {
+                    self.act(action);
+                }
+            }
+            Gesture::LongPress { x } => {
+                if let Some(action) = self.widget_at(x).and_then(Widget::hold).cloned() {
+                    self.act(action);
+                }
+            }
+        }
+    }
+
+    /// Index of the widget under panel x on the current page.
+    fn zone_at(&self, x: f32) -> Option<usize> {
+        let mut right = 0.0;
+        self.config.pages[self.page]
+            .widgets
+            .iter()
+            .position(|w| {
+                right += w.width() as f32;
+                x < right
+            })
+            .filter(|_| x >= 0.0)
+    }
+
+    fn widget_at(&self, x: f32) -> Option<&Widget> {
+        self.zone_at(x)
+            .map(|i| &self.config.pages[self.page].widgets[i])
+    }
+
+    /// The zone under x, if a tap or a long press there does something.
+    fn actionable_zone(&self, x: f32) -> Option<usize> {
+        self.zone_at(x).filter(|&i| {
+            let w = &self.config.pages[self.page].widgets[i];
+            w.tap().is_some() || w.hold().is_some()
+        })
+    }
+
+    fn act(&mut self, action: Action) {
+        match action {
+            Action::Page(target) => match target.as_str() {
+                "next" => self.handle(Input::Step(1)),
+                "prev" => self.handle(Input::Step(-1)),
+                name => {
+                    if let Some(i) = self.config.page_index(name) {
+                        self.go_to(i);
+                    }
+                }
+            },
+            Action::Publish { signal, value } => {
+                let value = match value.trim().parse::<f64>() {
+                    Ok(n) => Value::Number(n, Unit::None),
+                    Err(_) => Value::Text(value),
+                };
+                self.handle(Input::Signal(signal, value));
+            }
+            other => self.actions.push(other),
         }
     }
 
@@ -305,7 +390,7 @@ impl Engine {
                 &self.config.settings,
                 now,
             );
-            let canvas = self.renderer.render_page(&zones);
+            let canvas = self.renderer.render_page(&zones, None);
             self.snapshots.insert(page, canvas);
         }
         &self.snapshots[&page]
@@ -313,6 +398,7 @@ impl Engine {
 
     fn go_to(&mut self, index: usize) {
         self.motion = Motion::Still;
+        self.pressed = None;
         self.snapshots.clear();
         if index < self.config.pages.len() && index != self.page {
             self.page = index;
@@ -332,6 +418,7 @@ impl Engine {
             self.renderer = Renderer::new(Theme::default(), self.font.load());
         }
         self.motion = Motion::Still;
+        self.pressed = None;
         self.snapshots.clear();
         self.dirty = true;
         self.config = config;
@@ -458,6 +545,124 @@ mod tests {
             assert!(frames < 120, "settles within 2 s");
         }
         frames
+    }
+
+    /// Page A: a clock that taps to page B (0–99), media with tap and hold
+    /// (100–199), and a reading with no action (200–299). Page B: a clock.
+    fn tappable() -> Engine {
+        let config = Config::parse(
+            r#"
+            [[page]]
+            name = "A"
+            [[page.widget]]
+            type = "clock"
+            width = 100
+            tap = { page = "B" }
+            [[page.widget]]
+            type = "media"
+            width = 100
+            tap = { media = "play-pause" }
+            hold = { run = ["pavucontrol"] }
+            [[page.widget]]
+            type = "value"
+            width = 100
+            label = "CPU"
+            signal = "cpu.temp"
+
+            [[page]]
+            name = "B"
+            [[page.widget]]
+            type = "clock"
+            width = 640
+            "#,
+        )
+        .unwrap();
+        Engine::new(config)
+    }
+
+    /// Holds a still finger at `x` for `secs`, sampling at 500 Hz.
+    fn press(e: &mut Engine, x: f32, secs: f64) {
+        let mut t = 10.0;
+        while t < 10.0 + secs {
+            e.handle(Input::Touch {
+                down: true,
+                x,
+                at: t,
+            });
+            t += 0.002;
+        }
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: t,
+        });
+    }
+
+    fn pixel(canvas: &Canvas, x: u32, y: u32) -> [u8; 3] {
+        let i = ((y * crate::WIDTH + x) * 4) as usize;
+        let rgba = canvas.rgba();
+        [rgba[i], rgba[i + 1], rgba[i + 2]]
+    }
+
+    #[test]
+    fn a_finger_on_an_action_lights_its_zone_at_once() {
+        let mut e = tappable();
+        let now = at("16:17:05");
+        e.frame(&now, 0.0);
+        let lit = Theme::default().palette.pressed;
+        let lit = [lit.r, lit.g, lit.b];
+
+        e.handle(Input::Touch {
+            down: true,
+            x: 150.0,
+            at: 10.0,
+        });
+        let frame = e.frame(&now, 10.0).expect("the first sample redraws");
+        assert_eq!(pixel(&frame, 150, 2), lit, "media zone lit");
+        assert_ne!(pixel(&frame, 50, 2), lit, "clock zone not lit");
+
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: 10.1,
+        });
+        let frame = e.frame(&now, 10.1).expect("lifting redraws");
+        assert_ne!(pixel(&frame, 150, 2), lit);
+
+        // No action under the finger: nothing lights, nothing redraws.
+        e.handle(Input::Touch {
+            down: true,
+            x: 250.0,
+            at: 11.0,
+        });
+        assert!(e.frame(&now, 11.0).is_none());
+    }
+
+    #[test]
+    fn taps_and_holds_act() {
+        let mut e = tappable();
+        press(&mut e, 150.0, 0.1);
+        assert_eq!(
+            e.take_actions(),
+            [Action::Media(crate::config::MediaCommand::PlayPause)]
+        );
+        press(&mut e, 150.0, 0.7);
+        assert_eq!(e.take_actions(), [Action::Run(vec!["pavucontrol".into()])]);
+        assert!(e.take_actions().is_empty(), "taken once");
+
+        press(&mut e, 250.0, 0.1); // no action there
+        assert!(e.take_actions().is_empty());
+        assert_eq!(e.page(), 0);
+        press(&mut e, 50.0, 0.1);
+        assert_eq!(e.page(), 1, "page actions are done by the engine");
+    }
+
+    #[test]
+    fn a_swipe_from_a_lit_zone_turns_it_off_and_acts_on_nothing() {
+        let mut e = tappable();
+        swipe(&mut e, 150.0, 20.0, 0.1);
+        assert_eq!(e.pressed, None);
+        assert!(e.take_actions().is_empty());
     }
 
     #[test]

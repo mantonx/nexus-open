@@ -614,3 +614,19 @@ golang` finds nothing outside the changelog.
   cleaned up into a first-class app at the end of the rebuild. Recorded as
   Phase 8, replacing the archive gate in Phase 5; it follows the Linux
   release rather than macOS/Windows.
+- 2026-11-14 — Phase 3 step 4: tap and hold actions. Any widget takes
+  `tap`/`hold` = `page`, `run` (argv, no shell), `open`, `media` or
+  `publish`; checked at load (unknown page names are errors). A zone with an
+  action lights the moment a finger lands and goes dark when the touch
+  becomes a swipe. Under systemd, `run`/`open` go through `systemd-run
+  --user` so launched apps run outside the daemon's sandbox (verified: a
+  launched program wrote outside the service's private /tmp and saw
+  WAYLAND_DISPLAY). `nexusctl tap X` / `hold X` inject a touch through the
+  same gesture path (also the Phase 4 simulator's hook). Verified on the
+  service: page taps, play-pause and next on VLC.
+- 2026-11-14 — Brush guard: presses under 30 ms are ignored. PROVISIONAL.
+  `nexusd trace FILE` records raw touches alongside the daemon; traces
+  dropped in `crates/nexus-core/tests/traces/` (tap-, hold-, swipe-,
+  brush-) are replayed by a test. Needs Matt's recordings to set the real
+  threshold. "Send a key" is not built: on Wayland it needs root (uinput)
+  or a portal prompt; `run` with a tool like `wpctl` covers volume.

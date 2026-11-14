@@ -67,7 +67,7 @@ pub fn preview(
 
 fn render(font: FontChoice) -> Vec<u8> {
     let mut renderer = Renderer::new(Theme::default(), font.load());
-    renderer.render_page(&system_page()).rgba().to_vec()
+    renderer.render_page(&system_page(), None).rgba().to_vec()
 }
 
 fn show(device: &mut Nexus, frame: &[u8], font: FontChoice) -> Result<(), DeviceError> {
