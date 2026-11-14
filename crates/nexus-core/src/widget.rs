@@ -68,6 +68,17 @@ pub enum WidgetView {
     },
     /// The track playing, or `None` when nothing is.
     Media(Option<Track>),
+    /// A label, a readout, and a bar filled to `fraction`.
+    Slider {
+        label: String,
+        value: String,
+        /// 0.0–1.0; `None` when there is nothing to show.
+        fraction: Option<f32>,
+        /// A finger is on it: the bar is drawn thicker, with a handle.
+        active: bool,
+        /// Shown dimmed (muted audio).
+        muted: bool,
+    },
 }
 
 /// A track as the media widget shows it.
@@ -201,6 +212,13 @@ impl Renderer {
                 );
             }
             WidgetView::Media(track) => self.media(canvas, x, width, track.as_ref()),
+            WidgetView::Slider {
+                label,
+                value,
+                fraction,
+                active,
+                muted,
+            } => self.slider(canvas, x, width, label, value, *fraction, *active, *muted),
         }
     }
 
@@ -243,6 +261,47 @@ impl Renderer {
                 2,
                 if track.playing { p.info } else { p.unit },
             );
+        }
+    }
+
+    /// Label and readout above a bar along the bottom. While a finger is on
+    /// it the bar thickens and grows a handle, so the slider visibly has
+    /// hold of the touch.
+    #[allow(clippy::too_many_arguments)]
+    fn slider(
+        &mut self,
+        canvas: &mut Canvas,
+        x: f32,
+        width: f32,
+        label: &str,
+        value: &str,
+        fraction: Option<f32>,
+        active: bool,
+        muted: bool,
+    ) {
+        let ts = self.theme.type_scale.clone();
+        let p = self.theme.palette.clone();
+        let g = self.theme.grid.clone();
+        let room = width - 2.0 * g.pad_left;
+        let label = self.fit(&ts.label, label, room);
+        self.label(canvas, x, &label);
+        let value = self.fit(&ts.caption, value, room);
+        let at = (x + g.pad_left, g.caption_baseline);
+        let color = if muted { p.unit } else { p.value };
+        self.text
+            .draw(canvas, &self.text_fonts, &ts.caption, &value, at, color);
+
+        let left = (x + g.pad_left).round() as u32;
+        let len = room.round().max(1.0) as u32;
+        let (y, thick) = if active { (38, 5) } else { (39, 3) };
+        canvas.fill_rect(left, y, len, thick, p.divider);
+        if let Some(f) = fraction {
+            let filled = (len as f32 * f).round() as u32;
+            canvas.fill_rect(left, y, filled, thick, if muted { p.unit } else { p.info });
+            if active {
+                let handle = (left + filled).saturating_sub(1).min(left + len - 2);
+                canvas.fill_rect(handle, 34, 3, 13, p.value);
+            }
         }
     }
 

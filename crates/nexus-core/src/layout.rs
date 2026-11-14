@@ -8,12 +8,16 @@
 
 use jiff::Zoned;
 
-use crate::config::{ClockFormat, GraphStyle, Page, Settings, Temperature, Widget};
+use crate::config::{ClockFormat, GraphStyle, Page, Settings, SliderControl, Temperature, Widget};
 use crate::signal::{Signals, Unit, Value};
 use crate::widget::{Graph, Severity, Track, WidgetView, Zone};
 
 /// Shown where a reading has not arrived yet. Calm, not an error.
 pub const NO_DATA: &str = "—";
+
+/// The signals a volume source publishes: `volume.level` (percent) and
+/// `volume.muted` (1 or 0).
+pub const VOLUME_SIGNALS: [&str; 2] = ["volume.level", "volume.muted"];
 
 /// The signals a media source publishes and the media widget reads.
 /// `media.status` is "playing", "paused" or "stopped"; position and length
@@ -49,6 +53,13 @@ pub fn signals_used(page: &Page) -> impl Iterator<Item = &str> {
     page.widgets.iter().flat_map(|w| match w {
         Widget::Clock { .. } => vec![],
         Widget::Media { .. } => MEDIA_SIGNALS.to_vec(),
+        Widget::Slider {
+            controls, signal, ..
+        } => match controls {
+            SliderControl::Volume => VOLUME_SIGNALS.to_vec(),
+            SliderControl::Seek => MEDIA_SIGNALS.to_vec(),
+            SliderControl::Run(_) => signal.iter().map(String::as_str).collect(),
+        },
         Widget::Value { signal, .. } => vec![signal.as_str()],
         Widget::Rate { down, up, .. } => vec![down.as_str(), up.as_str()],
     })
@@ -58,6 +69,7 @@ fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zo
     match widget {
         Widget::Clock { .. } => clock(settings.clock, now),
         Widget::Media { .. } => media(signals),
+        Widget::Slider { .. } => slider(widget, signals, None, None),
         Widget::Value {
             label,
             signal,
@@ -107,6 +119,82 @@ fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zo
                 graph: (!history.is_empty()).then_some(Graph::Line(history)),
             }
         }
+    }
+}
+
+/// A slider's view. `held` is the finger's position (0–1) while sliding:
+/// shown instead of the live value, so the bar follows the finger at once.
+/// `last_set` is what a `run` slider without a signal shows at rest.
+pub fn slider(
+    widget: &Widget,
+    signals: &Signals,
+    held: Option<f32>,
+    last_set: Option<f32>,
+) -> WidgetView {
+    let Widget::Slider {
+        label,
+        controls,
+        signal,
+        ..
+    } = widget
+    else {
+        unreachable!("slider() is only called for sliders")
+    };
+    let number = |name: &str| match signals.get(name) {
+        Some(Value::Number(n, _)) => Some(*n),
+        _ => None,
+    };
+    let percent = |f: f32| format!("{:.0}%", f * 100.0);
+    let (fraction, value, muted) = match controls {
+        SliderControl::Volume => {
+            let muted = held.is_none() && number("volume.muted").is_some_and(|m| m != 0.0);
+            let f = held.or(number("volume.level").map(|v| (v / 100.0) as f32));
+            let value = match f {
+                _ if muted => "Muted".to_string(),
+                Some(f) => percent(f),
+                None => NO_DATA.to_string(),
+            };
+            (f, value, muted)
+        }
+        SliderControl::Seek => {
+            let length = number("media.length").filter(|l| *l > 0.0);
+            let active =
+                matches!(signals.get("media.status"), Some(Value::Text(s)) if s != "stopped");
+            match length.filter(|_| active) {
+                Some(length) => {
+                    let f = held.or(number("media.position").map(|p| (p / length) as f32));
+                    let at = f.map_or(0.0, |f| f64::from(f.clamp(0.0, 1.0)) * length);
+                    let value = format!("{} / {}", track_time(at), track_time(length));
+                    (f, value, false)
+                }
+                None => (None, NO_DATA.to_string(), false),
+            }
+        }
+        SliderControl::Run(_) => {
+            let shown = signal
+                .as_deref()
+                .and_then(number)
+                .map(|v| (v / 100.0) as f32);
+            let f = held.or(shown).or(last_set);
+            (f, f.map_or(NO_DATA.to_string(), percent), false)
+        }
+    };
+    WidgetView::Slider {
+        label: label.clone(),
+        value,
+        fraction: fraction.map(|f| f.clamp(0.0, 1.0)),
+        active: held.is_some(),
+        muted,
+    }
+}
+
+/// "3:07", or "1:02:09" past an hour.
+fn track_time(seconds: f64) -> String {
+    let s = seconds.max(0.0) as u64;
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    } else {
+        format!("{}:{:02}", s / 60, s % 60)
     }
 }
 
@@ -287,6 +375,55 @@ mod tests {
         assert_eq!((t.progress, t.playing), (None, false));
         s.set("media.status", Value::Text("stopped".into()));
         assert_eq!(media(&s), WidgetView::Media(None));
+    }
+
+    #[test]
+    fn sliders_show_live_values_or_the_finger() {
+        let w = |controls: &str| {
+            let c = Config::parse(&format!(
+                "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"slider\"\nwidth = 200\nlabel = \"S\"\ncontrols = {controls}\n[[page.widget]]\ntype = \"clock\"\nwidth = 100\n"
+            ))
+            .unwrap();
+            c.pages[0].widgets[0].clone()
+        };
+        let view = |w: &Widget, s: &Signals, held| match slider(w, s, held, None) {
+            WidgetView::Slider {
+                value,
+                fraction,
+                muted,
+                ..
+            } => (value, fraction, muted),
+            _ => unreachable!(),
+        };
+        let mut s = Signals::new();
+        let volume = w("\"volume\"");
+        assert_eq!(view(&volume, &s, None), (NO_DATA.into(), None, false));
+        s.set("volume.level", Value::Number(40.0, Unit::Percent));
+        assert_eq!(view(&volume, &s, None), ("40%".into(), Some(0.4), false));
+        assert_eq!(
+            view(&volume, &s, Some(0.75)),
+            ("75%".into(), Some(0.75), false)
+        );
+        s.set("volume.muted", Value::Number(1.0, Unit::None));
+        assert_eq!(view(&volume, &s, None), ("Muted".into(), Some(0.4), true));
+
+        let seek = w("\"seek\"");
+        assert_eq!(view(&seek, &s, None).0, NO_DATA, "nothing playing");
+        s.set("media.status", Value::Text("playing".into()));
+        s.set("media.position", Value::Number(65.0, Unit::None));
+        s.set("media.length", Value::Number(260.0, Unit::None));
+        assert_eq!(
+            view(&seek, &s, None),
+            ("1:05 / 4:20".into(), Some(0.25), false)
+        );
+        assert_eq!(view(&seek, &s, Some(0.5)).0, "2:10 / 4:20");
+
+        let run = w("{ run = [\"x\", \"{value}\"] }");
+        assert_eq!(view(&run, &s, None).0, NO_DATA);
+        assert!(matches!(
+            slider(&run, &s, None, Some(0.3)),
+            WidgetView::Slider { fraction: Some(f), .. } if (f - 0.3).abs() < 1e-6
+        ));
     }
 
     #[test]

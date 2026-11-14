@@ -16,7 +16,7 @@ const LONG_PRESS: f64 = 0.5;
 /// his shortest deliberate tap lasted 46 ms (5 reports), and a finger
 /// bouncing as it lifts leaves single-report contacts of 8–12 ms. Brushes
 /// while typing are not recorded yet; revisit with a `brush-typing` trace.
-const MIN_TAP: f64 = 0.03;
+pub(crate) const MIN_TAP: f64 = 0.03;
 /// Touches starting this soon after a swipe ends are ignored: a fast flick
 /// lifts the finger while reports are still in flight, and the tail would
 /// otherwise start a new swipe.

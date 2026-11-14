@@ -47,6 +47,11 @@ pub enum Request {
         x: f32,
         hold: bool,
     },
+    /// A simulated drag from one panel x to another over 0.3 s.
+    Drag {
+        from: f32,
+        to: f32,
+    },
     Frames,
 }
 
@@ -109,9 +114,20 @@ impl Request {
                     hold: word == "hold",
                 })
             }
+            "drag" => {
+                let xs: Vec<f32> = rest
+                    .split_whitespace()
+                    .filter_map(|x| x.parse().ok())
+                    .filter(|x| (0.0..640.0).contains(x))
+                    .collect();
+                match xs[..] {
+                    [from, to] => Ok(Request::Drag { from, to }),
+                    _ => Err("drag needs two x positions from 0 to 639".into()),
+                }
+            }
             "" => Err("empty request".into()),
             other => Err(format!(
-                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold or frames"
+                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold, drag or frames"
             )),
         }
     }
@@ -271,7 +287,21 @@ mod tests {
             Request::parse("hold 0"),
             Ok(Request::Touch { x: 0.0, hold: true })
         );
-        for bad in ["tap", "tap 640", "hold -1", "tap left"] {
+        assert_eq!(
+            Request::parse("drag 10 300"),
+            Ok(Request::Drag {
+                from: 10.0,
+                to: 300.0
+            })
+        );
+        for bad in [
+            "tap",
+            "tap 640",
+            "hold -1",
+            "tap left",
+            "drag 10",
+            "drag 10 700",
+        ] {
             assert!(Request::parse(bad).is_err(), "{bad}");
         }
     }

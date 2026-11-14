@@ -39,6 +39,9 @@ pub struct Track {
     pub position: f64,
     /// Seconds; 0 when unknown.
     pub length: f64,
+    /// The player's ID for the track (`mpris:trackid`), needed to seek to
+    /// an absolute position.
+    pub id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -152,6 +155,33 @@ pub fn command(command: MediaCommand) {
     }
 }
 
+/// Moves the shown track to `seconds` in. Uses `SetPosition`, which needs
+/// the track's ID; players without one get a relative `Seek` instead.
+pub fn seek(seconds: f64) {
+    let Ok(conn) = Connection::session() else {
+        return;
+    };
+    let Some(track) = choose(&read_all(&conn), None) else {
+        return;
+    };
+    let target = (seconds.max(0.0) * 1e6) as i64;
+    let player = Some(track.player.as_str());
+    let result = match track
+        .id
+        .as_deref()
+        .and_then(|id| zbus::zvariant::ObjectPath::try_from(id).ok())
+    {
+        Some(id) => conn.call_method(player, PATH, Some(PLAYER), "SetPosition", &(id, target)),
+        None => {
+            let offset = target - (track.position * 1e6) as i64;
+            conn.call_method(player, PATH, Some(PLAYER), "Seek", &(offset,))
+        }
+    };
+    if let Err(e) = result {
+        eprintln!("nexusd: media: {} refused to seek: {e}", track.player);
+    }
+}
+
 /// Wakes `wake` on every player event: a player starting or quitting, a
 /// property change, a seek.
 fn listen(conn: &Connection, wake: mpsc::Sender<()>) -> zbus::Result<()> {
@@ -246,6 +276,10 @@ fn read_player(conn: &Connection, name: &str) -> Option<Track> {
         length: meta_get("mpris:length")
             .and_then(micros)
             .map_or(0.0, to_seconds),
+        id: meta_get("mpris:trackid").and_then(|v| match v {
+            Variant::ObjectPath(p) => Some(p.to_string()),
+            other => text(other),
+        }),
     })
 }
 

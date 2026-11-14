@@ -18,13 +18,13 @@ use std::time::Duration;
 use jiff::Zoned;
 
 use crate::canvas::Canvas;
-use crate::config::{Action, Config, Widget};
+use crate::config::{Action, Config, SLIDER_VALUE, SliderControl, Widget};
 use crate::fonts::FontChoice;
-use crate::gesture::{Gesture, Recognizer, should_commit};
-use crate::layout::{bind_page, shows_clock, signals_used};
+use crate::gesture::{Gesture, MIN_TAP, Recognizer, should_commit};
+use crate::layout::{bind_page, shows_clock, signals_used, slider};
 use crate::signal::{Signals, Unit, Value};
 use crate::theme::Theme;
-use crate::widget::Renderer;
+use crate::widget::{Renderer, Zone};
 
 const WIDTH: f32 = crate::WIDTH as f32;
 
@@ -49,6 +49,33 @@ pub enum Input {
     Config(Box<Config>),
     /// The device came back; it needs the whole picture again.
     Redraw,
+}
+
+/// Something for the caller to do. The engine never touches processes,
+/// D-Bus or audio itself, which keeps it testable without any of them.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Effect {
+    /// A tap or hold action other than a page change or a publish.
+    Act(Action),
+    /// Set the output volume, 0–100.
+    Volume(u8),
+    /// Move the shown track to this many seconds in.
+    Seek(f64),
+    /// Run a slider's command, `{value}` already filled in.
+    Run(Vec<String>),
+}
+
+/// A finger on a slider.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Slide {
+    zone: usize,
+    /// When the finger landed: until `MIN_TAP` has passed it might be a
+    /// lift bounce, so nothing is set yet.
+    start: f64,
+    /// The finger's position along the bar, 0–1.
+    fraction: f32,
+    /// The last whole percent sent, so a drag sends each value once.
+    sent: Option<u8>,
 }
 
 /// How the page row is moving. `offset` is how far the current page is
@@ -87,9 +114,14 @@ pub struct Engine {
     drawn_minute: Option<i64>,
     /// The zone a finger rests on, if a tap there would act. Drawn lit.
     pressed: Option<usize>,
-    /// Actions only the caller can carry out (start a program, open a URL,
-    /// control media), collected by `take_actions`.
-    actions: Vec<Action>,
+    /// What only the caller can carry out, collected by `take_effects`.
+    effects: Vec<Effect>,
+    /// A finger on a slider. While set, touches go to the slider and not
+    /// to the gesture recognizer, so a slider's drag is never a swipe.
+    slide: Option<Slide>,
+    /// The last value of each `run` slider with no signal to show, by
+    /// (page, zone).
+    last_set: HashMap<(usize, usize), f32>,
 }
 
 impl Engine {
@@ -108,14 +140,16 @@ impl Engine {
             dirty: true,
             drawn_minute: None,
             pressed: None,
-            actions: Vec::new(),
+            effects: Vec::new(),
+            slide: None,
+            last_set: HashMap::new(),
         }
     }
 
-    /// Actions from taps and long presses since the last call, for the
+    /// What taps, holds and slides asked for since the last call, for the
     /// caller to carry out. Page changes and publishes are already done.
-    pub fn take_actions(&mut self) -> Vec<Action> {
-        std::mem::take(&mut self.actions)
+    pub fn take_effects(&mut self) -> Vec<Effect> {
+        std::mem::take(&mut self.effects)
     }
 
     pub fn config(&self) -> &Config {
@@ -145,6 +179,15 @@ impl Engine {
                 self.dirty |= visible;
             }
             Input::Touch { down, x, at } => {
+                let on_slider = self.slide.is_some()
+                    || (down
+                        && !self.gestures.pressed()
+                        && self.motion == Motion::Still
+                        && self.slider_at(x).is_some());
+                if on_slider {
+                    self.slide_touch(down, x, at);
+                    return;
+                }
                 let landing = down && !self.gestures.pressed();
                 let gesture = self.gestures.update(down, x, at);
                 // Light the zone as soon as the finger lands, so the strip
@@ -190,7 +233,8 @@ impl Engine {
         if !self.dirty && minute == self.drawn_minute {
             return None;
         }
-        let zones = bind_page(page, &self.signals, &self.config.settings, now);
+        let mut zones = bind_page(page, &self.signals, &self.config.settings, now);
+        self.show_sliders(self.page, &mut zones);
         self.dirty = false;
         self.drawn_minute = minute;
         Some(self.renderer.render_page(&zones, self.pressed))
@@ -268,6 +312,104 @@ impl Engine {
             .map(|i| &self.config.pages[self.page].widgets[i])
     }
 
+    /// The slider under x, if there is one.
+    fn slider_at(&self, x: f32) -> Option<usize> {
+        self.zone_at(x).filter(|&i| {
+            matches!(
+                self.config.pages[self.page].widgets[i],
+                Widget::Slider { .. }
+            )
+        })
+    }
+
+    /// Where x falls along a slider's bar, 0–1. The bar spans the zone less
+    /// its padding, so the ends are reachable without leaving the zone.
+    fn slider_fraction(&self, zone: usize, x: f32) -> f32 {
+        let widgets = &self.config.pages[self.page].widgets;
+        let left: u32 = widgets[..zone].iter().map(Widget::width).sum();
+        let pad = Theme::default().grid.pad_left;
+        let span = (widgets[zone].width() as f32 - 2.0 * pad).max(1.0);
+        ((x - left as f32 - pad) / span).clamp(0.0, 1.0)
+    }
+
+    /// A touch while on a slider. The bar follows the finger from the first
+    /// sample; values are only set once the touch has outlasted a lift
+    /// bounce. The lift sample reports x = 0, so the release keeps the last
+    /// position.
+    fn slide_touch(&mut self, down: bool, x: f32, at: f64) {
+        let Some(mut slide) = self.slide.take().or_else(|| {
+            let zone = self.slider_at(x)?;
+            Some(Slide {
+                zone,
+                start: at,
+                fraction: self.slider_fraction(zone, x),
+                sent: None,
+            })
+        }) else {
+            return;
+        };
+        self.dirty = true;
+        let settled = at - slide.start >= MIN_TAP;
+        if down {
+            slide.fraction = self.slider_fraction(slide.zone, x);
+            if settled {
+                self.slid(&mut slide, false);
+            }
+            self.slide = Some(slide);
+        } else if settled {
+            self.slid(&mut slide, true);
+        }
+    }
+
+    /// Turns a slider position into effects: volume and commands as the
+    /// value changes, a seek on release.
+    fn slid(&mut self, slide: &mut Slide, done: bool) {
+        let Widget::Slider { controls, .. } = &self.config.pages[self.page].widgets[slide.zone]
+        else {
+            return;
+        };
+        let percent = (slide.fraction * 100.0).round() as u8;
+        let changed = slide.sent != Some(percent);
+        let effect = match controls {
+            SliderControl::Volume if changed => Some(Effect::Volume(percent)),
+            SliderControl::Run(argv) if changed => Some(Effect::Run(
+                argv.iter()
+                    .map(|a| a.replace(SLIDER_VALUE, &percent.to_string()))
+                    .collect(),
+            )),
+            SliderControl::Seek if done => match self.signals.get("media.length") {
+                Some(Value::Number(length, _)) if *length > 0.0 => {
+                    Some(Effect::Seek(f64::from(slide.fraction) * length))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if matches!(controls, SliderControl::Run(_)) {
+            self.last_set
+                .insert((self.page, slide.zone), slide.fraction);
+        }
+        if let Some(effect) = effect {
+            slide.sent = Some(percent);
+            self.effects.push(effect);
+        }
+    }
+
+    /// Replaces slider views with ones that show the finger while sliding,
+    /// and a `run` slider's last value at rest.
+    fn show_sliders(&self, page: usize, zones: &mut [Zone]) {
+        for (i, widget) in self.config.pages[page].widgets.iter().enumerate() {
+            if matches!(widget, Widget::Slider { .. }) {
+                let held = self
+                    .slide
+                    .filter(|s| s.zone == i && page == self.page)
+                    .map(|s| s.fraction);
+                let last = self.last_set.get(&(page, i)).copied();
+                zones[i].view = slider(widget, &self.signals, held, last);
+            }
+        }
+    }
+
     /// The zone under x, if a tap or a long press there does something.
     fn actionable_zone(&self, x: f32) -> Option<usize> {
         self.zone_at(x).filter(|&i| {
@@ -294,7 +436,7 @@ impl Engine {
                 };
                 self.handle(Input::Signal(signal, value));
             }
-            other => self.actions.push(other),
+            other => self.effects.push(Effect::Act(other)),
         }
     }
 
@@ -384,12 +526,13 @@ impl Engine {
 
     fn snapshot(&mut self, page: usize, now: &Zoned) -> &Canvas {
         if !self.snapshots.contains_key(&page) {
-            let zones = bind_page(
+            let mut zones = bind_page(
                 &self.config.pages[page],
                 &self.signals,
                 &self.config.settings,
                 now,
             );
+            self.show_sliders(page, &mut zones);
             let canvas = self.renderer.render_page(&zones, None);
             self.snapshots.insert(page, canvas);
         }
@@ -399,6 +542,7 @@ impl Engine {
     fn go_to(&mut self, index: usize) {
         self.motion = Motion::Still;
         self.pressed = None;
+        self.slide = None;
         self.snapshots.clear();
         if index < self.config.pages.len() && index != self.page {
             self.page = index;
@@ -419,6 +563,8 @@ impl Engine {
         }
         self.motion = Motion::Still;
         self.pressed = None;
+        self.slide = None;
+        self.last_set.clear();
         self.snapshots.clear();
         self.dirty = true;
         self.config = config;
@@ -489,12 +635,13 @@ mod tests {
     #[test]
     fn stepping_stops_at_the_ends() {
         let mut e = Engine::new(Config::default_layout());
+        let last = e.config().pages.len() - 1;
         e.handle(Input::Step(-1));
         assert_eq!(e.page(), 0);
         e.handle(Input::Step(10));
-        assert_eq!(e.page(), 3);
+        assert_eq!(e.page(), last);
         e.handle(Input::ShowPage(99));
-        assert_eq!(e.page(), 3);
+        assert_eq!(e.page(), last);
     }
 
     #[test]
@@ -643,15 +790,20 @@ mod tests {
         let mut e = tappable();
         press(&mut e, 150.0, 0.1);
         assert_eq!(
-            e.take_actions(),
-            [Action::Media(crate::config::MediaCommand::PlayPause)]
+            e.take_effects(),
+            [Effect::Act(Action::Media(
+                crate::config::MediaCommand::PlayPause
+            ))]
         );
         press(&mut e, 150.0, 0.7);
-        assert_eq!(e.take_actions(), [Action::Run(vec!["pavucontrol".into()])]);
-        assert!(e.take_actions().is_empty(), "taken once");
+        assert_eq!(
+            e.take_effects(),
+            [Effect::Act(Action::Run(vec!["pavucontrol".into()]))]
+        );
+        assert!(e.take_effects().is_empty(), "taken once");
 
         press(&mut e, 250.0, 0.1); // no action there
-        assert!(e.take_actions().is_empty());
+        assert!(e.take_effects().is_empty());
         assert_eq!(e.page(), 0);
         press(&mut e, 50.0, 0.1);
         assert_eq!(e.page(), 1, "page actions are done by the engine");
@@ -662,7 +814,133 @@ mod tests {
         let mut e = tappable();
         swipe(&mut e, 150.0, 20.0, 0.1);
         assert_eq!(e.pressed, None);
-        assert!(e.take_actions().is_empty());
+        assert!(e.take_effects().is_empty());
+    }
+
+    /// Page A: a volume slider (0–199), a clock (200–299), a seek slider
+    /// (300–499) and a run slider (500–639). Page B: a clock.
+    fn sliders() -> Engine {
+        let config = Config::parse(
+            r#"
+            [[page]]
+            name = "A"
+            [[page.widget]]
+            type = "slider"
+            width = 200
+            label = "Volume"
+            controls = "volume"
+            [[page.widget]]
+            type = "clock"
+            width = 100
+            [[page.widget]]
+            type = "slider"
+            width = 200
+            label = "Position"
+            controls = "seek"
+            [[page.widget]]
+            type = "slider"
+            width = 140
+            label = "Screen"
+            controls = { run = ["ddcutil", "setvcp", "10", "{value}"] }
+
+            [[page]]
+            name = "B"
+            [[page.widget]]
+            type = "clock"
+            width = 640
+            "#,
+        )
+        .unwrap();
+        Engine::new(config)
+    }
+
+    /// Drags from `from` to `to` over `secs` at the strip's ~100 Hz, lifts.
+    fn drag(e: &mut Engine, from: f32, to: f32, secs: f64) {
+        let samples = (secs * 100.0) as usize;
+        let mut t = 50.0;
+        for i in 0..=samples {
+            let x = from + (to - from) * i as f32 / samples.max(1) as f32;
+            e.handle(Input::Touch {
+                down: true,
+                x,
+                at: t,
+            });
+            t += 0.01;
+        }
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: t,
+        });
+    }
+
+    #[test]
+    fn a_volume_drag_sends_each_level_once_and_never_swipes() {
+        let mut e = sliders();
+        let pad = Theme::default().grid.pad_left;
+        drag(&mut e, pad, 200.0 - pad, 0.3);
+        let levels: Vec<u8> = e
+            .take_effects()
+            .into_iter()
+            .map(|fx| match fx {
+                Effect::Volume(v) => v,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(levels.last(), Some(&100));
+        assert!(levels.windows(2).all(|w| w[0] < w[1]), "{levels:?}");
+        assert!(
+            levels[0] <= 15,
+            "starts near the finger's landing: {levels:?}"
+        );
+        assert_eq!(e.page(), 0, "a drag on a slider is not a swipe");
+        assert!(e.slide.is_none());
+    }
+
+    #[test]
+    fn a_lift_bounce_on_a_slider_sets_nothing() {
+        let mut e = sliders();
+        e.handle(Input::Touch {
+            down: true,
+            x: 120.0,
+            at: 9.0,
+        });
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: 9.01,
+        });
+        assert!(e.take_effects().is_empty());
+    }
+
+    #[test]
+    fn seek_waits_for_release_and_run_fills_in_the_value() {
+        let mut e = sliders();
+        e.handle(Input::Signal(
+            "media.length".into(),
+            Value::Number(200.0, Unit::None),
+        ));
+        let pad = Theme::default().grid.pad_left;
+        let mid = 300.0 + 100.0; // the middle of the seek bar
+        drag(&mut e, 300.0 + pad, mid, 0.2);
+        assert_eq!(e.take_effects(), [Effect::Seek(100.0)]);
+
+        drag(&mut e, 600.0, 600.0, 0.1);
+        let fx = e.take_effects();
+        let Some(Effect::Run(argv)) = fx.last() else {
+            panic!("{fx:?}")
+        };
+        let value: u8 = argv[3].parse().unwrap();
+        assert_eq!(&argv[..3], ["ddcutil", "setvcp", "10"]);
+        assert!((70..=90).contains(&value), "{value}");
+    }
+
+    #[test]
+    fn a_swipe_starting_beside_a_slider_still_swipes() {
+        let mut e = sliders();
+        swipe(&mut e, 290.0, 60.0, 0.1); // lands on the clock, crosses the volume
+        assert_eq!(e.page(), 1);
+        assert!(e.take_effects().is_empty());
     }
 
     #[test]

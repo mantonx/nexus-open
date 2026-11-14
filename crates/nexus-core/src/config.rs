@@ -120,6 +120,22 @@ pub enum Widget {
         #[serde(default)]
         hold: Option<Action>,
     },
+    /// A bar to drag along: volume, position in the track, or anything a
+    /// command can set. A touch that lands on it belongs to it, so pages
+    /// cannot be swiped from a slider.
+    Slider {
+        width: u32,
+        label: String,
+        controls: SliderControl,
+        /// For `controls = { run = … }`: a 0–100 signal for the bar to
+        /// show. Without one, it shows the last value set.
+        #[serde(default)]
+        signal: Option<String>,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
+    },
     /// What is playing: title, artist and progress, from the `media.*`
     /// signals.
     Media {
@@ -135,6 +151,7 @@ impl Widget {
     pub fn width(&self) -> u32 {
         match self {
             Widget::Clock { width, .. }
+            | Widget::Slider { width, .. }
             | Widget::Media { width, .. }
             | Widget::Value { width, .. }
             | Widget::Rate { width, .. } => *width,
@@ -145,6 +162,7 @@ impl Widget {
     pub fn tap(&self) -> Option<&Action> {
         match self {
             Widget::Clock { tap, .. }
+            | Widget::Slider { tap, .. }
             | Widget::Media { tap, .. }
             | Widget::Value { tap, .. }
             | Widget::Rate { tap, .. } => tap.as_ref(),
@@ -155,6 +173,7 @@ impl Widget {
     pub fn hold(&self) -> Option<&Action> {
         match self {
             Widget::Clock { hold, .. }
+            | Widget::Slider { hold, .. }
             | Widget::Media { hold, .. }
             | Widget::Value { hold, .. }
             | Widget::Rate { hold, .. } => hold.as_ref(),
@@ -180,6 +199,23 @@ pub enum Action {
     /// Set a signal to a value: a number if it reads as one, else text.
     Publish { signal: String, value: String },
 }
+
+/// What a slider sets.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase", deny_unknown_fields)]
+pub enum SliderControl {
+    /// The default audio output's volume, 0–100%, set as the finger moves.
+    Volume,
+    /// The position in the track the media widget shows, set on release.
+    Seek,
+    /// A program and its arguments, run as the finger moves with `{value}`
+    /// replaced by 0–100. Runs are never queued: a slow command is next run
+    /// with the latest value only.
+    Run(Vec<String>),
+}
+
+/// Stands for the slider's value, 0–100, in a `run` slider's arguments.
+pub const SLIDER_VALUE: &str = "{value}";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -266,7 +302,41 @@ impl Config {
             }
         }
         for page in &self.pages {
+            let at = |i: usize| format!("page \"{}\", widget {}", page.name, i + 1);
+            let sliders = page
+                .widgets
+                .iter()
+                .filter(|w| matches!(w, Widget::Slider { .. }));
+            let only_sliders = !page.widgets.is_empty() && sliders.count() == page.widgets.len();
+            if self.pages.len() > 1 && only_sliders {
+                return Err(ConfigError(format!(
+                    "page \"{}\" has only sliders, so it could not be swiped away; add another widget",
+                    page.name
+                )));
+            }
             for (i, w) in page.widgets.iter().enumerate() {
+                if let Widget::Slider {
+                    controls,
+                    tap,
+                    hold,
+                    ..
+                } = w
+                {
+                    if tap.is_some() || hold.is_some() {
+                        return Err(ConfigError(format!(
+                            "{}: a slider uses touches itself, so it cannot have tap or hold",
+                            at(i)
+                        )));
+                    }
+                    if let SliderControl::Run(argv) = controls
+                        && (argv.is_empty() || !argv.iter().any(|a| a.contains(SLIDER_VALUE)))
+                    {
+                        return Err(ConfigError(format!(
+                            "{}: a run slider needs a program and {SLIDER_VALUE} in its arguments",
+                            at(i)
+                        )));
+                    }
+                }
                 for (gesture, action) in [("tap", w.tap()), ("hold", w.hold())] {
                     if let Some(action) = action {
                         self.check_action(action).map_err(|m| {
@@ -375,6 +445,43 @@ mod tests {
         ] {
             let e = page(bad).unwrap_err().0;
             assert!(e.contains(says), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn sliders_parse_and_are_checked() {
+        let parse = |widget: &str, more: &str| {
+            Config::parse(&format!(
+                "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"slider\"\nwidth = 200\nlabel = \"S\"\n{widget}\n{more}\n[[page]]\nname = \"B\"\n"
+            ))
+        };
+        let clock = "[[page.widget]]\ntype = \"clock\"\nwidth = 100\n";
+        let controls = |src: &str| match &parse(src, clock).unwrap().pages[0].widgets[0] {
+            Widget::Slider { controls, .. } => controls.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(controls("controls = \"volume\""), SliderControl::Volume);
+        assert_eq!(controls("controls = \"seek\""), SliderControl::Seek);
+        assert_eq!(
+            controls("controls = { run = [\"ddcutil\", \"setvcp\", \"10\", \"{value}\"] }"),
+            SliderControl::Run(vec![
+                "ddcutil".into(),
+                "setvcp".into(),
+                "10".into(),
+                "{value}".into()
+            ])
+        );
+        for (widget, more, says) in [
+            ("controls = \"volume\"", "", "only sliders"),
+            (
+                "controls = \"volume\"\ntap = { page = \"B\" }",
+                clock,
+                "cannot have tap",
+            ),
+            ("controls = { run = [\"ddcutil\"] }", clock, "{value}"),
+        ] {
+            let e = parse(widget, more).unwrap_err().0;
+            assert!(e.contains(says), "{widget}: {e}");
         }
     }
 

@@ -38,6 +38,9 @@ enum Command {
     Tap { x: f32 },
     /// Long-press the strip at x (0–639): runs that widget's hold action.
     Hold { x: f32 },
+    /// Drag along the strip from one x to another (0–639): a swipe, or a
+    /// slide on a slider.
+    Drag { from: f32, to: f32 },
 }
 
 fn main() -> ExitCode {
@@ -51,6 +54,7 @@ fn main() -> ExitCode {
         Command::Publish { signal, value } => format!("publish {signal} {}", value.join(" ")),
         Command::Tap { x } => format!("tap {x}"),
         Command::Hold { x } => format!("hold {x}"),
+        Command::Drag { from, to } => format!("drag {from} {to}"),
     };
     let mut client = match Client::connect() {
         Ok(c) => c,

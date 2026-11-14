@@ -83,6 +83,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         origin: Instant::now(),
         last_frame: Instant::now(),
         weather: None,
+        effects: crate::actions::Effects::new(),
     };
     // Kept alive for as long as the daemon runs; dropping it stops watching.
     let _watcher = watch_config(&daemon.path, tx.clone())?;
@@ -91,6 +92,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
     } else {
         nexus_sources::spawn_machine(publisher(tx.clone()));
         nexus_sources::spawn_media(publisher(tx.clone()));
+        nexus_sources::spawn_volume(publisher(tx.clone()));
         let weather = nexus_sources::spawn_weather(publisher(tx));
         let _ = weather.send(daemon.engine.config().weather.clone());
         daemon.weather = Some(weather);
@@ -116,6 +118,8 @@ struct Daemon {
     /// Origin of the monotonic clock shared by touch samples and animation.
     origin: Instant,
     last_frame: Instant,
+    /// Carries out what taps, holds and slides ask for.
+    effects: crate::actions::Effects,
     /// Tells the weather source where to look; `None` in demo mode.
     weather: Option<Sender<Option<config::Weather>>>,
 }
@@ -178,8 +182,8 @@ impl Daemon {
             if reload {
                 self.reload();
             }
-            for action in self.engine.take_actions() {
-                crate::actions::carry_out(action);
+            for effect in self.engine.take_effects() {
+                self.effects.carry_out(effect);
             }
         }
     }
@@ -329,6 +333,23 @@ impl Daemon {
                     down: false,
                     x: 0.0,
                     at: start + length,
+                });
+                Ok(json!(null))
+            }
+            Request::Drag { from, to } => {
+                // 30 samples 10 ms apart: the strip's own report rate.
+                let start = self.origin.elapsed().as_secs_f64();
+                for i in 0..=30 {
+                    self.engine.handle(Input::Touch {
+                        down: true,
+                        x: from + (to - from) * i as f32 / 30.0,
+                        at: start + f64::from(i) * 0.01,
+                    });
+                }
+                self.engine.handle(Input::Touch {
+                    down: false,
+                    x: 0.0,
+                    at: start + 0.31,
                 });
                 Ok(json!(null))
             }

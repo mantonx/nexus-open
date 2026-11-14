@@ -638,3 +638,15 @@ golang` finds nothing outside the changelog.
   swipe-matt,brush-lift-bounce}.trace`; `cargo run -p nexus-core --example
   replay -- FILE` prints how each touch is read. Still wanted: a
   `brush-typing` trace.
+- 2026-11-14 — Phase 3 step 5: the slider widget. `controls = "volume"`
+  (live, via `pactl`; works for PipeWire), `"seek"` (MPRIS SetPosition on
+  release) or `{ run = [..., "{value}"] }` (0–100, for brightness via
+  ddcutil and the like). A touch landing on a slider belongs to it, so
+  pages cannot be swiped from a slider; a page of only sliders is rejected.
+  The bar follows the finger from the first sample; values are set only
+  after the 30 ms brush guard. Slow setters never queue: a worker applies
+  the newest value only. New `volume.level`/`volume.muted` signals from an
+  event-driven `pactl subscribe` source. `nexusctl drag A B` simulates a
+  drag at the strip's 100 Hz. A "Sound" page (media, position, volume) is
+  added to the default and to Matt's config. Verified on the service:
+  volume 100→91→100 % agreeing with pactl, seek both ways on VLC.

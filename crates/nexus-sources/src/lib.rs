@@ -18,6 +18,8 @@ mod gpu;
 mod machine;
 #[cfg(target_os = "linux")]
 mod media;
+#[cfg(target_os = "linux")]
+mod volume;
 mod weather;
 
 pub use weather::spawn as spawn_weather;
@@ -29,6 +31,32 @@ pub fn media_command(command: nexus_core::config::MediaCommand) {
     media::command(command);
     #[cfg(not(target_os = "linux"))]
     let _ = command;
+}
+
+/// Moves the track the media widget shows to `seconds` in. Linux only for
+/// now.
+pub fn media_seek(seconds: f64) {
+    #[cfg(target_os = "linux")]
+    media::seek(seconds);
+    #[cfg(not(target_os = "linux"))]
+    let _ = seconds;
+}
+
+/// Starts publishing `volume.level` and `volume.muted` for the default
+/// audio output. Linux only for now (PulseAudio or PipeWire, via `pactl`).
+pub fn spawn_volume(publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
+    #[cfg(target_os = "linux")]
+    volume::spawn(publish);
+    #[cfg(not(target_os = "linux"))]
+    drop(publish);
+}
+
+/// Sets the default output's volume, 0–100. Blocks until done.
+pub fn set_volume(percent: u8) {
+    #[cfg(target_os = "linux")]
+    volume::set(percent);
+    #[cfg(not(target_os = "linux"))]
+    let _ = percent;
 }
 
 /// Starts publishing the `media.*` signals from the system's media players.
