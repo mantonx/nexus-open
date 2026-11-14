@@ -65,3 +65,6 @@ dist/
 .pkg-staging/
 /test-screenshots/
 .claude/settings.local.json
+
+# Rust
+/target/

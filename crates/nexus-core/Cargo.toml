@@ -1,0 +1,15 @@
+[package]
+name = "nexus-core"
+description = "Rendering and layout model for the Corsair iCUE Nexus touch strip"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+swash.workspace = true
+tiny-skia.workspace = true
+
+[lints]
+workspace = true

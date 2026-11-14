@@ -1,8 +1,8 @@
 # Nexus redesign plan
 
 Status: rebuild confirmed by Matt on 2026-11-14. Written for an agent (Claude
-Opus) to execute with Matt. Phase 0 is skipped; start at Phase 1. Nothing has
-been started.
+Opus) to execute with Matt. Phases 0 and 1 are skipped; work is in Phase 2
+on branch `redesign`.
 
 ## How to use this plan
 
@@ -202,7 +202,7 @@ Verified first-hand unless marked otherwise.
 - The new binary must not be named `nexus-open`, or the old daemon will kill
   it on start. Working names: `nexusd` (daemon and UI) and `nexusctl` (CLI).
 - Only one process can hold the device, so the old service must be stopped
-  before any hardware test. See "Before the spikes" in Phase 1.
+  before any hardware test. See Phase 1.
 - Anything needing `sudo` is a **GATE**.
 - Temporary benchmark files were used in `internal/app` and `internal/zone`
   during the investigation and removed. The tree was clean afterwards.
@@ -210,10 +210,10 @@ Verified first-hand unless marked otherwise.
 **Not verified**
 
 - Whether the udev fix works; it has not been applied.
-- Whether the device accepts frames through hidraw (Spike 3).
-- How the hinted text of a Rust renderer looks on the real panel (Spike 1).
-- Whether Slint runs cleanly on KDE Wayland with NVIDIA (Spike 2).
-- Whether Slint exposes controls to screen readers on Linux (Spike 2).
+- Whether the device accepts frames through hidraw (Phase 2, milestone 2).
+- How the hinted text of a Rust renderer looks on the real panel (Phase 2, milestone 1).
+- Whether Slint runs cleanly on KDE Wayland with NVIDIA (Phase 2, milestone 3).
+- Whether Slint exposes controls to screen readers on Linux (Phase 2, milestone 3).
 - The device's highest sustainable frame rate. The Go daemon targets 30 fps.
 - Which signals KDE and GNOME emit for screen lock and display sleep.
 - Matt's Rust experience. Ask; it affects how much explanation to give.
@@ -227,65 +227,41 @@ code. The known problems there (idle CPU, the tray token 401, the committed
 One thing carries over: the udev ordering bug blocks the rebuild too, because
 the new code needs the same device node. It is fixed as part of Phase 1.
 
-## Phase 1 — Spikes
+## Phase 1 — Removed
 
-Three throwaway experiments. Keep them outside the product crates. Each
-produces a short written result: pass or fail, evidence, and what it means
-for the plan.
+Matt chose to build the real app directly instead of throwaway spikes. The
+three risks the spikes covered are now the first milestones of Phase 2,
+checked in real code. If one fails, fix it there or come back with a toolkit
+change.
 
-**Before the spikes — device access.** Spikes 1 and 3 need the hardware.
+Device access is still needed before any hardware test:
 
-1. Write the new udev rule as `70-nexus.rules` (any number below 73), with
-   `TAG+="uaccess"` for the usb and hidraw nodes of `1b1c:1b8e`. Leave out
-   the `usbreset` step unless a spike shows it is needed.
-2. **GATE** (sudo): install it, remove the old
-   `/usr/lib/udev/rules.d/99-corsair-nexus.rules`, reload udev, and have Matt
-   replug the device. Confirm with `getfacl` that the device node has a
-   `user:` entry.
-3. **GATE**: the old service must not be running. Once access works, the Go
-   daemon's watcher connects within 3 s and holds the device. Ask Matt to
-   stop and disable it for the duration of the rebuild
-   (`systemctl --user disable --now nexus-open`). It is currently using about
-   25% of a core and 400 MB while showing nothing.
-
-**Spike 1 — text on the panel.** Render the System page (clock, weather,
-CPU value with sparkline) to a 640×48 image using a Rust rasterizer with
-hinted glyphs (swash's scaler, directly or through cosmic-text). Compare
-with the goldens and `docs/screenshots/display.png`, then show it on the
-real strip.
-Pass: Matt judges the 10 px labels as crisp as today.
-Fallback: FreeType bindings, or a bitmap font for small sizes.
-
-**Spike 2 — Slint on Matt's desktop.** A window that:
-- runs natively on Wayland (KDE, NVIDIA), without XWayland;
-- shows a 640×48 image at an integer scale with no smoothing, updating at
-  30 fps from a channel;
-- maps pointer down, move and up to strip X coordinates;
-- lets you drag to reorder up to 6 zone rectangles;
-- builds one form from a schema with string, enum, int, bool and colour.
-Pass: all five work with no blur and no crash.
-Also report, separately: is the window fully keyboard-operable, and does a
-screen reader (Orca) see its controls? This decides whether the 9/10 bar's
-accessibility items are reachable in Slint.
-Fallback: Qt 6/QML (6.12 is installed with declarative and websockets).
-
-**Spike 3 — device access.** Send a test frame and read touch X from Rust.
-Try the HID path first (`hidapi`, hidraw backend); the frame header's first
-byte `0x02` looks like a HID report ID. If that fails, use `nusb` with
-kernel-driver detach, mirroring `usbfs.go`. Remember the EP `0x81` priming
-read.
-Pass: frame visible, touch X read, reconnect after replug.
-Record which path worked. Only the HID path avoids a driver install on
-Windows and macOS.
-
-**GATE**: report all three results. Matt decides go, change toolkit, or stop.
-Also ask which Slint licence to use: GPLv3 (binary is GPL, source files can
-stay MIT) or the royalty-free licence (attribution required).
+1. The udev rule is `data/udev/70-nexus.rules`. It must sort before
+   `73-seat-late.rules`, which applies ACLs only to devices already tagged.
+2. **GATE** (sudo): install it to `/etc/udev/rules.d/`, remove
+   `/usr/lib/udev/rules.d/99-corsair-nexus.rules`, reload udev, replug, and
+   confirm with `getfacl` that the device node has a `user:` entry.
+3. The old service is disabled (done 2026-11-14).
 
 ## Phase 2 — Core
 
 A Cargo workspace at the repo root in `crates/`, on a `redesign` branch.
 The Go and Flutter code stays untouched.
+
+Milestones, in order. The first three replace the old spikes.
+
+1. **Renderer.** The System page renders to a PNG through the real renderer
+   (swash hinted glyphs, tiny-skia shapes). Matt judges text crispness on the
+   strip once the device works. Fallback: FreeType bindings or a bitmap font.
+2. **Device.** HID backend over hidraw: frames out, touch in, reconnect after
+   replug. The report descriptor says output report 0x02 is the 1024-byte
+   frame packet and input report 0x01 is the touch report. Fallback: `nusb`
+   with kernel-driver detach.
+3. **UI shell.** A minimal Slint window showing the live frame at an integer
+   scale with no smoothing, on native Wayland (KDE, NVIDIA). Also check
+   keyboard operation and whether Orca sees its controls. Fallback: Qt 6/QML.
+4. **Core.** The single state owner, signals, layout, config with reload,
+   gestures, the control socket, `nexusctl`.
 
 Design:
 
@@ -449,3 +425,8 @@ every item in the 9/10 bar is passing or waived by Matt.
   ID), input report ID 0x01 with 511 bytes (= the touch report), feature
   reports 0x03–0x0e with 31 bytes each. The hidraw path for Spike 3 looks
   viable without detaching the kernel driver.
+- 2026-11-14 — Matt: no spikes; build the real app. Phase 1 removed. Its three
+  risks (text crispness, hidraw device access, Slint on Wayland) became the
+  first milestones of Phase 2. The udev rule moved to `data/udev/`.
+- 2026-11-14 — Matt has not written Rust before. Explain Rust choices as the
+  code is written.
