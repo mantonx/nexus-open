@@ -465,3 +465,7 @@ The Linux release ships first. Then, per OS:
   confirming the image on the panel, touch (blocked on `parse_touch`), and
   replug recovery under 2 s.
 
+- 2026-11-14 — Rust toolchain pinned to 1.100.0 in `rust-toolchain.toml`.
+  The first CI run failed because the runners' newer clippy had a lint the
+  local 1.93 lacked; with the pin, local and CI run the same compiler and
+  lints. Rust CI is green on Linux, macOS and Windows (run 43603527771).
