@@ -520,3 +520,24 @@ The Linux release ships first. Then, per OS:
   phantom touches). Still Matt's: swipe feel, replug under 2 s, Tab/Space
   in the window (keys cannot be injected into a native Wayland window
   without root), and Orca speaking.
+- 2026-11-14 — **GATE passed:** Matt signed off the config schema and
+  signal names ("carry on" after the Phase 3 proposal). Additions since are
+  additive only: an optional `[weather]` section (`location`, or `latitude`
+  and `longitude`).
+- 2026-11-14 — Phase 3 step 1: built-in sources in `nexus-sources`.
+  `sysinfo` for CPU load, memory, network and CPU temperature; NVML for
+  NVIDIA, sysfs for AMD on Linux; Open-Meteo (forecast and geocoding) over
+  `ureq`/rustls for weather, refreshed every 15 min, retried every minute
+  while failing. Network counts only interfaces with a backing device
+  (skips loopback, Docker, Tailscale). Verified against `nvidia-smi` and
+  `free` on Matt's machine.
+- 2026-11-14 — Found: the Go cpu-temp plugin read `thermal_zone0`, which on
+  Matt's machine is `acpitz` (motherboard, ~28 °C), not the CPU
+  (`coretemp Package id 0`). The new sensor choice is `cpu_sensor::pick`,
+  left as Matt's contribution; until written, `cpu.temp` shows "—".
+- 2026-11-14 — Memory: NVML adds ~21 MB of the NVIDIA driver's own
+  allocations to the daemon (measured in isolation: sysinfo +0.3 MB, an
+  HTTPS fetch +0.7 MB). Daemon with real sources: 0.47% CPU, 41 MB RSS,
+  over the 40 MB target. The alternative, `nvidia-smi` every second, is
+  the process churn the Go daemon paid for in CPU. Needs Matt's call on the
+  target.

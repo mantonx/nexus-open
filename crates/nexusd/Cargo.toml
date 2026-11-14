@@ -14,6 +14,7 @@ interprocess = "2.4.8"
 nexus-control = { path = "../nexus-control" }
 nexus-core = { path = "../nexus-core" }
 nexus-device = { path = "../nexus-device" }
+nexus-sources = { path = "../nexus-sources" }
 nexus-ui = { path = "../nexus-ui" }
 serde_json = "1.0.154"
 notify = { version = "8.2.2", default-features = false, features = ["macos_kqueue"] }

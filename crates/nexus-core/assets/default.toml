@@ -14,6 +14,13 @@ font = "ibm-plex-sans"       # ibm-plex-sans, atkinson-hyperlegible, roboto, not
 temperature = "celsius"      # celsius or fahrenheit
 clock = "24h"                # 24h or 12h
 
+# Weather comes from Open-Meteo, which is sent this location (or the
+# coordinates) and nothing else. Uncomment and set it to show weather.temp:
+# [weather]
+# location = "Lisbon"          # or "City, region, country" to pick the right one
+# latitude = 38.72             # optional: coordinates instead of a name
+# longitude = -9.14
+
 [[page]]
 name = "System"
 

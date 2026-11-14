@@ -29,6 +29,19 @@ pub struct Config {
     // what to add, instead of serde's "missing field `page`".
     #[serde(rename = "page", default)]
     pub pages: Vec<Page>,
+    /// Where the weather is for. Without it there is no weather reading.
+    pub weather: Option<Weather>,
+}
+
+/// The `[weather]` section: a place name to look up, or coordinates.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Weather {
+    /// "City" or "City, region, country". Looked up once per change.
+    pub location: Option<String>,
+    /// Coordinates in degrees. When given, the location is not looked up.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -180,6 +193,29 @@ impl Config {
                 )));
             }
         }
+        if let Some(w) = &self.weather {
+            w.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl Weather {
+    fn validate(&self) -> Result<(), ConfigError> {
+        let err = |m: &str| Err(ConfigError(format!("[weather]: {m}")));
+        match (self.latitude, self.longitude) {
+            (Some(lat), Some(lon)) => {
+                if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+                    return err("latitude must be -90 to 90 and longitude -180 to 180");
+                }
+            }
+            (None, None) => {
+                if self.location.as_deref().is_none_or(|l| l.trim().is_empty()) {
+                    return err("give a location, or a latitude and a longitude");
+                }
+            }
+            _ => return err("give both latitude and longitude, or neither"),
+        }
         Ok(())
     }
 }
@@ -187,6 +223,27 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn weather_needs_a_place() {
+        let page = "\n[[page]]\nname = \"P\"\n";
+        let ok = |w: &str| Config::parse(&format!("[weather]\n{w}{page}"));
+        assert_eq!(
+            ok("location = \"Jersey City\"\n")
+                .unwrap()
+                .weather
+                .unwrap()
+                .location
+                .as_deref(),
+            Some("Jersey City")
+        );
+        assert!(ok("latitude = 40.7\nlongitude = -74.0\n").is_ok());
+        for bad in ["", "latitude = 40.7\n", "latitude = 91\nlongitude = 0\n"] {
+            let e = ok(bad).unwrap_err().0;
+            assert!(e.starts_with("[weather]"), "{bad:?} gave {e}");
+        }
+        assert_eq!(Config::parse(page).unwrap().weather, None);
+    }
 
     #[test]
     fn default_layout_is_valid() {

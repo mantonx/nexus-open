@@ -22,6 +22,7 @@ use nexus_core::engine::{Engine, Input};
 use nexus_core::signal::Value;
 use nexus_device::protocol::{TouchCalibration, parse_touch};
 use nexus_device::{DeviceError, Surface};
+use nexus_sources::Reading;
 use notify::{EventKind, RecursiveMode, Watcher};
 use serde_json::json;
 
@@ -81,11 +82,17 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         calibration: TouchCalibration::default(),
         origin: Instant::now(),
         last_frame: Instant::now(),
+        weather: None,
     };
     // Kept alive for as long as the daemon runs; dropping it stops watching.
     let _watcher = watch_config(&daemon.path, tx.clone())?;
     if options.demo {
-        spawn_demo(tx);
+        spawn_demo(publisher(tx));
+    } else {
+        nexus_sources::spawn_machine(publisher(tx.clone()));
+        let weather = nexus_sources::spawn_weather(publisher(tx));
+        let _ = weather.send(daemon.engine.config().weather.clone());
+        daemon.weather = Some(weather);
     }
     daemon.run(&rx)
 }
@@ -108,6 +115,8 @@ struct Daemon {
     /// Origin of the monotonic clock shared by touch samples and animation.
     origin: Instant,
     last_frame: Instant,
+    /// Tells the weather source where to look; `None` in demo mode.
+    weather: Option<Sender<Option<config::Weather>>>,
 }
 
 impl Daemon {
@@ -318,6 +327,11 @@ impl Daemon {
                 if self.last_config_error.take().is_some() {
                     eprintln!("nexusd: config fixed; applying it");
                 }
+                if config.weather != self.engine.config().weather
+                    && let Some(weather) = &self.weather
+                {
+                    let _ = weather.send(config.weather.clone());
+                }
                 if &config != self.engine.config() {
                     self.engine.handle(Input::Config(Box::new(config)));
                 }
@@ -393,18 +407,23 @@ fn watch_config(path: &Path, tx: Sender<Msg>) -> notify::Result<impl Watcher + u
     Ok(watcher)
 }
 
-fn spawn_demo(tx: Sender<Msg>) {
+/// Hands a source's readings to the daemon thread. Returns false once the
+/// daemon has gone, which tells the source to stop.
+fn publisher(tx: Sender<Msg>) -> impl FnMut(Vec<Reading>) -> bool + Send + 'static {
+    move |readings| {
+        readings.into_iter().all(|(name, value)| {
+            let input = Input::Signal(name.to_string(), value);
+            tx.send(Msg::Engine(input)).is_ok()
+        })
+    }
+}
+
+fn spawn_demo(mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
     let start = Instant::now();
     thread::Builder::new()
         .name("demo-source".into())
         .spawn(move || {
-            loop {
-                for (name, value) in demo::readings(start.elapsed().as_secs_f64()) {
-                    let input = Input::Signal(name.to_string(), value);
-                    if tx.send(Msg::Engine(input)).is_err() {
-                        return;
-                    }
-                }
+            while publish(demo::readings(start.elapsed().as_secs_f64())) {
                 thread::sleep(DEMO_INTERVAL);
             }
         })

@@ -1,0 +1,21 @@
+[package]
+name = "nexus-sources"
+description = "Built-in sources: readings from this machine and the weather"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+nexus-core = { path = "../nexus-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sysinfo = { version = "0.40.3", default-features = false, features = ["component", "network", "system"] }
+ureq = "3.5.2"
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+nvml-wrapper = "0.13.0"
+
+[lints]
+workspace = true
