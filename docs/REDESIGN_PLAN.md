@@ -650,3 +650,16 @@ golang` finds nothing outside the changelog.
   drag at the strip's 100 Hz. A "Sound" page (media, position, volume) is
   added to the default and to Matt's config. Verified on the service:
   volume 100→91→100 % agreeing with pactl, seek both ways on VLC.
+- 2026-11-14 — Phase 3 step 6: takeovers. `[[takeover]]` with `name`,
+  `on_change` (signals), `seconds` (0.5–60) and widgets written as on a
+  page, through the same binding and renderer. Shown when a signal changes
+  (not on its first reading, not to blank text) unless the page on the
+  strip already shows that signal, so the Sound page never pops a volume
+  takeover. A touch restarts its time; a swipe dismisses it without moving
+  the page underneath; it never ends under a finger; a different takeover
+  never replaces one mid-touch. Defaults: "Now playing" (media + seek, 5 s)
+  and "Volume" (full-width slider, 2 s). A full-width slider cannot be
+  swiped away; it times out. Verified on the service with a published
+  `volume.level` (signal only; the real volume was untouched): covered at
+  once, page back after 2 s. Instant cut for now; a transition is Phase 4
+  polish. Remaining Phase 3 item: external sources.

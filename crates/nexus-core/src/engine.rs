@@ -8,6 +8,11 @@
 //! minute). Between those the daemon sleeps: there is no frame loop while
 //! nothing changes.
 //!
+//! A takeover is a row of widgets that covers the page for a few seconds
+//! when one of its signals changes. While it is up, everything that asks
+//! "which widgets are on the strip" gets its widgets instead of the page's,
+//! so drawing, taps and sliders work on it unchanged.
+//!
 //! The engine never reads a clock or touches a thread. Wall time (for the
 //! clock widget) and monotonic time (for touch and animation, in seconds
 //! from any origin) are passed in, so tests can drive it to any moment.
@@ -65,9 +70,26 @@ pub enum Effect {
     Run(Vec<String>),
 }
 
+/// A row of widgets that can fill the strip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Row {
+    Page(usize),
+    Takeover(usize),
+}
+
+/// A takeover on the strip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Cover {
+    index: usize,
+    /// Monotonic time it ends. `None` until the next frame, since a signal
+    /// arrives without a time.
+    until: Option<f64>,
+}
+
 /// A finger on a slider.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Slide {
+    row: Row,
     zone: usize,
     /// When the finger landed: until `MIN_TAP` has passed it might be a
     /// lift bounce, so nothing is set yet.
@@ -120,8 +142,13 @@ pub struct Engine {
     /// to the gesture recognizer, so a slider's drag is never a swipe.
     slide: Option<Slide>,
     /// The last value of each `run` slider with no signal to show, by
-    /// (page, zone).
-    last_set: HashMap<(usize, usize), f32>,
+    /// (row, zone).
+    last_set: HashMap<(Row, usize), f32>,
+    /// The takeover covering the page, if any.
+    cover: Option<Cover>,
+    /// A swipe dismissed a takeover: the rest of it, up to the lift, does
+    /// nothing.
+    dismissing: bool,
 }
 
 impl Engine {
@@ -143,6 +170,8 @@ impl Engine {
             effects: Vec::new(),
             slide: None,
             last_set: HashMap::new(),
+            cover: None,
+            dismissing: false,
         }
     }
 
@@ -165,6 +194,12 @@ impl Engine {
         self.page
     }
 
+    /// The name of the takeover on the strip, if one is.
+    pub fn takeover(&self) -> Option<&str> {
+        self.cover
+            .map(|c| self.config.takeovers[c.index].name.as_str())
+    }
+
     /// True while a page is springing into place and frames are due as fast
     /// as the device takes them.
     pub fn animating(&self) -> bool {
@@ -174,11 +209,24 @@ impl Engine {
     pub fn handle(&mut self, input: Input) {
         match input {
             Input::Signal(name, value) => {
-                let visible = signals_used(&self.config.pages[self.page]).any(|s| s == name);
+                let visible = signals_used(self.shown()).any(|s| s == name);
+                let on_page =
+                    signals_used(&self.config.pages[self.page].widgets).any(|s| s == name);
+                // A change, not a first reading: the daemon starting up
+                // is not news.
+                let changed = self.signals.get(&name).is_some_and(|old| *old != value);
+                let blank = matches!(&value, Value::Text(t) if t.trim().is_empty());
                 self.signals.set(&name, value);
                 self.dirty |= visible;
+                if changed && !blank && !on_page {
+                    self.take_over(&name);
+                }
             }
             Input::Touch { down, x, at } => {
+                // Any touch keeps a takeover up for its full time again.
+                if let Some(cover) = &mut self.cover {
+                    cover.until = Some(at + self.config.takeovers[cover.index].seconds);
+                }
                 let on_slider = self.slide.is_some()
                     || (down
                         && !self.gestures.pressed()
@@ -228,33 +276,64 @@ impl Engine {
         if let Some(offset) = self.offset() {
             return Some(self.slide(offset, now));
         }
-        let page = &self.config.pages[self.page];
-        let minute = shows_clock(page).then(|| now.timestamp().as_second().div_euclid(60));
+        if let Some(cover) = &mut self.cover {
+            let until = *cover
+                .until
+                .get_or_insert(mono + self.config.takeovers[cover.index].seconds);
+            // Never pulled from under a finger.
+            if mono >= until && !self.gestures.pressed() && self.slide.is_none() {
+                self.uncover();
+            }
+        }
+        let widgets = self.shown();
+        let minute = shows_clock(widgets).then(|| now.timestamp().as_second().div_euclid(60));
         if !self.dirty && minute == self.drawn_minute {
             return None;
         }
-        let mut zones = bind_page(page, &self.signals, &self.config.settings, now);
-        self.show_sliders(self.page, &mut zones);
+        let mut zones = bind_page(widgets, &self.signals, &self.config.settings, now);
+        self.show_sliders(self.row(), &mut zones);
         self.dirty = false;
         self.drawn_minute = minute;
         Some(self.renderer.render_page(&zones, self.pressed))
     }
 
     /// How long until the picture changes without any input: no time at
-    /// all while animating, the start of the next minute if the page shows
-    /// a clock, otherwise never.
-    pub fn next_wait(&self, now: &Zoned) -> Option<Duration> {
+    /// all while animating, otherwise the sooner of a takeover ending and
+    /// the next minute on a clock, or never. `mono` is as for `frame`.
+    pub fn next_wait(&self, now: &Zoned, mono: f64) -> Option<Duration> {
         if self.animating() {
             return Some(Duration::ZERO);
         }
-        if !shows_clock(&self.config.pages[self.page]) {
-            return None;
+        let minute = shows_clock(self.shown()).then(|| {
+            let ms = now.timestamp().as_millisecond().rem_euclid(60_000);
+            Duration::from_millis((60_000 - ms) as u64)
+        });
+        // While a finger is down the next touch sample is the wake-up.
+        let touching = self.gestures.pressed() || self.slide.is_some();
+        let ends = self.cover.filter(|_| !touching).map(|c| {
+            let until = c
+                .until
+                .unwrap_or(mono + self.config.takeovers[c.index].seconds);
+            Duration::from_secs_f64((until - mono).max(0.0))
+        });
+        match (minute, ends) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         }
-        let ms = now.timestamp().as_millisecond().rem_euclid(60_000);
-        Some(Duration::from_millis((60_000 - ms) as u64))
     }
 
     fn gesture(&mut self, gesture: Gesture) {
+        if self.dismissing {
+            self.dismissing = !matches!(gesture, Gesture::Release { .. });
+            return;
+        }
+        // A swipe on a takeover puts the page back; it does not also move
+        // the page underneath.
+        if self.cover.is_some() && matches!(gesture, Gesture::Drag { .. }) {
+            self.uncover();
+            self.dismissing = true;
+            return;
+        }
         match gesture {
             Gesture::Drag { dx } => {
                 // Grabbing a page mid-spring: let go of the spring.
@@ -294,11 +373,62 @@ impl Engine {
         }
     }
 
-    /// Index of the widget under panel x on the current page.
+    /// What fills the strip when it is still: the takeover, or the page.
+    fn row(&self) -> Row {
+        match self.cover {
+            Some(c) => Row::Takeover(c.index),
+            None => Row::Page(self.page),
+        }
+    }
+
+    fn widgets(&self, row: Row) -> &[Widget] {
+        match row {
+            Row::Page(i) => &self.config.pages[i].widgets,
+            Row::Takeover(i) => &self.config.takeovers[i].widgets,
+        }
+    }
+
+    /// The widgets on the strip.
+    fn shown(&self) -> &[Widget] {
+        self.widgets(self.row())
+    }
+
+    /// Shows the takeover that `signal` sets off, if there is one. The same
+    /// takeover again only starts its time over. A different one waits for
+    /// no finger: it would swap the widgets out from under a touch.
+    fn take_over(&mut self, signal: &str) {
+        let Some(index) = self
+            .config
+            .takeovers
+            .iter()
+            .position(|t| t.on_change.iter().any(|s| s == signal))
+        else {
+            return;
+        };
+        let same = self.cover.is_some_and(|c| c.index == index);
+        let busy = self.gestures.pressed() || self.slide.is_some() || self.motion != Motion::Still;
+        if !same && busy {
+            return;
+        }
+        self.cover = Some(Cover { index, until: None });
+        if !same {
+            self.pressed = None;
+            self.dirty = true;
+        }
+    }
+
+    fn uncover(&mut self) {
+        if self.cover.take().is_some() {
+            self.pressed = None;
+            self.slide = None;
+            self.dirty = true;
+        }
+    }
+
+    /// Index of the widget under panel x on the strip.
     fn zone_at(&self, x: f32) -> Option<usize> {
         let mut right = 0.0;
-        self.config.pages[self.page]
-            .widgets
+        self.shown()
             .iter()
             .position(|w| {
                 right += w.width() as f32;
@@ -308,24 +438,19 @@ impl Engine {
     }
 
     fn widget_at(&self, x: f32) -> Option<&Widget> {
-        self.zone_at(x)
-            .map(|i| &self.config.pages[self.page].widgets[i])
+        self.zone_at(x).map(|i| &self.shown()[i])
     }
 
     /// The slider under x, if there is one.
     fn slider_at(&self, x: f32) -> Option<usize> {
-        self.zone_at(x).filter(|&i| {
-            matches!(
-                self.config.pages[self.page].widgets[i],
-                Widget::Slider { .. }
-            )
-        })
+        self.zone_at(x)
+            .filter(|&i| matches!(self.shown()[i], Widget::Slider { .. }))
     }
 
     /// Where x falls along a slider's bar, 0–1. The bar spans the zone less
     /// its padding, so the ends are reachable without leaving the zone.
     fn slider_fraction(&self, zone: usize, x: f32) -> f32 {
-        let widgets = &self.config.pages[self.page].widgets;
+        let widgets = self.shown();
         let left: u32 = widgets[..zone].iter().map(Widget::width).sum();
         let pad = Theme::default().grid.pad_left;
         let span = (widgets[zone].width() as f32 - 2.0 * pad).max(1.0);
@@ -340,6 +465,7 @@ impl Engine {
         let Some(mut slide) = self.slide.take().or_else(|| {
             let zone = self.slider_at(x)?;
             Some(Slide {
+                row: self.row(),
                 zone,
                 start: at,
                 fraction: self.slider_fraction(zone, x),
@@ -364,8 +490,7 @@ impl Engine {
     /// Turns a slider position into effects: volume and commands as the
     /// value changes, a seek on release.
     fn slid(&mut self, slide: &mut Slide, done: bool) {
-        let Widget::Slider { controls, .. } = &self.config.pages[self.page].widgets[slide.zone]
-        else {
+        let Widget::Slider { controls, .. } = &self.widgets(slide.row)[slide.zone] else {
             return;
         };
         let percent = (slide.fraction * 100.0).round() as u8;
@@ -387,7 +512,7 @@ impl Engine {
         };
         if matches!(controls, SliderControl::Run(_)) {
             self.last_set
-                .insert((self.page, slide.zone), slide.fraction);
+                .insert((slide.row, slide.zone), slide.fraction);
         }
         if let Some(effect) = effect {
             slide.sent = Some(percent);
@@ -397,14 +522,14 @@ impl Engine {
 
     /// Replaces slider views with ones that show the finger while sliding,
     /// and a `run` slider's last value at rest.
-    fn show_sliders(&self, page: usize, zones: &mut [Zone]) {
-        for (i, widget) in self.config.pages[page].widgets.iter().enumerate() {
+    fn show_sliders(&self, row: Row, zones: &mut [Zone]) {
+        for (i, widget) in self.widgets(row).iter().enumerate() {
             if matches!(widget, Widget::Slider { .. }) {
                 let held = self
                     .slide
-                    .filter(|s| s.zone == i && page == self.page)
+                    .filter(|s| s.zone == i && s.row == row)
                     .map(|s| s.fraction);
-                let last = self.last_set.get(&(page, i)).copied();
+                let last = self.last_set.get(&(row, i)).copied();
                 zones[i].view = slider(widget, &self.signals, held, last);
             }
         }
@@ -413,7 +538,7 @@ impl Engine {
     /// The zone under x, if a tap or a long press there does something.
     fn actionable_zone(&self, x: f32) -> Option<usize> {
         self.zone_at(x).filter(|&i| {
-            let w = &self.config.pages[self.page].widgets[i];
+            let w = &self.shown()[i];
             w.tap().is_some() || w.hold().is_some()
         })
     }
@@ -527,12 +652,12 @@ impl Engine {
     fn snapshot(&mut self, page: usize, now: &Zoned) -> &Canvas {
         if !self.snapshots.contains_key(&page) {
             let mut zones = bind_page(
-                &self.config.pages[page],
+                &self.config.pages[page].widgets,
                 &self.signals,
                 &self.config.settings,
                 now,
             );
-            self.show_sliders(page, &mut zones);
+            self.show_sliders(Row::Page(page), &mut zones);
             let canvas = self.renderer.render_page(&zones, None);
             self.snapshots.insert(page, canvas);
         }
@@ -540,6 +665,8 @@ impl Engine {
     }
 
     fn go_to(&mut self, index: usize) {
+        self.uncover();
+        self.dismissing = false;
         self.motion = Motion::Still;
         self.pressed = None;
         self.slide = None;
@@ -564,6 +691,8 @@ impl Engine {
         self.motion = Motion::Still;
         self.pressed = None;
         self.slide = None;
+        self.cover = None;
+        self.dismissing = false;
         self.last_set.clear();
         self.snapshots.clear();
         self.dirty = true;
@@ -627,9 +756,12 @@ mod tests {
     #[test]
     fn waits_for_the_next_minute_only_with_a_clock() {
         let mut e = Engine::new(Config::default_layout());
-        assert_eq!(e.next_wait(&at("16:17:05")), Some(Duration::from_secs(55)));
+        assert_eq!(
+            e.next_wait(&at("16:17:05"), 0.0),
+            Some(Duration::from_secs(55))
+        );
         e.handle(Input::ShowPage(1)); // Performance: no clock
-        assert_eq!(e.next_wait(&at("16:17:05")), None);
+        assert_eq!(e.next_wait(&at("16:17:05"), 0.0), None);
     }
 
     #[test]
@@ -1001,5 +1133,133 @@ mod tests {
         }
         let mid = e.frame(&at("16:17:05"), 10.2).unwrap();
         assert_ne!(first.rgba(), mid.rgba());
+    }
+
+    /// Page A: a clock. Page B: media. Takeovers for the track (5 s, media
+    /// and seek) and the volume (2 s, one slider).
+    fn covered() -> Engine {
+        let config = Config::parse(
+            r#"
+            [[page]]
+            name = "A"
+            [[page.widget]]
+            type = "clock"
+            width = 640
+
+            [[page]]
+            name = "B"
+            [[page.widget]]
+            type = "media"
+            width = 640
+
+            [[takeover]]
+            name = "Now playing"
+            on_change = ["media.title"]
+            seconds = 5
+            [[takeover.widget]]
+            type = "media"
+            width = 320
+            [[takeover.widget]]
+            type = "slider"
+            width = 320
+            label = "Position"
+            controls = "seek"
+
+            [[takeover]]
+            name = "Volume"
+            on_change = ["volume.level"]
+            seconds = 2
+            [[takeover.widget]]
+            type = "slider"
+            width = 640
+            label = "Volume"
+            controls = "volume"
+            "#,
+        )
+        .unwrap();
+        Engine::new(config)
+    }
+
+    fn title(t: &str) -> Input {
+        Input::Signal("media.title".into(), Value::Text(t.into()))
+    }
+
+    #[test]
+    fn a_change_covers_the_strip_until_its_time_is_up() {
+        let mut e = covered();
+        let now = at("16:17:05");
+        e.handle(title("First"));
+        assert_eq!(e.takeover(), None, "a first reading is not a change");
+        e.frame(&now, 0.0);
+
+        e.handle(title("Second"));
+        assert_eq!(e.takeover(), Some("Now playing"));
+        assert!(e.frame(&now, 1.0).is_some(), "drawn at once");
+        assert_eq!(
+            e.next_wait(&now, 1.0),
+            Some(Duration::from_secs(5)),
+            "wakes when it ends, sooner than the minute"
+        );
+        assert!(e.frame(&now, 5.9).is_none());
+        assert!(e.frame(&now, 6.0).is_some(), "the page again");
+        assert_eq!(e.takeover(), None);
+
+        e.handle(title(""));
+        assert_eq!(e.takeover(), None, "nothing playing is not news");
+    }
+
+    #[test]
+    fn no_takeover_for_what_the_page_already_shows() {
+        let mut e = covered();
+        e.handle(Input::ShowPage(1)); // the media page
+        e.handle(title("First"));
+        e.handle(title("Second"));
+        assert_eq!(e.takeover(), None);
+    }
+
+    #[test]
+    fn a_touch_keeps_it_up_and_a_swipe_puts_the_page_back() {
+        let mut e = covered();
+        let now = at("16:17:05");
+        e.handle(title("First"));
+        e.handle(title("Second"));
+        e.frame(&now, 0.0); // ends at 5 s
+        press(&mut e, 100.0, 0.1); // at 10 s: now ends at 15 s
+        e.frame(&now, 10.2);
+        assert_eq!(e.takeover(), Some("Now playing"), "{:?}", e.cover);
+
+        swipe(&mut e, 300.0, 100.0, 0.1);
+        assert_eq!(e.takeover(), None);
+        assert_eq!(e.page(), 0, "the swipe only dismissed it");
+    }
+
+    #[test]
+    fn a_slider_on_a_takeover_works_and_restarts_its_time() {
+        let mut e = covered();
+        let level = |v| Input::Signal("volume.level".into(), Value::Number(v, Unit::Percent));
+        e.handle(level(100.0));
+        e.handle(level(90.0));
+        assert_eq!(e.takeover(), Some("Volume"));
+        e.frame(&at("16:17:05"), 0.0);
+        drag(&mut e, 300.0, 200.0, 0.2);
+        let fx = e.take_effects();
+        assert!(matches!(fx.last(), Some(Effect::Volume(30..=35))), "{fx:?}");
+        // The level the drag set comes back as a reading: still the same
+        // takeover, not a new one.
+        e.handle(level(32.0));
+        assert_eq!(e.takeover(), Some("Volume"));
+    }
+
+    #[test]
+    fn a_different_takeover_waits_for_the_finger_to_lift() {
+        let mut e = covered();
+        e.handle(title("First"));
+        e.handle(Input::Touch {
+            down: true,
+            x: 100.0,
+            at: 1.0,
+        });
+        e.handle(title("Second"));
+        assert_eq!(e.takeover(), None);
     }
 }

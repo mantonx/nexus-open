@@ -134,7 +134,9 @@ impl Daemon {
             self.show(&now);
 
             // Sleep until something happens or the picture is due to change.
-            let mut wait = self.engine.next_wait(&now);
+            let mut wait = self
+                .engine
+                .next_wait(&now, self.origin.elapsed().as_secs_f64());
             if self.engine.animating() {
                 wait = Some(FRAME_INTERVAL.saturating_sub(self.last_frame.elapsed()));
             }

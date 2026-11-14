@@ -8,7 +8,7 @@
 
 use jiff::Zoned;
 
-use crate::config::{ClockFormat, GraphStyle, Page, Settings, SliderControl, Temperature, Widget};
+use crate::config::{ClockFormat, GraphStyle, Settings, SliderControl, Temperature, Widget};
 use crate::signal::{Signals, Unit, Value};
 use crate::widget::{Graph, Severity, Track, WidgetView, Zone};
 
@@ -30,9 +30,14 @@ pub const MEDIA_SIGNALS: [&str; 5] = [
     "media.length",
 ];
 
-/// Builds the zones for one page.
-pub fn bind_page(page: &Page, signals: &Signals, settings: &Settings, now: &Zoned) -> Vec<Zone> {
-    page.widgets
+/// Builds the zones for a row of widgets: a page, or a takeover.
+pub fn bind_page(
+    widgets: &[Widget],
+    signals: &Signals,
+    settings: &Settings,
+    now: &Zoned,
+) -> Vec<Zone> {
+    widgets
         .iter()
         .map(|w| Zone {
             width: w.width(),
@@ -41,16 +46,14 @@ pub fn bind_page(page: &Page, signals: &Signals, settings: &Settings, now: &Zone
         .collect()
 }
 
-/// Whether the page shows the time, so it must redraw each minute.
-pub fn shows_clock(page: &Page) -> bool {
-    page.widgets
-        .iter()
-        .any(|w| matches!(w, Widget::Clock { .. }))
+/// Whether the row shows the time, so it must redraw each minute.
+pub fn shows_clock(widgets: &[Widget]) -> bool {
+    widgets.iter().any(|w| matches!(w, Widget::Clock { .. }))
 }
 
-/// Signals a page reads; a change to any other signal needs no redraw.
-pub fn signals_used(page: &Page) -> impl Iterator<Item = &str> {
-    page.widgets.iter().flat_map(|w| match w {
+/// Signals a row reads; a change to any other signal needs no redraw.
+pub fn signals_used(widgets: &[Widget]) -> impl Iterator<Item = &str> {
+    widgets.iter().flat_map(|w| match w {
         Widget::Clock { .. } => vec![],
         Widget::Media { .. } => MEDIA_SIGNALS.to_vec(),
         Widget::Slider {
@@ -452,7 +455,12 @@ mod tests {
     #[test]
     fn missing_signals_show_a_calm_placeholder() {
         let config = Config::default_layout();
-        let zones = bind_page(&config.pages[0], &Signals::new(), &config.settings, &now());
+        let zones = bind_page(
+            &config.pages[0].widgets,
+            &Signals::new(),
+            &config.settings,
+            &now(),
+        );
         assert_eq!(zones.len(), 6);
         assert_eq!(zones[1].view, WidgetView::Media(None), "nothing playing");
         let WidgetView::Value { value, graph, .. } = &zones[3].view else {
@@ -464,11 +472,11 @@ mod tests {
     #[test]
     fn page_signal_list() {
         let config = Config::default_layout();
-        let used: Vec<&str> = signals_used(&config.pages[0]).collect();
+        let used: Vec<&str> = signals_used(&config.pages[0].widgets).collect();
         let mut expected = MEDIA_SIGNALS.to_vec();
         expected.extend(["weather.temp", "cpu.temp", "gpu.temp", "net.down", "net.up"]);
         assert_eq!(used, expected);
-        assert!(shows_clock(&config.pages[0]));
-        assert!(!shows_clock(&config.pages[2]));
+        assert!(shows_clock(&config.pages[0].widgets));
+        assert!(!shows_clock(&config.pages[2].widgets));
     }
 }

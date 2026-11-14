@@ -160,3 +160,37 @@ type = "slider"
 width = 213
 label = "Volume"
 controls = "volume"
+
+# Takeovers briefly cover the whole strip when a signal changes: a new
+# track, a new volume. Not when a reading first arrives, and not while the
+# page on the strip already shows that signal. A touch keeps one up for its
+# full time again; a swipe, or the time running out, puts the page back.
+# Widgets are written as on a page.
+
+[[takeover]]
+name = "Now playing"
+on_change = ["media.title"]
+seconds = 5
+
+[[takeover.widget]]
+type = "media"
+width = 320
+tap = { media = "play-pause" }
+hold = { media = "next" }
+
+[[takeover.widget]]
+type = "slider"
+width = 320
+label = "Position"
+controls = "seek"
+
+[[takeover]]
+name = "Volume"
+on_change = ["volume.level", "volume.muted"]
+seconds = 2
+
+[[takeover.widget]]
+type = "slider"
+width = 640
+label = "Volume"
+controls = "volume"

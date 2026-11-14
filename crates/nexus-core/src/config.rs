@@ -31,7 +31,29 @@ pub struct Config {
     pub pages: Vec<Page>,
     /// Where the weather is for. Without it there is no weather reading.
     pub weather: Option<Weather>,
+    /// Rows that briefly cover the strip when a signal changes.
+    #[serde(rename = "takeover", default)]
+    pub takeovers: Vec<Takeover>,
 }
+
+/// A row of widgets that covers the whole strip for a few seconds when one
+/// of its signals changes: the new track, the new volume. A touch keeps it
+/// up; a swipe or the timer puts the page back.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Takeover {
+    pub name: String,
+    /// Signals whose change shows it. Not when a signal first appears, and
+    /// not while the page on the strip already shows that signal.
+    pub on_change: Vec<String>,
+    /// How long it stays after the change or the last touch.
+    pub seconds: f64,
+    #[serde(rename = "widget", default)]
+    pub widgets: Vec<Widget>,
+}
+
+/// Bounds for a takeover's `seconds`.
+pub const TAKEOVER_SECONDS: std::ops::RangeInclusive<f64> = 0.5..=60.0;
 
 /// The `[weather]` section: a place name to look up, or coordinates.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -285,24 +307,7 @@ impl Config {
                     "{at} appears twice; page names must be unique"
                 )));
             }
-            for (i, w) in page.widgets.iter().enumerate() {
-                if w.width() < MIN_WIDGET_WIDTH {
-                    return Err(ConfigError(format!(
-                        "{at}, widget {}: width {} is too narrow; the minimum is {MIN_WIDGET_WIDTH}",
-                        i + 1,
-                        w.width()
-                    )));
-                }
-            }
-            let total: u32 = page.widgets.iter().map(Widget::width).sum();
-            if total > WIDTH {
-                return Err(ConfigError(format!(
-                    "{at}: widget widths add up to {total} px, but the strip is {WIDTH} px wide"
-                )));
-            }
-        }
-        for page in &self.pages {
-            let at = |i: usize| format!("page \"{}\", widget {}", page.name, i + 1);
+            self.check_widgets(&at, &page.widgets)?;
             let sliders = page
                 .widgets
                 .iter()
@@ -310,45 +315,35 @@ impl Config {
             let only_sliders = !page.widgets.is_empty() && sliders.count() == page.widgets.len();
             if self.pages.len() > 1 && only_sliders {
                 return Err(ConfigError(format!(
-                    "page \"{}\" has only sliders, so it could not be swiped away; add another widget",
-                    page.name
+                    "{at} has only sliders, so it could not be swiped away; add another widget"
                 )));
             }
-            for (i, w) in page.widgets.iter().enumerate() {
-                if let Widget::Slider {
-                    controls,
-                    tap,
-                    hold,
-                    ..
-                } = w
-                {
-                    if tap.is_some() || hold.is_some() {
-                        return Err(ConfigError(format!(
-                            "{}: a slider uses touches itself, so it cannot have tap or hold",
-                            at(i)
-                        )));
-                    }
-                    if let SliderControl::Run(argv) = controls
-                        && (argv.is_empty() || !argv.iter().any(|a| a.contains(SLIDER_VALUE)))
-                    {
-                        return Err(ConfigError(format!(
-                            "{}: a run slider needs a program and {SLIDER_VALUE} in its arguments",
-                            at(i)
-                        )));
-                    }
-                }
-                for (gesture, action) in [("tap", w.tap()), ("hold", w.hold())] {
-                    if let Some(action) = action {
-                        self.check_action(action).map_err(|m| {
-                            ConfigError(format!(
-                                "page \"{}\", widget {}, {gesture}: {m}",
-                                page.name,
-                                i + 1
-                            ))
-                        })?;
-                    }
-                }
+        }
+        let mut names = HashSet::new();
+        for t in &self.takeovers {
+            let at = format!("takeover \"{}\"", t.name);
+            let err = |m: &str| Err(ConfigError(format!("{at}: {m}")));
+            if t.name.trim().is_empty() {
+                return Err(ConfigError("a takeover has an empty name".into()));
             }
+            if !names.insert(t.name.as_str()) {
+                return err("appears twice; takeover names must be unique");
+            }
+            if t.on_change.is_empty() || t.on_change.iter().any(|s| s.trim().is_empty()) {
+                return err("on_change needs signal names, as in on_change = [\"media.title\"]");
+            }
+            if !TAKEOVER_SECONDS.contains(&t.seconds) {
+                return err(&format!(
+                    "seconds is {}; it must be {} to {}",
+                    t.seconds,
+                    TAKEOVER_SECONDS.start(),
+                    TAKEOVER_SECONDS.end()
+                ));
+            }
+            if t.widgets.is_empty() {
+                return err("it has no widgets; add a [[takeover.widget]]");
+            }
+            self.check_widgets(&at, &t.widgets)?;
         }
         if let Some(w) = &self.weather {
             w.validate()?;
@@ -358,6 +353,58 @@ impl Config {
 }
 
 impl Config {
+    /// The rules every row of widgets follows, page or takeover. `at` names
+    /// the row in messages.
+    fn check_widgets(&self, at: &str, widgets: &[Widget]) -> Result<(), ConfigError> {
+        let at_widget = |i: usize| format!("{at}, widget {}", i + 1);
+        for (i, w) in widgets.iter().enumerate() {
+            if w.width() < MIN_WIDGET_WIDTH {
+                return Err(ConfigError(format!(
+                    "{}: width {} is too narrow; the minimum is {MIN_WIDGET_WIDTH}",
+                    at_widget(i),
+                    w.width()
+                )));
+            }
+        }
+        let total: u32 = widgets.iter().map(Widget::width).sum();
+        if total > WIDTH {
+            return Err(ConfigError(format!(
+                "{at}: widget widths add up to {total} px, but the strip is {WIDTH} px wide"
+            )));
+        }
+        for (i, w) in widgets.iter().enumerate() {
+            if let Widget::Slider {
+                controls,
+                tap,
+                hold,
+                ..
+            } = w
+            {
+                if tap.is_some() || hold.is_some() {
+                    return Err(ConfigError(format!(
+                        "{}: a slider uses touches itself, so it cannot have tap or hold",
+                        at_widget(i)
+                    )));
+                }
+                if let SliderControl::Run(argv) = controls
+                    && (argv.is_empty() || !argv.iter().any(|a| a.contains(SLIDER_VALUE)))
+                {
+                    return Err(ConfigError(format!(
+                        "{}: a run slider needs a program and {SLIDER_VALUE} in its arguments",
+                        at_widget(i)
+                    )));
+                }
+            }
+            for (gesture, action) in [("tap", w.tap()), ("hold", w.hold())] {
+                if let Some(action) = action {
+                    self.check_action(action)
+                        .map_err(|m| ConfigError(format!("{}, {gesture}: {m}", at_widget(i))))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn check_action(&self, action: &Action) -> Result<(), String> {
         match action {
             Action::Page(target) => {
@@ -557,5 +604,44 @@ mod tests {
         assert!(err(wide).contains("800 px"));
         let narrow = "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"clock\"\nwidth = 10\n";
         assert!(err(narrow).contains("too narrow"));
+    }
+
+    #[test]
+    fn takeovers_are_checked() {
+        let t = |body: &str| {
+            Config::parse(&format!(
+                "[[page]]\nname = \"A\"\n[[takeover]]\nname = \"T\"\n{body}"
+            ))
+        };
+        let slider = "[[takeover.widget]]\ntype = \"slider\"\nwidth = 640\nlabel = \"V\"\ncontrols = \"volume\"\n";
+        let ok = t(&format!(
+            "on_change = [\"volume.level\"]\nseconds = 2\n{slider}"
+        ))
+        .unwrap();
+        assert_eq!(ok.takeovers[0].on_change, ["volume.level"]);
+        for (body, says) in [
+            (
+                format!("on_change = []\nseconds = 2\n{slider}"),
+                "on_change needs",
+            ),
+            (
+                format!("on_change = [\"x\"]\nseconds = 0\n{slider}"),
+                "seconds is 0",
+            ),
+            ("on_change = [\"x\"]\nseconds = 2\n".into(), "no widgets"),
+            (
+                format!("on_change = [\"x\"]\nseconds = 2\n{slider}{slider}"),
+                "takeover \"T\": widget widths add up to 1280",
+            ),
+            (
+                format!(
+                    "on_change = [\"x\"]\nseconds = 2\n{slider}[[takeover]]\nname = \"T\"\non_change = [\"y\"]\nseconds = 2\n{slider}"
+                ),
+                "appears twice",
+            ),
+        ] {
+            let e = t(&body).unwrap_err().0;
+            assert!(e.contains(says), "{body}: {e}");
+        }
     }
 }
