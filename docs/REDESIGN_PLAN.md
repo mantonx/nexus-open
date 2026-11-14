@@ -469,3 +469,22 @@ The Linux release ships first. Then, per OS:
   The first CI run failed because the runners' newer clippy had a lint the
   local 1.93 lacked; with the pin, local and CI run the same compiler and
   lints. Rust CI is green on Linux, macOS and Windows (run 43603527771).
+- 2026-11-14 — Milestone 3 (UI shell) built: `nexusd ui` opens a Slint
+  1.18.1 window (`crates/nexus-ui`, winit backend, femtovg/OpenGL) on native
+  KDE Wayland with the NVIDIA driver. No runtime warnings. The preview is
+  pixel-identical to the renderer's output at 1× and 2×, including under
+  fractional desktop scaling (`SLINT_SCALE_FACTOR=1.25`), because its size
+  is counted in physical pixels (`phx`). Over AT-SPI (what Orca reads) the
+  window exposes a frame "Nexus Open", the preview as an image with a spoken
+  description, and a focusable combo box named "Font". Still to check by
+  hand: Tab and arrow-key operation, and Orca actually speaking the
+  controls. The Qt 6/QML fallback is not needed so far.
+- 2026-11-14 — Open: Slint licensing. The repo is MIT; Slint is GPL-3.0 or
+  its Royalty-free 2.0 license, which allows a free desktop app but requires
+  attribution (the `AboutSlint` widget in an About screen, or the "Made with
+  Slint" badge on the project page). Proposed: keep MIT and add an About
+  screen with `AboutSlint` in Phase 4. Needs Matt's confirmation.
+- 2026-11-14 — `nexus-ui` sets `unsafe_code = "deny"` instead of the
+  workspace's `forbid`, because Slint's generated code carries
+  `#[allow(unsafe_code)]`, which `forbid` rejects. Hand-written unsafe code
+  is still an error.

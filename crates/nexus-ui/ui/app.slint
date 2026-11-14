@@ -1,0 +1,76 @@
+// The settings window. For now it is only the shell: the live strip preview
+// and one real control (the font), enough to check rendering, keyboard use
+// and screen reader access on each desktop.
+
+import { ComboBox, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "Nexus Open";
+    icon: @image-url("../assets/icon.png");
+    min-width: 720px;
+    min-height: 320px;
+    preferred-width: 1340px;
+    preferred-height: 420px;
+    background: Palette.background;
+
+    /// The frame on the strip, 640×48.
+    in property <image> frame;
+    /// Font names, in the order the core lists them.
+    in property <[string]> fonts;
+    in-out property <int> font-index: 0;
+    callback font-chosen(int);
+
+    VerticalBox {
+        Text {
+            text: "Strip preview";
+            font-size: 18px;
+            font-weight: 600;
+            accessible-role: text;
+        }
+
+        preview-area := Rectangle {
+            vertical-stretch: 1;
+            min-height: 48phx * 2;
+
+            // Largest whole-number scale that fits, counted in physical
+            // pixels (phx), not logical ones (px). With fractional desktop
+            // scaling a logical-pixel scale would land between device
+            // pixels and blur the strip's hinted text.
+            property <int> scale: max(1, min(
+                floor(self.width / 640phx),
+                floor(self.height / 48phx)));
+
+            Image {
+                source: root.frame;
+                image-rendering: pixelated;
+                width: 640phx * preview-area.scale;
+                height: 48phx * preview-area.scale;
+                // Rounded to whole physical pixels for the same reason.
+                x: round((parent.width - self.width) / 2 / 1phx) * 1phx;
+                y: round((parent.height - self.height) / 2 / 1phx) * 1phx;
+                accessible-role: image;
+                accessible-label: "Strip preview at " + preview-area.scale + " times size";
+            }
+        }
+
+        HorizontalBox {
+            alignment: start;
+            padding: 0;
+
+            font-label := Text {
+                text: "Font";
+                vertical-alignment: center;
+            }
+
+            ComboBox {
+                model: root.fonts;
+                current-index <=> root.font-index;
+                min-width: 220px;
+                accessible-label: font-label.text;
+                selected => {
+                    root.font-chosen(self.current-index);
+                }
+            }
+        }
+    }
+}

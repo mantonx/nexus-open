@@ -1,8 +1,12 @@
 //! nexusd: drives the Corsair iCUE Nexus touch strip.
 //!
-//! Only the `preview` command exists so far. It shows the demo System page on
-//! the real strip, which is how the renderer and fonts are judged on hardware
-//! and how replug recovery is measured.
+//! Commands so far:
+//! - `preview` shows the demo System page on the real strip, which is how the
+//!   renderer and fonts are judged on hardware and how replug recovery is
+//!   measured.
+//! - `ui` opens the settings window. It is the same binary so installs stay
+//!   one file; the window runs as its own process and the strip will keep
+//!   working with it closed.
 
 use std::process::ExitCode;
 use std::time::Duration;
@@ -34,14 +38,17 @@ enum Command {
         #[arg(long)]
         touch: bool,
     },
+    /// Open the settings window.
+    Ui,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command {
+    let result: Result<(), Box<dyn std::error::Error>> = match cli.command {
         Command::Preview { font, cycle, touch } => {
-            preview(font, cycle.map(Duration::from_secs), touch)
+            preview(font, cycle.map(Duration::from_secs), touch).map_err(Into::into)
         }
+        Command::Ui => nexus_ui::run().map_err(Into::into),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

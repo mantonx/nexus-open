@@ -1,0 +1,35 @@
+[package]
+name = "nexus-ui"
+description = "Settings app for the Corsair iCUE Nexus touch strip"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+nexus-core = { path = "../nexus-core" }
+# Features chosen explicitly: winit for native Wayland/X11/macOS/Windows
+# windows, femtovg (OpenGL) with the software renderer as fallback, and
+# AccessKit so screen readers see the controls. `compat-1-2` is required
+# whenever default features are off.
+slint = { version = "1.18.1", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "accessibility",
+] }
+
+[build-dependencies]
+slint-build = "1.18.1"
+
+# Not `workspace = true`: the code Slint generates from app.slint contains
+# `#[allow(unsafe_code)]` blocks, which `forbid` rejects outright. `deny`
+# still rejects any unsafe code written by hand in this crate.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
