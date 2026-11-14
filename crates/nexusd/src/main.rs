@@ -15,6 +15,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use nexus_core::fonts::FontChoice;
 
+mod control;
 #[cfg(target_os = "linux")]
 mod preview;
 mod run;

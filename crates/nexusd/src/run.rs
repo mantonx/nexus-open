@@ -10,17 +10,22 @@ use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use jiff::Zoned;
+use nexus_control::{PageTarget, Request, SignalEntry, Status};
 use nexus_core::config::{self, Config};
 use nexus_core::demo;
 use nexus_core::engine::{Engine, Input};
+use nexus_core::signal::Value;
 use nexus_device::protocol::{TouchCalibration, parse_touch};
 use nexus_device::{DeviceError, Surface};
 use notify::{EventKind, RecursiveMode, Watcher};
+use serde_json::json;
+
+use crate::control::{self, Frame, Reply};
 
 /// How often to look for the device while it is unplugged.
 const RECONNECT_POLL: Duration = Duration::from_millis(250);
@@ -31,10 +36,14 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const DEMO_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Everything the daemon thread reacts to.
-enum Msg {
+pub enum Msg {
     Engine(Input),
     Device(nexus_device::Input),
     ConfigChanged,
+    /// A request from the control socket and where to send the answer.
+    Control(Request, Sender<Reply>),
+    /// A viewer (the settings window) wants every frame.
+    Subscribe(SyncSender<Frame>),
 }
 
 impl From<nexus_device::Input> for Msg {
@@ -53,15 +62,22 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         Some(path) => path,
         None => default_config_path()?,
     };
+    // Claim the socket first: it doubles as the guard against a second
+    // daemon fighting over the device.
+    let listener = nexus_control::listen().map_err(|e| e.to_string())?;
     let (tx, rx) = mpsc::channel();
+    control::serve(listener, tx.clone());
+    let (config, config_error) = first_config(&path)?;
     let mut daemon = Daemon {
-        engine: Engine::new(first_config(&path)?),
+        engine: Engine::new(config),
         path,
         device: None,
         next_attempt: Instant::now(),
         last_device_error: None,
-        last_config_error: None,
+        last_config_error: config_error,
         tx: tx.clone(),
+        viewers: Vec::new(),
+        current: None,
         calibration: TouchCalibration::default(),
         origin: Instant::now(),
         last_frame: Instant::now(),
@@ -84,6 +100,10 @@ struct Daemon {
     last_device_error: Option<String>,
     last_config_error: Option<String>,
     tx: Sender<Msg>,
+    /// Settings windows receiving frames.
+    viewers: Vec<SyncSender<Frame>>,
+    /// The frame last produced, for a viewer that just connected.
+    current: Option<Frame>,
     calibration: TouchCalibration,
     /// Origin of the monotonic clock shared by touch samples and animation.
     origin: Instant,
@@ -131,6 +151,18 @@ impl Daemon {
                     }
                     Msg::Device(nexus_device::Input::Gone(e)) => self.lost(&e.to_string()),
                     Msg::ConfigChanged => reload = true,
+                    Msg::Control(request, answer) => {
+                        let _ = answer.send(self.control(request));
+                    }
+                    Msg::Subscribe(viewer) => {
+                        match &self.current {
+                            Some(frame) => {
+                                let _ = viewer.try_send(frame.clone());
+                            }
+                            None => self.engine.handle(Input::Redraw),
+                        }
+                        self.viewers.push(viewer);
+                    }
                 }
             }
             if reload {
@@ -175,16 +207,99 @@ impl Daemon {
 
     /// Sends a frame if the picture changed. Without a device nothing is
     /// drawn, so the change is still pending when the device returns.
+    ///
+    /// With neither a device nor a viewer, nothing is drawn: the change
+    /// stays pending until one appears.
     fn show(&mut self, now: &Zoned) {
-        let Some(device) = self.device.as_mut() else {
+        if self.device.is_none() && self.viewers.is_empty() {
+            return;
+        }
+        let mono = self.origin.elapsed().as_secs_f64();
+        let Some(frame) = self.engine.frame(now, mono) else {
             return;
         };
-        let mono = self.origin.elapsed().as_secs_f64();
-        if let Some(frame) = self.engine.frame(now, mono) {
-            self.last_frame = Instant::now();
-            if let Err(e) = device.send_frame(frame.rgba()) {
-                self.lost(&e.to_string());
+        self.last_frame = Instant::now();
+        let frame: Frame = frame.rgba().into();
+        control::broadcast(&mut self.viewers, &frame);
+        self.current = Some(frame.clone());
+        if let Some(device) = self.device.as_mut()
+            && let Err(e) = device.send_frame(&frame)
+        {
+            self.lost(&e.to_string());
+        }
+    }
+
+    /// Answers a control request.
+    fn control(&mut self, request: Request) -> Reply {
+        let pages = &self.engine.config().pages;
+        match request {
+            Request::Status => {
+                let status = Status {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    pid: std::process::id(),
+                    device_error: self.device.is_none().then(|| {
+                        self.last_device_error
+                            .clone()
+                            .unwrap_or_else(|| "not connected yet".into())
+                    }),
+                    page: pages[self.engine.page()].name.clone(),
+                    pages: pages.iter().map(|p| p.name.clone()).collect(),
+                    config_path: self.path.display().to_string(),
+                    config_error: self.last_config_error.clone(),
+                };
+                serde_json::to_value(status).map_err(|e| e.to_string())
             }
+            Request::Signals => {
+                let signals = self.engine.signals();
+                let entries: Vec<SignalEntry> = signals
+                    .names()
+                    .into_iter()
+                    .map(|name| SignalEntry {
+                        name: name.to_string(),
+                        value: match signals.get(name) {
+                            Some(Value::Number(n, unit)) => format!("{n} ({unit:?})"),
+                            Some(Value::Text(t)) => t.clone(),
+                            None => String::new(),
+                        },
+                    })
+                    .collect();
+                serde_json::to_value(entries).map_err(|e| e.to_string())
+            }
+            Request::Page(target) => {
+                let input = match target {
+                    PageTarget::Next => Input::Step(1),
+                    PageTarget::Prev => Input::Step(-1),
+                    PageTarget::Index(i) if i < pages.len() => Input::ShowPage(i),
+                    PageTarget::Index(i) => {
+                        return Err(format!("no page {}; there are {}", i + 1, pages.len()));
+                    }
+                    PageTarget::Name(name) => match self.engine.config().page_index(&name) {
+                        Some(i) => Input::ShowPage(i),
+                        None => {
+                            let names: Vec<&str> = pages.iter().map(|p| p.name.as_str()).collect();
+                            return Err(format!(
+                                "no page named \"{name}\"; pages are: {}",
+                                names.join(", ")
+                            ));
+                        }
+                    },
+                };
+                self.engine.handle(input);
+                Ok(json!(null))
+            }
+            Request::Reload => {
+                self.reload();
+                match &self.last_config_error {
+                    None => Ok(json!(null)),
+                    Some(e) => Err(format!("{e}\nthe previous layout is still shown")),
+                }
+            }
+            Request::Publish(name, value) => {
+                self.engine.handle(Input::Signal(name, value));
+                Ok(json!(null))
+            }
+            // Handled by the connection thread before it gets here.
+            Request::Frames => Err("frames is handled by the connection".into()),
         }
     }
 
@@ -223,8 +338,7 @@ impl Daemon {
 }
 
 fn default_config_path() -> Result<PathBuf, Box<dyn Error>> {
-    let dir = dirs::config_dir().ok_or("cannot find the user's config directory")?;
-    Ok(dir.join("nexus-open").join("nexus.toml"))
+    Ok(nexus_control::default_config_path().ok_or("cannot find the user's config directory")?)
 }
 
 /// `Ok(None)` if the file does not exist.
@@ -236,26 +350,27 @@ fn read_config(path: &Path) -> Result<Option<Config>, Box<dyn Error>> {
     }
 }
 
-/// The config to start with. A missing file is created from the default so
-/// there is something to edit. A broken file falls back to the default
-/// layout for this run, without overwriting the file.
-fn first_config(path: &Path) -> Result<Config, Box<dyn Error>> {
+/// The config to start with, and why the file was rejected if it was. A
+/// missing file is created from the default so there is something to edit.
+/// A broken file falls back to the default layout for this run, without
+/// overwriting the file.
+fn first_config(path: &Path) -> Result<(Config, Option<String>), Box<dyn Error>> {
     match read_config(path) {
-        Ok(Some(config)) => Ok(config),
+        Ok(Some(config)) => Ok((config, None)),
         Ok(None) => {
             if let Some(dir) = path.parent() {
                 fs::create_dir_all(dir)?;
             }
             fs::write(path, config::DEFAULT)?;
             eprintln!("nexusd: wrote the default layout to {}", path.display());
-            Ok(Config::default_layout())
+            Ok((Config::default_layout(), None))
         }
         Err(e) => {
             eprintln!(
                 "nexusd: {}: {e}\nnexusd: showing the default layout until it is fixed",
                 path.display()
             );
-            Ok(Config::default_layout())
+            Ok((Config::default_layout(), Some(e.to_string())))
         }
     }
 }

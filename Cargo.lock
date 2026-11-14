@@ -1066,6 +1066,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "doctest-file"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2db04e74f0a9a93103b50e90b96024c9b2bdca8bce6a632ec71b88736d3d359"
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2374,6 +2380,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36eee07d8e02bd95bf52b2e642cf13d33701b94c6e4b04fbf1d1fb07e9cb19e7"
 
 [[package]]
+name = "interprocess"
+version = "2.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f0ed453af5ae3bdbf68e41dde07eae0bffcc986419f63521ba9c89d82988c70"
+dependencies = [
+ "doctest-file",
+ "libc",
+ "recvmsg",
+ "widestring",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "io-lifetimes"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2922,6 +2941,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-control"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "interprocess",
+ "nexus-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nexus-core"
 version = "0.1.0"
 dependencies = [
@@ -2946,16 +2976,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexusctl"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nexus-control",
+ "nexus-core",
+ "nexus-device",
+ "serde_json",
+]
+
+[[package]]
 name = "nexusd"
 version = "0.1.0"
 dependencies = [
  "clap",
- "dirs",
+ "interprocess",
  "jiff",
+ "nexus-control",
  "nexus-core",
  "nexus-device",
  "nexus-ui",
  "notify",
+ "serde_json",
 ]
 
 [[package]]
@@ -3842,6 +3885,12 @@ dependencies = [
  "font-types",
  "once_cell",
 ]
+
+[[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
 
 [[package]]
 name = "redox_syscall"
@@ -5375,6 +5424,12 @@ dependencies = [
  "raw-window-handle",
  "static_assertions",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi-util"

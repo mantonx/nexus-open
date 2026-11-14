@@ -1,0 +1,18 @@
+[package]
+name = "nexus-control"
+description = "Control protocol between nexusd, nexusctl and the settings window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+dirs = "7.0.0"
+interprocess = "2.4.8"
+nexus-core = { path = "../nexus-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[lints]
+workspace = true
