@@ -14,6 +14,15 @@ pub mod hidraw;
 pub mod protocol;
 pub mod simulator;
 
+/// What a device's input reader reports.
+#[derive(Debug)]
+pub enum Input {
+    /// One raw input report, report ID included.
+    Report(Vec<u8>),
+    /// The device went away; the reader has stopped.
+    Gone(io::Error),
+}
+
 /// Something that can show a 640×48 frame.
 pub trait Surface {
     /// Shows one frame of 640×48 RGBA pixels.

@@ -13,21 +13,12 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 use crate::protocol::{FRAME_BYTES, PACKET_BYTES, PACKETS_PER_FRAME, encode_packet};
-use crate::{DeviceError, Surface};
+use crate::{DeviceError, Input, Surface};
 
 /// USB IDs of the iCUE Nexus as they appear in a hidraw uevent `HID_ID`.
 const HID_ID: &str = "0003:00001B1C:00001B8E";
 /// Interface 0 carries frames and touch; interface 1 is a keyboard.
 const INTERFACE: &str = "00";
-
-/// What the touch reader thread reports.
-#[derive(Debug)]
-pub enum Input {
-    /// One raw input report, report ID included.
-    Report(Vec<u8>),
-    /// The device went away; the reader thread has stopped.
-    Gone(io::Error),
-}
 
 pub struct Nexus {
     file: File,
@@ -65,7 +56,13 @@ impl Nexus {
     /// The thread ends after sending `Input::Gone`, which is also how an
     /// unplug is noticed: the blocking read fails as soon as the device
     /// disappears.
-    pub fn spawn_reader(&self, tx: Sender<Input>) -> Result<(), DeviceError> {
+    ///
+    /// Sends into any channel whose message type converts from `Input`, so
+    /// a caller can merge device input with its other events on one channel.
+    pub fn spawn_reader<T>(&self, tx: Sender<T>) -> Result<(), DeviceError>
+    where
+        T: From<Input> + Send + 'static,
+    {
         let mut file = self.file.try_clone().map_err(DeviceError::Io)?;
         thread::Builder::new()
             .name("nexus-touch".into())
@@ -74,17 +71,18 @@ impl Nexus {
                 loop {
                     match file.read(&mut buf) {
                         Ok(0) => {
-                            let _ = tx.send(Input::Gone(io::ErrorKind::UnexpectedEof.into()));
+                            let _ =
+                                tx.send(Input::Gone(io::ErrorKind::UnexpectedEof.into()).into());
                             return;
                         }
                         Ok(n) => {
-                            if tx.send(Input::Report(buf[..n].to_vec())).is_err() {
+                            if tx.send(Input::Report(buf[..n].to_vec()).into()).is_err() {
                                 return; // receiver dropped: nobody is listening
                             }
                         }
                         Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                         Err(e) => {
-                            let _ = tx.send(Input::Gone(e));
+                            let _ = tx.send(Input::Gone(e).into());
                             return;
                         }
                     }

@@ -8,7 +8,8 @@ use nexus_core::demo::system_page;
 use nexus_core::fonts::FontChoice;
 use nexus_core::theme::Theme;
 use nexus_core::widget::Renderer;
-use nexus_device::hidraw::{Input, Nexus};
+use nexus_device::Input;
+use nexus_device::hidraw::Nexus;
 use nexus_device::protocol::{TouchCalibration, parse_touch};
 use nexus_device::{DeviceError, Surface};
 

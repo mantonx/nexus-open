@@ -1,6 +1,7 @@
 //! nexusd: drives the Corsair iCUE Nexus touch strip.
 //!
 //! Commands so far:
+//! - `run` is the daemon.
 //! - `preview` shows the demo System page on the real strip, which is how the
 //!   renderer and fonts are judged on hardware and how replug recovery is
 //!   measured.
@@ -16,6 +17,7 @@ use nexus_core::fonts::FontChoice;
 
 #[cfg(target_os = "linux")]
 mod preview;
+mod run;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -38,6 +40,16 @@ enum Command {
         #[arg(long)]
         touch: bool,
     },
+    /// Run the daemon: show the configured pages on the strip.
+    Run {
+        /// Config file. Default: nexus-open/nexus.toml in the user's config
+        /// directory, created with the default layout if missing.
+        #[arg(long, value_name = "PATH")]
+        config: Option<std::path::PathBuf>,
+        /// Publish fake readings, for testing before real sources exist.
+        #[arg(long)]
+        demo: bool,
+    },
     /// Open the settings window.
     Ui,
 }
@@ -48,6 +60,7 @@ fn main() -> ExitCode {
         Command::Preview { font, cycle, touch } => {
             preview(font, cycle.map(Duration::from_secs), touch).map_err(Into::into)
         }
+        Command::Run { config, demo } => run::run(run::Options { config, demo }),
         Command::Ui => nexus_ui::run().map_err(Into::into),
     };
     match result {

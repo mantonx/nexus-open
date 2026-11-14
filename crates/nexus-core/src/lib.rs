@@ -7,6 +7,7 @@
 pub mod canvas;
 pub mod config;
 pub mod demo;
+pub mod engine;
 pub mod fonts;
 pub mod layout;
 pub mod signal;

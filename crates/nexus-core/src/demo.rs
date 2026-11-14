@@ -3,6 +3,7 @@
 //! Not real readings. Lets the renderer be exercised the same way everywhere
 //! until live signals exist.
 
+use crate::signal::{Unit, Value};
 use crate::widget::{Graph, Severity, WidgetView, Zone};
 
 /// The System page from the current app, with representative data.
@@ -68,5 +69,45 @@ pub fn system_page() -> Vec<Zone> {
                 graph: Some(Graph::Line(spiky)),
             },
         },
+    ]
+}
+
+/// Plausible fake readings for every signal the default layout uses, as a
+/// function of seconds since start. Drives the daemon with `--demo` until
+/// real sources exist, and gives tests moving data.
+pub fn readings(t: f64) -> Vec<(&'static str, Value)> {
+    let wave = |period: f64, phase: f64| (t / period * std::f64::consts::TAU + phase).sin();
+    // A burst every 20 s, like a download starting.
+    let burst = if t % 20.0 < 3.0 { 40e6 } else { 0.0 };
+    vec![
+        (
+            "cpu.temp",
+            Value::Number(52.0 + 6.0 * wave(30.0, 0.0), Unit::Celsius),
+        ),
+        (
+            "gpu.temp",
+            Value::Number(74.0 + 8.0 * wave(45.0, 1.0), Unit::Celsius),
+        ),
+        ("weather.temp", Value::Number(21.0, Unit::Celsius)),
+        (
+            "cpu.load",
+            Value::Number(30.0 + 25.0 * wave(17.0, 0.5), Unit::Percent),
+        ),
+        (
+            "gpu.load",
+            Value::Number(60.0 + 35.0 * wave(23.0, 2.0), Unit::Percent),
+        ),
+        (
+            "mem.used",
+            Value::Number(41.0 + 2.0 * wave(60.0, 0.0), Unit::Percent),
+        ),
+        (
+            "net.down",
+            Value::Number(250e3 + 150e3 * wave(7.0, 0.0) + burst, Unit::BytesPerSecond),
+        ),
+        (
+            "net.up",
+            Value::Number(40e3 + 30e3 * wave(11.0, 1.0), Unit::BytesPerSecond),
+        ),
     ]
 }
