@@ -23,26 +23,49 @@ use crate::theme::{Rgb, TextStyle};
 /// A loaded font file.
 ///
 /// `FontRef` from swash borrows the font bytes, so it can't be stored on its
-/// own. `Font` owns the bytes and hands out a `FontRef` on demand. The bytes
-/// sit behind an `Arc` so cloning a `Font` is cheap.
+/// own. `Font` holds the bytes and hands out a `FontRef` on demand. Cloning a
+/// `Font` is cheap either way: bundled fonts point at bytes compiled into the
+/// binary, and loaded files sit behind an `Arc`.
 #[derive(Clone)]
 pub struct Font {
-    data: Arc<Vec<u8>>,
+    data: FontData,
     offset: u32,
     key: CacheKey,
 }
 
+#[derive(Clone)]
+enum FontData {
+    /// Compiled into the binary with `include_bytes!`; never copied.
+    Static(&'static [u8]),
+    /// Read at runtime, shared between clones.
+    Owned(Arc<Vec<u8>>),
+}
+
+impl FontData {
+    fn bytes(&self) -> &[u8] {
+        match self {
+            FontData::Static(b) => b,
+            FontData::Owned(b) => b,
+        }
+    }
+}
+
 impl Font {
-    /// Parses the first face in a font file. Returns `None` if the bytes are
-    /// not a font swash can read.
+    /// Parses the first face in a font file read at runtime. Returns `None` if
+    /// the bytes are not a font swash can read.
     pub fn from_bytes(data: Vec<u8>) -> Option<Self> {
-        let font = FontRef::from_index(&data, 0)?;
+        Self::new(FontData::Owned(Arc::new(data)))
+    }
+
+    /// Like `from_bytes`, for font bytes compiled into the binary.
+    pub fn from_static(data: &'static [u8]) -> Option<Self> {
+        Self::new(FontData::Static(data))
+    }
+
+    fn new(data: FontData) -> Option<Self> {
+        let font = FontRef::from_index(data.bytes(), 0)?;
         let (offset, key) = (font.offset, font.key);
-        Some(Self {
-            data: Arc::new(data),
-            offset,
-            key,
-        })
+        Some(Self { data, offset, key })
     }
 
     /// True if the font has a glyph for `c`.
@@ -52,7 +75,7 @@ impl Font {
 
     fn as_ref(&self) -> FontRef<'_> {
         FontRef {
-            data: &self.data,
+            data: self.data.bytes(),
             offset: self.offset,
             key: self.key,
         }

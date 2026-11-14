@@ -430,3 +430,8 @@ every item in the 9/10 bar is passing or waived by Matt.
   first milestones of Phase 2. The udev rule moved to `data/udev/`.
 - 2026-11-14 — Matt has not written Rust before. Explain Rust choices as the
   code is written.
+- 2026-11-14 — Font is a user setting with five bundled, hinted choices:
+  IBM Plex Sans (default), Atkinson Hyperlegible, Roboto, Noto Sans, Lato.
+  Matt dropped Go ("we moved on"). DejaVu Sans is the fixed fallback for
+  missing characters; Font Awesome Solid supplies icons. See
+  `crates/nexus-core/src/fonts.rs` and `crates/nexus-core/assets/fonts/`.

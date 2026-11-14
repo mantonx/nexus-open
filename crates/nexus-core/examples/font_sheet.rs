@@ -1,17 +1,19 @@
-//! Renders the System page once per font and stacks the results into a sheet,
-//! so fonts can be compared on the exact pixels the strip would show.
+//! Renders the System page once per bundled font choice and stacks the
+//! results into a sheet, so the choices can be compared on the exact pixels
+//! the strip would show.
 //!
 //! Usage:
-//!   cargo run -p nexus-core --example font_sheet -- <out-dir> <icon-font> <fallback-font> <font>...
+//!   cargo run -p nexus-core --example font_sheet -- <out-dir>
 //!
-//! Writes `<out-dir>/<font-name>.png` at panel size (for showing on the strip)
-//! and `<out-dir>/sheet.png`, all fonts stacked and scaled 3× without smoothing.
+//! Writes `<out-dir>/<font-id>.png` at panel size (for showing on the strip)
+//! and `<out-dir>/sheet.png`, all choices stacked and scaled 3× without
+//! smoothing.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use nexus_core::text::Font;
+use nexus_core::fonts::FontChoice;
 use nexus_core::theme::Theme;
-use nexus_core::widget::{Fonts, Graph, Renderer, Severity, WidgetView, Zone};
+use nexus_core::widget::{Graph, Renderer, Severity, WidgetView, Zone};
 use nexus_core::{HEIGHT, WIDTH};
 use tiny_skia::{Color, Pixmap};
 
@@ -20,54 +22,28 @@ const SCALE: u32 = 3;
 const GAP: u32 = 4;
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() < 4 {
-        eprintln!("usage: font_sheet <out-dir> <icon-font> <fallback-font> <font>...");
+    let Some(out_dir) = std::env::args().nth(1).map(PathBuf::from) else {
+        eprintln!("usage: font_sheet <out-dir>");
         std::process::exit(2);
-    }
-    let out_dir = PathBuf::from(&args[0]);
+    };
     std::fs::create_dir_all(&out_dir).expect("create output directory");
-    let icon = load(Path::new(&args[1]));
-    let fallback = load(Path::new(&args[2]));
 
-    let pages: Vec<(String, Vec<u8>)> = args[3..]
-        .iter()
-        .map(|path| {
-            let path = Path::new(path);
-            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-            let fonts = Fonts {
-                text: load(path),
-                fallback: vec![fallback.clone()],
-                icon: icon.clone(),
-            };
-            let mut renderer = Renderer::new(Theme::default(), fonts);
-            let frame = renderer.render_page(&system_page());
-            frame
-                .save_png(out_dir.join(format!("{name}.png")))
-                .expect("save page");
-            (name, frame.rgba().to_vec())
-        })
-        .collect();
-
-    let rows = pages.len() as u32;
+    let rows = FontChoice::ALL.len() as u32;
     let mut sheet = Pixmap::new(WIDTH * SCALE, (rows * (HEIGHT + GAP)) * SCALE).unwrap();
     sheet.fill(Color::from_rgba8(40, 40, 40, 255));
-    for (row, (_, rgba)) in pages.iter().enumerate() {
-        let top = row as u32 * (HEIGHT + GAP);
-        blit_scaled(&mut sheet, rgba, top);
+
+    for (row, choice) in FontChoice::ALL.into_iter().enumerate() {
+        let mut renderer = Renderer::new(Theme::default(), choice.load());
+        let frame = renderer.render_page(&system_page());
+        frame
+            .save_png(out_dir.join(format!("{}.png", choice.id())))
+            .expect("save page");
+        blit_scaled(&mut sheet, frame.rgba(), row as u32 * (HEIGHT + GAP));
+        println!("row {}: {}", row + 1, choice.display_name());
     }
     sheet
         .save_png(out_dir.join("sheet.png"))
         .expect("save sheet");
-
-    for (row, (name, _)) in pages.iter().enumerate() {
-        println!("row {}: {name}", row + 1);
-    }
-}
-
-fn load(path: &Path) -> Font {
-    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    Font::from_bytes(bytes).unwrap_or_else(|| panic!("not a font: {}", path.display()))
 }
 
 /// Copies a panel-sized RGBA frame into the sheet at row `top`, scaled up by
