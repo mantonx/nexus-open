@@ -1,0 +1,8 @@
+# Corsair iCUE Nexus (1b1c:1b8e) — grant the active desktop session access.
+#
+# This file must sort before 73-seat-late.rules: that file runs the
+# "uaccess" builtin, which only applies ACLs to devices already tagged.
+# The old 99-corsair-nexus.rules set the tag too late, so no ACL was applied.
+
+SUBSYSTEM=="usb", ATTR{idVendor}=="1b1c", ATTR{idProduct}=="1b8e", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", TAG+="uaccess"
