@@ -5,8 +5,11 @@
 //! whole visual layer testable on the simulator without hardware.
 
 pub mod canvas;
+pub mod config;
 pub mod demo;
 pub mod fonts;
+pub mod layout;
+pub mod signal;
 pub mod text;
 pub mod theme;
 pub mod widget;

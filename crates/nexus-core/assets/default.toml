@@ -1,0 +1,115 @@
+# Nexus Open layout.
+#
+# The strip is 640 px wide. Each page is a row of widgets, left to right; a
+# page's widget widths must add up to 640 or less. Swipe to change page.
+#
+# Signals are named readings published by sources, in base units:
+#   cpu.temp, gpu.temp, weather.temp   degrees Celsius
+#   cpu.load, gpu.load, mem.used       percent
+#   net.down, net.up                   bytes per second
+# Thresholds (warn, crit) use those base units too.
+
+[settings]
+font = "ibm-plex-sans"       # ibm-plex-sans, atkinson-hyperlegible, roboto, noto-sans, lato
+temperature = "celsius"      # celsius or fahrenheit
+clock = "24h"                # 24h or 12h
+
+[[page]]
+name = "System"
+
+[[page.widget]]
+type = "clock"
+width = 128
+
+[[page.widget]]
+type = "value"
+width = 128
+label = "Weather"
+signal = "weather.temp"
+
+[[page.widget]]
+type = "value"
+width = 128
+label = "CPU"
+signal = "cpu.temp"
+graph = "area"
+warn = 75
+crit = 90
+
+[[page.widget]]
+type = "value"
+width = 128
+label = "GPU"
+signal = "gpu.temp"
+graph = "area"
+warn = 75
+crit = 90
+
+[[page.widget]]
+type = "rate"
+width = 128
+label = "Net"
+down = "net.down"
+up = "net.up"
+
+[[page]]
+name = "Performance"
+
+[[page.widget]]
+type = "value"
+width = 240
+label = "CPU"
+signal = "cpu.temp"
+graph = "area"
+warn = 75
+crit = 90
+
+[[page.widget]]
+type = "value"
+width = 240
+label = "GPU"
+signal = "gpu.temp"
+graph = "area"
+warn = 75
+crit = 90
+
+[[page.widget]]
+type = "rate"
+width = 160
+label = "Net"
+down = "net.down"
+up = "net.up"
+
+[[page]]
+name = "Load"
+
+[[page.widget]]
+type = "value"
+width = 213
+label = "CPU load"
+signal = "cpu.load"
+graph = "line"
+warn = 85
+
+[[page.widget]]
+type = "value"
+width = 213
+label = "GPU load"
+signal = "gpu.load"
+graph = "line"
+warn = 85
+
+[[page.widget]]
+type = "value"
+width = 214
+label = "Memory"
+signal = "mem.used"
+graph = "line"
+warn = 90
+
+[[page]]
+name = "Clock"
+
+[[page.widget]]
+type = "clock"
+width = 640
