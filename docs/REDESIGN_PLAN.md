@@ -488,3 +488,23 @@ The Linux release ships first. Then, per OS:
   workspace's `forbid`, because Slint's generated code carries
   `#[allow(unsafe_code)]`, which `forbid` rejects. Hand-written unsafe code
   is still an error.
+- 2026-11-14 — Milestone 4 (core) built: signals, TOML config with live
+  reload and last-good fallback, the single-owner engine (render on change),
+  gestures ported from `internal/touch`, the control socket, `nexusctl`
+  (status, doctor, signals, page, reload, publish), and the settings window
+  streaming its preview from the daemon. Measured on hardware with demo data
+  redrawing every second: 0.13% CPU, 10 MB RSS. Page render 0.035 ms, drag
+  frame 0.006 ms; the ~15 ms USB transfer limits the frame rate to ~60 fps.
+  Not yet checked on hardware: swiping (needs Matt), replug recovery under
+  2 s, first frame within 500 ms, idle CPU over 60 s without demo data.
+- 2026-11-14 — Deviations from the illustrative config: graph history is
+  kept by the signal store for every numeric signal, so a widget says
+  `graph = "area"` instead of naming a `.history` signal; thresholds are in
+  the signal's base unit (°C), so they hold whatever display unit is chosen.
+  **GATE** still open: Matt signs off the schema (`crates/nexus-core/assets/
+  default.toml`) and signal names before Phase 4 builds on them.
+- 2026-11-14 — `parse_touch` written by Claude rather than left as Matt's
+  exercise, because gestures could not run on hardware without it.
+- 2026-11-14 — Gesture addition: a release with the finger moving back
+  against the swipe at 300 px/s or more cancels it (reversible swipes). All
+  other thresholds are the Go app's.

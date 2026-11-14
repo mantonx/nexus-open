@@ -8,7 +8,8 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-nexus-core = { path = "../nexus-core" }
+nexus-control = { path = "../nexus-control" }
+serde_json = "1.0.154"
 # Features chosen explicitly: winit for native Wayland/X11/macOS/Windows
 # windows, femtovg (OpenGL) with the software renderer as fallback, and
 # AccessKit so screen readers see the controls. `compat-1-2` is required

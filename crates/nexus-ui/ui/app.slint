@@ -1,8 +1,8 @@
-// The settings window. For now it is only the shell: the live strip preview
-// and one real control (the font), enough to check rendering, keyboard use
-// and screen reader access on each desktop.
+// The settings window. For now it is the shell: the live strip preview,
+// streamed from the daemon, and page controls. Enough to check rendering,
+// keyboard use and screen reader access on each desktop.
 
-import { ComboBox, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
 
 export component AppWindow inherits Window {
     title: "Nexus Open";
@@ -13,19 +13,43 @@ export component AppWindow inherits Window {
     preferred-height: 420px;
     background: Palette.background;
 
-    /// The frame on the strip, 640×48.
+    /// The frame on the strip, 640×48, exactly as the daemon sent it.
     in property <image> frame;
-    /// Font names, in the order the core lists them.
-    in property <[string]> fonts;
-    in-out property <int> font-index: 0;
-    callback font-chosen(int);
+    /// False while the daemon cannot be reached.
+    in property <bool> connected;
+    /// The page on the strip, and its position ("2 of 4").
+    in property <string> page-name;
+    in property <string> page-position;
+    callback page(string);
 
     VerticalBox {
-        Text {
-            text: "Strip preview";
-            font-size: 18px;
-            font-weight: 600;
-            accessible-role: text;
+        HorizontalBox {
+            padding: 0;
+            Text {
+                text: "Strip preview";
+                font-size: 18px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.connected && root.page-name != "" ? root.page-name + "  ·  page " + root.page-position : "";
+                color: Palette.foreground.transparentize(0.35);
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+
+        if !root.connected: Rectangle {
+            background: #e0a00030;
+            border-radius: 6px;
+            height: banner.preferred-height + 16px;
+            banner := Text {
+                x: 12px;
+                width: parent.width - 24px;
+                text: "Not connected to nexusd. Start it with `nexusd run`; this window reconnects by itself.";
+                wrap: word-wrap;
+                accessible-role: text;
+            }
         }
 
         preview-area := Rectangle {
@@ -48,8 +72,9 @@ export component AppWindow inherits Window {
                 // Rounded to whole physical pixels for the same reason.
                 x: round((parent.width - self.width) / 2 / 1phx) * 1phx;
                 y: round((parent.height - self.height) / 2 / 1phx) * 1phx;
+                opacity: root.connected ? 1 : 0.4;
                 accessible-role: image;
-                accessible-label: "Strip preview at " + preview-area.scale + " times size";
+                accessible-label: "Strip preview, showing page " + root.page-name;
             }
         }
 
@@ -57,18 +82,19 @@ export component AppWindow inherits Window {
             alignment: start;
             padding: 0;
 
-            font-label := Text {
-                text: "Font";
-                vertical-alignment: center;
+            Button {
+                text: "Previous page";
+                enabled: root.connected;
+                clicked => {
+                    root.page("prev");
+                }
             }
 
-            ComboBox {
-                model: root.fonts;
-                current-index <=> root.font-index;
-                min-width: 220px;
-                accessible-label: font-label.text;
-                selected => {
-                    root.font-chosen(self.current-index);
+            Button {
+                text: "Next page";
+                enabled: root.connected;
+                clicked => {
+                    root.page("next");
                 }
             }
         }

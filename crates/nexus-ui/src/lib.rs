@@ -1,22 +1,29 @@
 //! The Nexus Open settings window, built with Slint.
 //!
-//! This is the shell from milestone 3: a live strip preview drawn by the same
-//! renderer the strip uses, plus a font picker. Frames come from the
-//! renderer in-process for now; once the core exists (milestone 4) they
-//! arrive from the daemon over the control socket instead, so the preview
-//! always shows exactly what the strip shows.
+//! The window draws nothing itself. It streams frames from the daemon over
+//! the control socket and shows them, so the preview is always exactly
+//! what the strip shows. Controls send requests over the same socket. If
+//! the daemon is not running the window says so and keeps retrying.
 
-use nexus_core::canvas::Canvas;
-use nexus_core::demo::system_page;
-use nexus_core::fonts::FontChoice;
-use nexus_core::theme::Theme;
-use nexus_core::widget::Renderer;
-use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use std::io;
+use std::thread;
+use std::time::Duration;
+
+use nexus_control::{Client, Status};
+use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 
 slint::include_modules!();
 
 /// Matches the old app's ID, so the existing desktop file and icon apply.
 const APP_ID: &str = "io.nexus.open";
+/// Strip size in pixels.
+const WIDTH: u32 = 640;
+const HEIGHT: u32 = 48;
+/// Wait between reconnection attempts while the daemon is down.
+const RETRY: Duration = Duration::from_secs(1);
+/// How often the page name is refreshed: a swipe on the strip changes it
+/// without the window knowing.
+const STATUS_POLL: Duration = Duration::from_secs(1);
 
 /// Opens the window and runs until it is closed.
 pub fn run() -> Result<(), slint::PlatformError> {
@@ -26,56 +33,105 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // groups it in the task bar. It needs the platform to exist, and must be
     // set before the window is shown by `run`.
     slint::set_xdg_app_id(APP_ID)?;
-    let names: Vec<SharedString> = FontChoice::ALL
-        .iter()
-        .map(|f| f.display_name().into())
-        .collect();
-    app.set_fonts(ModelRc::new(VecModel::from(names)));
-    app.set_frame(render(FontChoice::default()));
 
-    // The callback must not own `app`, or the window would keep itself
-    // alive; a weak handle breaks that cycle.
-    let weak = app.as_weak();
-    app.on_font_chosen(move |index| {
-        let Some(app) = weak.upgrade() else { return };
-        let font = usize::try_from(index)
-            .ok()
-            .and_then(|i| FontChoice::ALL.get(i).copied())
-            .unwrap_or_default();
-        app.set_frame(render(font));
+    spawn("frames", app.as_weak(), stream_frames)?;
+    spawn("status", app.as_weak(), poll_status)?;
+
+    // Requests run off the UI thread so a slow daemon never freezes the
+    // window. The status poll picks up the new page name.
+    app.on_page(|target| {
+        let target = target.to_string();
+        thread::spawn(move || {
+            if let Ok(mut client) = Client::connect() {
+                let _ = client.request(&format!("page {target}"));
+            }
+        });
     });
 
     app.run()
 }
 
-fn render(font: FontChoice) -> Image {
-    let mut renderer = Renderer::new(Theme::default(), font.load());
-    to_image(&renderer.render_page(&system_page()))
+fn spawn(
+    name: &str,
+    app: Weak<AppWindow>,
+    body: fn(&Weak<AppWindow>),
+) -> Result<(), slint::PlatformError> {
+    thread::Builder::new()
+        .name(name.into())
+        .spawn(move || body(&app))
+        .map(drop)
+        .map_err(|e| slint::PlatformError::Other(e.to_string()))
 }
 
-/// Copies a rendered frame into a Slint image. The canvas is always opaque,
-/// so its premultiplied RGBA bytes are also plain RGBA.
-pub fn to_image(canvas: &Canvas) -> Image {
-    Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
-        canvas.rgba(),
-        canvas.width(),
-        canvas.height(),
-    ))
+/// Shows every frame the daemon sends, reconnecting whenever the
+/// connection drops. Returns once the window has closed.
+fn stream_frames(app: &Weak<AppWindow>) {
+    loop {
+        let _why = watch_frames(app);
+        // Fails only when the event loop has ended: the window is gone.
+        if app
+            .upgrade_in_event_loop(|app| app.set_connected(false))
+            .is_err()
+        {
+            return;
+        }
+        thread::sleep(RETRY);
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nexus_core::theme::Rgb;
+/// Streams frames until the connection fails; returns why.
+fn watch_frames(app: &Weak<AppWindow>) -> io::Error {
+    let mut client = match Client::connect() {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+    match client.request("frames") {
+        Ok(Ok(_)) => {}
+        Ok(Err(message)) => return io::Error::other(message),
+        Err(e) => return e,
+    }
+    loop {
+        let rgba = match client.next_frame() {
+            Ok(f) => f,
+            Err(e) => return e,
+        };
+        if rgba.len() != (WIDTH * HEIGHT * 4) as usize {
+            return io::Error::new(io::ErrorKind::InvalidData, "frame of the wrong size");
+        }
+        // The pixel buffer can cross threads; the Image built from it
+        // cannot, so it is made on the UI thread.
+        let pixels = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba, WIDTH, HEIGHT);
+        let shown = app.upgrade_in_event_loop(move |app| {
+            app.set_frame(Image::from_rgba8(pixels));
+            app.set_connected(true);
+        });
+        if shown.is_err() {
+            return io::Error::other("window closed");
+        }
+    }
+}
 
-    #[test]
-    fn image_keeps_size_and_pixels() {
-        let mut canvas = Canvas::new(nexus_core::WIDTH, nexus_core::HEIGHT, Rgb::hex(0x000000));
-        canvas.fill_rect(10, 5, 3, 2, Rgb::hex(0xC86432));
-        let image = to_image(&canvas);
-        let size = image.size();
-        assert_eq!((size.width, size.height), (640, 48));
-        let pixels = image.to_rgba8().expect("RGBA image");
-        assert_eq!(pixels.as_bytes(), canvas.rgba());
+fn poll_status(app: &Weak<AppWindow>) {
+    loop {
+        let status = Client::connect()
+            .ok()
+            .and_then(|mut c| c.request("status").ok()?.ok())
+            .and_then(|data| serde_json::from_value::<Status>(data).ok());
+        if let Some(status) = status {
+            let position = status
+                .pages
+                .iter()
+                .position(|p| p == &status.page)
+                .map_or(0, |i| i + 1);
+            let label = format!("{position} of {}", status.pages.len());
+            let shown = app.upgrade_in_event_loop(move |app| {
+                app.set_page_name(status.page.into());
+                app.set_page_position(label.into());
+            });
+            if shown.is_err() {
+                return; // window closed
+            }
+        }
+        thread::sleep(STATUS_POLL);
     }
 }
