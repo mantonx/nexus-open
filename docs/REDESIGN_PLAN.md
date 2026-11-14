@@ -685,3 +685,8 @@ golang` finds nothing outside the changelog.
   as a first reading, so no takeover). Removing a source or changing its
   `run` forgets them at once. Verified on the service: forgotten 60.000 s
   after the first exit, mid-backoff; removal cleared at once.
+- 2026-11-14 — Matt: SQLite is to be the source of truth for everything the
+  app is configured with, replacing `nexus.toml`. Design proposed in
+  docs/STORAGE.md (daemon as sole writer, tables plus per-type JSON fields,
+  page actions by ID, snapshot undo, TOML kept as the import/export format).
+  Phase 4's editor waits on it.
