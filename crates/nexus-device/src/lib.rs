@@ -8,6 +8,7 @@
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
+use std::time::Instant;
 
 #[cfg(target_os = "linux")]
 pub mod hidraw;
@@ -17,8 +18,10 @@ pub mod simulator;
 /// What a device's input reader reports.
 #[derive(Debug)]
 pub enum Input {
-    /// One raw input report, report ID included.
-    Report(Vec<u8>),
+    /// One raw input report, report ID included, and when it was read.
+    /// Stamped by the reader so gesture velocity is not skewed by however
+    /// long the report waits in a queue.
+    Report(Vec<u8>, Instant),
     /// The device went away; the reader has stopped.
     Gone(io::Error),
 }

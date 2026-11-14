@@ -17,12 +17,16 @@ use std::time::{Duration, Instant};
 use jiff::Zoned;
 use nexus_core::config::{self, Config};
 use nexus_core::demo;
-use nexus_core::engine::{Engine, Input, until};
+use nexus_core::engine::{Engine, Input};
+use nexus_device::protocol::{TouchCalibration, parse_touch};
 use nexus_device::{DeviceError, Surface};
 use notify::{EventKind, RecursiveMode, Watcher};
 
 /// How often to look for the device while it is unplugged.
 const RECONNECT_POLL: Duration = Duration::from_millis(250);
+/// Frame pacing while a page animates: about 60 fps. A frame takes the
+/// device 15–17 ms to accept, so this is close to the most it sustains.
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// How often the demo source publishes.
 const DEMO_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -58,6 +62,9 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         last_device_error: None,
         last_config_error: None,
         tx: tx.clone(),
+        calibration: TouchCalibration::default(),
+        origin: Instant::now(),
+        last_frame: Instant::now(),
     };
     // Kept alive for as long as the daemon runs; dropping it stops watching.
     let _watcher = watch_config(&daemon.path, tx.clone())?;
@@ -77,6 +84,10 @@ struct Daemon {
     last_device_error: Option<String>,
     last_config_error: Option<String>,
     tx: Sender<Msg>,
+    calibration: TouchCalibration,
+    /// Origin of the monotonic clock shared by touch samples and animation.
+    origin: Instant,
+    last_frame: Instant,
 }
 
 impl Daemon {
@@ -89,10 +100,10 @@ impl Daemon {
             self.show(&now);
 
             // Sleep until something happens or the picture is due to change.
-            let mut wait = self
-                .engine
-                .next_deadline(now.timestamp())
-                .map(|d| until(d, now.timestamp()));
+            let mut wait = self.engine.next_wait(&now);
+            if self.engine.animating() {
+                wait = Some(FRAME_INTERVAL.saturating_sub(self.last_frame.elapsed()));
+            }
             if self.device.is_none() {
                 let retry = self.next_attempt.saturating_duration_since(Instant::now());
                 wait = Some(wait.map_or(retry, |w| w.min(retry)));
@@ -115,8 +126,8 @@ impl Daemon {
             for msg in first.into_iter().chain(rx.try_iter()) {
                 match msg {
                     Msg::Engine(input) => self.engine.handle(input),
-                    Msg::Device(nexus_device::Input::Report(_)) => {
-                        // Touch handling arrives with gestures.
+                    Msg::Device(nexus_device::Input::Report(report, read_at)) => {
+                        self.touch(&report, read_at);
                     }
                     Msg::Device(nexus_device::Input::Gone(e)) => self.lost(&e.to_string()),
                     Msg::ConfigChanged => reload = true,
@@ -125,6 +136,17 @@ impl Daemon {
             if reload {
                 self.reload();
             }
+        }
+    }
+
+    /// Passes a touch report to the engine, timed by when it was read.
+    fn touch(&mut self, report: &[u8], read_at: Instant) {
+        if let Some(t) = parse_touch(report) {
+            self.engine.handle(Input::Touch {
+                down: t.down,
+                x: f32::from(self.calibration.to_panel_x(t.x)),
+                at: read_at.duration_since(self.origin).as_secs_f64(),
+            });
         }
     }
 
@@ -157,10 +179,12 @@ impl Daemon {
         let Some(device) = self.device.as_mut() else {
             return;
         };
-        if let Some(frame) = self.engine.frame(now)
-            && let Err(e) = device.send_frame(frame.rgba())
-        {
-            self.lost(&e.to_string());
+        let mono = self.origin.elapsed().as_secs_f64();
+        if let Some(frame) = self.engine.frame(now, mono) {
+            self.last_frame = Instant::now();
+            if let Err(e) = device.send_frame(frame.rgba()) {
+                self.lost(&e.to_string());
+            }
         }
     }
 

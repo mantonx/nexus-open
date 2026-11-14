@@ -11,6 +11,7 @@ use tiny_skia::{Color, Pixmap};
 
 use crate::theme::Rgb;
 
+#[derive(Clone)]
 pub struct Canvas {
     pixmap: Pixmap,
 }
@@ -37,6 +38,31 @@ impl Canvas {
     /// Raw RGBA bytes, row-major, 4 bytes per pixel.
     pub fn rgba(&self) -> &[u8] {
         self.pixmap.data()
+    }
+
+    /// Copies `src` onto this canvas shifted `dx` pixels right (left if
+    /// negative). The part that falls outside is clipped. Both canvases must
+    /// be the same height. Used to slide pages during a swipe.
+    pub fn copy_shifted(&mut self, src: &Canvas, dx: i32) {
+        assert_eq!(self.height(), src.height(), "canvases must match in height");
+        let (dst_w, src_w) = (self.width() as i32, src.width() as i32);
+        let from = (-dx).max(0); // first source column that lands on canvas
+        let to = (dst_w - dx).min(src_w); // one past the last
+        if from >= to {
+            return;
+        }
+        let bytes = (to - from) as usize * 4;
+        let src_x = from as usize * 4;
+        let dst_x = (from + dx) as usize * 4;
+        let (src_stride, dst_stride) = (src_w as usize * 4, dst_w as usize * 4);
+        let rows = self.height() as usize;
+        let src_data = src.pixmap.data();
+        let dst_data = self.pixmap.data_mut();
+        for row in 0..rows {
+            let s = row * src_stride + src_x;
+            let d = row * dst_stride + dst_x;
+            dst_data[d..d + bytes].copy_from_slice(&src_data[s..s + bytes]);
+        }
     }
 
     pub fn pixmap_mut(&mut self) -> &mut Pixmap {
@@ -109,6 +135,25 @@ fn mix(src: u8, dst: u8, a: u32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_shifted_clips_both_ways() {
+        let red = Canvas::new(4, 1, Rgb::hex(0xff0000));
+        let first_red = |c: &Canvas| c.rgba().chunks(4).position(|p| p[0] == 255);
+
+        let mut c = Canvas::new(4, 1, Rgb::hex(0x000000));
+        c.copy_shifted(&red, 3);
+        assert_eq!(first_red(&c), Some(3), "shifted right, one column visible");
+
+        let mut c = Canvas::new(4, 1, Rgb::hex(0x000000));
+        c.copy_shifted(&red, -3);
+        assert_eq!(first_red(&c), Some(0));
+        assert_eq!(c.rgba()[4], 0, "only one column visible");
+
+        let mut c = Canvas::new(4, 1, Rgb::hex(0x000000));
+        c.copy_shifted(&red, 4);
+        assert_eq!(first_red(&c), None, "entirely off canvas");
+    }
 
     #[test]
     fn mix_endpoints() {

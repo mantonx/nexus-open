@@ -9,6 +9,7 @@ pub mod config;
 pub mod demo;
 pub mod engine;
 pub mod fonts;
+pub mod gesture;
 pub mod layout;
 pub mod signal;
 pub mod text;

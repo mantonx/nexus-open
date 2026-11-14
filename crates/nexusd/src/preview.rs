@@ -36,7 +36,7 @@ pub fn preview(
             c.saturating_sub(last_switch.elapsed())
         });
         match rx.recv_timeout(wait) {
-            Ok(Input::Report(report)) => {
+            Ok(Input::Report(report, _)) => {
                 if touch && let Some(t) = parse_touch(&report) {
                     let x = calibration.to_panel_x(t.x);
                     println!(

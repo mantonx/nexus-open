@@ -11,6 +11,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Instant;
 
 use crate::protocol::{FRAME_BYTES, PACKET_BYTES, PACKETS_PER_FRAME, encode_packet};
 use crate::{DeviceError, Input, Surface};
@@ -76,7 +77,10 @@ impl Nexus {
                             return;
                         }
                         Ok(n) => {
-                            if tx.send(Input::Report(buf[..n].to_vec()).into()).is_err() {
+                            if tx
+                                .send(Input::Report(buf[..n].to_vec(), Instant::now()).into())
+                                .is_err()
+                            {
                                 return; // receiver dropped: nobody is listening
                             }
                         }

@@ -87,12 +87,16 @@ pub struct RawTouch {
 /// 7     X position, high byte
 /// ```
 pub fn parse_touch(report: &[u8]) -> Option<RawTouch> {
-    // TODO(Matt): decode the report. See the doc comment above for the
-    // layout. About 8 lines; the tests at the bottom of this file describe
-    // what it must do. Run them with:
-    //   cargo test -p nexus-device -- --include-ignored
-    let _ = report;
-    todo!("parse_touch")
+    // A slice pattern checks the length and the header in one step: any
+    // report shorter than 8 bytes or with a different header falls through
+    // to `None`.
+    match report {
+        [0x01, 0x02, 0x21, _, _, state, x_lo, x_hi, ..] => Some(RawTouch {
+            down: *state != 0,
+            x: u16::from_le_bytes([*x_lo, *x_hi]),
+        }),
+        _ => None,
+    }
 }
 
 /// Maps raw touch X to panel pixels, raising the calibration if the device
@@ -184,7 +188,7 @@ mod tests {
         assert_eq!(c.raw_max(), 500);
     }
 
-    // ---- parse_touch: these describe the behaviour to implement ----
+    // ---- parse_touch ----
 
     fn report(bytes: &[u8]) -> Vec<u8> {
         let mut r = bytes.to_vec();
@@ -193,7 +197,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Matt: implement parse_touch, then run with --include-ignored"]
     fn touch_down_with_little_endian_x() {
         // x = 0x01E6 = 486
         let r = report(&[0x01, 0x02, 0x21, 0, 0, 1, 0xE6, 0x01]);
@@ -201,14 +204,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Matt: implement parse_touch, then run with --include-ignored"]
     fn any_nonzero_state_means_down() {
         let r = report(&[0x01, 0x02, 0x21, 0, 0, 0x80, 10, 0]);
         assert_eq!(parse_touch(&r), Some(RawTouch { down: true, x: 10 }));
     }
 
     #[test]
-    #[ignore = "Matt: implement parse_touch, then run with --include-ignored"]
     fn finger_lifted() {
         let r = report(&[0x01, 0x02, 0x21, 0, 0, 0, 0x2C, 0x01]);
         assert_eq!(
@@ -221,7 +222,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Matt: implement parse_touch, then run with --include-ignored"]
     fn other_reports_are_ignored() {
         assert_eq!(
             parse_touch(&report(&[0x01, 0x02, 0x00, 0, 0, 1, 5, 0])),
@@ -234,7 +234,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Matt: implement parse_touch, then run with --include-ignored"]
     fn short_reports_are_ignored() {
         assert_eq!(parse_touch(&[0x01, 0x02, 0x21, 0, 0, 1, 5]), None);
         assert_eq!(parse_touch(&[]), None);
