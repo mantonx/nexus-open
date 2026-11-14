@@ -1,0 +1,6 @@
+# One toolchain for everyone: local builds and CI run the same compiler and
+# clippy, so a lint can't pass locally and fail in CI. Bump deliberately.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]
+targets = ["x86_64-pc-windows-gnu", "aarch64-apple-darwin"]

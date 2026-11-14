@@ -47,12 +47,12 @@ pub fn encode_packet(rgba: &[u8], index: usize, packet: &mut [u8; PACKET_BYTES])
         (len >> 8) as u8,
     ]);
 
-    let body = &mut packet[HEADER_BYTES..HEADER_BYTES + len];
-    for (dst, src) in body
-        .chunks_exact_mut(4)
-        .zip(rgba[start..end].chunks_exact(4))
-    {
-        dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+    // `as_chunks` views the bytes as `[u8; 4]` pixels. The payload length is
+    // always a multiple of 4, so the remainders are empty.
+    let (dst, _) = packet[HEADER_BYTES..HEADER_BYTES + len].as_chunks_mut::<4>();
+    let (src, _) = rgba[start..end].as_chunks::<4>();
+    for (d, &[r, g, b, a]) in dst.iter_mut().zip(src) {
+        *d = [b, g, r, a];
     }
     packet[HEADER_BYTES + len..].fill(0);
 }
@@ -167,8 +167,8 @@ mod tests {
         for i in 0..PACKETS_PER_FRAME {
             encode_packet(&rgba, i, &mut p);
             let len = usize::from(p[6]) | usize::from(p[7]) << 8;
-            for px in p[8..8 + len].chunks_exact(4) {
-                rebuilt.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+            for &[b, g, r, a] in p[8..8 + len].as_chunks::<4>().0 {
+                rebuilt.extend_from_slice(&[r, g, b, a]);
             }
         }
         assert_eq!(rebuilt, rgba);

@@ -24,7 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: rustup component add rustfmt
       - run: cargo fmt --all --check
 
   test:
@@ -36,7 +35,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - run: rustup component add clippy
       - uses: actions/cache@v6
         with:
           path: |
