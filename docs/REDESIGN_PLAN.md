@@ -32,7 +32,8 @@ changes from a polled stats dashboard into an event-driven touch surface:
   OS. Matt can test on Linux and macOS; Windows needs a test machine first.
 
 Out of scope: WASM plugins, a focused-window context engine, a web UI
-(Matt rejected web; the UI must be native), support for other display hardware.
+(Matt rejected web; the UI must be native). Other Corsair devices are
+planned separately in `docs/DEVICES_PLAN.md`.
 
 ## The 9/10 bar
 
@@ -762,3 +763,8 @@ golang` finds nothing outside the changelog.
   tap finished into a quoted command, a note shown in `nexusctl export`,
   Reading → Clock, width, add by splitting, delete; eight undos returned
   the exact original. Each control is labelled for screen readers.
+- 2026-11-15 — Matt asked to plan for all supported Corsair devices,
+  starting with his K100, Commander Core and Elite LCD cap, so the app can
+  become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
+  lifts "other hardware" out of the out-of-scope list and adds phases
+  D1–D7 after this plan's Phase 5, pending Matt's answer on timing.
