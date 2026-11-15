@@ -13,7 +13,7 @@
 //! status                        daemon, device and config state
 //! signals                       every signal and its latest value
 //! page next|prev|<n>|<name>     show a page (n counts from 1)
-//! reload                        re-read the config file now
+//! reload                        re-read the store now
 //! publish <signal> <value>      set a signal: a number with an optional
 //!                               unit (celsius, percent, bytes-per-second),
 //!                               or any text
@@ -22,6 +22,8 @@
 //!                               if `base` is given and the revision moved
 //! undo / redo                   take back or redo the last change
 //! export [layout]               a layout, the settings and sources as TOML
+//! layout                        the layout on the strip as data, with the
+//!                               IDs that edits name things by
 //! import {"name", "text", "activate"}  add a layout from TOML
 //! ```
 //!
@@ -63,6 +65,8 @@ pub enum Request {
     Redo,
     /// A layout by name, or the one on the strip.
     Export(Option<String>),
+    /// The layout on the strip, as data.
+    Layout,
     Import(Box<ImportRequest>),
 }
 
@@ -88,6 +92,22 @@ pub struct ImportRequest {
     /// Put it on the strip.
     #[serde(default)]
     pub activate: bool,
+}
+
+/// The answer to `layout`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Layout {
+    pub id: i64,
+    pub name: String,
+    /// Send it as an edit's `base` so the edit is refused if something
+    /// else changed the layout first.
+    pub revision: i64,
+    pub config: nexus_core::config::Config,
+    /// In the same order as `config`.
+    pub ids: nexus_store::Ids,
+    /// What undo and redo would take back or make again, if anything.
+    pub undo: Option<String>,
+    pub redo: Option<String>,
 }
 
 /// The answer to `export`.
@@ -120,6 +140,7 @@ impl Request {
             "frames" => Ok(Request::Frames),
             "undo" => Ok(Request::Undo),
             "redo" => Ok(Request::Redo),
+            "layout" => Ok(Request::Layout),
             "export" => Ok(Request::Export(
                 (!rest.is_empty()).then(|| rest.to_string()),
             )),
@@ -203,6 +224,12 @@ pub struct Status {
     /// Why the store could not be opened; the default layout is shown and
     /// edits are refused until it is fixed.
     pub store_error: Option<String>,
+    /// The takeover covering the page, if one is.
+    #[serde(default)]
+    pub takeover: Option<String>,
+    /// The store's revision: when it moves, the layout or settings changed.
+    #[serde(default)]
+    pub revision: i64,
 }
 
 /// One entry of the answer to `signals`.
@@ -380,6 +407,7 @@ mod tests {
     #[test]
     fn parses_requests() {
         assert_eq!(Request::parse("status\n"), Ok(Request::Status));
+        assert_eq!(Request::parse("layout"), Ok(Request::Layout));
         assert_eq!(
             Request::parse("page 2"),
             Ok(Request::Page(PageTarget::Index(1)))

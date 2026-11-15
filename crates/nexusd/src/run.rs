@@ -14,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use jiff::Zoned;
-use nexus_control::{Export, PageTarget, Request, SignalEntry, Status};
+use nexus_control::{Export, Layout, PageTarget, Request, SignalEntry, Status};
 use nexus_core::config;
 use nexus_core::demo;
 use nexus_core::engine::{Engine, Input};
@@ -280,6 +280,8 @@ impl Daemon {
                         .unwrap_or_default(),
                     store_path: self.store_path.display().to_string(),
                     store_error: self.store_error.clone(),
+                    takeover: self.engine.takeover().map(str::to_string),
+                    revision: self.store.revision().unwrap_or_default(),
                 };
                 serde_json::to_value(status).map_err(|e| e.to_string())
             }
@@ -372,6 +374,20 @@ impl Daemon {
                     revision: store.revision().map_err(|e| e.to_string())?,
                 };
                 serde_json::to_value(export).map_err(|e| e.to_string())
+            }
+            Request::Layout => {
+                let store = &self.store;
+                let id = store.active_layout().map_err(|e| e.to_string())?;
+                let layout = Layout {
+                    id,
+                    name: store.layout_name(id).map_err(|e| e.to_string())?,
+                    revision: store.revision().map_err(|e| e.to_string())?,
+                    config: store.load(id).map_err(|e| e.to_string())?.0,
+                    ids: store.ids(id).map_err(|e| e.to_string())?,
+                    undo: store.undo_label().map_err(|e| e.to_string())?,
+                    redo: store.redo_label().map_err(|e| e.to_string())?,
+                };
+                serde_json::to_value(layout).map_err(|e| e.to_string())
             }
             Request::Import(import) => {
                 self.writable()?;

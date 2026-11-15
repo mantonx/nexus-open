@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 nexus-control = { path = "../nexus-control" }
+nexus-core = { path = "../nexus-core" }
+nexus-store = { path = "../nexus-store" }
 serde_json = "1.0.154"
 # Features chosen explicitly: winit for native Wayland/X11/macOS/Windows
 # windows, femtovg (OpenGL) with the software renderer as fallback, and

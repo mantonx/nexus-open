@@ -3045,6 +3045,8 @@ name = "nexus-ui"
 version = "0.1.0"
 dependencies = [
  "nexus-control",
+ "nexus-core",
+ "nexus-store",
  "serde_json",
  "slint",
  "slint-build",

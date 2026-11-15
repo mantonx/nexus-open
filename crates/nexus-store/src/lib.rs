@@ -25,6 +25,22 @@ pub use text::{Notes, RowNotes};
 
 pub type LayoutId = i64;
 
+/// The IDs behind a loaded layout, in the same order as its `Config`:
+/// `pages[i]` is the page `config.pages[i]`, and so on. Edits name things
+/// by these IDs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Ids {
+    pub pages: Vec<RowIds>,
+    pub takeovers: Vec<RowIds>,
+}
+
+/// A page's or takeover's ID and its widgets' IDs, left to right.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RowIds {
+    pub id: i64,
+    pub widgets: Vec<i64>,
+}
+
 #[derive(Debug)]
 pub enum StoreError {
     Sqlite(rusqlite::Error),
@@ -259,6 +275,31 @@ impl Store {
             tx.commit()?;
         }
         Ok(out)
+    }
+
+    /// The IDs behind `load(layout)`, in the same order.
+    pub fn ids(&self, layout: LayoutId) -> Result<Ids, StoreError> {
+        let rows = |table: &str, owner: &str| -> Result<Vec<RowIds>, StoreError> {
+            let mut q = self.conn.prepare(&format!(
+                "SELECT id FROM {table} WHERE layout_id = ?1 ORDER BY position, id"
+            ))?;
+            let ids: Vec<i64> = q
+                .query_map([layout], |r| r.get(0))?
+                .collect::<Result<_, _>>()?;
+            let mut q = self.conn.prepare(&format!(
+                "SELECT id FROM widget WHERE {owner} = ?1 ORDER BY position, id"
+            ))?;
+            ids.into_iter()
+                .map(|id| {
+                    let widgets = q.query_map([id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+                    Ok(RowIds { id, widgets })
+                })
+                .collect()
+        };
+        Ok(Ids {
+            pages: rows("page", "page_id")?,
+            takeovers: rows("takeover", "takeover_id")?,
+        })
     }
 
     /// A layout with the settings and sources, as the engine takes it.
@@ -556,6 +597,35 @@ mod tests {
         assert_eq!(store.active_layout().unwrap(), id);
         let (config, _) = store.load(id).unwrap();
         assert_eq!(config, Config::default_layout());
+    }
+
+    #[test]
+    fn ids_line_up_with_the_loaded_layout() {
+        let (mut store, id) = with_default();
+        let (config, _) = store.load(id).unwrap();
+        let ids = store.ids(id).unwrap();
+        assert_eq!(ids.pages.len(), config.pages.len());
+        assert_eq!(ids.takeovers.len(), config.takeovers.len());
+        for (row, page) in ids.pages.iter().zip(&config.pages) {
+            assert_eq!(row.widgets.len(), page.widgets.len());
+        }
+        // Moving the first widget to the end moves its ID with it.
+        let first = &ids.pages[0];
+        let moved = first.widgets[0];
+        store
+            .edit(&Edit::MoveWidget {
+                widget: moved,
+                on: None,
+                to: first.widgets.len() - 1,
+            })
+            .unwrap();
+        let (after, _) = store.load(id).unwrap();
+        let ids_after = store.ids(id).unwrap();
+        assert_eq!(ids_after.pages[0].widgets.last(), Some(&moved));
+        assert_eq!(
+            after.pages[0].widgets.last(),
+            config.pages[0].widgets.first()
+        );
     }
 
     #[test]

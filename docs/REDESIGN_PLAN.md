@@ -719,3 +719,23 @@ golang` finds nothing outside the changelog.
   edit moved two widgets on the strip, undo, redo and undo again returned
   it to the original text exactly; a stray trailing comment was warned
   about; the day's backup was written.
+- 2026-11-15 — Phase 4 step 1: the preview is the editor. The store gives
+  out the IDs behind a layout (`Store::ids`, in `Config` order) and the
+  daemon answers a new `layout` request with the layout, those IDs, the
+  revision and what undo and redo would do; `status` gains the covering
+  takeover and the revision, which the window polls every 250 ms to follow
+  swipes and outside edits. Over the live frame the window outlines the
+  page's widgets: click selects, dragging moves (a widget passes a
+  neighbour when its leading edge crosses that neighbour's middle),
+  dragging a right edge resizes (an inner edge trades width with the
+  neighbour; the last edge uses the empty strip; never below the minimum
+  width). Keyboard: arrows select, Ctrl+arrows move, Shift+arrows resize by
+  4 px (a run of presses settles into one edit), Ctrl+Z and Ctrl+Shift+Z or
+  Ctrl+Y undo and redo, also as buttons. Each gesture is one edit made
+  against the revision shown; nothing is sent while one is in flight. A
+  takeover over the page or an unwritable store hides the outlines and the
+  caption says why. Verified against the service from a headless KWin
+  session (xdotool): select, drag-move, Ctrl+Z, keyboard select and move,
+  edge resize with live widths, five Shift+→ as one edit, and back to the
+  original layout exactly. Found: AccessKit reports the widget items as
+  siblings of their list, not children; for Matt's Orca pass.

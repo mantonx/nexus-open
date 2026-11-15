@@ -2,8 +2,12 @@
 //!
 //! The window draws nothing itself. It streams frames from the daemon over
 //! the control socket and shows them, so the preview is always exactly
-//! what the strip shows. Controls send requests over the same socket. If
-//! the daemon is not running the window says so and keeps retrying.
+//! what the strip shows. The preview is also the editor (`editor`): its
+//! changes are edits sent over the same socket. If the daemon is not
+//! running the window says so and keeps retrying.
+
+mod editor;
+mod geometry;
 
 use std::io;
 use std::thread;
@@ -21,9 +25,10 @@ const WIDTH: u32 = 640;
 const HEIGHT: u32 = 48;
 /// Wait between reconnection attempts while the daemon is down.
 const RETRY: Duration = Duration::from_secs(1);
-/// How often the page name is refreshed: a swipe on the strip changes it
-/// without the window knowing.
-const STATUS_POLL: Duration = Duration::from_secs(1);
+/// How often the page, takeover and revision are checked: a swipe on the
+/// strip or `nexusctl edit` changes them without the window knowing, and
+/// the outlines over the preview must follow quickly.
+const STATUS_POLL: Duration = Duration::from_millis(250);
 
 /// Opens the window and runs until it is closed.
 pub fn run() -> Result<(), slint::PlatformError> {
@@ -33,6 +38,10 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // groups it in the task bar. It needs the platform to exist, and must be
     // set before the window is shown by `run`.
     slint::set_xdg_app_id(APP_ID)?;
+
+    let editor = editor::Editor::new(&app);
+    editor::Editor::connect(&editor, &app);
+    editor::install(&editor);
 
     spawn("frames", app.as_weak(), stream_frames)?;
     spawn("status", app.as_weak(), poll_status)?;
@@ -125,6 +134,7 @@ fn poll_status(app: &Weak<AppWindow>) {
                 .map_or(0, |i| i + 1);
             let label = format!("{position} of {}", status.pages.len());
             let shown = app.upgrade_in_event_loop(move |app| {
+                editor::status(&status);
                 app.set_page_name(status.page.into());
                 app.set_page_position(label.into());
             });

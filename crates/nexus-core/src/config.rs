@@ -206,6 +206,18 @@ impl Widget {
         }
     }
 
+    /// The same widget at another width.
+    pub fn with_width(mut self, new: u32) -> Widget {
+        match &mut self {
+            Widget::Clock { width, .. }
+            | Widget::Slider { width, .. }
+            | Widget::Media { width, .. }
+            | Widget::Value { width, .. }
+            | Widget::Rate { width, .. } => *width = new,
+        }
+        self
+    }
+
     /// What a tap does, if anything.
     pub fn tap(&self) -> Option<&Action> {
         match self {

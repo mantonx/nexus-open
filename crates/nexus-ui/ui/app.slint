@@ -1,8 +1,21 @@
-// The settings window. For now it is the shell: the live strip preview,
-// streamed from the daemon, and page controls. Enough to check rendering,
-// keyboard use and screen reader access on each desktop.
+// The settings window. The preview is the editor: the live strip, streamed
+// from the daemon, with the page's widgets outlined over it. Click one to
+// select it, drag it to move it, drag an edge to resize. Every change is an
+// edit sent to the daemon, so it shows on the strip (and in this preview)
+// at once, and undo covers it.
+//
+// The window keeps no rules of its own. Pointer and key events go to Rust
+// in strip pixels; Rust works out what they mean and sends back the zones
+// to draw.
 
 import { Button, VerticalBox, HorizontalBox, Palette } from "std-widgets.slint";
+
+/// One widget on the page, in strip pixels.
+export struct Zone {
+    x: int,
+    width: int,
+    name: string,
+}
 
 export component AppWindow inherits Window {
     title: "Nexus Open";
@@ -20,83 +33,271 @@ export component AppWindow inherits Window {
     /// The page on the strip, and its position ("2 of 4").
     in property <string> page-name;
     in property <string> page-position;
+
+    /// The widgets of the page on the strip.
+    in property <[Zone]> zones;
+    /// Index into `zones`, or -1.
+    in property <int> selected: -1;
+    /// False while there is nothing to edit: no layout yet, a takeover
+    /// covering the page, or a store that cannot be written.
+    in property <bool> editable;
+    /// Under the preview: the selection, a drag in progress, or why the
+    /// page cannot be edited right now.
+    in property <string> caption;
+    /// What went wrong with the last change, until the next one.
+    in property <string> problem;
+    /// While a widget is dragged: where it is drawn and the gap it would
+    /// drop into, in strip pixels; `ghost-width` 0 when not dragging.
+    in property <float> ghost-x;
+    in property <int> ghost-width;
+    in property <int> drop-x;
+    /// What undo and redo would do; empty when there is nothing.
+    in property <string> undo-label;
+    in property <string> redo-label;
+
     callback page(string);
+    /// Pointer on the strip, in strip pixels; a press also says how near
+    /// an edge counts as on it.
+    callback pressed(float, float);
+    callback dragged(float);
+    callback released(float);
+    callback cancelled();
+    /// The widget whose right edge is within `reach` of x, or -1.
+    pure callback edge-at(float, float) -> int;
+    /// Keyboard: select the widget `step` along; move the selected one;
+    /// widen (positive) or narrow it by pixels; drop the selection.
+    callback select-step(int);
+    callback move-step(int);
+    callback resize-step(int);
+    callback deselect();
+    callback undo();
+    callback redo();
 
-    VerticalBox {
-        HorizontalBox {
-            padding: 0;
-            Text {
-                text: "Strip preview";
-                font-size: 18px;
-                font-weight: 600;
-                vertical-alignment: center;
+    // Undo and redo work wherever focus is: this scope holds everything,
+    // so it sees every key first.
+    FocusScope {
+        width: parent.width;
+        height: parent.height;
+            capture-key-pressed(event) => {
+                if !event.modifiers.control || (event.text.to-lowercase() != "z" && event.text.to-lowercase() != "y") {
+                    return reject;
+                }
+                if event.text.to-lowercase() == "y" || event.modifiers.shift {
+                    root.redo();
+                } else {
+                    root.undo();
+                }
+                accept
             }
-            Text {
-                text: root.connected && root.page-name != "" ? root.page-name + "  ·  page " + root.page-position : "";
-                color: Palette.foreground.transparentize(0.35);
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-            }
-        }
 
-        if !root.connected: Rectangle {
-            background: #e0a00030;
-            border-radius: 6px;
-            height: banner.preferred-height + 16px;
-            banner := Text {
-                x: 12px;
-                width: parent.width - 24px;
-                text: "Not connected to nexusd. Start it with `nexusd run`; this window reconnects by itself.";
-                wrap: word-wrap;
+        VerticalBox {
+            HorizontalBox {
+                padding: 0;
+                Text {
+                    text: "Strip preview";
+                    font-size: 18px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.connected && root.page-name != "" ? root.page-name + "  ·  page " + root.page-position : "";
+                    color: Palette.foreground.transparentize(0.35);
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            if !root.connected: Rectangle {
+                background: #e0a00030;
+                border-radius: 6px;
+                height: banner.preferred-height + 16px;
+                banner := Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: "Not connected to nexusd. Start it with `nexusd run`; this window reconnects by itself.";
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+            }
+
+            if root.problem != "": Rectangle {
+                background: #d0303030;
+                border-radius: 6px;
+                height: problem-text.preferred-height + 16px;
+                problem-text := Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: root.problem;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+            }
+
+            preview-area := Rectangle {
+                vertical-stretch: 1;
+                min-height: 48phx * 2;
+
+                // Largest whole-number scale that fits, counted in physical
+                // pixels (phx), not logical ones (px). With fractional desktop
+                // scaling a logical-pixel scale would land between device
+                // pixels and blur the strip's hinted text.
+                property <int> scale: max(1, min(
+                    floor(self.width / 640phx),
+                    floor(self.height / 48phx)));
+                // One strip pixel on screen.
+                property <length> unit: 1phx * self.scale;
+
+                strip := Image {
+                    source: root.frame;
+                    image-rendering: pixelated;
+                    width: 640 * preview-area.unit;
+                    height: 48 * preview-area.unit;
+                    // Rounded to whole physical pixels for the same reason.
+                    x: round((parent.width - self.width) / 2 / 1phx) * 1phx;
+                    y: round((parent.height - self.height) / 2 / 1phx) * 1phx;
+                    opacity: root.connected ? 1 : 0.4;
+                    accessible-role: image;
+                    accessible-label: "Strip preview, showing page " + root.page-name;
+                }
+
+                // The list of widgets for keyboards and screen readers, laid
+                // exactly over the strip so the outlines are its items.
+                keys := FocusScope {
+                    x: strip.x;
+                    y: strip.y;
+                    width: strip.width;
+                    height: strip.height;
+                    accessible-role: list;
+                    accessible-label: "Widgets on page " + root.page-name
+                        + ". Left and right arrows select; with Control they move the widget, with Shift they resize it.";
+                    key-pressed(event) => {
+                        if !root.editable {
+                            return reject;
+                        }
+                        if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                            let step = event.text == Key.LeftArrow ? -1 : 1;
+                            if event.modifiers.control {
+                                root.move-step(step);
+                            } else if event.modifiers.shift {
+                                root.resize-step(step * 4);
+                            } else {
+                                root.select-step(step);
+                            }
+                            return accept;
+                        }
+                        if event.text == Key.Escape {
+                            root.cancelled();
+                            root.deselect();
+                            return accept;
+                        }
+                        reject
+                    }
+
+                    if root.editable: Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+
+                        for zone[i] in root.zones: Rectangle {
+                            x: zone.x * preview-area.unit;
+                            width: zone.width * preview-area.unit;
+                            border-width: i == root.selected ? 2px : 1px;
+                            border-color: i == root.selected ? Palette.accent-background : #ffffff38;
+                            background: i == root.selected ? Palette.accent-background.transparentize(0.85) : transparent;
+                            accessible-role: list-item;
+                            accessible-label: zone.name + ", " + zone.width + " pixels wide";
+                            accessible-item-selectable: true;
+                            accessible-item-selected: i == root.selected;
+                            accessible-item-index: i;
+                        }
+
+                        if root.ghost-width > 0: Rectangle {
+                            x: root.ghost-x * preview-area.unit;
+                            width: root.ghost-width * preview-area.unit;
+                            border-width: 2px;
+                            border-color: Palette.accent-background;
+                            background: Palette.accent-background.transparentize(0.6);
+                        }
+                        if root.ghost-width > 0: Rectangle {
+                            x: root.drop-x * preview-area.unit - 2px;
+                            width: 4px;
+                            background: Palette.accent-background;
+                        }
+
+                        touch := TouchArea {
+                            property <float> at: self.mouse-x / preview-area.unit;
+                            property <float> reach: 4px / preview-area.unit;
+                            property <int> edge: root.edge-at(self.at, self.reach);
+                            mouse-cursor: self.edge >= 0 ? MouseCursor.ew-resize
+                                : self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                            pointer-event(event) => {
+                                if event.button != PointerEventButton.left {
+                                    return;
+                                }
+                                if event.kind == PointerEventKind.down {
+                                    keys.focus();
+                                    root.pressed(self.at, self.reach);
+                                } else if event.kind == PointerEventKind.up {
+                                    root.released(self.at);
+                                } else if event.kind == PointerEventKind.cancel {
+                                    root.cancelled();
+                                }
+                            }
+                            moved => {
+                                root.dragged(self.at);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: root.caption;
+                color: Palette.foreground.transparentize(0.25);
+                horizontal-alignment: center;
                 accessible-role: text;
             }
-        }
 
-        preview-area := Rectangle {
-            vertical-stretch: 1;
-            min-height: 48phx * 2;
+            HorizontalBox {
+                alignment: start;
+                padding: 0;
 
-            // Largest whole-number scale that fits, counted in physical
-            // pixels (phx), not logical ones (px). With fractional desktop
-            // scaling a logical-pixel scale would land between device
-            // pixels and blur the strip's hinted text.
-            property <int> scale: max(1, min(
-                floor(self.width / 640phx),
-                floor(self.height / 48phx)));
-
-            Image {
-                source: root.frame;
-                image-rendering: pixelated;
-                width: 640phx * preview-area.scale;
-                height: 48phx * preview-area.scale;
-                // Rounded to whole physical pixels for the same reason.
-                x: round((parent.width - self.width) / 2 / 1phx) * 1phx;
-                y: round((parent.height - self.height) / 2 / 1phx) * 1phx;
-                opacity: root.connected ? 1 : 0.4;
-                accessible-role: image;
-                accessible-label: "Strip preview, showing page " + root.page-name;
-            }
-        }
-
-        HorizontalBox {
-            alignment: start;
-            padding: 0;
-
-            Button {
-                text: "Previous page";
-                enabled: root.connected;
-                clicked => {
-                    root.page("prev");
+                Button {
+                    text: "Previous page";
+                    enabled: root.connected;
+                    clicked => {
+                        root.page("prev");
+                    }
                 }
-            }
 
-            Button {
-                text: "Next page";
-                enabled: root.connected;
-                clicked => {
-                    root.page("next");
+                Button {
+                    text: "Next page";
+                    enabled: root.connected;
+                    clicked => {
+                        root.page("next");
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                Button {
+                    text: root.undo-label == "" ? "Undo" : "Undo: " + root.undo-label;
+                    enabled: root.connected && root.undo-label != "";
+                    clicked => {
+                        root.undo();
+                    }
+                }
+
+                Button {
+                    text: root.redo-label == "" ? "Redo" : "Redo: " + root.redo-label;
+                    enabled: root.connected && root.redo-label != "";
+                    clicked => {
+                        root.redo();
+                    }
                 }
             }
         }
+
     }
 }
