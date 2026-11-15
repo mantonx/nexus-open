@@ -5,7 +5,7 @@
 
 pub const MIGRATIONS: &[&str] = &[
     // 1: settings, layouts, pages, takeovers, widgets, actions, sources,
-    // history.
+    // the revision counter, history.
     r#"
 CREATE TABLE layout (
   id   INTEGER PRIMARY KEY,
@@ -91,6 +91,14 @@ CREATE TABLE source (
   position INTEGER NOT NULL,
   note    TEXT NOT NULL DEFAULT ''
 );
+
+-- Goes up by one with every change, undo and redo included, so an edit
+-- can say which state it was made against.
+CREATE TABLE revision (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  n  INTEGER NOT NULL
+);
+INSERT INTO revision VALUES (1, 0);
 
 CREATE TABLE history (
   id     INTEGER PRIMARY KEY,

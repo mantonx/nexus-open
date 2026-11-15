@@ -14,7 +14,8 @@ use toml_edit::{Decor, DocumentMut, Item, Table};
 
 /// The notes on a config's items, in the same order as the items. Missing
 /// entries are empty notes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Notes {
     pub settings: String,
     pub pages: Vec<RowNotes>,
@@ -23,7 +24,8 @@ pub struct Notes {
 }
 
 /// A page's or takeover's note and its widgets' notes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RowNotes {
     pub note: String,
     pub widgets: Vec<String>,
