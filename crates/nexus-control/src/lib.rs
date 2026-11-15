@@ -105,6 +105,7 @@ pub struct Layout {
     pub config: nexus_core::config::Config,
     /// In the same order as `config`.
     pub ids: nexus_store::Ids,
+    pub notes: nexus_store::Notes,
     /// What undo and redo would take back or make again, if anything.
     pub undo: Option<String>,
     pub redo: Option<String>,
@@ -237,6 +238,11 @@ pub struct Status {
 pub struct SignalEntry {
     pub name: String,
     pub value: String,
+    /// For a number: the number and its unit's name (`Unit::name`).
+    #[serde(default)]
+    pub number: Option<f64>,
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 /// Formats a reply line (without the newline).

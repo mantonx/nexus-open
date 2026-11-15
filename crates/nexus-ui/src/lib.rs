@@ -8,12 +8,13 @@
 
 mod editor;
 mod geometry;
+mod inspector;
 
 use std::io;
 use std::thread;
 use std::time::Duration;
 
-use nexus_control::{Client, Status};
+use nexus_control::{Client, SignalEntry, Status};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
 
 slint::include_modules!();
@@ -29,6 +30,8 @@ const RETRY: Duration = Duration::from_secs(1);
 /// strip or `nexusctl edit` changes them without the window knowing, and
 /// the outlines over the preview must follow quickly.
 const STATUS_POLL: Duration = Duration::from_millis(250);
+/// Signals are fetched every this many status polls.
+const SIGNALS_EVERY: u64 = 4;
 
 /// Opens the window and runs until it is closed.
 pub fn run() -> Result<(), slint::PlatformError> {
@@ -121,7 +124,21 @@ fn watch_frames(app: &Weak<AppWindow>) -> io::Error {
 }
 
 fn poll_status(app: &Weak<AppWindow>) {
-    loop {
+    for tick in 0u64.. {
+        // Signals once a second: the inspector's "Now 52 °C" lines.
+        if tick % SIGNALS_EVERY == 0 {
+            let entries = Client::connect()
+                .ok()
+                .and_then(|mut c| c.request("signals").ok()?.ok())
+                .and_then(|data| serde_json::from_value::<Vec<SignalEntry>>(data).ok());
+            if let Some(entries) = entries
+                && app
+                    .upgrade_in_event_loop(move |_| editor::signals(entries))
+                    .is_err()
+            {
+                return;
+            }
+        }
         let status = Client::connect()
             .ok()
             .and_then(|mut c| c.request("status").ok()?.ok())

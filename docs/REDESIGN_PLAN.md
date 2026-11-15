@@ -739,3 +739,26 @@ golang` finds nothing outside the changelog.
   edge resize with live widths, five Shift+→ as one edit, and back to the
   original layout exactly. Found: AccessKit reports the widget items as
   siblings of their list, not children; for Matt's Orca pass.
+- 2026-11-15 — Phase 4 step 2: the inspector. Under the preview, the
+  selected widget's settings, generated from one description in
+  `nexus-ui/src/inspector.rs`: a widget is flattened into named values in
+  the window's words and rebuilt from them, so every type shares one field
+  list and one rebuild. Fields: type (a change of type keeps width,
+  actions and note, and gives the new type working defaults), width (the
+  right neighbour gives or takes the difference), label, signals with their
+  live value ("Now 109 °F", or "nothing has published this yet"), graph,
+  warn and critical thresholds typed in the display unit (°F here, stored
+  in °C), slider control and command, tap and long press (page, next,
+  previous, run, open, media, set a signal) and the note. Commands are
+  shown and typed as shell words (shlex), stored as argv. A change that
+  cannot be built yet, such as "Run a command" with no command, stays a
+  local draft with an amber "Not saved yet" line, so the strip never gets a
+  half-written action. Text is sent on Enter or when focus leaves; the row
+  just typed in is updated in place so focus stays. Add widget (after the
+  selection, in the empty strip, else by splitting the selection) and
+  Delete widget, both undoable. The daemon's `layout` now carries notes and
+  `signals` carries numbers and units. Verified against the service from a
+  headless KWin session: label, a °F threshold stored as 85 °C, a draft
+  tap finished into a quoted command, a note shown in `nexusctl export`,
+  Reading → Clock, width, add by splitting, delete; eight undos returned
+  the exact original. Each control is labelled for screen readers.

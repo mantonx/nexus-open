@@ -290,13 +290,24 @@ impl Daemon {
                 let entries: Vec<SignalEntry> = signals
                     .names()
                     .into_iter()
-                    .map(|name| SignalEntry {
-                        name: name.to_string(),
-                        value: match signals.get(name) {
-                            Some(Value::Number(n, unit)) => format!("{n} ({unit:?})"),
-                            Some(Value::Text(t)) => t.clone(),
-                            None => String::new(),
-                        },
+                    .map(|name| {
+                        let value = signals.get(name);
+                        let (number, unit) = match value {
+                            Some(Value::Number(n, unit)) => {
+                                (Some(*n), Some(unit.name().to_string()))
+                            }
+                            _ => (None, None),
+                        };
+                        SignalEntry {
+                            name: name.to_string(),
+                            value: match value {
+                                Some(Value::Number(n, unit)) => format!("{n} ({unit:?})"),
+                                Some(Value::Text(t)) => t.clone(),
+                                None => String::new(),
+                            },
+                            number,
+                            unit,
+                        }
                     })
                     .collect();
                 serde_json::to_value(entries).map_err(|e| e.to_string())
@@ -378,11 +389,13 @@ impl Daemon {
             Request::Layout => {
                 let store = &self.store;
                 let id = store.active_layout().map_err(|e| e.to_string())?;
+                let loaded = store.load(id).map_err(|e| e.to_string())?;
                 let layout = Layout {
                     id,
                     name: store.layout_name(id).map_err(|e| e.to_string())?,
                     revision: store.revision().map_err(|e| e.to_string())?,
-                    config: store.load(id).map_err(|e| e.to_string())?.0,
+                    config: loaded.0,
+                    notes: loaded.1,
                     ids: store.ids(id).map_err(|e| e.to_string())?,
                     undo: store.undo_label().map_err(|e| e.to_string())?,
                     redo: store.redo_label().map_err(|e| e.to_string())?,

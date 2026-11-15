@@ -26,6 +26,16 @@ pub enum Unit {
 }
 
 impl Unit {
+    /// The name `from_name` reads.
+    pub fn name(self) -> &'static str {
+        match self {
+            Unit::None => "none",
+            Unit::Celsius => "celsius",
+            Unit::Percent => "percent",
+            Unit::BytesPerSecond => "bytes-per-second",
+        }
+    }
+
     /// The unit with this name, as written by `nexusctl publish` and
     /// external sources: none, celsius, percent, bytes-per-second.
     pub fn from_name(name: &str) -> Option<Unit> {

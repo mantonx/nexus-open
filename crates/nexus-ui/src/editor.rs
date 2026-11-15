@@ -7,17 +7,19 @@
 //! so nothing here has to guess what the daemon did.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
-use nexus_control::{Client, EditRequest, Layout, Status};
-use nexus_core::config::Widget;
-use nexus_store::Edit;
-use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
+use nexus_control::{Client, EditRequest, Layout, SignalEntry, Status};
+use nexus_core::config::{MIN_WIDGET_WIDTH, Temperature, Widget};
+use nexus_store::{Edit, Item, Row};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
 
 use crate::geometry::{self, STRIP};
-use crate::{AppWindow, Zone};
+use crate::inspector::{self, Context, Field, Kind, Outcome, Reading, Values};
+use crate::{AppWindow, Field as FieldRow, Zone};
 
 /// How far a press must move before it is a drag rather than a click, in
 /// strip pixels.
@@ -67,6 +69,25 @@ pub struct Editor {
     /// An edit is with the daemon. Until its answer and the new layout
     /// arrive, the layout here is out of date, so nothing new is sent.
     busy: bool,
+    /// Field changes made while busy, applied once the layout arrives.
+    queued: Vec<(String, String)>,
+    /// After an add: the place of the new widget, to select it.
+    select_after: Option<usize>,
+
+    /// The inspector's rows, kept so a changed value updates its row in
+    /// place rather than rebuilding every control.
+    fields: Rc<VecModel<FieldRow>>,
+    shown: Vec<Field>,
+    /// The widget `shown` belongs to.
+    fields_for: Option<i64>,
+    /// Inspector values not sent yet (see `inspector::apply`), and why.
+    drafts: Values,
+    draft_hint: String,
+    /// The last value sent for each field, so the row the person just
+    /// typed in is not rebuilt (and does not lose focus) when the daemon
+    /// confirms it.
+    committed: HashMap<String, String>,
+    signals: HashMap<String, Reading>,
 }
 
 pub type Shared = Rc<RefCell<Editor>>;
@@ -86,6 +107,15 @@ impl Editor {
             settle: Timer::default(),
             problem: String::new(),
             busy: false,
+            queued: Vec::new(),
+            select_after: None,
+            fields: Rc::new(VecModel::default()),
+            shown: Vec::new(),
+            fields_for: None,
+            drafts: Values::new(),
+            draft_hint: String::new(),
+            committed: HashMap::new(),
+            signals: HashMap::new(),
         }))
     }
 
@@ -120,6 +150,15 @@ impl Editor {
             e.selected = None;
             e.show();
         });
+        app.set_fields(ModelRc::from(editor.borrow().fields.clone()));
+        let e = editor.clone();
+        app.on_field_changed(move |key, value| {
+            e.borrow_mut().field_changed(key.as_str(), value.as_str());
+        });
+        let e = editor.clone();
+        app.on_add_widget(move || e.borrow_mut().add_widget());
+        let e = editor.clone();
+        app.on_delete_widget(move || e.borrow_mut().delete_widget());
         let e = editor.clone();
         app.on_undo(move || e.borrow_mut().step("undo"));
         let e = editor.clone();
@@ -158,7 +197,31 @@ impl Editor {
         if !matches!(self.drag, Drag::Pressed { .. }) {
             self.drag = Drag::None;
         }
+        if let Some(at) = self.select_after.take() {
+            self.selected = self.widget_ids().get(at).copied();
+        }
         self.show();
+        for (key, value) in std::mem::take(&mut self.queued) {
+            self.field_changed(&key, &value);
+        }
+    }
+
+    /// The latest signals, for the inspector's "Now …" lines.
+    fn set_signals(&mut self, entries: Vec<SignalEntry>) {
+        self.signals = entries
+            .into_iter()
+            .map(|e| {
+                let reading = Reading {
+                    text: e.value,
+                    number: e.number,
+                    unit: e.unit,
+                };
+                (e.name, reading)
+            })
+            .collect();
+        if self.selected.is_some() {
+            self.show_fields();
+        }
     }
 
     fn set_problem(&mut self, problem: String) {
@@ -440,7 +503,7 @@ impl Editor {
     }
 
     /// Pushes the editor's state into the window.
-    fn show(&self) {
+    fn show(&mut self) {
         let Some(app) = self.app.upgrade() else {
             return;
         };
@@ -466,11 +529,12 @@ impl Editor {
             app.set_ghost_width(0);
         }
         app.set_caption(self.caption(&widths, selected).into());
+        self.show_fields();
     }
 
     /// While moving: the dragged widget follows the pointer and the gap it
     /// would drop into is marked.
-    fn show_drag(&self, x: f32) {
+    fn show_drag(&mut self, x: f32) {
         self.show();
         let (Drag::Moving { index, from, to }, Some(app)) = (self.drag, self.app.upgrade()) else {
             return;
@@ -524,6 +588,247 @@ impl Editor {
     }
 }
 
+/// The inspector: the selected widget's fields, and what changing one
+/// sends.
+impl Editor {
+    fn context(&self) -> Context {
+        let Some(layout) = &self.layout else {
+            return Context::default();
+        };
+        Context {
+            pages: layout.config.pages.iter().map(|p| p.name.clone()).collect(),
+            fahrenheit: layout.config.settings.temperature == Temperature::Fahrenheit,
+            signals: self.signals.clone(),
+        }
+    }
+
+    fn note(&self, index: usize) -> String {
+        match (&self.layout, self.page_index()) {
+            (Some(l), Some(p)) => l.notes.page(p).widget(index).to_string(),
+            _ => String::new(),
+        }
+    }
+
+    /// Puts the selected widget's fields in the window. Rows whose value
+    /// changed are rebuilt so their controls show it, except a row whose
+    /// new value is the one just sent from it.
+    fn show_fields(&mut self) {
+        let selected = self.selected_index().filter(|_| self.editable());
+        let id = selected.and_then(|i| self.widget_ids().get(i).copied());
+        if id != self.fields_for {
+            self.fields_for = id;
+            self.drafts.clear();
+            self.draft_hint.clear();
+            self.committed.clear();
+            self.shown.clear();
+            self.fields.set_vec(Vec::new());
+        }
+        let fields = match selected {
+            Some(i) => {
+                let ctx = self.context();
+                let mut values = inspector::flatten(&self.widgets()[i], &ctx);
+                values.extend(self.drafts.clone());
+                let mut fields = inspector::fields(&values, &ctx);
+                fields.push(Field {
+                    key: "note".into(),
+                    label: "Note".into(),
+                    kind: Kind::Note,
+                    value: self.note(i),
+                    help: "For you: kept with the widget, and shown as a comment in nexusctl edit."
+                        .into(),
+                });
+                fields
+            }
+            None => Vec::new(),
+        };
+        let same_keys = fields.len() == self.shown.len()
+            && fields.iter().zip(&self.shown).all(|(a, b)| a.key == b.key);
+        if !same_keys {
+            self.fields
+                .set_vec(fields.iter().map(row).collect::<Vec<_>>());
+        } else {
+            for (i, (new, old)) in fields.iter().zip(&self.shown).enumerate() {
+                if new == old {
+                    continue;
+                }
+                let just_sent = self.committed.get(&new.key) == Some(&new.value);
+                if new.value != old.value && !just_sent {
+                    self.fields.remove(i);
+                    self.fields.insert(i, row(new));
+                } else {
+                    self.fields.set_row_data(i, row(new));
+                }
+            }
+        }
+        self.shown = fields;
+        if let Some(app) = self.app.upgrade() {
+            app.set_draft_hint(self.draft_hint.as_str().into());
+        }
+    }
+
+    fn field_changed(&mut self, key: &str, value: &str) {
+        if self.busy {
+            self.queued.push((key.into(), value.into()));
+            return;
+        }
+        let Some(i) = self.selected_index() else {
+            return;
+        };
+        let id = self.widget_ids()[i];
+        let widget = self.widgets()[i].clone();
+        self.committed.insert(key.into(), value.into());
+        self.problem.clear();
+        match key {
+            "width" => match value.trim().parse::<u32>() {
+                Ok(new) => {
+                    let delta = new as i32 - widget.width() as i32;
+                    self.preview = Some(geometry::resize(&self.layout_widths(), i, delta));
+                    self.commit_resize(i);
+                }
+                Err(_) => self.problem = "The width must be a whole number of pixels.".into(),
+            },
+            "note" => {
+                if value != self.note(i) {
+                    self.send(Edit::SetNote {
+                        item: Item::Widget(id),
+                        note: value.into(),
+                    });
+                }
+            }
+            _ => {
+                // A draft is finished by the fields it is about; a change
+                // elsewhere goes out on its own and leaves the draft be.
+                let group = |k: &str| k.split('.').next().unwrap_or(k).to_string();
+                let in_draft = self.drafts.keys().any(|k| group(k) == group(key));
+                let drafts = if in_draft {
+                    self.drafts.clone()
+                } else {
+                    Values::new()
+                };
+                match inspector::apply(&widget, &drafts, key, value, &self.context()) {
+                    Outcome::Send(new) => {
+                        if in_draft {
+                            self.drafts.clear();
+                            self.draft_hint.clear();
+                        }
+                        self.send(Edit::Batch {
+                            label: format!("Change {}", describe(&widget)),
+                            edits: vec![Edit::SetWidget {
+                                widget: id,
+                                value: new,
+                            }],
+                        });
+                    }
+                    Outcome::Draft(draft, why) => {
+                        if in_draft {
+                            self.drafts = draft;
+                        } else {
+                            self.drafts.extend(draft);
+                        }
+                        self.draft_hint = why;
+                    }
+                    Outcome::Invalid(why) => self.problem = why,
+                    Outcome::Unchanged => {
+                        if in_draft {
+                            self.drafts.clear();
+                            self.draft_hint.clear();
+                        }
+                    }
+                }
+            }
+        }
+        self.show();
+    }
+
+    /// Adds a clock after the selected widget (or at the end) in the
+    /// empty strip; with none left, splits the selected widget in two.
+    fn add_widget(&mut self) {
+        let (Some(layout), Some(p)) = (&self.layout, self.page_index()) else {
+            return;
+        };
+        let page = layout.ids.pages[p].id;
+        let widths = self.layout_widths();
+        let free = STRIP - widths.iter().sum::<u32>();
+        let selected = self.selected_index();
+        let at = selected.map_or(widths.len(), |i| i + 1);
+        let clock = |width| Widget::Clock {
+            width,
+            tap: None,
+            hold: None,
+        };
+        let mut edits = Vec::new();
+        let width = if free >= MIN_WIDGET_WIDTH {
+            free
+        } else if let Some(i) = selected.filter(|&i| widths[i] >= 2 * MIN_WIDGET_WIDTH) {
+            let half = widths[i] / 2;
+            edits.push(Edit::SetWidget {
+                widget: self.widget_ids()[i],
+                value: self.widgets()[i].clone().with_width(widths[i] - half),
+            });
+            half
+        } else {
+            self.problem = format!(
+                "There is no room on this page. Narrow a widget to leave {MIN_WIDGET_WIDTH} px free, or select one at least {} px wide to split it.",
+                2 * MIN_WIDGET_WIDTH
+            );
+            self.show();
+            return;
+        };
+        edits.push(Edit::AddWidget {
+            on: Row::Page(page),
+            at: Some(at),
+            widget: clock(width),
+        });
+        self.select_after = Some(at);
+        self.send(Edit::Batch {
+            label: "Add widget".into(),
+            edits,
+        });
+    }
+
+    fn delete_widget(&mut self) {
+        let Some(i) = self.selected_index() else {
+            return;
+        };
+        let id = self.widget_ids()[i];
+        let name = describe(&self.widgets()[i]);
+        self.selected = None;
+        self.send(Edit::Batch {
+            label: format!("Delete {name}"),
+            edits: vec![Edit::DeleteWidget { widget: id }],
+        });
+        self.show();
+    }
+}
+
+/// A field as the window takes it.
+fn row(f: &Field) -> FieldRow {
+    let (kind, choices) = match &f.kind {
+        Kind::Text => ("text", Vec::new()),
+        Kind::Number => ("number", Vec::new()),
+        Kind::Note => ("note", Vec::new()),
+        Kind::Choice(options) => ("choice", options.clone()),
+    };
+    let index = choices
+        .iter()
+        .position(|c| c == &f.value)
+        .map_or(-1, |i| i as i32);
+    FieldRow {
+        key: f.key.as_str().into(),
+        label: f.label.as_str().into(),
+        kind: kind.into(),
+        value: f.value.as_str().into(),
+        choices: ModelRc::new(VecModel::from(
+            choices
+                .into_iter()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        )),
+        index,
+        help: f.help.as_str().into(),
+    }
+}
+
 fn label(s: Option<&str>) -> SharedString {
     s.unwrap_or_default().into()
 }
@@ -550,6 +855,14 @@ pub fn describe(w: &Widget) -> String {
 thread_local! {
     /// The editor, reachable from closures posted to the UI thread.
     static EDITOR: RefCell<Option<Shared>> = const { RefCell::new(None) };
+}
+
+/// The latest signals, for the installed editor.
+pub fn signals(entries: Vec<SignalEntry>) {
+    let editor = EDITOR.with(|e| e.borrow().clone());
+    if let Some(editor) = editor {
+        editor.borrow_mut().set_signals(entries);
+    }
 }
 
 /// A new status from the poll, for the installed editor.
