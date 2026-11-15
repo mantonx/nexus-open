@@ -48,10 +48,11 @@ enum Command {
     },
     /// Run the daemon: show the configured pages on the strip.
     Run {
-        /// Config file. Default: nexus-open/nexus.toml in the user's config
-        /// directory, created with the default layout if missing.
+        /// The store. Default: nexus-open/nexusd.db in the user's state
+        /// directory, filled on first start from nexus-open/nexus.toml if
+        /// there is one, else with the default layout.
         #[arg(long, value_name = "PATH")]
-        config: Option<std::path::PathBuf>,
+        db: Option<std::path::PathBuf>,
         /// Publish fake readings, for testing before real sources exist.
         #[arg(long)]
         demo: bool,
@@ -75,7 +76,7 @@ fn main() -> ExitCode {
         Command::Preview { font, cycle, touch } => {
             preview(font, cycle.map(Duration::from_secs), touch).map_err(Into::into)
         }
-        Command::Run { config, demo } => run::run(run::Options { config, demo }),
+        Command::Run { db, demo } => run::run(run::Options { db, demo }),
         Command::Ui => nexus_ui::run().map_err(Into::into),
         Command::Trace { out, seconds } => trace(&out, seconds),
     };

@@ -21,9 +21,14 @@ RestrictRealtime=true
 PrivateTmp=true
 UMask=0077
 
-# ── Files: read-only system; writes only to its config and its socket ─────
+# ── Files: read-only system. Writes go to its store (StateDirectory:
+# ~/.local/state/nexusd, created by systemd), its socket, and its config
+# folder, where the first start renames the old nexus.toml after importing it.
+# Not StateDirectory=nexus-open: with ~/.config/nexus-open present, systemd
+# takes that for a pre-254 state directory and symlinks the new one to it.
 ProtectSystem=strict
-ReadWritePaths=%h/.config/nexus-open %t
+StateDirectory=nexusd
+ReadWritePaths=-%h/.config/nexus-open %t
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

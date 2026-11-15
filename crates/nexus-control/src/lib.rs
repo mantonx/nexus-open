@@ -18,6 +18,11 @@
 //!                               unit (celsius, percent, bytes-per-second),
 //!                               or any text
 //! frames                        stream every frame (see below)
+//! edit {"edit": {...}, "base": n}  one change (nexus_store::Edit); refused
+//!                               if `base` is given and the revision moved
+//! undo / redo                   take back or redo the last change
+//! export [layout]               a layout, the settings and sources as TOML
+//! import {"name", "text", "activate"}  add a layout from TOML
 //! ```
 //!
 //! After `frames` and its reply, the connection carries only frames: each
@@ -53,6 +58,45 @@ pub enum Request {
         to: f32,
     },
     Frames,
+    Edit(Box<EditRequest>),
+    Undo,
+    Redo,
+    /// A layout by name, or the one on the strip.
+    Export(Option<String>),
+    Import(Box<ImportRequest>),
+}
+
+/// The body of `edit`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditRequest {
+    pub edit: nexus_store::Edit,
+    /// The revision the edit was made against. When given and no longer
+    /// current, the edit is refused rather than applied over a change the
+    /// sender has not seen.
+    #[serde(default)]
+    pub base: Option<i64>,
+}
+
+/// The body of `import`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportRequest {
+    pub name: String,
+    /// The layout as TOML, as `export` writes it.
+    pub text: String,
+    /// Put it on the strip.
+    #[serde(default)]
+    pub activate: bool,
+}
+
+/// The answer to `export`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Export {
+    pub id: i64,
+    pub layout: String,
+    pub text: String,
+    pub revision: i64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -74,6 +118,19 @@ impl Request {
             "signals" => Ok(Request::Signals),
             "reload" => Ok(Request::Reload),
             "frames" => Ok(Request::Frames),
+            "undo" => Ok(Request::Undo),
+            "redo" => Ok(Request::Redo),
+            "export" => Ok(Request::Export(
+                (!rest.is_empty()).then(|| rest.to_string()),
+            )),
+            "edit" => serde_json::from_str(rest)
+                .map(|e| Request::Edit(Box::new(e)))
+                .map_err(|e| {
+                    format!("edit needs JSON, as in edit {{\"edit\": {{\"op\": …}}}}: {e}")
+                }),
+            "import" => serde_json::from_str(rest)
+                .map(|i| Request::Import(Box::new(i)))
+                .map_err(|e| format!("import needs JSON with name and text: {e}")),
             "page" => Ok(Request::Page(match rest {
                 "" => return Err("page needs next, prev, a number or a name".into()),
                 "next" => PageTarget::Next,
@@ -125,7 +182,7 @@ impl Request {
             }
             "" => Err("empty request".into()),
             other => Err(format!(
-                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold, drag or frames"
+                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold, drag, frames, edit, undo, redo, export or import"
             )),
         }
     }
@@ -140,9 +197,12 @@ pub struct Status {
     pub device_error: Option<String>,
     pub page: String,
     pub pages: Vec<String>,
-    pub config_path: String,
-    /// Why the config file was rejected; the previous layout is in use.
-    pub config_error: Option<String>,
+    /// The layout on the strip.
+    pub layout: String,
+    pub store_path: String,
+    /// Why the store could not be opened; the default layout is shown and
+    /// edits are refused until it is fixed.
+    pub store_error: Option<String>,
 }
 
 /// One entry of the answer to `signals`.
@@ -160,10 +220,23 @@ pub fn reply(result: Result<serde_json::Value, String>) -> String {
     }
 }
 
-/// The config file used when none is given: `nexus-open/nexus.toml` in the
-/// user's config directory (`~/.config` on Linux).
+/// The config file of earlier versions: `nexus-open/nexus.toml` in the
+/// user's config directory (`~/.config` on Linux). Imported into the store
+/// on first start. External sources run in this folder.
 pub fn default_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("nexus-open").join("nexus.toml"))
+}
+
+/// The store. On Linux `~/.local/state/nexusd/nexusd.db`, a directory
+/// systemd's `StateDirectory=nexusd` creates and opens to the sandboxed
+/// service. Not `nexus-open`: when `~/.config/<name>` exists, systemd takes
+/// the state directory to be an old-style one and links it there. Elsewhere
+/// `nexus-open/nexusd.db` in the data directory.
+pub fn default_store_path() -> Option<PathBuf> {
+    match dirs::state_dir() {
+        Some(state) => Some(state.join("nexusd").join("nexusd.db")),
+        None => dirs::data_dir().map(|d| d.join("nexus-open").join("nexusd.db")),
+    }
 }
 
 /// Where the socket lives: the per-user runtime directory (only the user

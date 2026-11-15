@@ -125,6 +125,68 @@ impl Notes {
     }
 }
 
+/// Table headers whose comments are kept as notes.
+const NOTED: [&str; 6] = [
+    "[settings]",
+    "[[page]]",
+    "[[page.widget]]",
+    "[[takeover]]",
+    "[[takeover.widget]]",
+    "[[source]]",
+];
+
+/// Lines (from 1) with comments that cannot be kept: at the end of a line,
+/// or not directly above a table that has a note. `##` help is not counted.
+pub fn stray_comments(text: &str) -> Vec<usize> {
+    let mut stray = Vec::new();
+    let mut waiting: Vec<usize> = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("##") {
+            continue;
+        }
+        if t.starts_with('#') {
+            waiting.push(i + 1);
+            continue;
+        }
+        let header: String = t
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        if NOTED.contains(&header.as_str()) {
+            waiting.clear();
+        } else {
+            stray.append(&mut waiting);
+        }
+        if trailing_comment(t) {
+            stray.push(i + 1);
+        }
+    }
+    stray.append(&mut waiting);
+    stray
+}
+
+/// Whether a line has a `#` outside its strings.
+fn trailing_comment(line: &str) -> bool {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for c in line.chars() {
+        match quote {
+            Some('"') if escaped => escaped = false,
+            Some('"') if c == '\\' => escaped = true,
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '"' || c == '\'' => quote = Some(c),
+            None if c == '#' => return true,
+            None => {}
+        }
+    }
+    false
+}
+
 fn tables(item: Option<&Item>) -> impl Iterator<Item = &Table> {
     item.and_then(Item::as_array_of_tables)
         .into_iter()
@@ -311,5 +373,27 @@ mod tests {
             .collect();
         assert_eq!(with_notes.len(), 1, "only the Sound page: {with_notes:?}");
         assert!(notes.takeovers.iter().all(|t| t.note.is_empty()));
+    }
+
+    #[test]
+    fn comments_that_cannot_be_kept_are_found() {
+        let text = "## help\n\
+                    # kept: above settings\n\
+                    [settings]\n\
+                    clock = \"12h\" # trailing\n\
+                    # lost: above weather\n\
+                    [weather]\n\
+                    location = \"A # B\"\n\
+                    # kept\n\
+                    \n\
+                    [[page]]\n\
+                    name = \"A\"\n\
+                    # kept: above the widget\n\
+                    # kept too\n\
+                    [[page.widget]]\n\
+                    type = \"clock\"\n\
+                    width = 100\n\
+                    # lost: at the end\n";
+        assert_eq!(stray_comments(text), [4, 5, 17]);
     }
 }

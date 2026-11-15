@@ -97,15 +97,21 @@ on the config types.
 
 | Platform | Path |
 |---|---|
-| Linux | `~/.local/share/nexus-open/nexusd.db` (`$XDG_DATA_HOME`) |
+| Linux | `~/.local/state/nexusd/nexusd.db` (`$XDG_STATE_HOME`) |
 | macOS | `~/Library/Application Support/nexus-open/nexusd.db` |
 | Windows | `%APPDATA%\nexus-open\nexusd.db` |
 
-The data directory, because it is no longer a file meant for editing. Named
+On Linux, the state directory: systemd's `StateDirectory=` creates it and
+opens it to the sandboxed service, which cannot create a directory itself
+under `ProtectSystem=strict`. Elsewhere, the data directory. Named
 `nexusd.db`, because the Go app already uses `nexus.db` in both the config
 and data folders. The two apps must never open each other's file.
 
-The systemd unit gets `ReadWritePaths=%h/.local/share/nexus-open`.
+The systemd unit gets `StateDirectory=nexusd`. Not `nexus-open`: when a
+user unit's state directory is missing and `~/.config/<same name>` exists,
+systemd (254 and later) assumes it is upgrading from the old layout, where
+user state lived in `~/.config`, and makes the state directory a symlink to
+the config folder. Found on Matt's machine on the first deploy.
 
 ### 7. Editing by hand: `nexusctl edit`, with comments kept as notes
 

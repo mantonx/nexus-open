@@ -116,6 +116,31 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// The layout with this name.
+    pub fn layout_named(&self, name: &str) -> Result<Option<LayoutId>, StoreError> {
+        Ok(self
+            .layouts()?
+            .into_iter()
+            .find_map(|(id, n)| (n == name).then_some(id)))
+    }
+
+    /// A layout's name.
+    pub fn layout_name(&self, layout: LayoutId) -> Result<String, StoreError> {
+        Ok(self
+            .conn
+            .query_row("SELECT name FROM layout WHERE id = ?1", [layout], |r| {
+                r.get(0)
+            })?)
+    }
+
+    /// Writes a consistent copy of the whole database to `to`, which must
+    /// not exist. Safe while the database is in use.
+    pub fn backup(&self, to: &Path) -> Result<(), StoreError> {
+        self.conn
+            .execute("VACUUM INTO ?1", [to.to_string_lossy()])?;
+        Ok(())
+    }
+
     /// The layout on the strip.
     pub fn active_layout(&self) -> Result<LayoutId, StoreError> {
         self.conn
@@ -980,5 +1005,20 @@ mod tests {
             }
         );
         assert!(serde_json::from_str::<Edit>(r#"{"op": "rename-page", "page": 3}"#).is_err());
+    }
+
+    #[test]
+    fn a_backup_opens_with_everything_in_it() {
+        let (store, layout) = with_default();
+        let path =
+            std::env::temp_dir().join(format!("nexus-store-backup-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        store.backup(&path).unwrap();
+        let copy = Store::open(&path).unwrap();
+        assert_eq!(copy.load(layout).unwrap(), store.load(layout).unwrap());
+        drop(copy);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
     }
 }

@@ -8,22 +8,21 @@
 
 use std::error::Error;
 use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use jiff::Zoned;
-use nexus_control::{PageTarget, Request, SignalEntry, Status};
-use nexus_core::config::{self, Config};
+use nexus_control::{Export, PageTarget, Request, SignalEntry, Status};
+use nexus_core::config;
 use nexus_core::demo;
 use nexus_core::engine::{Engine, Input};
 use nexus_core::signal::Value;
 use nexus_device::protocol::{TouchCalibration, parse_touch};
 use nexus_device::{DeviceError, Surface};
 use nexus_sources::Reading;
-use notify::{EventKind, RecursiveMode, Watcher};
+use nexus_store::{Edit, Store, text};
 use serde_json::json;
 
 use crate::control::{self, Frame, Reply};
@@ -33,6 +32,8 @@ const RECONNECT_POLL: Duration = Duration::from_millis(250);
 /// Frame pacing while a page animates: about 60 fps. A frame takes the
 /// device 15–17 ms to accept, so this is close to the most it sustains.
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// Days of daily store backups kept.
+const BACKUPS: usize = 7;
 /// How often the demo source publishes.
 const DEMO_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -40,7 +41,6 @@ const DEMO_INTERVAL: Duration = Duration::from_secs(1);
 pub enum Msg {
     Engine(Input),
     Device(nexus_device::Input),
-    ConfigChanged,
     /// A request from the control socket and where to send the answer.
     Control(Request, Sender<Reply>),
     /// A viewer (the settings window) wants every frame.
@@ -54,29 +54,37 @@ impl From<nexus_device::Input> for Msg {
 }
 
 pub struct Options {
-    pub config: Option<PathBuf>,
+    pub db: Option<PathBuf>,
     pub demo: bool,
 }
 
 pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
-    let path = match options.config {
+    let store_path = match options.db {
         Some(path) => path,
-        None => default_config_path()?,
+        None => {
+            nexus_control::default_store_path().ok_or("cannot find the user's state directory")?
+        }
     };
+    // The config file of earlier versions, imported on first start. Sources
+    // run in its folder, where their scripts are kept.
+    let legacy = nexus_control::default_config_path();
     // Claim the socket first: it doubles as the guard against a second
     // daemon fighting over the device.
     let listener = nexus_control::listen().map_err(|e| e.to_string())?;
     let (tx, rx) = mpsc::channel();
     control::serve(listener, tx.clone());
-    let (config, config_error) = first_config(&path)?;
-    let sources = crate::sources::Sources::new(tx.clone(), &path);
+    let (store, store_error) = open_store(&store_path, legacy.as_deref());
+    let (config, _) = store.load(store.active_layout()?)?;
+    let sources_dir = legacy.unwrap_or_else(|| store_path.clone());
+    let sources = crate::sources::Sources::new(tx.clone(), &sources_dir);
     let mut daemon = Daemon {
         engine: Engine::new(config),
-        path,
+        store,
+        store_path,
+        store_error,
         device: None,
         next_attempt: Instant::now(),
         last_device_error: None,
-        last_config_error: config_error,
         tx: tx.clone(),
         viewers: Vec::new(),
         current: None,
@@ -88,8 +96,6 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         sources,
     };
     daemon.sources.apply(&daemon.engine.config().sources);
-    // Kept alive for as long as the daemon runs; dropping it stops watching.
-    let _watcher = watch_config(&daemon.path, tx.clone())?;
     if options.demo {
         spawn_demo(publisher(tx));
     } else {
@@ -105,13 +111,17 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
 
 struct Daemon {
     engine: Engine,
-    path: PathBuf,
+    /// Everything the strip is configured with. Only this thread writes it.
+    store: Store,
+    store_path: PathBuf,
+    /// Why the store could not be opened; the default layout is shown from
+    /// memory and edits are refused.
+    store_error: Option<String>,
     device: Option<Box<dyn Surface>>,
     /// When to next try to open the device, while it is missing.
     next_attempt: Instant,
     /// Logged once, not on every retry.
     last_device_error: Option<String>,
-    last_config_error: Option<String>,
     tx: Sender<Msg>,
     /// Settings windows receiving frames.
     viewers: Vec<SyncSender<Frame>>,
@@ -162,8 +172,7 @@ impl Daemon {
             };
 
             // Handle everything already queued before drawing, so a burst of
-            // updates becomes one frame and a burst of file events one reload.
-            let mut reload = false;
+            // updates becomes one frame.
             for msg in first.into_iter().chain(rx.try_iter()) {
                 match msg {
                     Msg::Engine(input) => self.engine.handle(input),
@@ -171,7 +180,6 @@ impl Daemon {
                         self.touch(&report, read_at);
                     }
                     Msg::Device(nexus_device::Input::Gone(e)) => self.lost(&e.to_string()),
-                    Msg::ConfigChanged => reload = true,
                     Msg::Control(request, answer) => {
                         let _ = answer.send(self.control(request));
                     }
@@ -185,9 +193,6 @@ impl Daemon {
                         self.viewers.push(viewer);
                     }
                 }
-            }
-            if reload {
-                self.reload();
             }
             for effect in self.engine.take_effects() {
                 self.effects.carry_out(effect);
@@ -268,8 +273,13 @@ impl Daemon {
                     }),
                     page: pages[self.engine.page()].name.clone(),
                     pages: pages.iter().map(|p| p.name.clone()).collect(),
-                    config_path: self.path.display().to_string(),
-                    config_error: self.last_config_error.clone(),
+                    layout: self
+                        .store
+                        .active_layout()
+                        .and_then(|id| self.store.layout_name(id))
+                        .unwrap_or_default(),
+                    store_path: self.store_path.display().to_string(),
+                    store_error: self.store_error.clone(),
                 };
                 serde_json::to_value(status).map_err(|e| e.to_string())
             }
@@ -311,12 +321,73 @@ impl Daemon {
                 self.engine.handle(input);
                 Ok(json!(null))
             }
-            Request::Reload => {
-                self.reload();
-                match &self.last_config_error {
-                    None => Ok(json!(null)),
-                    Some(e) => Err(format!("{e}\nthe previous layout is still shown")),
+            Request::Reload => self.reload().map(|()| json!(null)),
+            Request::Edit(request) => {
+                self.writable()?;
+                let now = self.store.revision().map_err(|e| e.to_string())?;
+                if let Some(base) = request.base
+                    && base != now
+                {
+                    return Err(format!(
+                        "the layout changed since this edit was started (revision {base}, now {now}); nothing was applied"
+                    ));
                 }
+                self.backup();
+                let revision = self.store.edit(&request.edit).map_err(|e| e.to_string())?;
+                self.reload()?;
+                Ok(json!({ "revision": revision }))
+            }
+            Request::Undo | Request::Redo => {
+                self.writable()?;
+                let undo = matches!(request, Request::Undo);
+                let step = if undo {
+                    self.store.undo()
+                } else {
+                    self.store.redo()
+                };
+                match step.map_err(|e| e.to_string())? {
+                    Some(label) => {
+                        self.reload()?;
+                        let revision = self.store.revision().map_err(|e| e.to_string())?;
+                        Ok(json!({ "label": label, "revision": revision }))
+                    }
+                    None if undo => Err("nothing to undo".into()),
+                    None => Err("nothing to redo".into()),
+                }
+            }
+            Request::Export(name) => {
+                let store = &self.store;
+                let id = match &name {
+                    Some(name) => store
+                        .layout_named(name)
+                        .map_err(|e| e.to_string())?
+                        .ok_or_else(|| format!("no layout called \"{name}\""))?,
+                    None => store.active_layout().map_err(|e| e.to_string())?,
+                };
+                let (config, notes) = store.load(id).map_err(|e| e.to_string())?;
+                let export = Export {
+                    id,
+                    layout: store.layout_name(id).map_err(|e| e.to_string())?,
+                    text: text::write(&config, &notes),
+                    revision: store.revision().map_err(|e| e.to_string())?,
+                };
+                serde_json::to_value(export).map_err(|e| e.to_string())
+            }
+            Request::Import(import) => {
+                self.writable()?;
+                let (config, notes) = text::parse(&import.text).map_err(|e| e.to_string())?;
+                self.backup();
+                let id = self
+                    .store
+                    .import(&import.name, &config, &notes, false)
+                    .map_err(|e| e.to_string())?;
+                if import.activate {
+                    self.store
+                        .edit(&Edit::Activate { layout: id })
+                        .map_err(|e| e.to_string())?;
+                    self.reload()?;
+                }
+                Ok(json!({ "layout": id }))
             }
             Request::Publish(name, value) => {
                 self.engine.handle(Input::Signal(name, value));
@@ -372,93 +443,140 @@ impl Daemon {
         self.next_attempt = Instant::now();
     }
 
-    /// Re-reads the config. A broken file is reported once and the current
-    /// layout stays on the strip.
-    fn reload(&mut self) {
-        match read_config(&self.path) {
-            Ok(Some(config)) => {
-                if self.last_config_error.take().is_some() {
-                    eprintln!("nexusd: config fixed; applying it");
-                }
-                if config.weather != self.engine.config().weather
-                    && let Some(weather) = &self.weather
-                {
-                    let _ = weather.send(config.weather.clone());
-                }
-                self.sources.apply(&config.sources);
-                if &config != self.engine.config() {
-                    self.engine.handle(Input::Config(Box::new(config)));
-                }
-            }
-            Ok(None) => {} // Deleted or mid-save; keep what is shown.
-            Err(e) => {
-                let message = e.to_string();
-                if self.last_config_error.as_ref() != Some(&message) {
-                    eprintln!(
-                        "nexusd: {}: {message}\nnexusd: keeping the previous layout",
-                        self.path.display()
-                    );
-                    self.last_config_error = Some(message);
-                }
-            }
+    /// Shows the store's layout on the strip: the engine, the weather
+    /// source and the external sources all follow it.
+    fn reload(&mut self) -> Result<(), String> {
+        let (config, _) = self
+            .store
+            .active_layout()
+            .and_then(|id| self.store.load(id))
+            .map_err(|e| e.to_string())?;
+        if config.weather != self.engine.config().weather
+            && let Some(weather) = &self.weather
+        {
+            let _ = weather.send(config.weather.clone());
+        }
+        self.sources.apply(&config.sources);
+        if &config != self.engine.config() {
+            self.engine.handle(Input::Config(Box::new(config)));
+        }
+        Ok(())
+    }
+
+    /// Edits need the real store, not the stand-in shown when it failed.
+    fn writable(&self) -> Result<(), String> {
+        match &self.store_error {
+            None => Ok(()),
+            Some(e) => Err(format!(
+                "the store could not be opened ({e}), so the default layout is shown and changes cannot be saved; fix it and restart nexusd"
+            )),
+        }
+    }
+
+    /// A copy of the store before the first change of each day, in
+    /// `backups/` beside it; the last BACKUPS days are kept. A failure is
+    /// logged and does not block the change.
+    fn backup(&self) {
+        let Some(dir) = self.store_path.parent().map(|d| d.join("backups")) else {
+            return;
+        };
+        let day = Zoned::now().date();
+        let path = dir.join(format!("nexusd-{day}.db"));
+        if path.exists() {
+            return;
+        }
+        let made = fs::create_dir_all(&dir)
+            .map_err(|e| e.to_string())
+            .and_then(|()| self.store.backup(&path).map_err(|e| e.to_string()));
+        if let Err(e) = made {
+            eprintln!("nexusd: backup to {} failed: {e}", path.display());
+            return;
+        }
+        let mut old: Vec<PathBuf> = fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("nexusd-") && n.ends_with(".db"))
+            })
+            .collect();
+        old.sort();
+        let excess = old.len().saturating_sub(BACKUPS);
+        for path in &old[..excess] {
+            let _ = fs::remove_file(path);
         }
     }
 }
 
-fn default_config_path() -> Result<PathBuf, Box<dyn Error>> {
-    Ok(nexus_control::default_config_path().ok_or("cannot find the user's config directory")?)
-}
-
-/// `Ok(None)` if the file does not exist.
-fn read_config(path: &Path) -> Result<Option<Config>, Box<dyn Error>> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(Config::parse(&text)?)),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// The config to start with, and why the file was rejected if it was. A
-/// missing file is created from the default so there is something to edit.
-/// A broken file falls back to the default layout for this run, without
-/// overwriting the file.
-fn first_config(path: &Path) -> Result<(Config, Option<String>), Box<dyn Error>> {
-    match read_config(path) {
-        Ok(Some(config)) => Ok((config, None)),
-        Ok(None) => {
-            if let Some(dir) = path.parent() {
-                fs::create_dir_all(dir)?;
-            }
-            fs::write(path, config::DEFAULT)?;
-            eprintln!("nexusd: wrote the default layout to {}", path.display());
-            Ok((Config::default_layout(), None))
+/// Opens the store, filling it on first start: from the earlier versions'
+/// config file if there is one (which is then renamed, never deleted), else
+/// from the bundled default. If it cannot be opened, the default layout is
+/// shown from memory and the reason is returned.
+fn open_store(path: &Path, legacy: Option<&Path>) -> (Store, Option<String>) {
+    let opened = (|| -> Result<Store, Box<dyn Error>> {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
         }
+        let mut store = Store::open(path)?;
+        if store.is_empty()? {
+            seed(&mut store, legacy)?;
+        }
+        Ok(store)
+    })();
+    match opened {
+        Ok(store) => (store, None),
         Err(e) => {
             eprintln!(
-                "nexusd: {}: {e}\nnexusd: showing the default layout until it is fixed",
+                "nexusd: {}: {e}\nnexusd: showing the default layout; changes cannot be saved until this is fixed",
                 path.display()
             );
-            Ok((Config::default_layout(), Some(e.to_string())))
+            let mut store = Store::open_in_memory().expect("an in-memory database opens");
+            let (config, notes) =
+                text::parse(config::DEFAULT).expect("the bundled default is valid");
+            store
+                .import("Default", &config, &notes, true)
+                .expect("the bundled default imports");
+            (store, Some(e.to_string()))
         }
     }
 }
 
-/// Watches the config's directory, not the file: editors often save by
-/// writing a new file and renaming it over the old one, which a watch on
-/// the old file would miss.
-fn watch_config(path: &Path, tx: Sender<Msg>) -> notify::Result<impl Watcher + use<>> {
-    let file = path.to_path_buf();
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if let Ok(event) = event
-            && !matches!(event.kind, EventKind::Access(_))
-            && event.paths.iter().any(|p| p == &file)
-        {
-            let _ = tx.send(Msg::ConfigChanged);
+fn seed(store: &mut Store, legacy: Option<&Path>) -> Result<(), Box<dyn Error>> {
+    if let Some(file) = legacy.filter(|f| f.exists()) {
+        let read = fs::read_to_string(file)
+            .map_err(|e| e.to_string())
+            .and_then(|t| text::parse(&t).map_err(|e| e.to_string()));
+        match read {
+            Ok((config, notes)) => {
+                // Older files carry copies of the bundled help as comments;
+                // they are not the person's notes.
+                let notes = notes.without_lines_in(config::DEFAULT);
+                store.import("Main", &config, &notes, true)?;
+                let kept = file.with_extension("toml.imported");
+                match fs::rename(file, &kept) {
+                    Ok(()) => eprintln!(
+                        "nexusd: imported {} as the layout \"Main\"; the file is now {}",
+                        file.display(),
+                        kept.display()
+                    ),
+                    Err(e) => eprintln!(
+                        "nexusd: imported {} as the layout \"Main\" but could not rename it ({e}); it is no longer read",
+                        file.display()
+                    ),
+                }
+                return Ok(());
+            }
+            Err(e) => eprintln!(
+                "nexusd: {} could not be imported ({e}); starting from the default layout and leaving the file as it is",
+                file.display()
+            ),
         }
-    })?;
-    let dir = path.parent().unwrap_or(Path::new("."));
-    watcher.watch(dir, RecursiveMode::NonRecursive)?;
-    Ok(watcher)
+    }
+    let (config, notes) = text::parse(config::DEFAULT)?;
+    store.import("Default", &config, &notes, true)?;
+    Ok(())
 }
 
 /// Hands a source's readings to the daemon thread. Returns false once the

@@ -6,11 +6,9 @@
 
 #[cfg(target_os = "linux")]
 use std::path::Path;
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use nexus_control::{Client, Status};
-use nexus_core::config::Config;
 
 struct Report {
     failed: bool,
@@ -40,7 +38,7 @@ pub fn run() -> ExitCode {
 
     let status = daemon(&mut r);
     device(&mut r);
-    config(&mut r, status.as_ref());
+    store(&mut r, status.as_ref());
 
     if r.failed {
         println!("\nSomething needs fixing; see FAIL above.");
@@ -195,30 +193,29 @@ fn device(r: &mut Report) {
     r.note("device", "device checks are not implemented on this OS yet");
 }
 
-fn config(r: &mut Report, status: Option<&Status>) {
-    let path: Option<PathBuf> = status
-        .map(|s| PathBuf::from(&s.config_path))
-        .or_else(nexus_control::default_config_path);
-    let Some(path) = path else {
-        r.fail("config", "cannot find the user's config directory", "");
-        return;
-    };
-    match std::fs::read_to_string(&path) {
-        Ok(text) => match Config::parse(&text) {
-            Ok(c) => r.ok(
-                "config",
-                &format!("{} is valid ({} pages)", path.display(), c.pages.len()),
+fn store(r: &mut Report, status: Option<&Status>) {
+    match status {
+        Some(s) => match &s.store_error {
+            None => r.ok(
+                "store",
+                &format!("{} (layout \"{}\", {} pages)", s.store_path, s.layout, s.pages.len()),
             ),
-            Err(e) => r.fail(
-                "config",
-                &format!("{} is invalid", path.display()),
-                &format!("{e}\nThe strip keeps the last valid layout until this is fixed."),
+            Some(e) => r.fail(
+                "store",
+                &format!("{} cannot be used", s.store_path),
+                &format!("{e}\nThe strip shows the default layout and changes are not saved until this is fixed."),
             ),
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => r.note(
-            "config",
-            &format!("{} does not exist yet; nexusd creates it", path.display()),
-        ),
-        Err(e) => r.fail("config", &format!("{}: {e}", path.display()), ""),
+        None => match nexus_control::default_store_path() {
+            Some(path) if path.exists() => r.note(
+                "store",
+                &format!("{} exists; start nexusd to check it", path.display()),
+            ),
+            Some(path) => r.note(
+                "store",
+                &format!("{} does not exist yet; nexusd creates it on first start", path.display()),
+            ),
+            None => r.fail("store", "cannot find the user's state directory", ""),
+        },
     }
 }

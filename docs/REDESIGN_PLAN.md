@@ -701,3 +701,21 @@ golang` finds nothing outside the changelog.
   exactly (5 pages, 2 takeovers); all its comments were copies of the
   bundled help, which a legacy import now drops (`without_lines_in`). The
   bundled default's help is now `##` lines, never kept as notes.
+- 2026-11-14 — Step 2 and 3 of the store built and deployed. Typed edits
+  (`Edit`, JSON over the socket) each run in one transaction, are validated
+  by loading every layout before commit, and record whole-state snapshots
+  for undo and redo (200 kept; a new edit drops the redo branch). The daemon
+  now reads only the store (`nexusd run --db`; default
+  `$XDG_STATE_HOME/nexusd/nexusd.db`); the file watcher is gone. On first
+  start it imports the legacy `nexus.toml` as layout "Main" and renames the
+  file `nexus.toml.imported`. A store it cannot open leaves the default
+  layout on the strip and refuses edits, so nothing is lost by writing over
+  it. A daily `VACUUM INTO` backup keeps 7. `nexusctl` gains `edit` (with a
+  conflict check against the revision the text was made from), `export`,
+  `import`, `undo` and `redo`. Found: `StateDirectory=nexus-open` made
+  systemd symlink `~/.local/state/nexus-open` to the existing
+  `~/.config/nexus-open`, so the unit uses `StateDirectory=nexusd`.
+  Verified on the service: Matt's import exports with an empty diff; an
+  edit moved two widgets on the strip, undo, redo and undo again returned
+  it to the original text exactly; a stray trailing comment was warned
+  about; the day's backup was written.

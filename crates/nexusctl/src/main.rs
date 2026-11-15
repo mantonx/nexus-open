@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use nexus_control::{Client, SignalEntry, Status};
 
 mod doctor;
+mod edit;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -16,7 +17,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Show the daemon's state: device, page, config.
+    /// Show the daemon's state: device, page, layout, store.
     Status,
     /// Check everything the strip needs and say how to fix what is wrong.
     Doctor,
@@ -24,8 +25,36 @@ enum Command {
     Signals,
     /// Show a page: next, prev, a number counting from 1, or a name.
     Page { target: String },
-    /// Re-read the config file now.
+    /// Re-read the store now.
     Reload,
+    /// Edit the layout, settings and sources as TOML in $VISUAL or $EDITOR.
+    /// Saving and closing applies it; comments directly above a table are
+    /// kept as notes.
+    Edit {
+        /// Another layout than the one on the strip.
+        #[arg(long)]
+        layout: Option<String>,
+    },
+    /// Print a layout, the settings and sources as TOML, for sharing or
+    /// backing up.
+    Export {
+        #[arg(long)]
+        layout: Option<String>,
+    },
+    /// Add a layout from a TOML file, as `export` writes it.
+    Import {
+        file: std::path::PathBuf,
+        /// Its name. Default: the file name without its extension.
+        #[arg(long)]
+        name: Option<String>,
+        /// Put it on the strip.
+        #[arg(long)]
+        activate: bool,
+    },
+    /// Take back the last change.
+    Undo,
+    /// Make the last undone change again.
+    Redo,
     /// Set a signal: a number with an optional unit (celsius, percent,
     /// bytes-per-second), or any text.
     Publish {
@@ -45,8 +74,57 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::Edit { layout } = &cli.command {
+        let mut client = match Client::connect() {
+            Ok(c) => c,
+            Err(_) => {
+                eprintln!("nexusctl: nexusd is not running. Start it with: nexusd run");
+                return ExitCode::FAILURE;
+            }
+        };
+        return match edit::run(&mut client, layout.as_deref()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("nexusctl: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let line = match &cli.command {
         Command::Doctor => return doctor::run(),
+        Command::Edit { .. } => unreachable!("handled above"),
+        Command::Export { layout } => match layout {
+            Some(name) => format!("export {name}"),
+            None => "export".into(),
+        },
+        Command::Import {
+            file,
+            name,
+            activate,
+        } => {
+            let text = match std::fs::read_to_string(file) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("nexusctl: {}: {e}", file.display());
+                    return ExitCode::FAILURE;
+                }
+            };
+            let name = name.clone().unwrap_or_else(|| {
+                file.file_stem()
+                    .map_or("Imported".into(), |s| s.to_string_lossy().into_owned())
+            });
+            let request = nexus_control::ImportRequest {
+                name,
+                text,
+                activate: *activate,
+            };
+            format!(
+                "import {}",
+                serde_json::to_string(&request).unwrap_or_default()
+            )
+        }
+        Command::Undo => "undo".into(),
+        Command::Redo => "redo".into(),
         Command::Status => "status".to_string(),
         Command::Signals => "signals".to_string(),
         Command::Page { target } => format!("page {target}"),
@@ -92,6 +170,23 @@ fn main() -> ExitCode {
                 println!("{:width$}  {}", e.name, e.value);
             }
         }
+        Command::Export { .. } => match serde_json::from_value::<nexus_control::Export>(data) {
+            Ok(export) => print!("{}", export.text),
+            Err(e) => {
+                eprintln!("nexusctl: unexpected answer from nexusd: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        Command::Import { activate, .. } => println!(
+            "Added the layout{}.",
+            if activate {
+                " and put it on the strip"
+            } else {
+                "; switch to it in the settings window"
+            }
+        ),
+        Command::Undo => println!("Undid: {}", data["label"].as_str().unwrap_or("?")),
+        Command::Redo => println!("Redid: {}", data["label"].as_str().unwrap_or("?")),
         _ => {}
     }
     ExitCode::SUCCESS
@@ -114,9 +209,10 @@ fn print_status(s: &Status) {
         s.pages.len(),
         s.pages.join(", ")
     );
-    println!("config   {}", s.config_path);
-    if let Some(e) = &s.config_error {
-        println!("         rejected, previous layout in use:");
+    println!("layout   {}", s.layout);
+    println!("store    {}", s.store_path);
+    if let Some(e) = &s.store_error {
+        println!("         cannot be used; showing the default layout, changes are not saved:");
         for line in e.lines() {
             println!("         {line}");
         }

@@ -16,8 +16,9 @@ nexusctl publish disk.used 71 percent
 
 ## Adding one
 
-Put the program next to `nexus.toml` (on Linux, `~/.config/nexus-open/`) and
-add a `[[source]]` section:
+Put the program in the config folder (on Linux, `~/.config/nexus-open/`),
+then add a `[[source]]` section with `nexusctl edit`, which opens the
+layout, settings and sources in your editor:
 
 ```toml
 [[source]]
@@ -29,8 +30,9 @@ run = ["sh", "disk.sh"]
   on Linux, its systemd unit (`nexus-source-disk`).
 - `run`: the program and its arguments. There is no shell, so nothing is
   expanded: write `["sh", "-c", "…"]` if you want one. Programs run in the
-  config folder, so a bare script name next to `nexus.toml` is found. A
-  relative program path (`./disk.sh`) is taken from that folder too.
+  config folder, so a bare script name there is found. A relative program
+  path (`./disk.sh`) is taken from that folder too.
+- `enabled = false` keeps it without running it.
 
 Then show its signals with a widget, as for any built-in reading:
 
@@ -45,8 +47,9 @@ warn = 85
 crit = 95
 ```
 
-Saving the file applies it: new sources start, removed ones stop, and a source
-whose `run` changed is restarted. The others keep running.
+Saving and closing the editor applies it: new sources start, removed ones
+stop, and a source whose `run` changed is restarted. The others keep
+running. `nexusctl undo` takes it back.
 
 ## The protocol
 
