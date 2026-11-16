@@ -857,6 +857,20 @@ golang` finds nothing outside the changelog.
   Minimal, an empty name refused, rename and undo; four undos gave back
   the exact snapshot. Import and export as files come next, with file
   dialogs.
+- 2026-11-15 — Phase 4 step 9: layout files. Strip settings has
+  Import from file… and Export this layout…, through the native file
+  dialog (`rfd`: the XDG portal on Linux, so the desktop's own picker;
+  the system dialogs on macOS and Windows), opened as children of the
+  window. Export leaves out where the weather is for and the sources: a
+  layout file is made to be shared, and those say where the user lives
+  and what is in their home directory (import ignores them anyway).
+  Import checks the file is a layout first, names it after the file and
+  puts it on the strip in one request. Verified with the KDE dialog in
+  the headless session (a private D-Bus, so the dialogs could not open on
+  the real desktop): export wrote the pages with no location in it;
+  importing it as Desk.toml added "Desk" on the strip with the same pages;
+  two undos gave back the exact snapshot. This completes the starter
+  layouts and import/export item of the bar.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

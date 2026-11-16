@@ -17,6 +17,7 @@ use nexus_core::config::{MIN_WIDGET_WIDTH, Takeover, Temperature, Widget};
 use nexus_store::{Edit, Item, Row};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
 
+use crate::files;
 use crate::geometry::{self, STRIP};
 use crate::inspector::{self, Context, Field, Kind, Missing, Outcome, Reading, Values};
 use crate::layouts;
@@ -112,6 +113,9 @@ pub struct Editor {
     edit_after: Option<String>,
     /// The strip's settings are open in the settings area.
     settings_open: bool,
+    /// What the last file action did, shown as the caption until the
+    /// next change.
+    notice: String,
 
     /// The inspector's rows, kept so a changed value updates its row in
     /// place rather than rebuilding every control.
@@ -162,6 +166,7 @@ impl Editor {
             adding: None,
             edit_after: None,
             settings_open: false,
+            notice: String::new(),
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
@@ -246,6 +251,8 @@ impl Editor {
         app.on_rename_layout(move |name| e.borrow_mut().rename_layout(name.as_str()));
         let e = editor.clone();
         app.on_add_layout(move |choice| e.borrow_mut().add_layout(choice.as_str()));
+        app.on_import_layout(import_layout);
+        app.on_export_layout(export_layout);
         let e = editor.clone();
         app.on_show_page(move |i| e.borrow_mut().show_page(i as usize));
         let e = editor.clone();
@@ -703,6 +710,7 @@ impl Editor {
         self.busy = true;
         // A problem lasts until the next change is tried.
         self.problem.clear();
+        self.notice.clear();
         let app = self.app.clone();
         thread::spawn(move || {
             let answer = Client::connect()
@@ -822,6 +830,9 @@ impl Editor {
     }
 
     fn caption(&self, widths: &[u32], selected: Option<usize>) -> String {
+        if !self.notice.is_empty() {
+            return self.notice.clone();
+        }
         if let Some(name) = &self.editing
             && self.takeover.as_ref() != Some(name)
         {
@@ -1505,6 +1516,91 @@ impl Editor {
             serde_json::to_string(&import).unwrap_or_default()
         ));
     }
+}
+
+/// Import from file…: asks for a layout file, checks it, and adds it as
+/// a new layout on the strip, named after the file.
+fn import_layout() {
+    let Some(dialog) = file_dialog() else {
+        return;
+    };
+    let _ = slint::spawn_local(async move {
+        let Some(file) = dialog
+            .set_title("Import a layout")
+            .add_filter("Nexus Open layout", &["toml"])
+            .pick_file()
+            .await
+        else {
+            return; // cancelled
+        };
+        let read = files::read(file.path());
+        with_editor(|e| match read {
+            Err(why) => e.set_problem(why),
+            Ok((base, text)) => {
+                let Some(l) = &e.layout else {
+                    return;
+                };
+                let taken: Vec<&str> = l.layouts.iter().map(|x| x.name.as_str()).collect();
+                let name = layouts::unique_name(&base, &taken);
+                e.leave_layout();
+                let import = ImportRequest {
+                    name,
+                    text,
+                    activate: true,
+                };
+                e.request(format!(
+                    "import {}",
+                    serde_json::to_string(&import).unwrap_or_default()
+                ));
+            }
+        });
+    });
+}
+
+/// Export…: saves the layout on the strip as a file to share.
+fn export_layout() {
+    let Some(dialog) = file_dialog() else {
+        return;
+    };
+    let mut current = None;
+    with_editor(|e| {
+        current = e
+            .layout
+            .as_ref()
+            .map(|l| (l.name.clone(), files::export_text(&l.config, &l.notes)));
+    });
+    let Some((name, text)) = current else {
+        return;
+    };
+    let _ = slint::spawn_local(async move {
+        let Some(file) = dialog
+            .set_title("Export the layout")
+            .set_file_name(files::file_name(&name))
+            .add_filter("Nexus Open layout", &["toml"])
+            .save_file()
+            .await
+        else {
+            return; // cancelled
+        };
+        let path = file.path().to_path_buf();
+        let written = std::fs::write(&path, text);
+        with_editor(|e| match written {
+            Ok(()) => {
+                e.problem.clear();
+                e.notice = format!("Saved “{name}” to {}.", path.display());
+                e.show();
+            }
+            Err(why) => e.set_problem(format!("Cannot save {}: {why}", path.display())),
+        });
+    });
+}
+
+/// A file dialog that opens over the settings window.
+fn file_dialog() -> Option<rfd::AsyncFileDialog> {
+    let mut app = None;
+    with_editor(|e| app = e.app.upgrade());
+    let app = app?;
+    Some(rfd::AsyncFileDialog::new().set_parent(&app.window().window_handle()))
 }
 
 /// Shows page `index` (from 0) on the strip. Off the UI thread, so a slow

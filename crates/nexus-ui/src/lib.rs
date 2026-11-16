@@ -7,6 +7,7 @@
 //! running the window says so and keeps retrying.
 
 mod editor;
+mod files;
 mod geometry;
 mod inspector;
 mod layouts;

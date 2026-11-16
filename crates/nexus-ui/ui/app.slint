@@ -148,6 +148,8 @@ component LayoutsSection inherits VerticalLayout {
     callback delete(int);
     callback rename(string);
     callback add(string);
+    callback import();
+    callback export();
 
     spacing: 8px;
     padding-top: 16px;
@@ -225,7 +227,7 @@ component LayoutsSection inherits VerticalLayout {
             horizontal-alignment: right;
             color: Palette.foreground.transparentize(0.2);
         }
-        start := ComboBox {
+        from-choice := ComboBox {
             model: root.choices;
             enabled: root.enabled;
             horizontal-stretch: 1;
@@ -234,16 +236,44 @@ component LayoutsSection inherits VerticalLayout {
         Button {
             text: "Add";
             enabled: root.enabled;
-            accessible-label: "Add a layout from " + start.current-value + " and show it";
+            accessible-label: "Add a layout from " + from-choice.current-value + " and show it";
             clicked => {
-                root.add(start.current-value);
+                root.add(from-choice.current-value);
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        Text {
+            text: "Files";
+            width: 150px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            color: Palette.foreground.transparentize(0.2);
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Button {
+                text: "Import from file…";
+                enabled: root.enabled;
+                clicked => {
+                    root.import();
+                }
+            }
+            Button {
+                text: "Export this layout…";
+                enabled: root.enabled;
+                clicked => {
+                    root.export();
+                }
             }
         }
     }
     HorizontalLayout {
         padding-left: 162px;
         Text {
-            text: "The new layout goes on the strip. Undo takes it back.";
+            text: "A new or imported layout goes on the strip; undo takes it back. An exported file holds the pages, takeovers and settings, but not where the weather is for or the sources.";
             font-size: 12px;
             wrap: word-wrap;
             color: Palette.foreground.transparentize(0.4);
@@ -282,6 +312,9 @@ export component AppWindow inherits Window {
     callback delete-layout(int);
     callback rename-layout(string);
     callback add-layout(string);
+    /// Add a layout from a file; save the one on the strip as a file.
+    callback import-layout();
+    callback export-layout();
     property <bool> copied;
 
     // Copies through a text input's own clipboard support, which works on
@@ -880,6 +913,12 @@ export component AppWindow inherits Window {
                             }
                             add(choice) => {
                                 root.add-layout(choice);
+                            }
+                            import => {
+                                root.import-layout();
+                            }
+                            export => {
+                                root.export-layout();
                             }
                         }
                     }
