@@ -342,3 +342,30 @@ mod tests {
         assert!(!r.contains(&home));
     }
 }
+
+#[cfg(test)]
+mod troubleshooting {
+    /// Every check the doctor can report has a section in the
+    /// troubleshooting page, named after it.
+    #[test]
+    fn every_check_has_a_section() {
+        let page = include_str!("../../../docs/TROUBLESHOOTING.md");
+        let source = include_str!("lib.rs");
+        let mut names: Vec<&str> = Vec::new();
+        for call in [r#"r.ok(""#, r#"r.fail(""#, r#"r.note(""#, r#"what: ""#] {
+            for part in source.split(call).skip(1) {
+                let name = &part[..part.find('"').unwrap()];
+                // Skip this test's own patterns and the unit test's data.
+                if !name.is_empty() && !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+        for name in names {
+            assert!(
+                page.contains(&format!("\n## {name}\n")),
+                "docs/TROUBLESHOOTING.md has no section for `{name}`"
+            );
+        }
+    }
+}
