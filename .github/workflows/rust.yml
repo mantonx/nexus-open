@@ -49,3 +49,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libfontconfig-dev
       - run: cargo clippy --workspace --all-targets --locked
       - run: cargo test --workspace --locked
+      # Fails on a render-cost regression. Linux only: one budget, one kind
+      # of machine.
+      - if: runner.os == 'Linux'
+        run: cargo run --release --locked -p nexus-core --example render_cost

@@ -973,6 +973,16 @@ golang` finds nothing outside the changelog.
   has one section per doctor check, named after its line of output, with
   the cause and the fix. A test in nexus-doctor fails if a check is added
   without a section (verified by renaming one).
+- 2026-11-15 — Phase 5, render-cost benchmark. The `render_cost` example
+  times 600 redraws of the default layout with moving demo data, and
+  every frame of repeated swipes to page 2 (it asserts each one lands).
+  It exits with an error when a median goes over budget, and CI runs it
+  on Linux. Here: 161 µs per update and 5 µs per swipe frame, since a
+  slide only shifts two page pictures rendered once; the slowest swipe
+  frames (about 0.4 ms) are the ones that render those pictures. Budgets:
+  1 ms and 0.1 ms. Medians, so one stall on a shared CI machine does not
+  fail the build; a regression has to be several times slower to be
+  caught, which is the price of not flaking.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
