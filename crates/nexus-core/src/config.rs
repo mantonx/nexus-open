@@ -753,4 +753,19 @@ mod tests {
             assert!(e.contains(says), "{body}: {e}");
         }
     }
+
+    /// docs/LAYOUT.md's examples are real: each complete one parses.
+    #[test]
+    fn the_layout_reference_examples_parse() {
+        let page = include_str!("../../../docs/LAYOUT.md");
+        let mut checked = 0;
+        for block in page.split("```toml\n").skip(1) {
+            let text = &block[..block.find("```").expect("closed block")];
+            if text.contains("[[page]]") {
+                Config::parse(text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "the reference has a whole layout");
+    }
 }

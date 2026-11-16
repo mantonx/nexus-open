@@ -983,6 +983,15 @@ golang` finds nothing outside the changelog.
   1 ms and 0.1 ms. Medians, so one stall on a shared CI machine does not
   fail the build; a regression has to be several times slower to be
   caught, which is the price of not flaking.
+- 2026-11-15 — Phase 5, docs. `docs/LAYOUT.md` is the config reference:
+  every key of settings, weather, pages, widgets, actions, takeovers and
+  sources, with the rules the parser enforces, and the signals the
+  built-in sources publish. A test parses its whole-layout example, so
+  it cannot drift from the parser (checked by breaking it). The plugin
+  protocol was already written (`docs/EXTERNAL_SOURCES.md`). Left: the
+  install guide. `docs/INSTALLATION.md` still describes the Go app's
+  packages; its replacement describes the new packages, so it waits for
+  them.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
