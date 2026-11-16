@@ -962,6 +962,13 @@ golang` finds nothing outside the changelog.
   minutes each locally: about 109 million inputs, no crash, and the round
   trip held. A weekly CI job (`fuzz.yml`, also by hand and when `fuzz/`
   changes) runs each for five minutes and uploads any crash.
+- 2026-11-15 — Phase 5, soak started. `scripts/soak-record.sh` samples
+  the nexusd service once a minute (PID, CPU, RSS, threads, open files,
+  lines logged) into `~/.local/state/nexusd/soak/`. It is read-only and
+  runs as the user unit `nexusd-soak` for 72 hours from 21:17 on
+  2026-11-15, so it ends 2026-11-18 21:17. First samples: 0.18% CPU,
+  45.8 MB RSS, 15 threads, 26 files, nothing logged. The bar: no
+  restart, RSS drift under 5 MB.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
