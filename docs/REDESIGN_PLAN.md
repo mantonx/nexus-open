@@ -889,6 +889,21 @@ golang` finds nothing outside the changelog.
   scheme, all at 4.5:1 or better (the old dark red was 4.4:1, now 5.3:1).
   The zone outlines stay as they are: they are drawn over the strip
   preview, which is black in both schemes.
+- 2026-11-15 — Phase 4 step 12: a disconnect loses nothing. A change
+  that cannot reach nexusd is kept and sent again as soon as a status
+  poll gets an answer; the caption says so. One whose connection broke
+  after sending is sent again only if it is an edit: an edit names the
+  revision it was made against, so if it did arrive the second copy is
+  refused rather than made twice (an import could be made twice, so it
+  is not). Found on the way: a change made while another was on its way
+  was silently dropped. Changes now wait in order, and an edit takes its
+  revision when it is sent, not when it was made, so it is not refused
+  for following the one before it. Verified: with the socket link
+  removed, switching to the 12-hour clock left the store untouched and
+  showed the message; with it back, the change landed within 2 s. Two
+  Ctrl+Z 1 ms apart undid two changes (traced: the second waited for the
+  first). My first runs of that test seemed to fail; the window under
+  test was an older build.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

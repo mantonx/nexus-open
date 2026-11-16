@@ -7,7 +7,7 @@
 //! so nothing here has to guess what the daemon did.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
@@ -116,6 +116,10 @@ pub struct Editor {
     /// What the last file action did, shown as the caption until the
     /// next change.
     notice: String,
+    /// A request that could not reach nexusd, sent again once it answers.
+    unsent: Option<String>,
+    /// Changes made while one was still on its way, in order.
+    waiting: VecDeque<Waiting>,
 
     /// The inspector's rows, kept so a changed value updates its row in
     /// place rather than rebuilding every control.
@@ -167,6 +171,8 @@ impl Editor {
             edit_after: None,
             settings_open: false,
             notice: String::new(),
+            unsent: None,
+            waiting: VecDeque::new(),
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
@@ -287,6 +293,12 @@ impl Editor {
     /// A new status from the poll. Fetches the layout when it changed.
     pub fn status(editor: &Shared, status: &Status) {
         let mut e = editor.borrow_mut();
+        // nexusd answers again: send what it missed.
+        if !e.busy
+            && let Some(line) = e.unsent.take()
+        {
+            e.request(line);
+        }
         let stale = e
             .layout
             .as_ref()
@@ -691,6 +703,12 @@ impl Editor {
     /// Sends an edit made against the layout on show, then fetches the
     /// layout again. A refusal is shown and the preview drops back.
     fn send(&mut self, edit: Edit) {
+        // Kept as the edit, not the line: the revision it is made against
+        // is the one current when it is sent, after the one before it.
+        if self.busy {
+            self.waiting.push_back(Waiting::Edit(edit));
+            return;
+        }
         let base = self.layout.as_ref().map(|l| l.revision);
         let line = format!(
             "edit {}",
@@ -705,6 +723,7 @@ impl Editor {
 
     fn request(&mut self, line: String) {
         if self.busy {
+            self.waiting.push_back(Waiting::Line(line));
             return;
         }
         self.busy = true;
@@ -713,19 +732,31 @@ impl Editor {
         self.notice.clear();
         let app = self.app.clone();
         thread::spawn(move || {
-            let answer = Client::connect()
-                .map_err(|e| format!("cannot reach nexusd: {e}"))
-                .and_then(|mut c| {
-                    c.request(&line)
-                        .map_err(|e| format!("lost the connection to nexusd: {e}"))
-                })
-                .and_then(|reply| reply);
+            let answer = match Client::connect() {
+                Err(_) => Err(Failure::Unsent),
+                Ok(mut c) => match c.request(&line) {
+                    Err(_) => Err(Failure::Lost),
+                    Ok(reply) => reply.map_err(Failure::Refused),
+                },
+            };
             let layout = fetch();
             let _ = app.upgrade_in_event_loop(move |_| {
                 with_editor(|e| {
                     e.busy = false;
-                    if let Err(problem) = answer {
-                        e.set_problem(problem);
+                    match answer {
+                        Ok(_) => {}
+                        Err(Failure::Refused(problem)) => e.set_problem(problem),
+                        Err(failure) => {
+                            if keep(&failure, &line) {
+                                e.unsent = Some(line);
+                                e.set_problem(
+                                    "nexusd cannot be reached. This change is kept and is sent once it answers again."
+                                        .into(),
+                                );
+                            } else {
+                                e.set_problem("The connection to nexusd was lost during this change; check whether it was made.".into());
+                            }
+                        }
                     }
                     match layout {
                         Some(l) => e.set_layout(l),
@@ -733,6 +764,14 @@ impl Editor {
                             e.preview = None;
                             e.show();
                         }
+                    }
+                    // The next change, unless this one failed: then the
+                    // ones after it may depend on it, so they are dropped
+                    // and the problem says why.
+                    if e.problem.is_empty() {
+                        e.send_next();
+                    } else {
+                        e.waiting.clear();
                     }
                 });
             });
@@ -1518,6 +1557,44 @@ impl Editor {
     }
 }
 
+/// A change made while another was on its way.
+enum Waiting {
+    Edit(Edit),
+    Line(String),
+}
+
+impl Editor {
+    fn send_next(&mut self) {
+        match self.waiting.pop_front() {
+            Some(Waiting::Edit(edit)) => self.send(edit),
+            Some(Waiting::Line(line)) => self.request(line),
+            None => {}
+        }
+    }
+}
+
+/// Why a request did not go through.
+enum Failure {
+    /// nexusd could not be reached: nothing was sent.
+    Unsent,
+    /// The connection broke after sending: it may or may not have been made.
+    Lost,
+    /// nexusd said no, and why.
+    Refused(String),
+}
+
+/// Whether a failed request is kept to send again. One never sent always
+/// is. One that may have arrived only if it is an edit: an edit names the
+/// revision it was made against, so if it did arrive, sending it again is
+/// refused rather than made twice. Anything else could be done twice.
+fn keep(failure: &Failure, line: &str) -> bool {
+    match failure {
+        Failure::Unsent => true,
+        Failure::Lost => line.starts_with("edit "),
+        Failure::Refused(_) => false,
+    }
+}
+
 /// Import from file…: asks for a layout file, checks it, and adds it as
 /// a new layout on the strip, named after the file.
 fn import_layout() {
@@ -1733,6 +1810,15 @@ fn fetch_layout(app: Weak<AppWindow>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_changes_that_cannot_happen_twice_are_sent_again() {
+        assert!(keep(&Failure::Unsent, "import {}"));
+        assert!(keep(&Failure::Lost, "edit {}"));
+        assert!(!keep(&Failure::Lost, "import {}"));
+        assert!(!keep(&Failure::Lost, "undo"));
+        assert!(!keep(&Failure::Refused("no".into()), "edit {}"));
+    }
 
     #[test]
     fn long_undo_labels_are_cut_short() {
