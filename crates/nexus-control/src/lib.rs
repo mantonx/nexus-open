@@ -324,11 +324,55 @@ pub fn socket_path() -> PathBuf {
 }
 
 fn name(path: &std::path::Path) -> io::Result<Name<'_>> {
+    named(path, "nexus-open")
+}
+
+/// A socket's name: the file on Unix, a namespaced name on Windows.
+fn named<'a>(path: &'a std::path::Path, windows: &'static str) -> io::Result<Name<'a>> {
     if cfg!(windows) {
-        "nexus-open".to_ns_name::<interprocess::local_socket::GenericNamespaced>()
+        windows.to_ns_name::<interprocess::local_socket::GenericNamespaced>()
     } else {
         path.to_fs_name::<interprocess::local_socket::GenericFilePath>()
     }
+}
+
+/// The settings window's own socket, beside the daemon's: a second window
+/// asks the first one to show itself instead of opening.
+fn ui_socket_path() -> PathBuf {
+    dirs::runtime_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("nexus-open-ui.sock")
+}
+
+/// Asks a window that is already open to show itself. True if one did.
+pub fn ui_raise() -> bool {
+    let path = ui_socket_path();
+    let Ok(name) = named(&path, "nexus-open-ui") else {
+        return false;
+    };
+    let Ok(mut stream) = Stream::connect(name) else {
+        return false;
+    };
+    stream.write_all(b"show\n").is_ok()
+}
+
+/// Removes the settings window's socket file as the window exits.
+pub fn ui_unlisten() {
+    if cfg!(unix) {
+        let _ = std::fs::remove_file(ui_socket_path());
+    }
+}
+
+/// Opens the settings window's socket, replacing a stale one. Call after
+/// `ui_raise` found no window.
+pub fn ui_listen() -> io::Result<Listener> {
+    let path = ui_socket_path();
+    if cfg!(unix) {
+        let _ = std::fs::remove_file(&path);
+    }
+    ListenerOptions::new()
+        .name(named(&path, "nexus-open-ui")?)
+        .create_sync()
 }
 
 /// Error from `listen` when another daemon already answers on the socket.

@@ -15,6 +15,7 @@ mod settings;
 mod signals;
 mod simulate;
 mod takeovers;
+mod tray;
 mod window_size;
 
 use std::io;
@@ -31,7 +32,7 @@ use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel, Weak};
 slint::include_modules!();
 
 /// Matches the old app's ID, so the existing desktop file and icon apply.
-const APP_ID: &str = "io.nexus.open";
+pub(crate) const APP_ID: &str = "io.nexus.open";
 /// Strip size in pixels.
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 48;
@@ -50,6 +51,13 @@ const CHECK_HEALTHY: Duration = Duration::from_secs(30);
 
 /// Whether the frame stream is up; a change runs the checks again.
 static STREAMING: AtomicBool = AtomicBool::new(false);
+/// Whether the window is on screen. Hidden in the tray it asks the daemon
+/// for nothing: no frames, no polling.
+static VISIBLE: AtomicBool = AtomicBool::new(true);
+/// Whether the tray icon is up, so closing the window can hide it.
+static IN_TRAY: AtomicBool = AtomicBool::new(false);
+/// Polling while hidden only checks, this often, whether it is shown.
+const HIDDEN_WAIT: Duration = Duration::from_millis(250);
 
 /// Asks the checks to run again now.
 static RECHECK: OnceLock<Sender<()>> = OnceLock::new();
@@ -60,8 +68,12 @@ fn recheck() {
     }
 }
 
-/// Opens the window and runs until it is closed.
+/// Opens the window and runs until it is closed, or quit from the tray.
+/// If a window is already open, shows that one instead.
 pub fn run() -> Result<(), slint::PlatformError> {
+    if nexus_control::ui_raise() {
+        return Ok(());
+    }
     // Creating the window also creates Slint's platform (the winit backend).
     let app = AppWindow::new()?;
     // On Wayland the app ID is how the desktop finds the window's icon and
@@ -83,12 +95,92 @@ pub fn run() -> Result<(), slint::PlatformError> {
         .map_err(|e| slint::PlatformError::Other(e.to_string()))?;
 
     window_size::restore(&app);
-    window_size::save_on_close(&app);
+    app.window().on_close_requested(|| {
+        with_app(window_size::save);
+        if IN_TRAY.load(Ordering::Relaxed) {
+            VISIBLE.store(false, Ordering::Relaxed);
+        } else {
+            let _ = slint::quit_event_loop();
+        }
+        slint::CloseRequestResponse::HideWindow
+    });
+    APP.with(|a| *a.borrow_mut() = Some(app.as_weak()));
+    IN_TRAY.store(tray::start(tray_command), Ordering::Relaxed);
+    listen_for_raise();
 
     spawn("frames", app.as_weak(), stream_frames)?;
     spawn("status", app.as_weak(), poll_status)?;
 
-    app.run()
+    app.show()?;
+    // Not `app.run()`: that returns once the window is hidden, and hidden
+    // in the tray the window must keep running.
+    let ran = slint::run_event_loop_until_quit();
+    nexus_control::ui_unlisten();
+    let _ = app.hide();
+    ran
+}
+
+thread_local! {
+    static APP: std::cell::RefCell<Option<Weak<AppWindow>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `f` with the window, on the UI thread.
+fn with_app(f: impl FnOnce(&AppWindow)) {
+    let app = APP.with(|a| a.borrow().as_ref().and_then(Weak::upgrade));
+    if let Some(app) = app {
+        f(&app);
+    }
+}
+
+/// From the tray's thread: show, hide or quit the window.
+fn tray_command(command: tray::Command) {
+    let _ = slint::invoke_from_event_loop(move || match command {
+        tray::Command::Show => show_window(),
+        tray::Command::Hide => hide_window(),
+        tray::Command::Toggle => {
+            if VISIBLE.load(Ordering::Relaxed) {
+                hide_window();
+            } else {
+                show_window();
+            }
+        }
+        tray::Command::Quit => {
+            with_app(window_size::save);
+            let _ = slint::quit_event_loop();
+        }
+    });
+}
+
+fn show_window() {
+    with_app(|app| {
+        let _ = app.show();
+    });
+    if !VISIBLE.swap(true, Ordering::Relaxed) {
+        recheck();
+    }
+}
+
+fn hide_window() {
+    with_app(|app| {
+        window_size::save(app);
+        let _ = app.hide();
+    });
+    VISIBLE.store(false, Ordering::Relaxed);
+}
+
+/// A second `nexusd ui` asks this window to show itself.
+fn listen_for_raise() {
+    let Ok(listener) = nexus_control::ui_listen() else {
+        return; // then a second window opens; nothing worse
+    };
+    let _ = thread::Builder::new().name("raise".into()).spawn(move || {
+        use interprocess::local_socket::traits::ListenerExt;
+        for _ in listener.incoming().flatten() {
+            if slint::invoke_from_event_loop(show_window).is_err() {
+                return;
+            }
+        }
+    });
 }
 
 fn spawn(
@@ -108,6 +200,9 @@ fn spawn(
 /// they read /proc and the socket, and the window must open at once.
 fn run_checks(app: &Weak<AppWindow>, again: &Receiver<()>) {
     loop {
+        while !VISIBLE.load(Ordering::Relaxed) {
+            thread::sleep(HIDDEN_WAIT);
+        }
         let checks = nexus_doctor::run();
         let report = nexus_doctor::report(&checks);
         let problems: Vec<Problem> = checks
@@ -142,7 +237,16 @@ fn run_checks(app: &Weak<AppWindow>, again: &Receiver<()>) {
 /// connection drops. Returns once the window has closed.
 fn stream_frames(app: &Weak<AppWindow>) {
     loop {
+        // Hidden in the tray: no frames, so the daemon has no viewer.
+        while !VISIBLE.load(Ordering::Relaxed) {
+            thread::sleep(HIDDEN_WAIT);
+        }
         let _why = watch_frames(app);
+        if !VISIBLE.load(Ordering::Relaxed) {
+            // Dropped on purpose; it is picked up again when shown.
+            STREAMING.store(false, Ordering::Relaxed);
+            continue;
+        }
         // Only when it was up: retrying every second while the daemon is
         // down must not run the checks every second too.
         if STREAMING.swap(false, Ordering::Relaxed) {
@@ -181,6 +285,9 @@ fn watch_frames(app: &Weak<AppWindow>) -> io::Error {
             Ok(f) => f,
             Err(e) => return e,
         };
+        if !VISIBLE.load(Ordering::Relaxed) {
+            return io::Error::other("window hidden");
+        }
         if rgba.len() != (WIDTH * HEIGHT * 4) as usize {
             return io::Error::new(io::ErrorKind::InvalidData, "frame of the wrong size");
         }
@@ -199,6 +306,10 @@ fn watch_frames(app: &Weak<AppWindow>) -> io::Error {
 
 fn poll_status(app: &Weak<AppWindow>) {
     for tick in 0u64.. {
+        if !VISIBLE.load(Ordering::Relaxed) {
+            thread::sleep(HIDDEN_WAIT);
+            continue;
+        }
         // Signals once a second: the inspector's "Now 52 °C" lines.
         if tick % SIGNALS_EVERY == 0 {
             let entries = Client::connect()

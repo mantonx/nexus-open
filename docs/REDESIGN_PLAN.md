@@ -915,6 +915,20 @@ golang` finds nothing outside the changelog.
   Performance and back, a tap on the clock opened Clock, a tap there
   returned to System. Media and slider widgets were not touched, since
   they act on the real player and volume.
+- 2026-11-15 — Phase 4 step 14: the tray icon. On Linux a
+  StatusNotifierItem (`ksni`, on async-io rather than tokio) with Show,
+  Hide and Quit; a click toggles. With the icon up, closing the window
+  hides it; without a tray host it quits as before. Hidden, the window
+  drops its frame stream and stops polling, so it asks the daemon for
+  nothing. `nexusd ui` while a window is open shows that one instead
+  (a small `nexus-open-ui.sock` beside the daemon's, removed on exit).
+  The window now runs until quit rather than until hidden. Verified on a
+  private bus with a stand-in watcher, so nothing appeared on the real
+  panel: the item registered with its title, icon and menu; Hide unmapped
+  the window and closed its frame stream; Show brought both back; closing
+  the window hid it; a second launch showed it and exited in 8–20 ms; Quit
+  ended the process and saved the size. Once, a second launch took 10 s
+  to exit after showing the window; four repeats did not, cause unknown.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

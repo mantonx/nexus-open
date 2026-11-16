@@ -38,21 +38,18 @@ pub fn restore(app: &AppWindow) {
     }
 }
 
-/// Saves the size when the window closes. Failing to save only means the
-/// next window opens at the default size.
-pub fn save_on_close(app: &AppWindow) {
-    let weak = app.as_weak();
-    app.window().on_close_requested(move || {
-        if let (Some(app), Some(path)) = (weak.upgrade(), path()) {
-            let window = app.window();
-            let size = window.size().to_logical(window.scale_factor());
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(path, format(size.width, size.height));
-        }
-        slint::CloseRequestResponse::HideWindow
-    });
+/// Saves the window's size, when it closes. Failing to save only means
+/// the next window opens at the default size.
+pub fn save(app: &AppWindow) {
+    let Some(path) = path() else {
+        return;
+    };
+    let window = app.window();
+    let size = window.size().to_logical(window.scale_factor());
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, format(size.width, size.height));
 }
 
 #[cfg(test)]
