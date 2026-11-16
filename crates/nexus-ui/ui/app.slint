@@ -284,8 +284,6 @@ component LayoutsSection inherits VerticalLayout {
 export component AppWindow inherits Window {
     title: "Nexus Open";
     icon: @image-url("../assets/icon.png");
-    min-width: 720px;
-    min-height: 320px;
     preferred-width: 1340px;
     preferred-height: 820px;
     background: Palette.background;
@@ -679,8 +677,16 @@ export component AppWindow inherits Window {
                 accessible-role: text;
             }
 
-            HorizontalBox {
+            // Scrolls sideways when the tabs are wider than the window: a
+            // plain row would make every tab part of the window's minimum
+            // width, and with many pages push the panels off screen.
+            tabs := ScrollView {
+                height: tab-row.preferred-height + 10px;
+                content-width: max(self.visible-width, tab-row.preferred-width);
+                content-height: tab-row.preferred-height;
+            tab-row := HorizontalBox {
                 padding: 0;
+                width: tabs.content-width;
 
                 // The pages, in order: a click shows that page on the strip.
                 for name[i] in root.pages: Button {
@@ -730,6 +736,7 @@ export component AppWindow inherits Window {
                 Rectangle {
                     horizontal-stretch: 1;
                 }
+            }
             }
 
             // The inspector: the selected widget's settings.

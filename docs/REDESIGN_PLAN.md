@@ -871,6 +871,16 @@ golang` finds nothing outside the changelog.
   importing it as Desk.toml added "Desk" on the strip with the same pages;
   two undos gave back the exact snapshot. This completes the starter
   layouts and import/export item of the bar.
+- 2026-11-15 — Phase 4 step 10: window size. The fixed 720 px minimum
+  was smaller than the layout needed, so at that width the signal browser
+  was cut off; the minimum now comes from the layout itself (753×485 with
+  the default layout, inside the 1024×640 bar). The page and takeover tabs
+  scroll sideways instead of adding to the minimum, which also fixes many
+  tabs pushing the panels off screen. Undo and redo labels are cut to 26
+  characters for the same reason. The window's size is saved in logical
+  pixels when it is closed and restored at start (state dir,
+  `window-size`). Verified headless: resized to 1100×700, closed with a
+  WM_DELETE_WINDOW request, and the next window opened at 1100×700.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

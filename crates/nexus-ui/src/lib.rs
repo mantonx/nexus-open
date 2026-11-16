@@ -14,6 +14,7 @@ mod layouts;
 mod settings;
 mod signals;
 mod takeovers;
+mod window_size;
 
 use std::io;
 use std::sync::OnceLock;
@@ -79,6 +80,9 @@ pub fn run() -> Result<(), slint::PlatformError> {
         .name("doctor".into())
         .spawn(move || run_checks(&weak, &rx))
         .map_err(|e| slint::PlatformError::Other(e.to_string()))?;
+
+    window_size::restore(&app);
+    window_size::save_on_close(&app);
 
     spawn("frames", app.as_weak(), stream_frames)?;
     spawn("status", app.as_weak(), poll_status)?;

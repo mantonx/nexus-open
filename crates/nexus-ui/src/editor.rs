@@ -1642,8 +1642,16 @@ fn row(f: &Field) -> FieldRow {
     }
 }
 
+/// An undo or redo label, cut short: the buttons' width counts toward
+/// the window's minimum width, so a long name must not widen the window.
 fn label(s: Option<&str>) -> SharedString {
-    s.unwrap_or_default().into()
+    const MAX: usize = 26;
+    let s = s.unwrap_or_default();
+    if s.chars().count() <= MAX {
+        return s.into();
+    }
+    let cut: String = s.chars().take(MAX - 1).collect();
+    format!("{}…", cut.trim_end()).into()
 }
 
 /// A widget's name as people see it: its label, or what it is.
@@ -1720,4 +1728,19 @@ fn fetch_layout(app: Weak<AppWindow>) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_undo_labels_are_cut_short() {
+        assert_eq!(label(Some("Add page Page 6")), "Add page Page 6");
+        assert_eq!(
+            label(Some("Change takeover A very long takeover name")),
+            "Change takeover A very lo…"
+        );
+        assert_eq!(label(None), "");
+    }
 }
