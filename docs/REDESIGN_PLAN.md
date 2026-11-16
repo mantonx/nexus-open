@@ -823,6 +823,24 @@ golang` finds nothing outside the changelog.
   service: the 12-hour clock showed on the strip at once, coordinates out
   of range were refused with nothing sent, and undo restored the exact
   snapshot.
+- 2026-11-15 — Phase 4 step 7: onboarding and diagnostics. The checks
+  behind `nexusctl doctor` moved into a `nexus-doctor` crate that returns
+  them as data; the CLI prints them as before, and the window runs them on
+  a thread (at start, every 5 s while one fails, every 30 s otherwise, and
+  at once when the daemon connection comes or goes). A banner appears only
+  when a check fails, naming it and its fix as selectable text, with
+  "Check again" and "Copy diagnostics"; Strip settings has the copy button
+  too. The report gives versions, the OS and desktop session and every
+  check, with the home directory shown as ~ and nothing from the layout
+  (it can hold where the user lives). Copying goes through a hidden text
+  input's own clipboard support, so no clipboard crate. With a service
+  installed, "nexusd is not running" now says to start the service and
+  where its log is, not `nexusd run`. Verified from the headless session:
+  a window given an empty runtime dir showed the banner; a fix line could
+  be selected and copied; linking the real socket in cleared the banner
+  within 3 s. Found while testing: a runtime dir path over about 90
+  characters makes the socket path exceed the 108-byte limit, and that
+  reads as "not running".
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

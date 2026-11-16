@@ -14,11 +14,15 @@ mod signals;
 mod takeovers;
 
 use std::io;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
 use nexus_control::{Client, SignalEntry, Status};
-use slint::{Image, Rgba8Pixel, SharedPixelBuffer, Weak};
+use nexus_doctor::State;
+use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel, Weak};
 
 slint::include_modules!();
 
@@ -35,6 +39,22 @@ const RETRY: Duration = Duration::from_secs(1);
 const STATUS_POLL: Duration = Duration::from_millis(250);
 /// Signals are fetched every this many status polls.
 const SIGNALS_EVERY: u64 = 4;
+/// How often the checks run again: often while something is wrong, so
+/// the problem goes away soon after it is fixed, and rarely otherwise.
+const CHECK_FAILING: Duration = Duration::from_secs(5);
+const CHECK_HEALTHY: Duration = Duration::from_secs(30);
+
+/// Whether the frame stream is up; a change runs the checks again.
+static STREAMING: AtomicBool = AtomicBool::new(false);
+
+/// Asks the checks to run again now.
+static RECHECK: OnceLock<Sender<()>> = OnceLock::new();
+
+fn recheck() {
+    if let Some(tx) = RECHECK.get() {
+        let _ = tx.send(());
+    }
+}
 
 /// Opens the window and runs until it is closed.
 pub fn run() -> Result<(), slint::PlatformError> {
@@ -48,6 +68,15 @@ pub fn run() -> Result<(), slint::PlatformError> {
     let editor = editor::Editor::new(&app);
     editor::Editor::connect(&editor, &app);
     editor::install(&editor);
+
+    let (tx, rx) = mpsc::channel();
+    let _ = RECHECK.set(tx);
+    app.on_check_again(recheck);
+    let weak = app.as_weak();
+    thread::Builder::new()
+        .name("doctor".into())
+        .spawn(move || run_checks(&weak, &rx))
+        .map_err(|e| slint::PlatformError::Other(e.to_string()))?;
 
     spawn("frames", app.as_weak(), stream_frames)?;
     spawn("status", app.as_weak(), poll_status)?;
@@ -67,11 +96,51 @@ fn spawn(
         .map_err(|e| slint::PlatformError::Other(e.to_string()))
 }
 
+/// Runs the `nexusctl doctor` checks now and again, and whenever asked,
+/// for the onboarding banner and "Copy diagnostics". Off the UI thread:
+/// they read /proc and the socket, and the window must open at once.
+fn run_checks(app: &Weak<AppWindow>, again: &Receiver<()>) {
+    loop {
+        let checks = nexus_doctor::run();
+        let report = nexus_doctor::report(&checks);
+        let problems: Vec<Problem> = checks
+            .into_iter()
+            .filter(|c| c.state == State::Fail)
+            .map(|c| Problem {
+                what: c.what.into(),
+                detail: c.detail.into(),
+                fix: c.fix.into(),
+            })
+            .collect();
+        let wait = if problems.is_empty() {
+            CHECK_HEALTHY
+        } else {
+            CHECK_FAILING
+        };
+        let shown = app.upgrade_in_event_loop(move |app| {
+            app.set_problems(ModelRc::new(VecModel::from(problems)));
+            app.set_diagnostics(report.into());
+        });
+        if shown.is_err() {
+            return; // window closed
+        }
+        match again.recv_timeout(wait) {
+            Ok(()) | Err(RecvTimeoutError::Timeout) => while again.try_recv().is_ok() {},
+            Err(RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
 /// Shows every frame the daemon sends, reconnecting whenever the
 /// connection drops. Returns once the window has closed.
 fn stream_frames(app: &Weak<AppWindow>) {
     loop {
         let _why = watch_frames(app);
+        // Only when it was up: retrying every second while the daemon is
+        // down must not run the checks every second too.
+        if STREAMING.swap(false, Ordering::Relaxed) {
+            recheck();
+        }
         // Fails only when the event loop has ended: the window is gone.
         if app
             .upgrade_in_event_loop(|app| app.set_connected(false))
@@ -93,6 +162,10 @@ fn watch_frames(app: &Weak<AppWindow>) -> io::Error {
         Ok(Ok(_)) => {}
         Ok(Err(message)) => return io::Error::other(message),
         Err(e) => return e,
+    }
+    // The daemon is back: the checks say so at once, not in 30 s.
+    if !STREAMING.swap(true, Ordering::Relaxed) {
+        recheck();
     }
     loop {
         let rgba = match client.next_frame() {

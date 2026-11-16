@@ -18,6 +18,13 @@ export struct Zone {
 }
 
 /// One signal in the signal browser.
+/// A check that failed, from the same checks as `nexusctl doctor`.
+export struct Problem {
+    what: string,
+    detail: string,
+    fix: string,
+}
+
 export struct SignalRow {
     name: string,
     /// Its latest value, in the display units.
@@ -136,6 +143,35 @@ export component AppWindow inherits Window {
     in property <image> frame;
     /// False while the daemon cannot be reached.
     in property <bool> connected;
+    /// The checks that failed, each with its fix; empty when all is well.
+    in property <[Problem]> problems;
+    /// Every check and the system, to paste into a bug report.
+    in property <string> diagnostics;
+    /// Run the checks again now.
+    callback check-again();
+    property <bool> copied;
+
+    // Copies through a text input's own clipboard support, which works on
+    // every platform Slint runs on. Never shown.
+    clip := TextInput {
+        visible: false;
+        text: root.diagnostics;
+    }
+
+    function copy-diagnostics() {
+        clip.select-all();
+        clip.copy();
+        clip.clear-selection();
+        root.copied = true;
+    }
+
+    Timer {
+        interval: 2s;
+        running: root.copied;
+        triggered => {
+            root.copied = false;
+        }
+    }
     /// The page on the strip, and its position ("2 of 4").
     in property <string> page-name;
     in property <string> page-position;
@@ -288,16 +324,57 @@ export component AppWindow inherits Window {
 
             }
 
-            if !root.connected: Rectangle {
+            // Onboarding: shown only when something is wrong, naming each
+            // problem and its fix. The fixes can be selected and copied.
+            if !root.connected || root.problems.length > 0: Rectangle {
                 background: #e0a00030;
                 border-radius: 6px;
-                height: banner.preferred-height + 16px;
-                banner := Text {
-                    x: 12px;
-                    width: parent.width - 24px;
-                    text: "Not connected to nexusd. Start it with `nexusd run`; this window reconnects by itself.";
-                    wrap: word-wrap;
-                    accessible-role: text;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: !root.connected
+                                ? "Not connected to nexusd. This window reconnects by itself once it runs."
+                                : "Something needs fixing before the strip works fully.";
+                            font-weight: 600;
+                            wrap: word-wrap;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            accessible-role: text;
+                        }
+                        Button {
+                            text: "Check again";
+                            clicked => {
+                                root.check-again();
+                            }
+                        }
+                        Button {
+                            text: root.copied ? "Copied" : "Copy diagnostics";
+                            enabled: root.diagnostics != "";
+                            clicked => {
+                                root.copy-diagnostics();
+                            }
+                        }
+                    }
+                    for p in root.problems: VerticalLayout {
+                        spacing: 2px;
+                        Text {
+                            text: p.what + ": " + p.detail;
+                            wrap: word-wrap;
+                            accessible-role: text;
+                        }
+                        if p.fix != "": TextInput {
+                            text: p.fix;
+                            read-only: true;
+                            single-line: false;
+                            wrap: word-wrap;
+                            font-family: "monospace";
+                            color: Palette.foreground.transparentize(0.15);
+                            accessible-label: "How to fix " + p.what;
+                        }
+                    }
                 }
             }
 
@@ -517,6 +594,13 @@ export component AppWindow inherits Window {
                         enabled: root.connected && root.editable;
                         clicked => {
                             root.add-widget();
+                        }
+                    }
+                    if root.form == "settings": Button {
+                        text: root.copied ? "Copied" : "Copy diagnostics";
+                        enabled: root.diagnostics != "";
+                        clicked => {
+                            root.copy-diagnostics();
                         }
                     }
                     if root.selected < 0 && (root.form == "new-takeover" || root.form == "takeover"): Button {

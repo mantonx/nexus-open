@@ -3016,6 +3016,15 @@ name = "nexus-device"
 version = "0.1.0"
 
 [[package]]
+name = "nexus-doctor"
+version = "0.1.0"
+dependencies = [
+ "nexus-control",
+ "nexus-device",
+ "serde_json",
+]
+
+[[package]]
 name = "nexus-sources"
 version = "0.1.0"
 dependencies = [
@@ -3046,6 +3055,7 @@ version = "0.1.0"
 dependencies = [
  "nexus-control",
  "nexus-core",
+ "nexus-doctor",
  "nexus-store",
  "serde_json",
  "shlex 2.0.1",
@@ -3060,7 +3070,7 @@ dependencies = [
  "clap",
  "nexus-control",
  "nexus-core",
- "nexus-device",
+ "nexus-doctor",
  "nexus-store",
  "serde_json",
 ]
