@@ -12,17 +12,18 @@ use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
-use nexus_control::{Client, EditRequest, Layout, SignalEntry, Status};
+use nexus_control::{Client, EditRequest, ImportRequest, Layout, LayoutEntry, SignalEntry, Status};
 use nexus_core::config::{MIN_WIDGET_WIDTH, Takeover, Temperature, Widget};
 use nexus_store::{Edit, Item, Row};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
 
 use crate::geometry::{self, STRIP};
 use crate::inspector::{self, Context, Field, Kind, Missing, Outcome, Reading, Values};
+use crate::layouts;
 use crate::settings;
 use crate::signals;
 use crate::takeovers;
-use crate::{AppWindow, Field as FieldRow, SignalRow, Zone};
+use crate::{AppWindow, Field as FieldRow, LayoutRow, SignalRow, Zone};
 
 /// A takeover being edited is shown on the strip for this long, and asked
 /// for again every `LEASE_RENEW`. If the window goes away, it ends soon.
@@ -235,6 +236,16 @@ impl Editor {
                 e.signal_picked(&name);
             }
         });
+        let choices: Vec<SharedString> = layouts::choices().into_iter().map(Into::into).collect();
+        app.set_layout_choices(ModelRc::new(VecModel::from(choices)));
+        let e = editor.clone();
+        app.on_use_layout(move |i| e.borrow_mut().use_layout(i as usize));
+        let e = editor.clone();
+        app.on_delete_layout(move |i| e.borrow_mut().delete_layout(i as usize));
+        let e = editor.clone();
+        app.on_rename_layout(move |name| e.borrow_mut().rename_layout(name.as_str()));
+        let e = editor.clone();
+        app.on_add_layout(move |choice| e.borrow_mut().add_layout(choice.as_str()));
         let e = editor.clone();
         app.on_show_page(move |i| e.borrow_mut().show_page(i as usize));
         let e = editor.clone();
@@ -763,6 +774,24 @@ impl Editor {
             .map(|t| t.name.as_str().into())
             .collect();
         app.set_takeovers(ModelRc::new(VecModel::from(names)));
+        let rows: Vec<LayoutRow> = self
+            .layout
+            .iter()
+            .flat_map(|l| {
+                l.layouts.iter().map(|e| LayoutRow {
+                    name: e.name.as_str().into(),
+                    active: e.id == l.id,
+                })
+            })
+            .collect();
+        app.set_layouts(ModelRc::new(VecModel::from(rows)));
+        app.set_layout_name(
+            self.layout
+                .as_ref()
+                .map(|l| l.name.as_str())
+                .unwrap_or_default()
+                .into(),
+        );
         app.set_current_takeover(editing.map_or(-1, |i| i as i32));
 
         app.set_editable(self.editable());
@@ -1395,6 +1424,89 @@ impl Editor {
     }
 }
 
+/// Layouts: switching, adding, renaming and deleting.
+impl Editor {
+    fn layout_entry(&self, i: usize) -> Option<LayoutEntry> {
+        self.layout.as_ref()?.layouts.get(i).cloned()
+    }
+
+    /// Before the strip changes layout: nothing of the old one stays chosen.
+    fn leave_layout(&mut self) {
+        self.stop_editing();
+        self.adding = None;
+        self.selected = None;
+    }
+
+    fn use_layout(&mut self, i: usize) {
+        let Some(entry) = self.layout_entry(i) else {
+            return;
+        };
+        if self.layout.as_ref().is_some_and(|l| l.id != entry.id) {
+            self.leave_layout();
+            self.send(Edit::Activate { layout: entry.id });
+        }
+    }
+
+    fn delete_layout(&mut self, i: usize) {
+        if let Some(entry) = self.layout_entry(i) {
+            self.send(Edit::DeleteLayout { layout: entry.id });
+        }
+    }
+
+    /// Renames the layout on the strip.
+    fn rename_layout(&mut self, name: &str) {
+        let Some(l) = &self.layout else {
+            return;
+        };
+        let name = name.trim();
+        if name == l.name {
+            return;
+        }
+        let refused = if name.is_empty() {
+            Some("A layout needs a name.".to_string())
+        } else if l.layouts.iter().any(|e| e.name == name) {
+            Some(format!("There is already a layout called “{name}”."))
+        } else {
+            None
+        };
+        if let Some(why) = refused {
+            if let Some(app) = self.app.upgrade() {
+                app.set_layout_name_resets(app.get_layout_name_resets() + 1);
+            }
+            self.set_problem(why);
+            return;
+        }
+        let layout = l.id;
+        self.send(Edit::RenameLayout {
+            layout,
+            name: name.into(),
+        });
+    }
+
+    /// Adds a layout from `choice` (see `layouts::choices`) and puts it on
+    /// the strip, in one request.
+    fn add_layout(&mut self, choice: &str) {
+        let Some(l) = &self.layout else {
+            return;
+        };
+        let Some((base, text)) = layouts::start(choice, (&l.name, &l.config, &l.notes)) else {
+            return;
+        };
+        let taken: Vec<&str> = l.layouts.iter().map(|e| e.name.as_str()).collect();
+        let name = layouts::unique_name(&base, &taken);
+        self.leave_layout();
+        let import = ImportRequest {
+            name,
+            text,
+            activate: true,
+        };
+        self.request(format!(
+            "import {}",
+            serde_json::to_string(&import).unwrap_or_default()
+        ));
+    }
+}
+
 /// Shows page `index` (from 0) on the strip. Off the UI thread, so a slow
 /// daemon never freezes the window; the status poll picks up the change.
 fn request_page(index: usize) {
@@ -1471,6 +1583,13 @@ pub fn signals(entries: Vec<SignalEntry>) {
 }
 
 /// A new status from the poll, for the installed editor.
+/// The daemon is reachable again. It may have restarted, a new version
+/// with more to say, while the store's revision stayed the same, so the
+/// layout is fetched again rather than waiting for a revision to move.
+pub fn reconnected() {
+    with_editor(|e| fetch_layout(e.app.clone()));
+}
+
 pub fn status(status: &Status) {
     let editor = EDITOR.with(|e| e.borrow().clone());
     if let Some(editor) = editor {

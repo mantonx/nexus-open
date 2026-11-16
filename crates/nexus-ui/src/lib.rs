@@ -9,6 +9,7 @@
 mod editor;
 mod geometry;
 mod inspector;
+mod layouts;
 mod settings;
 mod signals;
 mod takeovers;
@@ -163,9 +164,11 @@ fn watch_frames(app: &Weak<AppWindow>) -> io::Error {
         Ok(Err(message)) => return io::Error::other(message),
         Err(e) => return e,
     }
-    // The daemon is back: the checks say so at once, not in 30 s.
+    // The daemon is back: the checks say so at once, not in 30 s, and
+    // the layout is fetched afresh.
     if !STREAMING.swap(true, Ordering::Relaxed) {
         recheck();
+        let _ = app.upgrade_in_event_loop(|_| editor::reconnected());
     }
     loop {
         let rgba = match client.next_frame() {

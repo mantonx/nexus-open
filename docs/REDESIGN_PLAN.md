@@ -841,6 +841,22 @@ golang` finds nothing outside the changelog.
   within 3 s. Found while testing: a runtime dir path over about 90
   characters makes the socket path exceed the 108-byte limit, and that
   reads as "not running".
+- 2026-11-15 — Phase 4 step 8: layouts. Strip settings lists every
+  layout with Show and Delete, the name of the one on the strip, and Add
+  layout from a copy of it, an empty page, or a starter: Everything (the
+  default), Monitor, Music and Minimal, bundled beside `default.toml` and
+  tested to fill every page. Each add is one `import` request that also
+  puts it on the strip, since the window sends one request at a time;
+  import keeps the user's settings and sources, and its undo label is now
+  "Add layout X". The `layout` answer gained the list of layouts. With
+  more than one layout the header names the one shown. Found: after the
+  daemon restarts (an upgrade) the store revision is unchanged, so an
+  open window never fetched the new answer and showed no layouts; it now
+  fetches the layout whenever the connection comes back. Verified against
+  the service: add Minimal (on the strip at once), Show Main, Delete
+  Minimal, an empty name refused, rename and undo; four undos gave back
+  the exact snapshot. Import and export as files come next, with file
+  dialogs.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

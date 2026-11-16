@@ -14,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use jiff::Zoned;
-use nexus_control::{Export, Layout, PageTarget, Request, SignalEntry, Status};
+use nexus_control::{Export, Layout, LayoutEntry, PageTarget, Request, SignalEntry, Status};
 use nexus_core::config;
 use nexus_core::demo;
 use nexus_core::engine::{Engine, Input};
@@ -416,6 +416,12 @@ impl Daemon {
                     ids: store.ids(id).map_err(|e| e.to_string())?,
                     undo: store.undo_label().map_err(|e| e.to_string())?,
                     redo: store.redo_label().map_err(|e| e.to_string())?,
+                    layouts: store
+                        .layouts()
+                        .map_err(|e| e.to_string())?
+                        .into_iter()
+                        .map(|(id, name)| LayoutEntry { id, name })
+                        .collect(),
                 };
                 serde_json::to_value(layout).map_err(|e| e.to_string())
             }

@@ -1,0 +1,49 @@
+## Starter: Music. What is playing, large, with the time; then the
+## controls. A tap plays or pauses, a long press skips.
+
+[[page]]
+name = "Playing"
+
+[[page.widget]]
+type = "media"
+width = 427
+tap = { media = "play-pause" }
+hold = { media = "next" }
+
+[[page.widget]]
+type = "clock"
+width = 213
+
+# A touch that lands on a slider belongs to it, so swipe pages from the
+# media widget on this page.
+[[page]]
+name = "Controls"
+
+[[page.widget]]
+type = "media"
+width = 214
+tap = { media = "play-pause" }
+hold = { media = "next" }
+
+[[page.widget]]
+type = "slider"
+width = 213
+label = "Position"
+controls = "seek"
+
+[[page.widget]]
+type = "slider"
+width = 213
+label = "Volume"
+controls = "volume"
+
+[[takeover]]
+name = "Volume"
+on_change = ["volume.level", "volume.muted"]
+seconds = 2
+
+[[takeover.widget]]
+type = "slider"
+width = 640
+label = "Volume"
+controls = "volume"

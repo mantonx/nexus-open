@@ -1,0 +1,72 @@
+## Starter: Monitor. Temperatures and load side by side, then memory,
+## network and the time. Volume changes still show briefly.
+
+[[page]]
+name = "Monitor"
+
+[[page.widget]]
+type = "value"
+width = 160
+label = "CPU"
+signal = "cpu.temp"
+graph = "area"
+warn = 75
+crit = 90
+
+[[page.widget]]
+type = "value"
+width = 160
+label = "GPU"
+signal = "gpu.temp"
+graph = "area"
+warn = 75
+crit = 90
+
+[[page.widget]]
+type = "value"
+width = 160
+label = "CPU load"
+signal = "cpu.load"
+graph = "line"
+warn = 85
+
+[[page.widget]]
+type = "value"
+width = 160
+label = "GPU load"
+signal = "gpu.load"
+graph = "line"
+warn = 85
+
+[[page]]
+name = "System"
+
+[[page.widget]]
+type = "value"
+width = 213
+label = "Memory"
+signal = "mem.used"
+graph = "line"
+warn = 90
+
+[[page.widget]]
+type = "rate"
+width = 213
+label = "Net"
+down = "net.down"
+up = "net.up"
+
+[[page.widget]]
+type = "clock"
+width = 214
+
+[[takeover]]
+name = "Volume"
+on_change = ["volume.level", "volume.muted"]
+seconds = 2
+
+[[takeover.widget]]
+type = "slider"
+width = 640
+label = "Volume"
+controls = "volume"

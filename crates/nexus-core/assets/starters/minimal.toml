@@ -1,0 +1,26 @@
+## Starter: Minimal. The time and the weather, and a new track shown for
+## a few seconds.
+
+[[page]]
+name = "Clock"
+
+[[page.widget]]
+type = "clock"
+width = 427
+
+[[page.widget]]
+type = "value"
+width = 213
+label = "Weather"
+signal = "weather.temp"
+
+[[takeover]]
+name = "Now playing"
+on_change = ["media.title"]
+seconds = 5
+
+[[takeover.widget]]
+type = "media"
+width = 640
+tap = { media = "play-pause" }
+hold = { media = "next" }

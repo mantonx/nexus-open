@@ -122,6 +122,15 @@ pub struct Layout {
     /// What undo and redo would take back or make again, if anything.
     pub undo: Option<String>,
     pub redo: Option<String>,
+    /// Every layout, this one among them, by name.
+    #[serde(default)]
+    pub layouts: Vec<LayoutEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LayoutEntry {
+    pub id: i64,
+    pub name: String,
 }
 
 /// The answer to `export`.

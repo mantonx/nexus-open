@@ -180,7 +180,7 @@ impl Store {
         whole: bool,
     ) -> Result<LayoutId, StoreError> {
         config.validate()?;
-        self.write(&format!("Import layout {name}"), |tx| {
+        self.write(&format!("Add layout {name}"), |tx| {
             tx.execute("INSERT INTO layout (name) VALUES (?1)", [name])?;
             let layout = tx.last_insert_rowid();
             write_layout(tx, layout, config, notes)?;

@@ -17,6 +17,15 @@ use crate::fonts::FontChoice;
 /// The layout used when there is no config file yet.
 pub const DEFAULT: &str = include_str!("../assets/default.toml");
 
+/// Layouts to start from, by name: their pages and takeovers. Any
+/// settings in them are ignored when one is added.
+pub const STARTERS: [(&str, &str); 4] = [
+    ("Everything", DEFAULT),
+    ("Monitor", include_str!("../assets/starters/monitor.toml")),
+    ("Music", include_str!("../assets/starters/music.toml")),
+    ("Minimal", include_str!("../assets/starters/minimal.toml")),
+];
+
 /// Narrowest widget that still fits a label and a value.
 pub const MIN_WIDGET_WIDTH: u32 = 40;
 
@@ -517,6 +526,18 @@ impl Weather {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn every_starter_is_valid_and_fills_its_pages() {
+        for (name, text) in super::STARTERS {
+            let c = Config::parse(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            for p in &c.pages {
+                let width: u32 = p.widgets.iter().map(|w| w.width()).sum();
+                assert_eq!(width, 640, "{name}, page {}", p.name);
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

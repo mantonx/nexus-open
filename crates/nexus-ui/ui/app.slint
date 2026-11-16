@@ -18,6 +18,12 @@ export struct Zone {
 }
 
 /// One signal in the signal browser.
+/// A layout, and whether it is the one on the strip.
+export struct LayoutRow {
+    name: string,
+    active: bool,
+}
+
 /// A check that failed, from the same checks as `nexusctl doctor`.
 export struct Problem {
     what: string,
@@ -130,6 +136,121 @@ component FieldRow inherits HorizontalLayout {
     }
 }
 
+/// The layouts in Strip settings: each with Show and Delete, the name of
+/// the one on the strip, and Add layout from a copy, empty or a starter.
+component LayoutsSection inherits VerticalLayout {
+    in property <[LayoutRow]> layouts;
+    in property <string> layout-name;
+    in property <[string]> choices;
+    in property <int> resets;
+    in property <bool> enabled;
+    callback use(int);
+    callback delete(int);
+    callback rename(string);
+    callback add(string);
+
+    spacing: 8px;
+    padding-top: 16px;
+
+    Text {
+        text: "Layouts";
+        font-size: 15px;
+        font-weight: 600;
+        accessible-role: text;
+    }
+    Text {
+        text: "A layout is a set of pages and takeovers. The settings above apply to every layout.";
+        font-size: 12px;
+        wrap: word-wrap;
+        color: Palette.foreground.transparentize(0.4);
+    }
+    for l[i] in root.layouts: HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: l.active ? l.name + "  ·  on the strip" : l.name;
+            font-weight: l.active ? 600 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            accessible-role: text;
+        }
+        Button {
+            text: "Show";
+            enabled: root.enabled && !l.active;
+            accessible-label: "Show layout " + l.name + " on the strip";
+            clicked => {
+                root.use(i);
+            }
+        }
+        Button {
+            text: "Delete";
+            enabled: root.enabled && !l.active;
+            accessible-label: "Delete layout " + l.name;
+            clicked => {
+                root.delete(i);
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        Text {
+            text: "Name";
+            width: 150px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            color: Palette.foreground.transparentize(0.2);
+        }
+        // Made anew after a refused name, so it starts from the real one.
+        for item in [{ name: root.layout-name, epoch: root.resets }]: LineEdit {
+            property <string> name: item.name;
+            text: item.name;
+            enabled: root.enabled;
+            accessible-label: "Name of the layout on the strip";
+            accepted(text) => {
+                root.rename(text);
+            }
+            changed has-focus => {
+                if !self.has-focus && self.text != self.name {
+                    root.rename(self.text);
+                }
+            }
+        }
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        Text {
+            text: "Add layout";
+            width: 150px;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            color: Palette.foreground.transparentize(0.2);
+        }
+        start := ComboBox {
+            model: root.choices;
+            enabled: root.enabled;
+            horizontal-stretch: 1;
+            accessible-label: "What the new layout starts from";
+        }
+        Button {
+            text: "Add";
+            enabled: root.enabled;
+            accessible-label: "Add a layout from " + start.current-value + " and show it";
+            clicked => {
+                root.add(start.current-value);
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-left: 162px;
+        Text {
+            text: "The new layout goes on the strip. Undo takes it back.";
+            font-size: 12px;
+            wrap: word-wrap;
+            color: Palette.foreground.transparentize(0.4);
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Nexus Open";
     icon: @image-url("../assets/icon.png");
@@ -149,6 +270,18 @@ export component AppWindow inherits Window {
     in property <string> diagnostics;
     /// Run the checks again now.
     callback check-again();
+    /// Every layout; the name of the one on the strip; what a new one can
+    /// start from. Bumped when a typed layout name is refused.
+    in property <[LayoutRow]> layouts;
+    in property <string> layout-name;
+    in property <[string]> layout-choices;
+    in property <int> layout-name-resets;
+    /// Put layout `i` on the strip; delete it; rename the one on the
+    /// strip; add one from a choice and put it on the strip.
+    callback use-layout(int);
+    callback delete-layout(int);
+    callback rename-layout(string);
+    callback add-layout(string);
     property <bool> copied;
 
     // Copies through a text input's own clipboard support, which works on
@@ -290,6 +423,8 @@ export component AppWindow inherits Window {
                 }
                 Text {
                     text: !root.connected ? ""
+                        : root.layouts.length > 1 && root.current-takeover < 0 && root.page-name != ""
+                            ? root.layout-name + "  ·  " + root.page-name + "  ·  page " + root.page-position
                         : root.current-takeover >= 0 ? root.takeovers[root.current-takeover] + "  ·  takeover"
                         : root.page-name != "" ? root.page-name + "  ·  page " + root.page-position : "";
                     color: Palette.foreground.transparentize(0.35);
@@ -726,6 +861,25 @@ export component AppWindow inherits Window {
                             choose(key) => {
                                 root.choose-signal(key);
                                 filter.focus();
+                            }
+                        }
+                        if root.form == "settings": LayoutsSection {
+                            layouts: root.layouts;
+                            layout-name: root.layout-name;
+                            choices: root.layout-choices;
+                            resets: root.layout-name-resets;
+                            enabled: root.connected;
+                            use(i) => {
+                                root.use-layout(i);
+                            }
+                            delete(i) => {
+                                root.delete-layout(i);
+                            }
+                            rename(name) => {
+                                root.rename-layout(name);
+                            }
+                            add(choice) => {
+                                root.add-layout(choice);
                             }
                         }
                     }
