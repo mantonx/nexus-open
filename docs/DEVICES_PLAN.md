@@ -1,7 +1,7 @@
 # Corsair devices plan
 
-Status: proposed 2026-11-15, waiting on Matt's answers under "Decisions for
-Matt". Nothing here is built yet.
+Status: agreed 2026-11-15 (decisions below). Starts after the redesign's
+Phase 5 ships the Nexus on Linux. Nothing here is built yet.
 
 ## Goal
 
@@ -19,7 +19,7 @@ Start with the devices on Matt's machine:
 | `1b1c:0c32` | iCUE Commander Core (Elite Capellix pump and fans) | Bragi |
 | `1b1c:1b7c` | K100 RGB Optical | Bragi |
 
-Then widen family by family, not device by device (see "Families").
+Then widen family by family, not device by device (see D6).
 
 This changes the redesign plan's Goal, which listed other hardware as out of
 scope. The redesign phases (4, 5, 6, 8) stay as they are; this plan adds
@@ -194,11 +194,11 @@ Safety-critical. Read-only first.
 1. **Read-only:** firmware, connected fans, pump and fan RPM, coolant
    temperature as signals, without leaving hardware mode, if the device
    allows reads in hardware mode. Find out.
-2. **Hardware test, GATE: with Matt watching**, one at a time, each with a
-   way back: what the device does when software mode is entered and the
-   host goes silent for 5 s, 30 s, 2 min (does it fall back, hold its last
-   duty, or stop?). Watch coolant temperature throughout; abort above
-   45 °C. The answer sets the watchdog design.
+2. **The pump test. GATE: Matt at the machine, every run.** It answers
+   what the Commander Core does when it is in software mode and the host
+   goes silent: falls back to its hardware curve, holds its last duty, or
+   stops. The answer sets the watchdog design. See "The pump test" below
+   for the procedure; nothing in it is shortened or skipped.
 3. **Control:** fan and pump curves following any signal (coolant, CPU,
    GPU), presets (Quiet, Balanced, Extreme), the 50% pump floor, hardware
    fallback restored on exit.
@@ -226,9 +226,13 @@ on; kill -9 the daemon mid-macro and the keyboard types normally.
 ### D5 — Profiles
 
 - Profiles that switch lighting, cooling and keys together.
-- Per-app switching needs the focused window, which the redesign plan
-  listed as out of scope ("focused-window context engine"). **GATE: Matt**.
-  If yes, KDE first (Matt's desktop), GNOME, then wlroots.
+- Per-app switching. Agreed 2026-11-15, within a limit: the focused
+  app's id is one signal, `app.focused`, and profiles may switch on it.
+  The strip's layout does not rearrange on it; that stays out of scope.
+  KDE first (a KWin script reporting over D-Bus), then GNOME (needs an
+  extension), then wlroots (`wlr-foreign-toplevel`). Where none works the
+  signal is absent and profiles switch by hand, from the strip or the
+  window.
 
 ### D6 — Widen by family
 
@@ -253,22 +257,68 @@ Follows the redesign plan's Phase 6, on `hidapi`. Open questions there:
 whether macOS asks for Input Monitoring when only the vendor interface is
 opened, and stopping the Corsair Service on Windows.
 
-## Where this fits
+## The pump test
 
-The device work should start after the redesign's Phase 5 ships the Nexus
-on Linux. Shipping one device well proves the packaging, the store and the
-service before the scope grows. **GATE: Matt**, see below.
+Agreed with Matt on 2026-11-15: be careful. The procedure, in full.
 
-## Decisions for Matt
+**Before the first run**
 
-1. **When:** after the Nexus ships (Phase 5), or start D1–D2 now? D1 also
-   improves the Nexus (hotplug instead of a retry timer).
-2. **Name:** "Nexus Open" names one product. Keep it, or rename before the
-   first package goes out, while that is still cheap?
-3. **Per-app profiles** (D5) need a focused-window backend, which the
-   redesign plan ruled out. Allow it for profiles only?
-4. **Pump test** (D3 step 2): agree the procedure before anything is sent
-   to the cooler.
+- D3 step 1 is done: readings (pump and fan RPM, coolant temperature) have
+  run read-only for at least three days and match what iCUE showed on
+  Windows or what the hardware should read at idle (Matt to confirm the
+  expected pump RPM).
+- Every packet the test sends is written out in `docs/devices/` and
+  matches at least two sources (OpenLinkHub and OpenRGB or liquidctl). Any
+  byte the sources disagree on is not sent.
+- The test is a separate dev binary with a fixed script, not the daemon.
+  Its first run is a dry run that prints every packet and sends nothing;
+  Matt reads it.
+- Nothing else has the device open (the owner check), OpenLinkHub and
+  liquidctl are not installed, and `nexusd` is not touching the cooler.
+- The machine is idle: no game, build or render running. Coolant at its
+  idle baseline, recorded.
+
+**Independent readings.** The coolant reading comes from the device under
+test, so it cannot be trusted while the device's state is unknown. During
+every run the test also logs the CPU package temperature from the kernel
+(`k10temp` or `coretemp` hwmon) every second, and Matt watches the pump
+and fans (sound, the pump ring's light).
+
+**Duty never goes down.** In software mode the test only ever sets the
+pump to 100% and the fans to at least what they ran at in hardware mode.
+So whichever answer we find, "it holds the last duty" is the safe one.
+
+**The runs**, each starting and ending in hardware mode, with at least
+5 minutes in hardware mode between runs:
+
+1. Enter software mode, read speeds, return to hardware mode at once.
+   Passes if the pump RPM never drops.
+2. Enter software mode, set pump 100%, read speeds every second for 30 s,
+   return to hardware mode. Passes if the pump reaches and holds full
+   speed.
+3. Silence: enter software mode, set pump 100%, then send nothing for
+   5 s. The first packet after the silence reads speeds, which shows the
+   state the device chose; then return to hardware mode.
+4. The same with 15 s, 30 s, 60 s and 120 s of silence, one per run, only
+   if the run before passed and showed no drop.
+
+**Stop at once** (the script returns to hardware mode, and Matt is told
+why) if any of these happen:
+
+- CPU package temperature rises more than 10 °C over its idle baseline.
+- The pump RPM read back is below the hardware-mode RPM recorded at the
+  start, or zero.
+- Any read fails or times out, or a reply does not match its command.
+- Matt hears or sees the pump stop. He stops the run with Ctrl+C; the
+  script's handler returns the device to hardware mode.
+
+**If the device stops answering**: shut the machine down. The pump is
+powered from SATA and returns to its hardware curve at power-on; a USB
+reset alone has not been tested and is not relied on.
+
+**Afterwards**: the results go in the decision log with the raw readings,
+and the watchdog is designed from them: how often the daemon must speak,
+and what it does if it cannot.
 
 ## Decision log
 
@@ -280,3 +330,9 @@ service before the scope grows. **GATE: Matt**, see below.
   LCD cap shares the Nexus's display transport, and the Commander Core and
   K100 share Bragi, so three of the four starting devices need one new
   protocol.
+- 2026-11-15 — Matt's answers. (1) The device work starts after the
+  redesign's Phase 5 ships the Nexus. (2) Rename the app before the first
+  package; the new name is Matt's pick. (3) Per-app profiles: Matt left it
+  to Claude. Allowed as one signal, `app.focused`, that profiles may
+  switch on; the strip's layout does not react to it (see D5). (4) The pump
+  test is careful: the full procedure is in "The pump test".
