@@ -929,6 +929,20 @@ golang` finds nothing outside the changelog.
   the window hid it; a second launch showed it and exited in 8–20 ms; Quit
   ended the process and saved the size. Once, a second launch took 10 s
   to exit after showing the window; four repeats did not, cause unknown.
+- 2026-11-15 — Phase 4 step 15: strings to translate, and start time.
+  Every visible string and screen-reader label in `app.slint` is marked
+  with `@tr()` (gettext-compatible), and sentences built by joining
+  pieces became one string with placeholders, so a translation can put
+  the words in its own order. The window looks the same. Not done: the
+  strings made in Rust (captions, problems, field labels and help, the
+  doctor). Several choice fields match the chosen value against its
+  shown text ("°F (Fahrenheit)"), so translating them would break the
+  matching; those fields need stable ids first, then the Rust strings
+  can be marked the same way. Start time, release build in the headless
+  session: the window was mapped after 419 and 546 ms with warm caches;
+  1878 ms on the first run after building, with the binary not yet in
+  the page cache. A true cold start (caches dropped, needs sudo) is left
+  to measure on Matt's machine.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

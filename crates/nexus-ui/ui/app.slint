@@ -98,8 +98,8 @@ component FieldRow inherits HorizontalLayout {
                 }
             }
             Button {
-                text: root.choosing-for == root.field.label ? "Choosing…" : "Choose…";
-                accessible-label: "Choose the " + root.field.label + " from the signal list";
+                text: root.choosing-for == root.field.label ? @tr("Choosing…") : @tr("Choose…");
+                accessible-label: @tr("Choose the {} from the signal list", root.field.label);
                 clicked => {
                     root.choose(root.field.key);
                 }
@@ -165,13 +165,13 @@ component LayoutsSection inherits VerticalLayout {
     padding-top: 16px;
 
     Text {
-        text: "Layouts";
+        text: @tr("Layouts");
         font-size: 15px;
         font-weight: 600;
         accessible-role: text;
     }
     Text {
-        text: "A layout is a set of pages and takeovers. The settings above apply to every layout.";
+        text: @tr("A layout is a set of pages and takeovers. The settings above apply to every layout.");
         font-size: 12px;
         wrap: word-wrap;
         color: Palette.foreground.transparentize(0.4);
@@ -179,7 +179,7 @@ component LayoutsSection inherits VerticalLayout {
     for l[i] in root.layouts: HorizontalLayout {
         spacing: 8px;
         Text {
-            text: l.active ? l.name + "  ·  on the strip" : l.name;
+            text: l.active ? @tr("{}  ·  on the strip", l.name) : l.name;
             font-weight: l.active ? 600 : 400;
             vertical-alignment: center;
             overflow: elide;
@@ -187,17 +187,17 @@ component LayoutsSection inherits VerticalLayout {
             accessible-role: text;
         }
         Button {
-            text: "Show";
+            text: @tr("Show");
             enabled: root.enabled && !l.active;
-            accessible-label: "Show layout " + l.name + " on the strip";
+            accessible-label: @tr("Show layout {} on the strip", l.name);
             clicked => {
                 root.use(i);
             }
         }
         Button {
-            text: "Delete";
+            text: @tr("Delete");
             enabled: root.enabled && !l.active;
-            accessible-label: "Delete layout " + l.name;
+            accessible-label: @tr("Delete layout {}", l.name);
             clicked => {
                 root.delete(i);
             }
@@ -206,7 +206,7 @@ component LayoutsSection inherits VerticalLayout {
     HorizontalLayout {
         spacing: 12px;
         Text {
-            text: "Name";
+            text: @tr("Name");
             width: 150px;
             vertical-alignment: center;
             horizontal-alignment: right;
@@ -217,7 +217,7 @@ component LayoutsSection inherits VerticalLayout {
             property <string> name: item.name;
             text: item.name;
             enabled: root.enabled;
-            accessible-label: "Name of the layout on the strip";
+            accessible-label: @tr("Name of the layout on the strip");
             accepted(text) => {
                 root.rename(text);
             }
@@ -231,7 +231,7 @@ component LayoutsSection inherits VerticalLayout {
     HorizontalLayout {
         spacing: 12px;
         Text {
-            text: "Add layout";
+            text: @tr("Add layout");
             width: 150px;
             vertical-alignment: center;
             horizontal-alignment: right;
@@ -241,12 +241,12 @@ component LayoutsSection inherits VerticalLayout {
             model: root.choices;
             enabled: root.enabled;
             horizontal-stretch: 1;
-            accessible-label: "What the new layout starts from";
+            accessible-label: @tr("What the new layout starts from");
         }
         Button {
-            text: "Add";
+            text: @tr("Add");
             enabled: root.enabled;
-            accessible-label: "Add a layout from " + from-choice.current-value + " and show it";
+            accessible-label: @tr("Add a layout from {} and show it", from-choice.current-value);
             clicked => {
                 root.add(from-choice.current-value);
             }
@@ -255,7 +255,7 @@ component LayoutsSection inherits VerticalLayout {
     HorizontalLayout {
         spacing: 12px;
         Text {
-            text: "Files";
+            text: @tr("Files");
             width: 150px;
             vertical-alignment: center;
             horizontal-alignment: right;
@@ -265,14 +265,14 @@ component LayoutsSection inherits VerticalLayout {
             spacing: 8px;
             alignment: start;
             Button {
-                text: "Import from file…";
+                text: @tr("Import from file…");
                 enabled: root.enabled;
                 clicked => {
                     root.import();
                 }
             }
             Button {
-                text: "Export this layout…";
+                text: @tr("Export this layout…");
                 enabled: root.enabled;
                 clicked => {
                     root.export();
@@ -283,7 +283,7 @@ component LayoutsSection inherits VerticalLayout {
     HorizontalLayout {
         padding-left: 162px;
         Text {
-            text: "A new or imported layout goes on the strip; undo takes it back. An exported file holds the pages, takeovers and settings, but not where the weather is for or the sources.";
+            text: @tr("A new or imported layout goes on the strip; undo takes it back. An exported file holds the pages, takeovers and settings, but not where the weather is for or the sources.");
             font-size: 12px;
             wrap: word-wrap;
             color: Palette.foreground.transparentize(0.4);
@@ -292,7 +292,7 @@ component LayoutsSection inherits VerticalLayout {
 }
 
 export component AppWindow inherits Window {
-    title: "Nexus Open";
+    title: @tr("Nexus Open");
     icon: @image-url("../assets/icon.png");
     preferred-width: 1340px;
     preferred-height: 820px;
@@ -464,7 +464,7 @@ export component AppWindow inherits Window {
             HorizontalBox {
                 padding: 0;
                 Text {
-                    text: "Strip preview";
+                    text: @tr("Strip preview");
                     font-size: 18px;
                     font-weight: 600;
                     vertical-alignment: center;
@@ -472,9 +472,9 @@ export component AppWindow inherits Window {
                 Text {
                     text: !root.connected ? ""
                         : root.layouts.length > 1 && root.current-takeover < 0 && root.page-name != ""
-                            ? root.layout-name + "  ·  " + root.page-name + "  ·  page " + root.page-position
-                        : root.current-takeover >= 0 ? root.takeovers[root.current-takeover] + "  ·  takeover"
-                        : root.page-name != "" ? root.page-name + "  ·  page " + root.page-position : "";
+                            ? @tr("{}  ·  {}  ·  page {}", root.layout-name, root.page-name, root.page-position)
+                        : root.current-takeover >= 0 ? @tr("{}  ·  takeover", root.takeovers[root.current-takeover])
+                        : root.page-name != "" ? @tr("{}  ·  page {}", root.page-name, root.page-position) : "";
                     color: Palette.foreground.transparentize(0.35);
                     vertical-alignment: center;
                     horizontal-stretch: 1;
@@ -482,26 +482,26 @@ export component AppWindow inherits Window {
 
                 // Edit, or try the strip out in the preview.
                 Button {
-                    text: "Edit";
+                    text: @tr("Edit");
                     primary: !root.trying;
                     enabled: root.connected;
-                    accessible-label: "Edit mode: clicks on the preview select widgets";
+                    accessible-label: @tr("Edit mode: clicks on the preview select widgets");
                     clicked => {
                         root.set-trying(false);
                     }
                 }
                 Button {
-                    text: "Try it";
+                    text: @tr("Try it");
                     primary: root.trying;
                     enabled: root.connected;
-                    accessible-label: "Try mode: clicks on the preview act as touches on the strip";
+                    accessible-label: @tr("Try mode: clicks on the preview act as touches on the strip");
                     clicked => {
                         root.set-trying(true);
                     }
                 }
 
                 Button {
-                    text: "Settings";
+                    text: @tr("Settings");
                     enabled: root.connected;
                     primary: root.form == "settings";
                     clicked => {
@@ -510,7 +510,7 @@ export component AppWindow inherits Window {
                 }
 
                 Button {
-                    text: root.undo-label == "" ? "Undo" : "Undo: " + root.undo-label;
+                    text: root.undo-label == "" ? @tr("Undo") : @tr("Undo: {}", root.undo-label);
                     enabled: root.connected && root.undo-label != "";
                     clicked => {
                         root.undo();
@@ -518,7 +518,7 @@ export component AppWindow inherits Window {
                 }
 
                 Button {
-                    text: root.redo-label == "" ? "Redo" : "Redo: " + root.redo-label;
+                    text: root.redo-label == "" ? @tr("Redo") : @tr("Redo: {}", root.redo-label);
                     enabled: root.connected && root.redo-label != "";
                     clicked => {
                         root.redo();
@@ -539,8 +539,8 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         Text {
                             text: !root.connected
-                                ? "Not connected to nexusd. This window reconnects by itself once it runs."
-                                : "Something needs fixing before the strip works fully.";
+                                ? @tr("Not connected to nexusd. This window reconnects by itself once it runs.")
+                                : @tr("Something needs fixing before the strip works fully.");
                             font-weight: 600;
                             wrap: word-wrap;
                             vertical-alignment: center;
@@ -548,13 +548,13 @@ export component AppWindow inherits Window {
                             accessible-role: text;
                         }
                         Button {
-                            text: "Check again";
+                            text: @tr("Check again");
                             clicked => {
                                 root.check-again();
                             }
                         }
                         Button {
-                            text: root.copied ? "Copied" : "Copy diagnostics";
+                            text: root.copied ? @tr("Copied") : @tr("Copy diagnostics");
                             enabled: root.diagnostics != "";
                             clicked => {
                                 root.copy-diagnostics();
@@ -575,7 +575,7 @@ export component AppWindow inherits Window {
                             wrap: word-wrap;
                             font-family: "monospace";
                             color: Palette.foreground.transparentize(0.15);
-                            accessible-label: "How to fix " + p.what;
+                            accessible-label: @tr("How to fix {}", p.what);
                         }
                     }
                 }
@@ -606,7 +606,7 @@ export component AppWindow inherits Window {
                     y: round((parent.height - self.height) / 2 / 1phx) * 1phx;
                     opacity: root.connected ? 1 : 0.4;
                     accessible-role: image;
-                    accessible-label: "Strip preview, showing page " + root.page-name;
+                    accessible-label: @tr("Strip preview, showing page {}", root.page-name);
                 }
 
                 // The list of widgets for keyboards and screen readers, laid
@@ -617,8 +617,7 @@ export component AppWindow inherits Window {
                     width: strip.width;
                     height: strip.height;
                     accessible-role: list;
-                    accessible-label: "Widgets on page " + root.page-name
-                        + ". Left and right arrows select; with Control they move the widget, with Shift they resize it.";
+                    accessible-label: @tr("Widgets on page {}. Left and right arrows select; with Control they move the widget, with Shift they resize it.", root.page-name);
                     key-pressed(event) => {
                         if !root.editable {
                             return reject;
@@ -650,7 +649,7 @@ export component AppWindow inherits Window {
                         property <float> at: self.mouse-x / preview-area.unit;
                         mouse-cursor: MouseCursor.pointer;
                         accessible-role: button;
-                        accessible-label: "The strip, to try: a tap or swipe here acts on it";
+                        accessible-label: @tr("The strip, to try: a tap or swipe here acts on it");
                         pointer-event(event) => {
                             if event.button != PointerEventButton.left {
                                 return;
@@ -676,7 +675,7 @@ export component AppWindow inherits Window {
                             border-color: i == root.selected ? Palette.accent-background : #ffffff38;
                             background: i == root.selected ? Palette.accent-background.transparentize(0.85) : transparent;
                             accessible-role: list-item;
-                            accessible-label: zone.name + ", " + zone.width + " pixels wide";
+                            accessible-label: @tr("{}, {} pixels wide", zone.name, zone.width);
                             accessible-item-selectable: true;
                             accessible-item-selected: i == root.selected;
                             accessible-item-index: i;
@@ -749,15 +748,16 @@ export component AppWindow inherits Window {
                     text: name;
                     primary: i == root.current-page;
                     enabled: root.connected;
-                    accessible-label: name + ", page " + (i + 1) + " of " + root.pages.length
-                        + (i == root.current-page ? ", on the strip" : "");
+                    accessible-label: i == root.current-page
+                        ? @tr("{}, page {} of {}, on the strip", name, i + 1, root.pages.length)
+                        : @tr("{}, page {} of {}", name, i + 1, root.pages.length);
                     clicked => {
                         root.show-page(i);
                     }
                 }
 
                 Button {
-                    text: "Add page";
+                    text: @tr("Add page");
                     enabled: root.connected && root.editable;
                     clicked => {
                         root.add-page();
@@ -765,7 +765,7 @@ export component AppWindow inherits Window {
                 }
 
                 if root.takeovers.length > 0: Text {
-                    text: "Takeovers";
+                    text: @tr("Takeovers");
                     vertical-alignment: center;
                     color: Palette.foreground.transparentize(0.4);
                 }
@@ -775,14 +775,14 @@ export component AppWindow inherits Window {
                     text: name;
                     primary: i == root.current-takeover;
                     enabled: root.connected;
-                    accessible-label: name + ", takeover" + (i == root.current-takeover ? ", being edited" : "");
+                    accessible-label: i == root.current-takeover ? @tr("{}, takeover, being edited", name) : @tr("{}, takeover", name);
                     clicked => {
                         root.edit-takeover(i);
                     }
                 }
 
                 Button {
-                    text: "Add takeover";
+                    text: @tr("Add takeover");
                     enabled: root.connected;
                     clicked => {
                         root.add-takeover();
@@ -811,38 +811,38 @@ export component AppWindow inherits Window {
                 HorizontalBox {
                     padding: 0;
                     Text {
-                        text: root.selected >= 0 ? "Widget settings"
-                            : root.form == "new-takeover" ? "New takeover"
-                            : root.form == "takeover" ? "Takeover settings"
-                            : root.form == "settings" ? "Strip settings" : "Page settings";
+                        text: root.selected >= 0 ? @tr("Widget settings")
+                            : root.form == "new-takeover" ? @tr("New takeover")
+                            : root.form == "takeover" ? @tr("Takeover settings")
+                            : root.form == "settings" ? @tr("Strip settings") : @tr("Page settings");
                         font-size: 16px;
                         font-weight: 600;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
                     if root.form != "new-takeover" && root.form != "settings": Button {
-                        text: root.selected >= 0 ? "Add widget after" : "Add widget";
+                        text: root.selected >= 0 ? @tr("Add widget after") : @tr("Add widget");
                         enabled: root.connected && root.editable;
                         clicked => {
                             root.add-widget();
                         }
                     }
                     if root.form == "settings": Button {
-                        text: root.copied ? "Copied" : "Copy diagnostics";
+                        text: root.copied ? @tr("Copied") : @tr("Copy diagnostics");
                         enabled: root.diagnostics != "";
                         clicked => {
                             root.copy-diagnostics();
                         }
                     }
                     if root.selected < 0 && (root.form == "new-takeover" || root.form == "takeover"): Button {
-                        text: root.form == "new-takeover" ? "Cancel" : "Delete takeover";
+                        text: root.form == "new-takeover" ? @tr("Cancel") : @tr("Delete takeover");
                         enabled: root.connected;
                         clicked => {
                             root.delete-takeover();
                         }
                     }
                     if root.selected >= 0: Button {
-                        text: "Delete widget";
+                        text: @tr("Delete widget");
                         enabled: root.connected && root.editable;
                         clicked => {
                             root.delete-widget();
@@ -863,7 +863,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 12px;
                         Text {
-                            text: "Name";
+                            text: @tr("Name");
                             width: 150px;
                             y: 6px;
                             vertical-alignment: top;
@@ -875,7 +875,7 @@ export component AppWindow inherits Window {
                         for item in [{ name: root.page-name, epoch: root.page-name-resets }]: LineEdit {
                             property <string> name: item.name;
                             text: item.name;
-                            accessible-label: "Page name";
+                            accessible-label: @tr("Page name");
                             accepted(text) => {
                                 root.rename-page(text);
                             }
@@ -891,21 +891,21 @@ export component AppWindow inherits Window {
                         padding-left: 162px;
                         alignment: start;
                         Button {
-                            text: "Move earlier";
+                            text: @tr("Move earlier");
                             enabled: root.connected && root.current-page > 0;
                             clicked => {
                                 root.move-page(-1);
                             }
                         }
                         Button {
-                            text: "Move later";
+                            text: @tr("Move later");
                             enabled: root.connected && root.current-page < root.pages.length - 1;
                             clicked => {
                                 root.move-page(1);
                             }
                         }
                         Button {
-                            text: "Delete page";
+                            text: @tr("Delete page");
                             enabled: root.connected && root.pages.length > 1;
                             clicked => {
                                 root.delete-page();
@@ -915,7 +915,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         padding-left: 162px;
                         Text {
-                            text: "Taps that open this page follow a new name. Select a widget on the strip to change it instead.";
+                            text: @tr("Taps that open this page follow a new name. Select a widget on the strip to change it instead.");
                             font-size: 12px;
                             wrap: word-wrap;
                             color: Palette.foreground.transparentize(0.4);
@@ -931,7 +931,7 @@ export component AppWindow inherits Window {
                 // from under the pointer.
                 Text {
                     height: 20px;
-                    text: root.draft-hint == "" ? "" : "Not saved yet: " + root.draft-hint;
+                    text: root.draft-hint == "" ? "" : @tr("Not saved yet: {}", root.draft-hint);
                     color: Tones.pending;
                     overflow: elide;
                     vertical-alignment: center;
@@ -1006,12 +1006,12 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 8px;
                         Text {
-                            text: "Signals";
+                            text: @tr("Signals");
                             font-size: 16px;
                             font-weight: 600;
                         }
                         Text {
-                            text: root.signal-count == 0 ? "none yet" : root.signal-count + " live";
+                            text: root.signal-count == 0 ? @tr("none yet") : @tr("{} live", root.signal-count);
                             color: Palette.foreground.transparentize(0.4);
                             vertical-alignment: center;
                             horizontal-stretch: 1;
@@ -1019,8 +1019,8 @@ export component AppWindow inherits Window {
                     }
 
                     filter := LineEdit {
-                        placeholder-text: "Filter by name";
-                        accessible-label: "Filter signals by name";
+                        placeholder-text: @tr("Filter by name");
+                        accessible-label: @tr("Filter signals by name");
                         edited(text) => {
                             root.signal-filter(text);
                         }
@@ -1084,14 +1084,14 @@ export component AppWindow inherits Window {
                     if root.choosing-for != "": HorizontalLayout {
                         spacing: 8px;
                         Text {
-                            text: "Click a signal for " + root.choosing-for + ", or type part of its name and press Enter.";
+                            text: @tr("Click a signal for {}, or type part of its name and press Enter.", root.choosing-for);
                             color: Palette.accent-background;
                             wrap: word-wrap;
                             horizontal-stretch: 1;
                             accessible-role: text;
                         }
                         Button {
-                            text: "Cancel";
+                            text: @tr("Cancel");
                             clicked => {
                                 root.cancel-choose();
                             }
