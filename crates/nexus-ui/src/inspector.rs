@@ -40,6 +40,8 @@ pub enum Kind {
     Choice(Vec<String>),
     /// Several lines of free text.
     Note,
+    /// A signal's name: typed, or chosen from the signal browser.
+    Signal,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -390,7 +392,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             add(
                 "signal",
                 "Signal",
-                Kind::Text,
+                Kind::Signal,
                 reading_help(&get("signal"), ctx),
             );
             add(
@@ -418,13 +420,13 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             add(
                 "down",
                 "Download signal",
-                Kind::Text,
+                Kind::Signal,
                 reading_help(&get("down"), ctx),
             );
             add(
                 "up",
                 "Upload signal",
-                Kind::Text,
+                Kind::Signal,
                 reading_help(&get("up"), ctx),
             );
         }
@@ -448,7 +450,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 add(
                     "signal",
                     "Shows signal",
-                    Kind::Text,
+                    Kind::Signal,
                     "Optional: a 0–100 signal for the bar to follow.".into(),
                 );
             }
@@ -480,7 +482,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 add(
                     &key("signal"),
                     "Signal",
-                    Kind::Text,
+                    Kind::Signal,
                     "Any name, as in: mode. Widgets reading it change at once.".into(),
                 );
                 add(&key("value"), "Value", Kind::Text, String::new());
@@ -497,6 +499,18 @@ pub fn apply(widget: &Widget, drafts: &Values, key: &str, value: &str, ctx: &Con
     let saved = flatten(widget, ctx);
     let mut v = saved.clone();
     v.extend(drafts.clone());
+    // Thresholds are shown in the signal's unit (°F for a temperature
+    // here). A new signal re-shows them in its own unit, so the stored
+    // values carry over rather than the numbers on screen.
+    if key == "signal" {
+        let old = v.get("signal").cloned().unwrap_or_default();
+        for k in ["warn", "crit"] {
+            if let Some(n) = v.get(k).and_then(|t| t.trim().parse::<f64>().ok()) {
+                let stored = threshold_in(n, &old, ctx);
+                v.insert(k.into(), number(threshold_out(stored, value, ctx)));
+            }
+        }
+    }
     v.insert(key.into(), value.into());
     match build(&v, ctx) {
         Ok(w) if &w == widget => Outcome::Unchanged,
@@ -663,6 +677,29 @@ mod tests {
             panic!("not sent");
         };
         assert_eq!(crit, None);
+    }
+
+    #[test]
+    fn a_new_signal_keeps_the_stored_thresholds() {
+        let ctx = ctx();
+        let w = Widget::Value {
+            width: 100,
+            label: "CPU".into(),
+            signal: "cpu.temp".into(),
+            graph: None,
+            warn: Some(75.0),
+            crit: Some(90.0),
+            tap: None,
+            hold: None,
+        };
+        // Shown as 167 and 194 °F; a signal that is not a temperature
+        // must not store those numbers.
+        let Outcome::Send(Widget::Value { warn, crit, .. }) =
+            apply(&w, &Values::new(), "signal", "gpu.load", &ctx)
+        else {
+            panic!("not sent");
+        };
+        assert_eq!((warn, crit), (Some(75.0), Some(90.0)));
     }
 
     #[test]

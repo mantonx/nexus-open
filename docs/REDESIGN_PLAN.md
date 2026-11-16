@@ -763,6 +763,21 @@ golang` finds nothing outside the changelog.
   tap finished into a quoted command, a note shown in `nexusctl export`,
   Reading → Clock, width, add by splitting, delete; eight undos returned
   the exact original. Each control is labelled for screen readers.
+- 2026-11-15 — Phase 4 step 3: the signal browser. A Signals panel
+  beside the widget settings lists every signal and its live value in the
+  display units (°F here), updated each second in place so the list keeps
+  its scroll position, with a filter by name. Every signal field (a
+  reading's signal, a rate's download and upload, a slider's, a tap that
+  sets one) gets "Choose…": a click on a signal fills it, or type part of
+  the name in the filter and press Enter; Escape or Cancel stops. The hint
+  sits under the list so starting to choose moves no row under the
+  pointer (found in testing: it was above the list and a click landed one
+  row low). Found and fixed: changing a reading's signal between a
+  temperature and anything else stored the thresholds as the °F numbers
+  shown, 75 °C becoming 167. The stored values now carry over; a test
+  covers it. Verified against the service from a headless KWin session:
+  pick by click and by keyboard, Escape, the threshold fix, each undone
+  back to the exact snapshot. AT-SPI reads each row as name and value.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

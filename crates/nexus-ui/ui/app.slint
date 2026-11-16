@@ -8,7 +8,7 @@
 // in strip pixels; Rust works out what they mean and sends back the zones
 // to draw.
 
-import { Button, VerticalBox, HorizontalBox, Palette, LineEdit, ComboBox, TextEdit, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, Palette, LineEdit, ComboBox, TextEdit, ScrollView, ListView } from "std-widgets.slint";
 
 /// One widget on the page, in strip pixels.
 export struct Zone {
@@ -17,11 +17,18 @@ export struct Zone {
     name: string,
 }
 
+/// One signal in the signal browser.
+export struct SignalRow {
+    name: string,
+    /// Its latest value, in the display units.
+    value: string,
+}
+
 /// One setting of the selected widget, as the inspector lists it.
 export struct Field {
     key: string,
     label: string,
-    /// "text", "number", "choice" or "note".
+    /// "text", "number", "choice", "note" or "signal".
     kind: string,
     value: string,
     /// For a choice: the options, and which one is `value` (-1 if none).
@@ -34,7 +41,10 @@ export struct Field {
 // sent when Enter is pressed or focus leaves, not on every key.
 component FieldRow inherits HorizontalLayout {
     in property <Field> field;
+    /// The label of the field a signal is being chosen for, or empty.
+    in property <string> choosing-for;
     callback changed(string, string);
+    callback choose(string);
     spacing: 12px;
 
     Text {
@@ -50,6 +60,28 @@ component FieldRow inherits HorizontalLayout {
         spacing: 2px;
         horizontal-stretch: 1;
 
+        if root.field.kind == "signal": HorizontalLayout {
+            spacing: 6px;
+            LineEdit {
+                text: root.field.value;
+                accessible-label: root.field.label;
+                accepted(text) => {
+                    root.changed(root.field.key, text);
+                }
+                changed has-focus => {
+                    if !self.has-focus && self.text != root.field.value {
+                        root.changed(root.field.key, self.text);
+                    }
+                }
+            }
+            Button {
+                text: root.choosing-for == root.field.label ? "Choosing…" : "Choose…";
+                accessible-label: "Choose the " + root.field.label + " from the signal list";
+                clicked => {
+                    root.choose(root.field.key);
+                }
+            }
+        }
         if root.field.kind == "text" || root.field.kind == "number": LineEdit {
             text: root.field.value;
             input-type: root.field.kind == "number" ? InputType.decimal : InputType.text;
@@ -132,6 +164,12 @@ export component AppWindow inherits Window {
     /// What undo and redo would do; empty when there is nothing.
     in property <string> undo-label;
     in property <string> redo-label;
+    /// The signal browser: the signals matching the filter, and how many
+    /// there are in all.
+    in property <[SignalRow]> signal-rows;
+    in property <int> signal-count;
+    /// The label of the field a signal is being chosen for, or empty.
+    in property <string> choosing-for;
 
     callback page(string);
     /// Pointer on the strip, in strip pixels; a press also says how near
@@ -155,6 +193,13 @@ export component AppWindow inherits Window {
     /// After the selection, or at the end with nothing selected.
     callback add-widget();
     callback delete-widget();
+    /// Signal browser: choose a signal for the field with this key, stop
+    /// choosing, a signal clicked, the filter typed, Enter in the filter.
+    callback choose-signal(string);
+    callback cancel-choose();
+    callback signal-picked(string);
+    callback signal-filter(string);
+    callback pick-first();
 
     // Undo and redo work wherever focus is: this scope holds everything,
     // so it sees every key first.
@@ -392,52 +437,177 @@ export component AppWindow inherits Window {
                 background: Palette.border;
             }
 
-            HorizontalBox {
-                padding: 0;
-                Text {
-                    text: root.selected >= 0 ? "Widget settings" : "Select a widget on the strip to change it.";
-                    font-size: root.selected >= 0 ? 16px : 14px;
-                    font-weight: root.selected >= 0 ? 600 : 400;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                Button {
-                    text: root.selected >= 0 ? "Add widget after" : "Add widget";
-                    enabled: root.connected && root.editable;
-                    clicked => {
-                        root.add-widget();
-                    }
-                }
-                if root.selected >= 0: Button {
-                    text: "Delete widget";
-                    enabled: root.connected && root.editable;
-                    clicked => {
-                        root.delete-widget();
-                    }
-                }
-            }
-
-            if root.draft-hint != "": Text {
-                text: "Not saved yet: " + root.draft-hint;
-                color: #e0a000;
-                wrap: word-wrap;
-                accessible-role: text;
-            }
-
-            scroll := ScrollView {
+            HorizontalLayout {
+                spacing: 12px;
                 vertical-stretch: 1;
-                min-height: 120px;
-                visible: root.selected >= 0 && root.editable;
 
                 VerticalLayout {
-                    width: min(scroll.visible-width, 760px);
-                    alignment: start;
-                    spacing: 8px;
-                    padding-right: 12px;
-                    for field in root.fields: FieldRow {
-                        field: field;
-                        changed(key, value) => {
-                            root.field-changed(key, value);
+                    horizontal-stretch: 1;
+                    spacing: 6px;
+                HorizontalBox {
+                    padding: 0;
+                    Text {
+                        text: root.selected >= 0 ? "Widget settings" : "Select a widget on the strip to change it.";
+                        font-size: root.selected >= 0 ? 16px : 14px;
+                        font-weight: root.selected >= 0 ? 600 : 400;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: root.selected >= 0 ? "Add widget after" : "Add widget";
+                        enabled: root.connected && root.editable;
+                        clicked => {
+                            root.add-widget();
+                        }
+                    }
+                    if root.selected >= 0: Button {
+                        text: "Delete widget";
+                        enabled: root.connected && root.editable;
+                        clicked => {
+                            root.delete-widget();
+                        }
+                    }
+                }
+
+                if root.draft-hint != "": Text {
+                    text: "Not saved yet: " + root.draft-hint;
+                    color: #e0a000;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+
+                scroll := ScrollView {
+                    vertical-stretch: 1;
+                    min-height: 120px;
+                    visible: root.selected >= 0 && root.editable;
+
+                    VerticalLayout {
+                        width: min(scroll.visible-width, 760px);
+                        alignment: start;
+                        spacing: 8px;
+                        padding-right: 12px;
+                        for field in root.fields: FieldRow {
+                            field: field;
+                            choosing-for: root.choosing-for;
+                            changed(key, value) => {
+                                root.field-changed(key, value);
+                            }
+                            choose(key) => {
+                                root.choose-signal(key);
+                                filter.focus();
+                            }
+                        }
+                    }
+                }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    background: Palette.border;
+                }
+
+                // The signal browser: every signal and its live value. While
+                // a field's "Choose…" is active, a click puts the signal in
+                // that field.
+                VerticalLayout {
+                    min-width: 240px;
+                    preferred-width: 360px;
+                    max-width: 360px;
+                    horizontal-stretch: 0;
+                    spacing: 6px;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Signals";
+                            font-size: 16px;
+                            font-weight: 600;
+                        }
+                        Text {
+                            text: root.signal-count == 0 ? "none yet" : root.signal-count + " live";
+                            color: Palette.foreground.transparentize(0.4);
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    filter := LineEdit {
+                        placeholder-text: "Filter by name";
+                        accessible-label: "Filter signals by name";
+                        edited(text) => {
+                            root.signal-filter(text);
+                        }
+                        accepted => {
+                            if root.choosing-for != "" {
+                                root.pick-first();
+                                self.text = "";
+                                root.signal-filter("");
+                            }
+                        }
+                        key-pressed(event) => {
+                            if event.text == Key.Escape && root.choosing-for != "" {
+                                root.cancel-choose();
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+
+                    ListView {
+                        vertical-stretch: 1;
+                        min-height: 120px;
+                        for signal in root.signal-rows: Rectangle {
+                            height: 36px;
+                            background: pick.has-hover && root.choosing-for != "" ? Palette.accent-background.transparentize(0.8) : transparent;
+                            border-radius: 4px;
+                            accessible-role: list-item;
+                            accessible-label: signal.name + ", " + signal.value;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                Text {
+                                    text: signal.name;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: signal.value;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    overflow: elide;
+                                    max-width: 160px;
+                                    color: Palette.foreground.transparentize(0.3);
+                                }
+                            }
+                            pick := TouchArea {
+                                mouse-cursor: root.choosing-for != "" ? MouseCursor.pointer : MouseCursor.default;
+                                clicked => {
+                                    if root.choosing-for != "" {
+                                        root.signal-picked(signal.name);
+                                        filter.text = "";
+                                        root.signal-filter("");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.choosing-for != "": HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Click a signal for " + root.choosing-for + ", or type part of its name and press Enter.";
+                            color: Palette.accent-background;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            accessible-role: text;
+                        }
+                        Button {
+                            text: "Cancel";
+                            clicked => {
+                                root.cancel-choose();
+                            }
                         }
                     }
                 }

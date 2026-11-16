@@ -9,6 +9,7 @@
 mod editor;
 mod geometry;
 mod inspector;
+mod signals;
 
 use std::io;
 use std::thread;

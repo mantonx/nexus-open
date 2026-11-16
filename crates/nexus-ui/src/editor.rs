@@ -19,7 +19,8 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, Vec
 
 use crate::geometry::{self, STRIP};
 use crate::inspector::{self, Context, Field, Kind, Outcome, Reading, Values};
-use crate::{AppWindow, Field as FieldRow, Zone};
+use crate::signals;
+use crate::{AppWindow, Field as FieldRow, SignalRow, Zone};
 
 /// How far a press must move before it is a drag rather than a click, in
 /// strip pixels.
@@ -88,6 +89,13 @@ pub struct Editor {
     /// confirms it.
     committed: HashMap<String, String>,
     signals: HashMap<String, Reading>,
+
+    /// The signal browser's rows, updated in place so the list keeps its
+    /// scroll position as values change.
+    signal_rows: Rc<VecModel<SignalRow>>,
+    signal_filter: String,
+    /// The field a signal is being chosen for, from its "Choose…" button.
+    picking: Option<String>,
 }
 
 pub type Shared = Rc<RefCell<Editor>>;
@@ -116,6 +124,9 @@ impl Editor {
             draft_hint: String::new(),
             committed: HashMap::new(),
             signals: HashMap::new(),
+            signal_rows: Rc::new(VecModel::default()),
+            signal_filter: String::new(),
+            picking: None,
         }))
     }
 
@@ -159,6 +170,27 @@ impl Editor {
         app.on_add_widget(move || e.borrow_mut().add_widget());
         let e = editor.clone();
         app.on_delete_widget(move || e.borrow_mut().delete_widget());
+        app.set_signal_rows(ModelRc::from(editor.borrow().signal_rows.clone()));
+        let e = editor.clone();
+        app.on_choose_signal(move |key| e.borrow_mut().choose_signal(Some(key.into())));
+        let e = editor.clone();
+        app.on_cancel_choose(move || e.borrow_mut().choose_signal(None));
+        let e = editor.clone();
+        app.on_signal_picked(move |name| e.borrow_mut().signal_picked(name.as_str()));
+        let e = editor.clone();
+        app.on_signal_filter(move |text| {
+            let mut e = e.borrow_mut();
+            e.signal_filter = text.into();
+            e.show_signals();
+        });
+        let e = editor.clone();
+        app.on_pick_first(move || {
+            let mut e = e.borrow_mut();
+            let first = e.signal_rows.row_data(0).map(|r| r.name.to_string());
+            if let Some(name) = first {
+                e.signal_picked(&name);
+            }
+        });
         let e = editor.clone();
         app.on_undo(move || e.borrow_mut().step("undo"));
         let e = editor.clone();
@@ -222,6 +254,62 @@ impl Editor {
         if self.selected.is_some() {
             self.show_fields();
         }
+        self.show_signals();
+    }
+
+    /// Puts the signal browser's rows in the window. Rows are updated in
+    /// place while the names stay the same, which is every second.
+    fn show_signals(&mut self) {
+        let rows: Vec<SignalRow> =
+            signals::rows(&self.signals, &self.signal_filter, &self.context())
+                .into_iter()
+                .map(|r| SignalRow {
+                    name: r.name.into(),
+                    value: r.value.into(),
+                })
+                .collect();
+        let same_names = rows.len() == self.signal_rows.row_count()
+            && rows
+                .iter()
+                .zip(self.signal_rows.iter())
+                .all(|(a, b)| a.name == b.name);
+        if same_names {
+            for (i, row) in rows.into_iter().enumerate() {
+                if self.signal_rows.row_data(i).as_ref() != Some(&row) {
+                    self.signal_rows.set_row_data(i, row);
+                }
+            }
+        } else {
+            self.signal_rows.set_vec(rows);
+        }
+        if let Some(app) = self.app.upgrade() {
+            app.set_signal_count(self.signals.len() as i32);
+        }
+    }
+
+    /// Starts or stops choosing a signal for field `key`.
+    fn choose_signal(&mut self, key: Option<String>) {
+        let label = key
+            .as_ref()
+            .and_then(|k| self.shown.iter().find(|f| &f.key == k))
+            .map(|f| f.label.clone());
+        self.picking = key.filter(|_| label.is_some());
+        if let Some(app) = self.app.upgrade() {
+            app.set_choosing_for(label.unwrap_or_default().into());
+        }
+    }
+
+    /// A signal in the browser was clicked: while choosing, it goes into
+    /// the field being chosen for.
+    fn signal_picked(&mut self, name: &str) {
+        let Some(key) = self.picking.clone() else {
+            return;
+        };
+        self.choose_signal(None);
+        self.field_changed(&key, name);
+        // Not typed in the row, so the row must show the new name when the
+        // daemon confirms it (see `committed`).
+        self.committed.remove(&key);
     }
 
     fn set_problem(&mut self, problem: String) {
@@ -622,6 +710,7 @@ impl Editor {
             self.committed.clear();
             self.shown.clear();
             self.fields.set_vec(Vec::new());
+            self.choose_signal(None);
         }
         let fields = match selected {
             Some(i) => {
@@ -661,6 +750,11 @@ impl Editor {
             }
         }
         self.shown = fields;
+        if let Some(key) = &self.picking
+            && !self.shown.iter().any(|f| &f.key == key)
+        {
+            self.choose_signal(None);
+        }
         if let Some(app) = self.app.upgrade() {
             app.set_draft_hint(self.draft_hint.as_str().into());
         }
@@ -805,6 +899,7 @@ impl Editor {
 fn row(f: &Field) -> FieldRow {
     let (kind, choices) = match &f.kind {
         Kind::Text => ("text", Vec::new()),
+        Kind::Signal => ("signal", Vec::new()),
         Kind::Number => ("number", Vec::new()),
         Kind::Note => ("note", Vec::new()),
         Kind::Choice(options) => ("choice", options.clone()),
