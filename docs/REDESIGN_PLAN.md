@@ -881,6 +881,14 @@ golang` finds nothing outside the changelog.
   pixels when it is closed and restored at start (state dir,
   `window-size`). Verified headless: resized to 1100×700, closed with a
   WM_DELETE_WINDOW request, and the next window opened at 1100×700.
+- 2026-11-15 — Phase 4 step 11: light and dark. The window follows the
+  system scheme through Slint's palette; checked by forcing the light
+  scheme in a throwaway build. Everything read well except the three
+  colors chosen by hand against dark: the "Not saved yet" amber was 2.2:1
+  on white. A `Tones` global now picks the error and pending colors per
+  scheme, all at 4.5:1 or better (the old dark red was 4.4:1, now 5.3:1).
+  The zone outlines stay as they are: they are drawn over the strip
+  preview, which is black in both schemes.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

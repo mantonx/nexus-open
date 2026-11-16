@@ -11,6 +11,16 @@
 import { Button, VerticalBox, HorizontalBox, Palette, LineEdit, ComboBox, TextEdit, ScrollView, ListView } from "std-widgets.slint";
 
 /// One widget on the page, in strip pixels.
+/// Colors with a meaning, chosen for each color scheme: on a light
+/// background the bright ones are too faint to read.
+global Tones {
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    /// Something went wrong (about 5:1 on either background).
+    out property <color> error: dark ? #ec6464 : #b3261e;
+    /// Not done yet.
+    out property <color> pending: dark ? #e0a000 : #8a5a00;
+}
+
 export struct Zone {
     x: int,
     width: int,
@@ -671,7 +681,7 @@ export component AppWindow inherits Window {
             // pointer.
             Text {
                 text: root.problem != "" ? root.problem : root.caption;
-                color: root.problem != "" ? #e05050 : Palette.foreground.transparentize(0.25);
+                color: root.problem != "" ? Tones.error : Palette.foreground.transparentize(0.25);
                 horizontal-alignment: center;
                 wrap: word-wrap;
                 accessible-role: text;
@@ -876,7 +886,7 @@ export component AppWindow inherits Window {
                 Text {
                     height: 20px;
                     text: root.draft-hint == "" ? "" : "Not saved yet: " + root.draft-hint;
-                    color: #e0a000;
+                    color: Tones.pending;
                     overflow: elide;
                     vertical-alignment: center;
                     accessible-role: text;
