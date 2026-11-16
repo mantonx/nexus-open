@@ -911,7 +911,7 @@ mod tests {
         let e = store.edit(&Edit::DeletePage { page: clock }).unwrap_err();
         assert!(
             e.to_string()
-                .contains("opened by the tap on the clock widget on page \"System\""),
+                .contains("The tap on the clock widget on page \"System\" opens page \"Clock\""),
             "{e}"
         );
         // Load is unchanged; a page nothing opens goes, and the rest close up.

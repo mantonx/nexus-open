@@ -50,17 +50,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
     spawn("frames", app.as_weak(), stream_frames)?;
     spawn("status", app.as_weak(), poll_status)?;
 
-    // Requests run off the UI thread so a slow daemon never freezes the
-    // window. The status poll picks up the new page name.
-    app.on_page(|target| {
-        let target = target.to_string();
-        thread::spawn(move || {
-            if let Ok(mut client) = Client::connect() {
-                let _ = client.request(&format!("page {target}"));
-            }
-        });
-    });
-
     app.run()
 }
 

@@ -690,8 +690,13 @@ fn delete_page(conn: &Connection, page: i64) -> Result<(), StoreError> {
             (_, Some(t)) => format!("takeover \"{t}\""),
             _ => "another row".into(),
         };
+        let gesture = if gesture == "hold" {
+            "long press"
+        } else {
+            "tap"
+        };
         return Err(refuse(format!(
-            "page \"{name}\" is opened by the {gesture} on the {widget} widget on {place}; change that first"
+            "The {gesture} on the {widget} widget on {place} opens page \"{name}\". Change that {gesture} first."
         )));
     }
     // Its own widgets' actions may point at itself.

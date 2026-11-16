@@ -778,6 +778,23 @@ golang` finds nothing outside the changelog.
   covers it. Verified against the service from a headless KWin session:
   pick by click and by keyboard, Escape, the threshold fix, each undone
   back to the exact snapshot. AT-SPI reads each row as name and value.
+- 2026-11-15 — Phase 4 step 4: pages. A tab per page replaces Previous
+  and Next; a click shows that page on the strip, and Add page puts an
+  empty "Page N" after the current one and shows it. With no widget
+  selected, the settings area shows the page's: its name (refused if empty
+  or taken, and the field goes back to the real name), Move earlier, Move
+  later, Delete page (not the last one). The store already kept actions
+  pointing at pages by ID, so a rename never breaks a tap, and refuses to
+  delete a page a tap opens; its reason now reads "The tap on the clock
+  widget on page "System" opens page "Clock". Change that tap first."
+  Problems now show in the caption line under the preview instead of a
+  banner above it: in testing the banner pushed the controls down and a
+  click landed in empty space. Found too: a 760 px cap on the page
+  settings became the whole window's maximum width (a spacer absorbs it),
+  and a problem outlived the next change (cleared whenever an edit is
+  sent). Verified against the service from a headless KWin session: add,
+  rename, a taken name, move, add a widget to the empty page, delete, the
+  refused delete; five undos returned the exact snapshot.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

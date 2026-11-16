@@ -74,6 +74,11 @@ pub struct Editor {
     queued: Vec<(String, String)>,
     /// After an add: the place of the new widget, to select it.
     select_after: Option<usize>,
+    /// After adding a page: its place, to show it on the strip.
+    show_after: Option<usize>,
+    /// A rename sent: the old and new name, so the editor keeps following
+    /// the page before the status poll reports the new name.
+    renamed: Option<(String, String)>,
 
     /// The inspector's rows, kept so a changed value updates its row in
     /// place rather than rebuilding every control.
@@ -117,6 +122,8 @@ impl Editor {
             busy: false,
             queued: Vec::new(),
             select_after: None,
+            show_after: None,
+            renamed: None,
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
@@ -192,6 +199,16 @@ impl Editor {
             }
         });
         let e = editor.clone();
+        app.on_show_page(move |i| e.borrow_mut().show_page(i as usize));
+        let e = editor.clone();
+        app.on_add_page(move || e.borrow_mut().add_page());
+        let e = editor.clone();
+        app.on_rename_page(move |name| e.borrow_mut().rename_page(name.as_str()));
+        let e = editor.clone();
+        app.on_move_page(move |step| e.borrow_mut().move_page(step));
+        let e = editor.clone();
+        app.on_delete_page(move || e.borrow_mut().delete_page());
+        let e = editor.clone();
         app.on_undo(move || e.borrow_mut().step("undo"));
         let e = editor.clone();
         app.on_redo(move || e.borrow_mut().step("redo"));
@@ -224,6 +241,12 @@ impl Editor {
     }
 
     fn set_layout(&mut self, layout: Layout) {
+        if let Some((old, new)) = self.renamed.take()
+            && self.page == old
+            && layout.config.pages.iter().any(|p| p.name == new)
+        {
+            self.page = new;
+        }
         self.layout = Some(layout);
         self.preview = None;
         if !matches!(self.drag, Drag::Pressed { .. }) {
@@ -231,6 +254,9 @@ impl Editor {
         }
         if let Some(at) = self.select_after.take() {
             self.selected = self.widget_ids().get(at).copied();
+        }
+        if let Some(at) = self.show_after.take() {
+            request_page(at);
         }
         self.show();
         for (key, value) in std::mem::take(&mut self.queued) {
@@ -562,6 +588,8 @@ impl Editor {
             return;
         }
         self.busy = true;
+        // A problem lasts until the next change is tried.
+        self.problem.clear();
         let app = self.app.clone();
         thread::spawn(move || {
             let answer = Client::connect()
@@ -607,6 +635,14 @@ impl Editor {
             })
             .collect();
         app.set_zones(ModelRc::new(VecModel::from(zones)));
+        let pages: Vec<SharedString> = self
+            .layout
+            .iter()
+            .flat_map(|l| &l.config.pages)
+            .map(|p| p.name.as_str().into())
+            .collect();
+        app.set_pages(ModelRc::new(VecModel::from(pages)));
+        app.set_current_page(self.page_index().map_or(-1, |i| i as i32));
         app.set_editable(self.editable());
         let selected = self.selected_index();
         app.set_selected(selected.map_or(-1, |i| i as i32));
@@ -645,6 +681,9 @@ impl Editor {
             return String::new();
         }
         let widgets = self.widgets();
+        if widgets.is_empty() {
+            return "This page is empty. Add widget puts one on it.".into();
+        }
         match (self.drag, selected) {
             (Drag::Resizing { edge, .. }, _) | (_, Some(edge)) if self.preview.is_some() => {
                 let mut parts: Vec<String> = [edge, edge + 1]
@@ -893,6 +932,114 @@ impl Editor {
         });
         self.show();
     }
+}
+
+/// Pages: shown, added, renamed, moved and deleted from the tabs and the
+/// page settings.
+impl Editor {
+    fn page_names(&self) -> Vec<&str> {
+        self.layout
+            .iter()
+            .flat_map(|l| &l.config.pages)
+            .map(|p| p.name.as_str())
+            .collect()
+    }
+
+    /// The page on the strip: its place and ID.
+    fn current_page(&self) -> Option<(usize, i64)> {
+        let i = self.page_index()?;
+        Some((i, self.layout.as_ref()?.ids.pages[i].id))
+    }
+
+    fn show_page(&mut self, index: usize) {
+        self.selected = None;
+        self.show();
+        request_page(index);
+    }
+
+    /// Adds an empty page after the one on the strip and shows it.
+    fn add_page(&mut self) {
+        let names = self.page_names();
+        let name = (names.len() + 1..)
+            .map(|n| format!("Page {n}"))
+            .find(|n| !names.contains(&n.as_str()))
+            .expect("some page number is free");
+        let at = self.page_index().map_or(names.len(), |i| i + 1);
+        self.selected = None;
+        self.show_after = Some(at);
+        self.send(Edit::AddPage {
+            layout: None,
+            name,
+            at: Some(at),
+        });
+    }
+
+    fn rename_page(&mut self, name: &str) {
+        let Some((i, page)) = self.current_page() else {
+            return;
+        };
+        let name = name.trim();
+        let names = self.page_names();
+        if name == names[i] {
+            return;
+        }
+        let refused = if name.is_empty() {
+            Some("A page needs a name.".to_string())
+        } else if names.contains(&name) {
+            Some(format!("There is already a page called “{name}”."))
+        } else {
+            None
+        };
+        if let Some(why) = refused {
+            if let Some(app) = self.app.upgrade() {
+                app.set_page_name_resets(app.get_page_name_resets() + 1);
+            }
+            self.set_problem(why);
+            return;
+        }
+        self.renamed = Some((names[i].to_string(), name.to_string()));
+        self.problem.clear();
+        self.send(Edit::RenamePage {
+            page,
+            name: name.into(),
+        });
+    }
+
+    fn move_page(&mut self, step: i32) {
+        let Some((i, page)) = self.current_page() else {
+            return;
+        };
+        let to = i as i32 + step;
+        if to < 0 || to as usize >= self.page_names().len() {
+            return;
+        }
+        self.problem.clear();
+        self.send(Edit::MovePage {
+            page,
+            to: to as usize,
+        });
+    }
+
+    fn delete_page(&mut self) {
+        let Some((_, page)) = self.current_page() else {
+            return;
+        };
+        if self.page_names().len() < 2 {
+            return;
+        }
+        self.problem.clear();
+        self.send(Edit::DeletePage { page });
+    }
+}
+
+/// Shows page `index` (from 0) on the strip. Off the UI thread, so a slow
+/// daemon never freezes the window; the status poll picks up the change.
+fn request_page(index: usize) {
+    thread::spawn(move || {
+        if let Ok(mut client) = Client::connect() {
+            let _ = client.request(&format!("page {}", index + 1));
+        }
+    });
 }
 
 /// A field as the window takes it.

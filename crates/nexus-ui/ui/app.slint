@@ -139,6 +139,12 @@ export component AppWindow inherits Window {
     /// The page on the strip, and its position ("2 of 4").
     in property <string> page-name;
     in property <string> page-position;
+    /// Every page's name, in order, and which one is on the strip (-1
+    /// while unknown).
+    in property <[string]> pages;
+    in property <int> current-page: -1;
+    /// Bumped when a typed page name is refused, to put the real one back.
+    in property <int> page-name-resets;
 
     /// The widgets of the page on the strip.
     in property <[Zone]> zones;
@@ -171,7 +177,13 @@ export component AppWindow inherits Window {
     /// The label of the field a signal is being chosen for, or empty.
     in property <string> choosing-for;
 
-    callback page(string);
+    /// Pages: show page `i` on the strip; add one after it; rename it;
+    /// move it earlier (-1) or later (1); delete it.
+    callback show-page(int);
+    callback add-page();
+    callback rename-page(string);
+    callback move-page(int);
+    callback delete-page();
     /// Pointer on the strip, in strip pixels; a press also says how near
     /// an edge counts as on it.
     callback pressed(float, float);
@@ -243,19 +255,6 @@ export component AppWindow inherits Window {
                     x: 12px;
                     width: parent.width - 24px;
                     text: "Not connected to nexusd. Start it with `nexusd run`; this window reconnects by itself.";
-                    wrap: word-wrap;
-                    accessible-role: text;
-                }
-            }
-
-            if root.problem != "": Rectangle {
-                background: #d0303030;
-                border-radius: 6px;
-                height: problem-text.preferred-height + 16px;
-                problem-text := Text {
-                    x: 12px;
-                    width: parent.width - 24px;
-                    text: root.problem;
                     wrap: word-wrap;
                     accessible-role: text;
                 }
@@ -383,30 +382,37 @@ export component AppWindow inherits Window {
                 }
             }
 
+            // The caption, or what went wrong with the last change. In the
+            // same place, so a problem appearing moves nothing under the
+            // pointer.
             Text {
-                text: root.caption;
-                color: Palette.foreground.transparentize(0.25);
+                text: root.problem != "" ? root.problem : root.caption;
+                color: root.problem != "" ? #e05050 : Palette.foreground.transparentize(0.25);
                 horizontal-alignment: center;
+                wrap: word-wrap;
                 accessible-role: text;
             }
 
             HorizontalBox {
-                alignment: start;
                 padding: 0;
 
-                Button {
-                    text: "Previous page";
+                // The pages, in order: a click shows that page on the strip.
+                for name[i] in root.pages: Button {
+                    text: name;
+                    primary: i == root.current-page;
                     enabled: root.connected;
+                    accessible-label: name + ", page " + (i + 1) + " of " + root.pages.length
+                        + (i == root.current-page ? ", on the strip" : "");
                     clicked => {
-                        root.page("prev");
+                        root.show-page(i);
                     }
                 }
 
                 Button {
-                    text: "Next page";
-                    enabled: root.connected;
+                    text: "Add page";
+                    enabled: root.connected && root.editable;
                     clicked => {
-                        root.page("next");
+                        root.add-page();
                     }
                 }
 
@@ -447,9 +453,9 @@ export component AppWindow inherits Window {
                 HorizontalBox {
                     padding: 0;
                     Text {
-                        text: root.selected >= 0 ? "Widget settings" : "Select a widget on the strip to change it.";
-                        font-size: root.selected >= 0 ? 16px : 14px;
-                        font-weight: root.selected >= 0 ? 600 : 400;
+                        text: root.selected >= 0 ? "Widget settings" : "Page settings";
+                        font-size: 16px;
+                        font-weight: 600;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
@@ -467,6 +473,83 @@ export component AppWindow inherits Window {
                             root.delete-widget();
                         }
                     }
+                }
+
+                // With no widget selected: the page on the strip.
+                // The spacer takes the room past 760 px; without it the cap
+                // would become the whole window's maximum width.
+                if root.selected < 0 && root.editable: HorizontalLayout {
+                    vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    max-width: 760px;
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        Text {
+                            text: "Name";
+                            width: 150px;
+                            y: 6px;
+                            vertical-alignment: top;
+                            horizontal-alignment: right;
+                            color: Palette.foreground.transparentize(0.2);
+                        }
+                        // Made anew for each page, and after a name is
+                        // refused, so it always starts from the real name.
+                        for item in [{ name: root.page-name, epoch: root.page-name-resets }]: LineEdit {
+                            property <string> name: item.name;
+                            text: item.name;
+                            accessible-label: "Page name";
+                            accepted(text) => {
+                                root.rename-page(text);
+                            }
+                            changed has-focus => {
+                                if !self.has-focus && self.text != self.name {
+                                    root.rename-page(self.text);
+                                }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        padding-left: 162px;
+                        alignment: start;
+                        Button {
+                            text: "Move earlier";
+                            enabled: root.connected && root.current-page > 0;
+                            clicked => {
+                                root.move-page(-1);
+                            }
+                        }
+                        Button {
+                            text: "Move later";
+                            enabled: root.connected && root.current-page < root.pages.length - 1;
+                            clicked => {
+                                root.move-page(1);
+                            }
+                        }
+                        Button {
+                            text: "Delete page";
+                            enabled: root.connected && root.pages.length > 1;
+                            clicked => {
+                                root.delete-page();
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 162px;
+                        Text {
+                            text: "Taps that open this page follow a new name. Select a widget on the strip to change it instead.";
+                            font-size: 12px;
+                            wrap: word-wrap;
+                            color: Palette.foreground.transparentize(0.4);
+                        }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
                 }
 
                 if root.draft-hint != "": Text {
