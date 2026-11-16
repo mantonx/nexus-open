@@ -6,6 +6,8 @@
 
 /// What a tray item asks of the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Only the Linux tray makes them yet; macOS and Windows have no tray.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum Command {
     Show,
     Hide,
