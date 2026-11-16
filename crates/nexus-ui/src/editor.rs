@@ -230,6 +230,8 @@ impl Editor {
             e.borrow_mut().field_changed(key.as_str(), value.as_str());
         });
         let e = editor.clone();
+        app.on_field_chosen(move |key, index| e.borrow_mut().field_chosen(key.as_str(), index));
+        let e = editor.clone();
         app.on_add_widget(move || e.borrow_mut().add_widget());
         let e = editor.clone();
         app.on_delete_widget(move || e.borrow_mut().delete_widget());
@@ -254,7 +256,10 @@ impl Editor {
                 e.signal_picked(&name);
             }
         });
-        let choices: Vec<SharedString> = layouts::choices().into_iter().map(Into::into).collect();
+        let choices: Vec<SharedString> = layouts::choices()
+            .iter()
+            .map(|c| crate::i18n::shown(c).into())
+            .collect();
         app.set_layout_choices(ModelRc::new(VecModel::from(choices)));
         let e = editor.clone();
         app.on_use_layout(move |i| e.borrow_mut().use_layout(i as usize));
@@ -263,7 +268,14 @@ impl Editor {
         let e = editor.clone();
         app.on_rename_layout(move |name| e.borrow_mut().rename_layout(name.as_str()));
         let e = editor.clone();
-        app.on_add_layout(move |choice| e.borrow_mut().add_layout(choice.as_str()));
+        app.on_add_layout(move |index| {
+            let choice = usize::try_from(index)
+                .ok()
+                .and_then(|i| layouts::choices().into_iter().nth(i));
+            if let Some(choice) = choice {
+                e.borrow_mut().add_layout(&choice);
+            }
+        });
         app.on_import_layout(import_layout);
         app.on_export_layout(export_layout);
         let e = editor.clone();
@@ -1492,6 +1504,23 @@ impl Editor {
     }
 }
 
+impl Editor {
+    /// A choice field's option was picked, by its position in the list.
+    fn field_chosen(&mut self, key: &str, index: i32) {
+        let option = self
+            .shown
+            .iter()
+            .find(|f| f.key == key)
+            .and_then(|f| match &f.kind {
+                Kind::Choice(options) => options.get(usize::try_from(index).ok()?).cloned(),
+                _ => None,
+            });
+        if let Some(option) = option {
+            self.field_changed(key, &option);
+        }
+    }
+}
+
 /// Layouts: switching, adding, renaming and deleting.
 impl Editor {
     fn layout_entry(&self, i: usize) -> Option<LayoutEntry> {
@@ -1758,17 +1787,17 @@ fn row(f: &Field) -> FieldRow {
         .map_or(-1, |i| i as i32);
     FieldRow {
         key: f.key.as_str().into(),
-        label: f.label.as_str().into(),
+        label: crate::i18n::shown(&f.label).into(),
         kind: kind.into(),
         value: f.value.as_str().into(),
         choices: ModelRc::new(VecModel::from(
             choices
-                .into_iter()
-                .map(SharedString::from)
+                .iter()
+                .map(|c| SharedString::from(crate::i18n::shown(c)))
                 .collect::<Vec<_>>(),
         )),
         index,
-        help: f.help.as_str().into(),
+        help: crate::i18n::shown(&f.help).into(),
     }
 }
 

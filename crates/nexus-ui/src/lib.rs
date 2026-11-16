@@ -9,6 +9,7 @@
 mod editor;
 mod files;
 mod geometry;
+mod i18n;
 mod inspector;
 mod layouts;
 mod settings;

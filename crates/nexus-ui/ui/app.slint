@@ -67,6 +67,8 @@ component FieldRow inherits HorizontalLayout {
     /// The label of the field a signal is being chosen for, or empty.
     in property <string> choosing-for;
     callback changed(string, string);
+    /// A choice was picked: its position in `field.choices`.
+    callback chose(string, int);
     callback choose(string);
     spacing: 12px;
 
@@ -122,8 +124,9 @@ component FieldRow inherits HorizontalLayout {
             model: root.field.choices;
             current-index: root.field.index;
             accessible-label: root.field.label;
-            selected(value) => {
-                root.changed(root.field.key, value);
+            // By position: the shown text may be a translation.
+            selected => {
+                root.chose(root.field.key, self.current-index);
             }
         }
         if root.field.kind == "note": TextEdit {
@@ -157,7 +160,7 @@ component LayoutsSection inherits VerticalLayout {
     callback use(int);
     callback delete(int);
     callback rename(string);
-    callback add(string);
+    callback add(int);
     callback import();
     callback export();
 
@@ -248,7 +251,7 @@ component LayoutsSection inherits VerticalLayout {
             enabled: root.enabled;
             accessible-label: @tr("Add a layout from {} and show it", from-choice.current-value);
             clicked => {
-                root.add(from-choice.current-value);
+                root.add(from-choice.current-index);
             }
         }
     }
@@ -326,7 +329,7 @@ export component AppWindow inherits Window {
     callback use-layout(int);
     callback delete-layout(int);
     callback rename-layout(string);
-    callback add-layout(string);
+    callback add-layout(int);
     /// Add a layout from a file; save the one on the strip as a file.
     callback import-layout();
     callback export-layout();
@@ -432,6 +435,8 @@ export component AppWindow inherits Window {
     callback redo();
     /// A field of the selected widget changed: its key and new value.
     callback field-changed(string, string);
+    /// A choice field's option picked, by position.
+    callback field-chosen(string, int);
     /// After the selection, or at the end with nothing selected.
     callback add-widget();
     callback delete-widget();
@@ -953,6 +958,9 @@ export component AppWindow inherits Window {
                             choosing-for: root.choosing-for;
                             changed(key, value) => {
                                 root.field-changed(key, value);
+                            }
+                            chose(key, index) => {
+                                root.field-chosen(key, index);
                             }
                             choose(key) => {
                                 root.choose-signal(key);

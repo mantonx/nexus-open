@@ -943,6 +943,16 @@ golang` finds nothing outside the changelog.
   1878 ms on the first run after building, with the binary not yet in
   the page cache. A true cold start (caches dropped, needs sudo) is left
   to measure on Matt's machine.
+- 2026-11-15 — Phase 4 step 16: choices by position. A choice field's
+  options are stored and compared by their English text, so that text
+  must never be translated; the window now shows them through
+  `i18n::shown` (as is, until there are translations) and a pick comes
+  back as its position, which the editor maps to the stored option. The
+  same for Add layout's list, and field labels and help go through
+  `shown` too. Verified: the 12-hour clock and the Music starter, picked
+  from their lists, were stored as before; undo restored the snapshot.
+  Left for translation: strings built with `format!` in Rust (problems,
+  captions, help with numbers) still need marking for extraction.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
