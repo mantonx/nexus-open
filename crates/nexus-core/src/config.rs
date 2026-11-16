@@ -757,7 +757,8 @@ mod tests {
     /// docs/LAYOUT.md's examples are real: each complete one parses.
     #[test]
     fn the_layout_reference_examples_parse() {
-        let page = include_str!("../../../docs/LAYOUT.md");
+        // A Windows checkout may have CRLF line endings.
+        let page = include_str!("../../../docs/LAYOUT.md").replace("\r\n", "\n");
         let mut checked = 0;
         for block in page.split("```toml\n").skip(1) {
             let text = &block[..block.find("```").expect("closed block")];

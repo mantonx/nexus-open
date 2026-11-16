@@ -349,8 +349,9 @@ mod troubleshooting {
     /// troubleshooting page, named after it.
     #[test]
     fn every_check_has_a_section() {
-        let page = include_str!("../../../docs/TROUBLESHOOTING.md");
-        let source = include_str!("lib.rs");
+        // A Windows checkout may have CRLF line endings.
+        let page = include_str!("../../../docs/TROUBLESHOOTING.md").replace("\r\n", "\n");
+        let source = include_str!("lib.rs").replace("\r\n", "\n");
         let mut names: Vec<&str> = Vec::new();
         for call in [r#"r.ok(""#, r#"r.fail(""#, r#"r.note(""#, r#"what: ""#] {
             for part in source.split(call).skip(1) {
