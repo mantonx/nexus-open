@@ -489,6 +489,11 @@ export component AppWindow inherits Window {
                 Button {
                     text: @tr("Edit");
                     primary: !root.trying;
+                    // Which mode is on, for a screen reader too, not only by
+                    // color. `checked` and not `checkable`: a checkable Button
+                    // flips `checked` itself on a click, undoing this binding.
+                    checked: !root.trying;
+                    accessible-checkable: true;
                     enabled: root.connected;
                     accessible-label: @tr("Edit mode: clicks on the preview select widgets");
                     clicked => {
@@ -498,6 +503,8 @@ export component AppWindow inherits Window {
                 Button {
                     text: @tr("Try it");
                     primary: root.trying;
+                    checked: root.trying;
+                    accessible-checkable: true;
                     enabled: root.connected;
                     accessible-label: @tr("Try mode: clicks on the preview act as touches on the strip");
                     clicked => {
@@ -509,6 +516,8 @@ export component AppWindow inherits Window {
                     text: @tr("Settings");
                     enabled: root.connected;
                     primary: root.form == "settings";
+                    checked: root.form == "settings";
+                    accessible-checkable: true;
                     clicked => {
                         root.open-settings();
                     }

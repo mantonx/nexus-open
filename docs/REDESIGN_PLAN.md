@@ -992,6 +992,16 @@ golang` finds nothing outside the changelog.
   install guide. `docs/INSTALLATION.md` still describes the Go app's
   packages; its replacement describes the new packages, so it waits for
   them.
+- 2026-11-15 — Phase 4, accessibility audit over AT-SPI (bus switched on
+  for the test, then off). Every control in the main view and the
+  Settings form has a name; Tab visits them in reading order and wraps
+  every 20 stops, skipping disabled ones; the widget strip is one stop
+  whose arrow keys move the selection, announced as it moves. Fixed:
+  Edit, Try it and Settings showed which was on only by color. They are
+  now toggle buttons whose state follows the mode (`checked` bound, not
+  `checkable`, since a checkable Button flips its own state on a click);
+  AT-SPI reports the one on as pressed. Left for Matt: listening with
+  Orca itself.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
