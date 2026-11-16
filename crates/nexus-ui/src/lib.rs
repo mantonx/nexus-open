@@ -9,6 +9,7 @@
 mod editor;
 mod geometry;
 mod inspector;
+mod settings;
 mod signals;
 mod takeovers;
 

@@ -19,6 +19,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, Vec
 
 use crate::geometry::{self, STRIP};
 use crate::inspector::{self, Context, Field, Kind, Missing, Outcome, Reading, Values};
+use crate::settings;
 use crate::signals;
 use crate::takeovers;
 use crate::{AppWindow, Field as FieldRow, SignalRow, Zone};
@@ -41,6 +42,7 @@ enum Form {
     Widget(i64),
     Takeover(i64),
     NewTakeover,
+    Settings,
 }
 
 /// How far a press must move before it is a drag rather than a click, in
@@ -107,6 +109,8 @@ pub struct Editor {
     adding: Option<Values>,
     /// After adding a takeover: its name, to start editing it.
     edit_after: Option<String>,
+    /// The strip's settings are open in the settings area.
+    settings_open: bool,
 
     /// The inspector's rows, kept so a changed value updates its row in
     /// place rather than rebuilding every control.
@@ -156,6 +160,7 @@ impl Editor {
             lease: Timer::default(),
             adding: None,
             edit_after: None,
+            settings_open: false,
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
@@ -246,6 +251,15 @@ impl Editor {
         app.on_add_takeover(move || e.borrow_mut().add_takeover());
         let e = editor.clone();
         app.on_delete_takeover(move || e.borrow_mut().delete_takeover());
+        let e = editor.clone();
+        app.on_open_settings(move || {
+            let mut e = e.borrow_mut();
+            e.stop_editing();
+            e.adding = None;
+            e.selected = None;
+            e.settings_open = true;
+            e.show();
+        });
         let e = editor.clone();
         app.on_undo(move || e.borrow_mut().step("undo"));
         let e = editor.clone();
@@ -494,6 +508,7 @@ impl Editor {
             return;
         }
         self.problem.clear();
+        self.settings_open = false;
         self.flush();
         self.drag = if let Some(edge) = self.edge_at(x, reach) {
             self.selected = self.widget_ids().get(edge).copied();
@@ -749,11 +764,7 @@ impl Editor {
             .collect();
         app.set_takeovers(ModelRc::new(VecModel::from(names)));
         app.set_current_takeover(editing.map_or(-1, |i| i as i32));
-        app.set_takeover_form(match (self.adding.is_some(), editing.is_some()) {
-            (true, _) => "new".into(),
-            (false, true) => "edit".into(),
-            _ => SharedString::new(),
-        });
+
         app.set_editable(self.editable());
         let selected = self.selected_index();
         app.set_selected(selected.map_or(-1, |i| i as i32));
@@ -885,6 +896,7 @@ impl Editor {
         let form = match selected {
             Some(i) => self.widget_ids().get(i).copied().map(Form::Widget),
             None if self.adding.is_some() => Some(Form::NewTakeover),
+            None if self.settings_open => Some(Form::Settings),
             None => self.editing_takeover().map(|(_, id)| Form::Takeover(id)),
         };
         if form != self.fields_for {
@@ -919,6 +931,11 @@ impl Editor {
                 });
                 fields
             }
+            None if self.settings_open => self
+                .layout
+                .as_ref()
+                .map(|l| settings::fields(&settings::flatten(&l.config)))
+                .unwrap_or_default(),
             None => self
                 .takeover_values()
                 .map(|v| takeovers::fields(&v))
@@ -951,6 +968,13 @@ impl Editor {
         }
         if let Some(app) = self.app.upgrade() {
             app.set_draft_hint(self.draft_hint.as_str().into());
+            // Set here, once the form is known; `show` runs before this.
+            app.set_form(match self.fields_for {
+                Some(Form::NewTakeover) => "new-takeover".into(),
+                Some(Form::Takeover(_)) => "takeover".into(),
+                Some(Form::Settings) => "settings".into(),
+                _ => SharedString::new(),
+            });
         }
     }
 
@@ -961,6 +985,10 @@ impl Editor {
         }
         if key.starts_with("takeover.") {
             self.takeover_changed(key, value);
+            return;
+        }
+        if key.starts_with("settings.") {
+            self.settings_changed(key, value);
             return;
         }
         let Some(i) = self.selected_index() else {
@@ -1110,6 +1138,7 @@ impl Editor {
     }
 
     fn show_page(&mut self, index: usize) {
+        self.settings_open = false;
         self.stop_editing();
         self.adding = None;
         self.selected = None;
@@ -1208,6 +1237,7 @@ impl Editor {
         };
         self.adding = None;
         self.selected = None;
+        self.settings_open = false;
         self.start_editing(name);
     }
 
@@ -1245,6 +1275,7 @@ impl Editor {
 
     fn add_takeover(&mut self) {
         self.stop_editing();
+        self.settings_open = false;
         self.selected = None;
         let names: Vec<&str> = self
             .layout
@@ -1334,6 +1365,31 @@ impl Editor {
                 self.draft_hint = why;
             }
             (Err(Missing::Invalid(why)), _) => self.problem = why,
+        }
+        self.show();
+    }
+}
+
+impl Editor {
+    /// A field of the strip's settings changed.
+    fn settings_changed(&mut self, key: &str, value: &str) {
+        let Some(layout) = &self.layout else {
+            return;
+        };
+        let mut v = settings::flatten(&layout.config);
+        v.insert(key.into(), value.into());
+        self.committed.insert(key.into(), value.into());
+        self.problem.clear();
+        match settings::build(&v) {
+            Ok((s, weather)) => {
+                if s != layout.config.settings || weather != layout.config.weather {
+                    self.send(Edit::SetSettings {
+                        settings: s,
+                        weather,
+                    });
+                }
+            }
+            Err(Missing::Invalid(why) | Missing::Incomplete(why)) => self.problem = why,
         }
         self.show();
     }

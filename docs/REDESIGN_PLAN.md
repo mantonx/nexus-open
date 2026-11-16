@@ -813,6 +813,16 @@ golang` finds nothing outside the changelog.
   the service from a headless KWin session: edit Volume's seconds and
   signals, select its slider, add a takeover by its signal, rename it
   (the lease follows), delete it; undo returned the exact snapshot.
+- 2026-11-15 — Phase 4 step 6: settings. A Settings button in the header
+  opens the strip's own settings in the settings area, as fields from
+  `nexus-ui/src/settings.rs`: temperatures °F or °C, 24- or 12-hour
+  clock, font, and where the weather is for (a place, or "latitude,
+  longitude"; empty for none). One change is one undoable edit. Found: the
+  window's form kind was set before the form was worked out, so the
+  settings first opened under the page settings. Verified against the
+  service: the 12-hour clock showed on the strip at once, coordinates out
+  of range were refused with nothing sent, and undo restored the exact
+  snapshot.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
