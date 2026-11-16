@@ -10,6 +10,7 @@ mod editor;
 mod geometry;
 mod inspector;
 mod signals;
+mod takeovers;
 
 use std::io;
 use std::thread;

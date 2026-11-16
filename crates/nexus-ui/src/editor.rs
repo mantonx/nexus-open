@@ -13,14 +13,35 @@ use std::thread;
 use std::time::Duration;
 
 use nexus_control::{Client, EditRequest, Layout, SignalEntry, Status};
-use nexus_core::config::{MIN_WIDGET_WIDTH, Temperature, Widget};
+use nexus_core::config::{MIN_WIDGET_WIDTH, Takeover, Temperature, Widget};
 use nexus_store::{Edit, Item, Row};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
 
 use crate::geometry::{self, STRIP};
-use crate::inspector::{self, Context, Field, Kind, Outcome, Reading, Values};
+use crate::inspector::{self, Context, Field, Kind, Missing, Outcome, Reading, Values};
 use crate::signals;
+use crate::takeovers;
 use crate::{AppWindow, Field as FieldRow, SignalRow, Zone};
+
+/// A takeover being edited is shown on the strip for this long, and asked
+/// for again every `LEASE_RENEW`. If the window goes away, it ends soon.
+const LEASE: f64 = 15.0;
+const LEASE_RENEW: Duration = Duration::from_secs(5);
+
+/// The row of widgets being edited.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Shown {
+    Page(usize),
+    Takeover(usize),
+}
+
+/// What the settings area's fields belong to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Form {
+    Widget(i64),
+    Takeover(i64),
+    NewTakeover,
+}
 
 /// How far a press must move before it is a drag rather than a click, in
 /// strip pixels.
@@ -79,13 +100,20 @@ pub struct Editor {
     /// A rename sent: the old and new name, so the editor keeps following
     /// the page before the status poll reports the new name.
     renamed: Option<(String, String)>,
+    /// The takeover being edited, by name: shown on the strip on a lease.
+    editing: Option<String>,
+    lease: Timer,
+    /// A takeover being added: its form, until it has what it needs.
+    adding: Option<Values>,
+    /// After adding a takeover: its name, to start editing it.
+    edit_after: Option<String>,
 
     /// The inspector's rows, kept so a changed value updates its row in
     /// place rather than rebuilding every control.
     fields: Rc<VecModel<FieldRow>>,
     shown: Vec<Field>,
-    /// The widget `shown` belongs to.
-    fields_for: Option<i64>,
+    /// What `shown` belongs to.
+    fields_for: Option<Form>,
     /// Inspector values not sent yet (see `inspector::apply`), and why.
     drafts: Values,
     draft_hint: String,
@@ -124,6 +152,10 @@ impl Editor {
             select_after: None,
             show_after: None,
             renamed: None,
+            editing: None,
+            lease: Timer::default(),
+            adding: None,
+            edit_after: None,
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
@@ -209,6 +241,12 @@ impl Editor {
         let e = editor.clone();
         app.on_delete_page(move || e.borrow_mut().delete_page());
         let e = editor.clone();
+        app.on_edit_takeover(move |i| e.borrow_mut().edit_takeover(i as usize));
+        let e = editor.clone();
+        app.on_add_takeover(move || e.borrow_mut().add_takeover());
+        let e = editor.clone();
+        app.on_delete_takeover(move || e.borrow_mut().delete_takeover());
+        let e = editor.clone();
         app.on_undo(move || e.borrow_mut().step("undo"));
         let e = editor.clone();
         app.on_redo(move || e.borrow_mut().step("redo"));
@@ -257,6 +295,13 @@ impl Editor {
         }
         if let Some(at) = self.show_after.take() {
             request_page(at);
+        }
+        if let Some(name) = self.edit_after.take() {
+            self.start_editing(name);
+        }
+        // Gone, by undo or from elsewhere: back to the page.
+        if self.editing.is_some() && self.editing_takeover().is_none() {
+            self.stop_editing();
         }
         self.show();
         for (key, value) in std::mem::take(&mut self.queued) {
@@ -332,7 +377,18 @@ impl Editor {
             return;
         };
         self.choose_signal(None);
-        self.field_changed(&key, name);
+        let value = if key == takeovers::ON_CHANGE {
+            let list = self
+                .shown
+                .iter()
+                .find(|f| f.key == key)
+                .map(|f| f.value.clone())
+                .unwrap_or_default();
+            takeovers::add_signal(&list, name)
+        } else {
+            name.to_string()
+        };
+        self.field_changed(&key, &value);
         // Not typed in the row, so the row must show the new name when the
         // daemon confirms it (see `committed`).
         self.committed.remove(&key);
@@ -349,16 +405,47 @@ impl Editor {
         layout.config.pages.iter().position(|p| p.name == self.page)
     }
 
+    /// The row being edited: the takeover chosen, once the strip shows
+    /// it; else the page, unless a takeover covers it.
+    fn shown_row(&self) -> Option<Shown> {
+        let l = self.layout.as_ref()?;
+        match &self.editing {
+            Some(name) => {
+                if self.takeover.as_ref() != Some(name) {
+                    return None;
+                }
+                l.config
+                    .takeovers
+                    .iter()
+                    .position(|t| &t.name == name)
+                    .map(Shown::Takeover)
+            }
+            None if self.takeover.is_some() => None,
+            None => self.page_index().map(Shown::Page),
+        }
+    }
+
+    /// The store's ID of the row being edited.
+    fn row_id(&self) -> Option<Row> {
+        let l = self.layout.as_ref()?;
+        Some(match self.shown_row()? {
+            Shown::Page(i) => Row::Page(l.ids.pages[i].id),
+            Shown::Takeover(i) => Row::Takeover(l.ids.takeovers[i].id),
+        })
+    }
+
     fn widgets(&self) -> &[Widget] {
-        match (self.layout.as_ref(), self.page_index()) {
-            (Some(l), Some(i)) => &l.config.pages[i].widgets,
+        match (self.layout.as_ref(), self.shown_row()) {
+            (Some(l), Some(Shown::Page(i))) => &l.config.pages[i].widgets,
+            (Some(l), Some(Shown::Takeover(i))) => &l.config.takeovers[i].widgets,
             _ => &[],
         }
     }
 
     fn widget_ids(&self) -> &[i64] {
-        match (self.layout.as_ref(), self.page_index()) {
-            (Some(l), Some(i)) => &l.ids.pages[i].widgets,
+        match (self.layout.as_ref(), self.shown_row()) {
+            (Some(l), Some(Shown::Page(i))) => &l.ids.pages[i].widgets,
+            (Some(l), Some(Shown::Takeover(i))) => &l.ids.takeovers[i].widgets,
             _ => &[],
         }
     }
@@ -373,7 +460,7 @@ impl Editor {
     }
 
     fn editable(&self) -> bool {
-        self.takeover.is_none() && !self.store_error && self.page_index().is_some()
+        !self.store_error && self.shown_row().is_some()
     }
 
     fn selected_index(&self) -> Option<usize> {
@@ -642,7 +729,31 @@ impl Editor {
             .map(|p| p.name.as_str().into())
             .collect();
         app.set_pages(ModelRc::new(VecModel::from(pages)));
-        app.set_current_page(self.page_index().map_or(-1, |i| i as i32));
+        let editing = self.editing.as_ref().and_then(|name| {
+            self.layout
+                .as_ref()?
+                .config
+                .takeovers
+                .iter()
+                .position(|t| &t.name == name)
+        });
+        let current = self
+            .page_index()
+            .filter(|_| editing.is_none() && self.adding.is_none());
+        app.set_current_page(current.map_or(-1, |i| i as i32));
+        let names: Vec<SharedString> = self
+            .layout
+            .iter()
+            .flat_map(|l| &l.config.takeovers)
+            .map(|t| t.name.as_str().into())
+            .collect();
+        app.set_takeovers(ModelRc::new(VecModel::from(names)));
+        app.set_current_takeover(editing.map_or(-1, |i| i as i32));
+        app.set_takeover_form(match (self.adding.is_some(), editing.is_some()) {
+            (true, _) => "new".into(),
+            (false, true) => "edit".into(),
+            _ => SharedString::new(),
+        });
         app.set_editable(self.editable());
         let selected = self.selected_index();
         app.set_selected(selected.map_or(-1, |i| i as i32));
@@ -671,18 +782,28 @@ impl Editor {
     }
 
     fn caption(&self, widths: &[u32], selected: Option<usize>) -> String {
-        if let Some(t) = &self.takeover {
-            return format!("“{t}” is showing over the page; edit again once it ends.");
+        if let Some(name) = &self.editing
+            && self.takeover.as_ref() != Some(name)
+        {
+            return format!("Showing “{name}” on the strip…");
+        }
+        if let (None, Some(t)) = (&self.editing, &self.takeover) {
+            return format!(
+                "“{t}” is showing over the page; edit again once it ends, or click its tab to edit it."
+            );
         }
         if self.store_error {
             return "The store cannot be written, so the layout cannot be changed. Run nexusctl doctor.".into();
         }
-        if self.layout.is_some() && self.page_index().is_none() {
+        if self.layout.is_some() && self.shown_row().is_none() {
             return String::new();
         }
         let widgets = self.widgets();
         if widgets.is_empty() {
             return "This page is empty. Add widget puts one on it.".into();
+        }
+        if self.editing.is_some() && self.selected.is_none() && self.drag == Drag::None {
+            return "Editing the takeover: the strip shows it while this tab is chosen. Click a widget to select it.".into();
         }
         match (self.drag, selected) {
             (Drag::Resizing { edge, .. }, _) | (_, Some(edge)) if self.preview.is_some() => {
@@ -730,10 +851,30 @@ impl Editor {
     }
 
     fn note(&self, index: usize) -> String {
-        match (&self.layout, self.page_index()) {
-            (Some(l), Some(p)) => l.notes.page(p).widget(index).to_string(),
+        match (&self.layout, self.shown_row()) {
+            (Some(l), Some(Shown::Page(p))) => l.notes.page(p).widget(index).to_string(),
+            (Some(l), Some(Shown::Takeover(t))) => l.notes.takeover(t).widget(index).to_string(),
             _ => String::new(),
         }
+    }
+
+    /// The takeover being edited: its place and store ID.
+    fn editing_takeover(&self) -> Option<(usize, i64)> {
+        let l = self.layout.as_ref()?;
+        let name = self.editing.as_ref()?;
+        let i = l.config.takeovers.iter().position(|t| &t.name == name)?;
+        Some((i, l.ids.takeovers[i].id))
+    }
+
+    /// The takeover form's values: a new one's draft, or the edited one's.
+    fn takeover_values(&self) -> Option<Values> {
+        if let Some(v) = &self.adding {
+            return Some(v.clone());
+        }
+        let (i, _) = self.editing_takeover()?;
+        let mut v = takeovers::flatten(&self.layout.as_ref()?.config.takeovers[i]);
+        v.extend(self.drafts.clone());
+        Some(v)
     }
 
     /// Puts the selected widget's fields in the window. Rows whose value
@@ -741,15 +882,26 @@ impl Editor {
     /// new value is the one just sent from it.
     fn show_fields(&mut self) {
         let selected = self.selected_index().filter(|_| self.editable());
-        let id = selected.and_then(|i| self.widget_ids().get(i).copied());
-        if id != self.fields_for {
-            self.fields_for = id;
+        let form = match selected {
+            Some(i) => self.widget_ids().get(i).copied().map(Form::Widget),
+            None if self.adding.is_some() => Some(Form::NewTakeover),
+            None => self.editing_takeover().map(|(_, id)| Form::Takeover(id)),
+        };
+        if form != self.fields_for {
+            self.fields_for = form;
             self.drafts.clear();
             self.draft_hint.clear();
             self.committed.clear();
             self.shown.clear();
             self.fields.set_vec(Vec::new());
             self.choose_signal(None);
+        }
+        // A new takeover is a draft until it has its signals.
+        if let Some(v) = &self.adding {
+            self.draft_hint = match takeovers::build(v, &[]) {
+                Err(Missing::Incomplete(why)) => why,
+                _ => String::new(),
+            };
         }
         let fields = match selected {
             Some(i) => {
@@ -767,7 +919,10 @@ impl Editor {
                 });
                 fields
             }
-            None => Vec::new(),
+            None => self
+                .takeover_values()
+                .map(|v| takeovers::fields(&v))
+                .unwrap_or_default(),
         };
         let same_keys = fields.len() == self.shown.len()
             && fields.iter().zip(&self.shown).all(|(a, b)| a.key == b.key);
@@ -802,6 +957,10 @@ impl Editor {
     fn field_changed(&mut self, key: &str, value: &str) {
         if self.busy {
             self.queued.push((key.into(), value.into()));
+            return;
+        }
+        if key.starts_with("takeover.") {
+            self.takeover_changed(key, value);
             return;
         }
         let Some(i) = self.selected_index() else {
@@ -876,10 +1035,9 @@ impl Editor {
     /// Adds a clock after the selected widget (or at the end) in the
     /// empty strip; with none left, splits the selected widget in two.
     fn add_widget(&mut self) {
-        let (Some(layout), Some(p)) = (&self.layout, self.page_index()) else {
+        let Some(on) = self.row_id() else {
             return;
         };
-        let page = layout.ids.pages[p].id;
         let widths = self.layout_widths();
         let free = STRIP - widths.iter().sum::<u32>();
         let selected = self.selected_index();
@@ -908,7 +1066,7 @@ impl Editor {
             return;
         };
         edits.push(Edit::AddWidget {
-            on: Row::Page(page),
+            on,
             at: Some(at),
             widget: clock(width),
         });
@@ -952,6 +1110,8 @@ impl Editor {
     }
 
     fn show_page(&mut self, index: usize) {
+        self.stop_editing();
+        self.adding = None;
         self.selected = None;
         self.show();
         request_page(index);
@@ -959,6 +1119,9 @@ impl Editor {
 
     /// Adds an empty page after the one on the strip and shows it.
     fn add_page(&mut self) {
+        if self.editing.is_some() || self.adding.is_some() {
+            return;
+        }
         let names = self.page_names();
         let name = (names.len() + 1..)
             .map(|n| format!("Page {n}"))
@@ -1029,6 +1192,150 @@ impl Editor {
         }
         self.problem.clear();
         self.send(Edit::DeletePage { page });
+    }
+}
+
+/// Takeovers: chosen from the tabs to edit, added from a form, deleted.
+impl Editor {
+    fn edit_takeover(&mut self, index: usize) {
+        let Some(name) = self
+            .layout
+            .as_ref()
+            .and_then(|l| l.config.takeovers.get(index))
+            .map(|t| t.name.clone())
+        else {
+            return;
+        };
+        self.adding = None;
+        self.selected = None;
+        self.start_editing(name);
+    }
+
+    /// Shows takeover `name` on the strip, and keeps it there.
+    fn start_editing(&mut self, name: String) {
+        self.editing = Some(name);
+        self.renew_lease();
+        self.lease.start(TimerMode::Repeated, LEASE_RENEW, || {
+            with_editor(|e| e.renew_lease());
+        });
+        self.show();
+    }
+
+    fn renew_lease(&self) {
+        if let Some(name) = self.editing.clone() {
+            thread::spawn(move || {
+                if let Ok(mut c) = Client::connect() {
+                    let _ = c.request(&format!("show-takeover {LEASE} {name}"));
+                }
+            });
+        }
+    }
+
+    /// Stops editing a takeover and puts the page back.
+    fn stop_editing(&mut self) {
+        if self.editing.take().is_some() {
+            self.lease.stop();
+            thread::spawn(|| {
+                if let Ok(mut c) = Client::connect() {
+                    let _ = c.request("end-takeover");
+                }
+            });
+        }
+    }
+
+    fn add_takeover(&mut self) {
+        self.stop_editing();
+        self.selected = None;
+        let names: Vec<&str> = self
+            .layout
+            .iter()
+            .flat_map(|l| &l.config.takeovers)
+            .map(|t| t.name.as_str())
+            .collect();
+        self.adding = Some(takeovers::new_values(&names));
+        self.show();
+    }
+
+    fn delete_takeover(&mut self) {
+        if self.adding.take().is_some() {
+            self.draft_hint.clear();
+            self.show();
+            return;
+        }
+        let Some((_, id)) = self.editing_takeover() else {
+            return;
+        };
+        self.stop_editing();
+        self.send(Edit::DeleteTakeover { takeover: id });
+    }
+
+    /// A field of the takeover form changed.
+    fn takeover_changed(&mut self, key: &str, value: &str) {
+        let Some(mut v) = self.takeover_values() else {
+            return;
+        };
+        v.insert(key.into(), value.into());
+        let editing = self.editing_takeover();
+        let taken: Vec<&str> = self
+            .layout
+            .iter()
+            .flat_map(|l| l.config.takeovers.iter().enumerate())
+            .filter(|(i, _)| Some(*i) != editing.map(|e| e.0))
+            .map(|(_, t)| t.name.as_str())
+            .collect();
+        let built = takeovers::build(&v, &taken);
+        self.committed.insert(key.into(), value.into());
+        self.problem.clear();
+        match (built, editing) {
+            (Ok(s), None) => {
+                // A new one starts with a clock across the strip, to be
+                // changed like any widget.
+                let takeover = Takeover {
+                    name: s.name.clone(),
+                    on_change: s.on_change,
+                    seconds: s.seconds,
+                    widgets: vec![Widget::Clock {
+                        width: STRIP,
+                        tap: None,
+                        hold: None,
+                    }],
+                };
+                self.adding = None;
+                self.draft_hint.clear();
+                self.edit_after = Some(s.name);
+                self.send(Edit::AddTakeover {
+                    layout: None,
+                    takeover,
+                });
+            }
+            (Ok(s), Some((i, id))) => {
+                self.drafts.clear();
+                self.draft_hint.clear();
+                let old = &self.layout.as_ref().expect("editing one").config.takeovers[i];
+                if old.name != s.name || old.on_change != s.on_change || old.seconds != s.seconds {
+                    if old.name != s.name {
+                        // Followed by its new name once the layout says so.
+                        self.edit_after = Some(s.name.clone());
+                    }
+                    self.send(Edit::SetTakeover {
+                        takeover: id,
+                        name: s.name,
+                        on_change: s.on_change,
+                        seconds: s.seconds,
+                    });
+                }
+            }
+            (Err(Missing::Incomplete(why)), _) => {
+                if self.adding.is_some() {
+                    self.adding = Some(v);
+                } else {
+                    self.drafts.insert(key.into(), value.into());
+                }
+                self.draft_hint = why;
+            }
+            (Err(Missing::Invalid(why)), _) => self.problem = why,
+        }
+        self.show();
     }
 }
 

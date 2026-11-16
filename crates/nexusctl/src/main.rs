@@ -27,6 +27,17 @@ enum Command {
     Page { target: String },
     /// Re-read the store now.
     Reload,
+    /// Show a takeover now, for some seconds; or --end to put the page
+    /// back.
+    Takeover {
+        #[arg(required_unless_present = "end")]
+        name: Option<String>,
+        /// How long, up to 60.
+        #[arg(long, default_value_t = 10.0)]
+        seconds: f64,
+        #[arg(long, conflicts_with = "name")]
+        end: bool,
+    },
     /// Edit the layout, settings and sources as TOML in $VISUAL or $EDITOR.
     /// Saving and closing applies it; comments directly above a table are
     /// kept as notes.
@@ -129,6 +140,10 @@ fn main() -> ExitCode {
         Command::Signals => "signals".to_string(),
         Command::Page { target } => format!("page {target}"),
         Command::Reload => "reload".to_string(),
+        Command::Takeover { name, seconds, end } => match (end, name) {
+            (true, _) | (_, None) => "end-takeover".into(),
+            (false, Some(name)) => format!("show-takeover {seconds} {name}"),
+        },
         Command::Publish { signal, value } => format!("publish {signal} {}", value.join(" ")),
         Command::Tap { x } => format!("tap {x}"),
         Command::Hold { x } => format!("hold {x}"),

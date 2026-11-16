@@ -143,6 +143,12 @@ export component AppWindow inherits Window {
     /// while unknown).
     in property <[string]> pages;
     in property <int> current-page: -1;
+    /// Every takeover's name, and which one is being edited (-1 if none).
+    in property <[string]> takeovers;
+    in property <int> current-takeover: -1;
+    /// "new" while a takeover is being added, "edit" while one is being
+    /// edited, else empty.
+    in property <string> takeover-form;
     /// Bumped when a typed page name is refused, to put the real one back.
     in property <int> page-name-resets;
 
@@ -184,6 +190,11 @@ export component AppWindow inherits Window {
     callback rename-page(string);
     callback move-page(int);
     callback delete-page();
+    /// Takeovers: show takeover `i` on the strip to edit it; start a new
+    /// one; delete the one being edited (or drop the new one).
+    callback edit-takeover(int);
+    callback add-takeover();
+    callback delete-takeover();
     /// Pointer on the strip, in strip pixels; a press also says how near
     /// an edge counts as on it.
     callback pressed(float, float);
@@ -240,11 +251,30 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                 }
                 Text {
-                    text: root.connected && root.page-name != "" ? root.page-name + "  ·  page " + root.page-position : "";
+                    text: !root.connected ? ""
+                        : root.current-takeover >= 0 ? root.takeovers[root.current-takeover] + "  ·  takeover"
+                        : root.page-name != "" ? root.page-name + "  ·  page " + root.page-position : "";
                     color: Palette.foreground.transparentize(0.35);
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
+
+                Button {
+                    text: root.undo-label == "" ? "Undo" : "Undo: " + root.undo-label;
+                    enabled: root.connected && root.undo-label != "";
+                    clicked => {
+                        root.undo();
+                    }
+                }
+
+                Button {
+                    text: root.redo-label == "" ? "Redo" : "Redo: " + root.redo-label;
+                    enabled: root.connected && root.redo-label != "";
+                    clicked => {
+                        root.redo();
+                    }
+                }
+
             }
 
             if !root.connected: Rectangle {
@@ -416,24 +446,33 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                if root.takeovers.length > 0: Text {
+                    text: "Takeovers";
+                    vertical-alignment: center;
+                    color: Palette.foreground.transparentize(0.4);
+                }
+
+                // Takeovers: a click shows one on the strip to edit it.
+                for name[i] in root.takeovers: Button {
+                    text: name;
+                    primary: i == root.current-takeover;
+                    enabled: root.connected;
+                    accessible-label: name + ", takeover" + (i == root.current-takeover ? ", being edited" : "");
+                    clicked => {
+                        root.edit-takeover(i);
+                    }
+                }
+
+                Button {
+                    text: "Add takeover";
+                    enabled: root.connected;
+                    clicked => {
+                        root.add-takeover();
+                    }
+                }
+
                 Rectangle {
                     horizontal-stretch: 1;
-                }
-
-                Button {
-                    text: root.undo-label == "" ? "Undo" : "Undo: " + root.undo-label;
-                    enabled: root.connected && root.undo-label != "";
-                    clicked => {
-                        root.undo();
-                    }
-                }
-
-                Button {
-                    text: root.redo-label == "" ? "Redo" : "Redo: " + root.redo-label;
-                    enabled: root.connected && root.redo-label != "";
-                    clicked => {
-                        root.redo();
-                    }
                 }
             }
 
@@ -453,17 +492,26 @@ export component AppWindow inherits Window {
                 HorizontalBox {
                     padding: 0;
                     Text {
-                        text: root.selected >= 0 ? "Widget settings" : "Page settings";
+                        text: root.selected >= 0 ? "Widget settings"
+                            : root.takeover-form == "new" ? "New takeover"
+                            : root.takeover-form == "edit" ? "Takeover settings" : "Page settings";
                         font-size: 16px;
                         font-weight: 600;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
-                    Button {
+                    if root.takeover-form != "new": Button {
                         text: root.selected >= 0 ? "Add widget after" : "Add widget";
                         enabled: root.connected && root.editable;
                         clicked => {
                             root.add-widget();
+                        }
+                    }
+                    if root.selected < 0 && root.takeover-form != "": Button {
+                        text: root.takeover-form == "new" ? "Cancel" : "Delete takeover";
+                        enabled: root.connected;
+                        clicked => {
+                            root.delete-takeover();
                         }
                     }
                     if root.selected >= 0: Button {
@@ -478,7 +526,7 @@ export component AppWindow inherits Window {
                 // With no widget selected: the page on the strip.
                 // The spacer takes the room past 760 px; without it the cap
                 // would become the whole window's maximum width.
-                if root.selected < 0 && root.editable: HorizontalLayout {
+                if root.selected < 0 && root.editable && root.takeover-form == "": HorizontalLayout {
                     vertical-stretch: 1;
                 VerticalLayout {
                     spacing: 8px;
@@ -552,17 +600,21 @@ export component AppWindow inherits Window {
                 }
                 }
 
-                if root.draft-hint != "": Text {
-                    text: "Not saved yet: " + root.draft-hint;
+                // Always one line tall, so the hint appearing moves no field
+                // from under the pointer.
+                Text {
+                    height: 20px;
+                    text: root.draft-hint == "" ? "" : "Not saved yet: " + root.draft-hint;
                     color: #e0a000;
-                    wrap: word-wrap;
+                    overflow: elide;
+                    vertical-alignment: center;
                     accessible-role: text;
                 }
 
                 scroll := ScrollView {
                     vertical-stretch: 1;
                     min-height: 120px;
-                    visible: root.selected >= 0 && root.editable;
+                    visible: root.fields.length > 0;
 
                     VerticalLayout {
                         width: min(scroll.visible-width, 760px);

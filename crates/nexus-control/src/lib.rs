@@ -68,7 +68,20 @@ pub enum Request {
     /// The layout on the strip, as data.
     Layout,
     Import(Box<ImportRequest>),
+    /// Show a takeover for this many seconds (at most
+    /// `TAKEOVER_LEASE_MAX`), as the settings window does while editing
+    /// it; asked again before it ends, the time starts over.
+    ShowTakeover {
+        name: String,
+        seconds: f64,
+    },
+    /// Put the page back if a takeover covers it.
+    EndTakeover,
 }
+
+/// The longest a takeover is shown on request. A window that asked and
+/// then went away leaves it up no longer than this.
+pub const TAKEOVER_LEASE_MAX: f64 = 60.0;
 
 /// The body of `edit`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -142,6 +155,27 @@ impl Request {
             "undo" => Ok(Request::Undo),
             "redo" => Ok(Request::Redo),
             "layout" => Ok(Request::Layout),
+            "end-takeover" => Ok(Request::EndTakeover),
+            "show-takeover" => {
+                let (seconds, name) = rest.split_once(' ').unwrap_or((rest, ""));
+                let seconds: f64 = seconds
+                    .parse()
+                    .ok()
+                    .filter(|s: &f64| *s > 0.0 && *s <= TAKEOVER_LEASE_MAX)
+                    .ok_or_else(|| {
+                        format!(
+                            "show-takeover needs seconds (up to {TAKEOVER_LEASE_MAX}) and a name, as in show-takeover 15 Volume"
+                        )
+                    })?;
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err("show-takeover needs a takeover name after the seconds".into());
+                }
+                Ok(Request::ShowTakeover {
+                    name: name.into(),
+                    seconds,
+                })
+            }
             "export" => Ok(Request::Export(
                 (!rest.is_empty()).then(|| rest.to_string()),
             )),
@@ -408,6 +442,21 @@ mod tests {
         ] {
             assert!(Request::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn parses_takeover_requests() {
+        assert_eq!(
+            Request::parse("show-takeover 15 Now playing"),
+            Ok(Request::ShowTakeover {
+                name: "Now playing".into(),
+                seconds: 15.0
+            })
+        );
+        assert_eq!(Request::parse("end-takeover"), Ok(Request::EndTakeover));
+        assert!(Request::parse("show-takeover 600 Volume").is_err());
+        assert!(Request::parse("show-takeover 15").is_err());
+        assert!(Request::parse("show-takeover Volume").is_err());
     }
 
     #[test]

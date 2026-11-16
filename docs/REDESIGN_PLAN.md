@@ -795,6 +795,24 @@ golang` finds nothing outside the changelog.
   sent). Verified against the service from a headless KWin session: add,
   rename, a taken name, move, add a widget to the empty page, delete, the
   refused delete; five undos returned the exact snapshot.
+- 2026-11-15 — Phase 4 step 5: takeovers. Each takeover has a tab after
+  the pages; choosing one shows it on the strip so the preview edits its
+  widgets like a page's. The daemon gained `show-takeover <seconds> <name>`
+  and `end-takeover` (also `nexusctl takeover`): the window asks for 15 s
+  and asks again every 5 s, so a closed or crashed window leaves it up at
+  most 15 s. A config reload now keeps a takeover that still exists by
+  name; it used to drop it, which would have closed the takeover after
+  every edit. With no widget selected the settings show its name, the
+  signals whose change shows it (Choose… adds to the list) and seconds,
+  from `nexus-ui/src/takeovers.rs`. Add takeover is a draft until it has
+  signals, then starts with a clock across the strip. Undo and Redo moved
+  to the header to make room. The "Not saved yet" hint now has a line of
+  its own: appearing above the fields it pushed them down and a click
+  landed in the wrong field, the third such shift found by testing, so
+  every message that comes and goes now has fixed room. Verified against
+  the service from a headless KWin session: edit Volume's seconds and
+  signals, select its slider, add a takeover by its signal, rename it
+  (the lease follows), delete it; undo returned the exact snapshot.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

@@ -55,6 +55,13 @@ pub enum Input {
     Step(i32),
     /// A new, already-validated config replaces the current one.
     Config(Box<Config>),
+    /// Show the takeover with this name for `seconds` instead of its own
+    /// time, as the settings window does while it is being edited. Sent
+    /// again before it ends, it starts the time over. Unknown names are
+    /// ignored.
+    ShowTakeover { name: String, seconds: f64 },
+    /// Put the page back if a takeover covers it.
+    EndTakeover,
     /// The device came back; it needs the whole picture again.
     Redraw,
 }
@@ -87,6 +94,8 @@ struct Cover {
     /// Monotonic time it ends. `None` until the next frame, since a signal
     /// arrives without a time.
     until: Option<f64>,
+    /// How long it lasts, when not its own `seconds`: shown on request.
+    lease: Option<f64>,
 }
 
 /// A finger on a slider.
@@ -232,8 +241,9 @@ impl Engine {
             }
             Input::Touch { down, x, at } => {
                 // Any touch keeps a takeover up for its full time again.
-                if let Some(cover) = &mut self.cover {
-                    cover.until = Some(at + self.config.takeovers[cover.index].seconds);
+                if let Some(cover) = self.cover {
+                    let seconds = self.cover_seconds(&cover);
+                    self.cover.as_mut().expect("just matched").until = Some(at + seconds);
                 }
                 let on_slider = self.slide.is_some()
                     || (down
@@ -271,6 +281,27 @@ impl Engine {
                 self.go_to(target);
             }
             Input::Config(config) => self.reload(*config),
+            Input::ShowTakeover { name, seconds } => {
+                let Some(index) = self.config.takeovers.iter().position(|t| t.name == name) else {
+                    return;
+                };
+                let busy =
+                    self.gestures.pressed() || self.slide.is_some() || self.motion != Motion::Still;
+                let same = self.cover.is_some_and(|c| c.index == index);
+                if busy && !same {
+                    return;
+                }
+                self.cover = Some(Cover {
+                    index,
+                    until: None,
+                    lease: Some(seconds),
+                });
+                if !same {
+                    self.pressed = None;
+                    self.dirty = true;
+                }
+            }
+            Input::EndTakeover => self.uncover(),
             Input::Redraw => self.dirty = true,
         }
     }
@@ -284,10 +315,14 @@ impl Engine {
         if let Some(offset) = self.offset() {
             return Some(self.slide(offset, now));
         }
-        if let Some(cover) = &mut self.cover {
-            let until = *cover
+        if let Some(cover) = self.cover {
+            let seconds = self.cover_seconds(&cover);
+            let until = *self
+                .cover
+                .as_mut()
+                .expect("just matched")
                 .until
-                .get_or_insert(mono + self.config.takeovers[cover.index].seconds);
+                .get_or_insert(mono + seconds);
             // Never pulled from under a finger.
             if mono >= until && !self.gestures.pressed() && self.slide.is_none() {
                 self.uncover();
@@ -319,9 +354,7 @@ impl Engine {
         // While a finger is down the next touch sample is the wake-up.
         let touching = self.gestures.pressed() || self.slide.is_some();
         let ends = self.cover.filter(|_| !touching).map(|c| {
-            let until = c
-                .until
-                .unwrap_or(mono + self.config.takeovers[c.index].seconds);
+            let until = c.until.unwrap_or(mono + self.cover_seconds(&c));
             Duration::from_secs_f64((until - mono).max(0.0))
         });
         match (minute, ends) {
@@ -418,11 +451,20 @@ impl Engine {
         if !same && busy {
             return;
         }
-        self.cover = Some(Cover { index, until: None });
+        self.cover = Some(Cover {
+            index,
+            until: None,
+            lease: None,
+        });
         if !same {
             self.pressed = None;
             self.dirty = true;
         }
+    }
+
+    /// How long a takeover stays: its lease when shown on request.
+    fn cover_seconds(&self, c: &Cover) -> f64 {
+        c.lease.unwrap_or(self.config.takeovers[c.index].seconds)
     }
 
     fn uncover(&mut self) {
@@ -699,7 +741,14 @@ impl Engine {
         self.motion = Motion::Still;
         self.pressed = None;
         self.slide = None;
-        self.cover = None;
+        // A takeover stays if it still exists by name, as an edit to it
+        // from the settings window must not close it.
+        let covering = self.cover.map(|c| &self.config.takeovers[c.index].name);
+        let kept = covering.and_then(|name| config.takeovers.iter().position(|t| &t.name == name));
+        self.cover = match (self.cover, kept) {
+            (Some(c), Some(index)) => Some(Cover { index, ..c }),
+            _ => None,
+        };
         self.dismissing = false;
         self.last_set.clear();
         self.snapshots.clear();
@@ -1256,6 +1305,56 @@ mod tests {
         // takeover, not a new one.
         e.handle(level(32.0));
         assert_eq!(e.takeover(), Some("Volume"));
+    }
+
+    #[test]
+    fn a_takeover_shown_on_request_lasts_its_lease() {
+        let mut e = covered();
+        let now = at("16:17:05");
+        let show = || Input::ShowTakeover {
+            name: "Volume".into(),
+            seconds: 15.0,
+        };
+        e.handle(show());
+        assert_eq!(e.takeover(), Some("Volume"));
+        e.frame(&now, 0.0);
+        assert!(e.frame(&now, 10.0).is_none(), "longer than its own 2 s");
+        e.handle(show());
+        e.frame(&now, 10.0);
+        assert_eq!(e.takeover(), Some("Volume"));
+        e.frame(&now, 24.0);
+        assert_eq!(
+            e.takeover(),
+            Some("Volume"),
+            "asked again: time starts over"
+        );
+        e.frame(&now, 25.0);
+        assert_eq!(e.takeover(), None, "not renewed: it ends");
+
+        e.handle(show());
+        e.handle(Input::EndTakeover);
+        assert_eq!(e.takeover(), None);
+        e.handle(Input::ShowTakeover {
+            name: "Nope".into(),
+            seconds: 15.0,
+        });
+        assert_eq!(e.takeover(), None, "unknown names are ignored");
+    }
+
+    #[test]
+    fn a_takeover_stays_through_a_reload_that_keeps_it() {
+        let mut e = covered();
+        e.handle(Input::ShowTakeover {
+            name: "Volume".into(),
+            seconds: 15.0,
+        });
+        let mut config = e.config().clone();
+        config.takeovers[1].widgets[0] = config.takeovers[1].widgets[0].clone().with_width(600);
+        e.handle(Input::Config(Box::new(config.clone())));
+        assert_eq!(e.takeover(), Some("Volume"), "an edit to it keeps it");
+        config.takeovers.remove(1);
+        e.handle(Input::Config(Box::new(config)));
+        assert_eq!(e.takeover(), None, "gone from the config: gone");
     }
 
     #[test]

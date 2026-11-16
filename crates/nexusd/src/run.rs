@@ -335,6 +335,23 @@ impl Daemon {
                 Ok(json!(null))
             }
             Request::Reload => self.reload().map(|()| json!(null)),
+            Request::ShowTakeover { name, seconds } => {
+                let known = self
+                    .engine
+                    .config()
+                    .takeovers
+                    .iter()
+                    .any(|t| t.name == name);
+                if !known {
+                    return Err(format!("no takeover named \"{name}\""));
+                }
+                self.engine.handle(Input::ShowTakeover { name, seconds });
+                Ok(json!(null))
+            }
+            Request::EndTakeover => {
+                self.engine.handle(Input::EndTakeover);
+                Ok(json!(null))
+            }
             Request::Edit(request) => {
                 self.writable()?;
                 let now = self.store.revision().map_err(|e| e.to_string())?;
