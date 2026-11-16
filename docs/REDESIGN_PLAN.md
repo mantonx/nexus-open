@@ -1002,6 +1002,11 @@ golang` finds nothing outside the changelog.
   `checkable`, since a checkable Button flips its own state on a click);
   AT-SPI reports the one on as pressed. Left for Matt: listening with
   Orca itself.
+- 2026-11-15 — Soak restarted. Installing the build for Matt's exit test
+  restarted the daemon 90 minutes into the soak, which the recorder logs
+  as a restart, so the run was stopped and a new 72-hour one started; it
+  ends 2026-11-18 22:52. No install until then. The first run's file is kept.
+  Matt chose a converter for old layout YAML (Phase 5 gate).
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
