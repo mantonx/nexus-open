@@ -1,0 +1,47 @@
+[package]
+name = "nexus-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nexus-control = { path = "../crates/nexus-control" }
+nexus-device = { path = "../crates/nexus-device" }
+nexus-sources = { path = "../crates/nexus-sources" }
+nexus-store = { path = "../crates/nexus-store" }
+
+# Not part of the main workspace: it builds with nightly and sanitizers.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "config"
+path = "fuzz_targets/config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "touch_report"
+path = "fuzz_targets/touch_report.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "source_line"
+path = "fuzz_targets/source_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_request"
+path = "fuzz_targets/control_request.rs"
+test = false
+doc = false
+bench = false

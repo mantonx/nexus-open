@@ -1,0 +1,46 @@
+# Fuzzes every parser that takes input from outside: layout text, the
+# strip's HID reports, source plugin lines and control socket requests.
+# Weekly and by hand, not on every push: each target runs for minutes.
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [redesign, main]
+    paths: ['fuzz/**', '.github/workflows/fuzz.yml']
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [config, touch_report, source_line, control_request]
+    env:
+      # cargo-fuzz needs unstable flags; the pinned stable toolchain allows
+      # them this way, so the crates build with the version they require.
+      RUSTC_BOOTSTRAP: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/bin/cargo-fuzz
+            fuzz/target
+          key: fuzz-${{ hashFiles('fuzz/Cargo.lock') }}
+      - run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
+      - name: Seed the corpus
+        run: |
+          mkdir -p fuzz/corpus/config
+          cp crates/nexus-core/assets/default.toml crates/nexus-core/assets/starters/*.toml fuzz/corpus/config/
+      - run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=300 -rss_limit_mb=2048
+        working-directory: fuzz
+      - if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: crash-${{ matrix.target }}
+          path: fuzz/artifacts/

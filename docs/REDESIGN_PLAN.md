@@ -953,6 +953,15 @@ golang` finds nothing outside the changelog.
   from their lists, were stored as before; undo restored the snapshot.
   Left for translation: strings built with `format!` in Rust (problems,
   captions, help with numbers) still need marking for extraction.
+- 2026-11-15 — Phase 5, fuzzing. Four cargo-fuzz targets in `fuzz/`,
+  one per parser that takes outside input: layout text (parsed, and if
+  accepted written and parsed again to the same pages and takeovers),
+  the strip's touch reports, source plugin lines and control requests.
+  They build with the pinned 1.100 toolchain and `RUSTC_BOOTSTRAP=1`
+  rather than a nightly, so the crates keep their minimum version. Two
+  minutes each locally: about 109 million inputs, no crash, and the round
+  trip held. A weekly CI job (`fuzz.yml`, also by hand and when `fuzz/`
+  changes) runs each for five minutes and uploads any crash.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
