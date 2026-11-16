@@ -332,7 +332,9 @@ and what it does if it cannot.
   protocol.
 - 2026-11-15 — Matt's answers. (1) The device work starts after the
   redesign's Phase 5 ships the Nexus. (2) Rename the app before the first
-  package; the new name is Matt's pick. (3) Per-app profiles: Matt left it
+  package; Matt later the same day: keep "Nexus Open". (3) Per-app profiles: Matt left it
   to Claude. Allowed as one signal, `app.focused`, that profiles may
   switch on; the strip's layout does not react to it (see D5). (4) The pump
   test is careful: the full procedure is in "The pump test".
+- 2026-11-15 — Matt: keep the name "Nexus Open". The rename is dropped.
+  "CORSAIR" and "iCUE" still stay out of the name and icon.

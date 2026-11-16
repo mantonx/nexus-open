@@ -382,10 +382,6 @@ Hardening comes first. Do not package until it passes.
 
 Then ship:
 
-- The app's new name, before the first package (Matt, 2026-11-15: the
-  Corsair device plan makes "Nexus Open" too narrow). **GATE**: Matt picks
-  it. Rename the binaries, crates, socket, state paths and service, with a
-  migration for the existing store.
 - Packaging for Arch, deb, rpm and a tarball, with the udev rule numbered
   below 73.
 - A converter from the old layout YAML, or a documented manual migration.
