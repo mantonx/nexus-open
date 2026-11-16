@@ -13,6 +13,7 @@ mod inspector;
 mod layouts;
 mod settings;
 mod signals;
+mod simulate;
 mod takeovers;
 mod window_size;
 

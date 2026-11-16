@@ -23,6 +23,7 @@ use crate::inspector::{self, Context, Field, Kind, Missing, Outcome, Reading, Va
 use crate::layouts;
 use crate::settings;
 use crate::signals;
+use crate::simulate;
 use crate::takeovers;
 use crate::{AppWindow, Field as FieldRow, LayoutRow, SignalRow, Zone};
 
@@ -120,6 +121,10 @@ pub struct Editor {
     unsent: Option<String>,
     /// Changes made while one was still on its way, in order.
     waiting: VecDeque<Waiting>,
+    /// Try mode: the preview acts as the strip.
+    trying: bool,
+    /// In Try mode, where and when the current press began.
+    touch: Option<(f32, std::time::Instant)>,
 
     /// The inspector's rows, kept so a changed value updates its row in
     /// place rather than rebuilding every control.
@@ -173,6 +178,8 @@ impl Editor {
             notice: String::new(),
             unsent: None,
             waiting: VecDeque::new(),
+            trying: false,
+            touch: None,
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
@@ -284,6 +291,14 @@ impl Editor {
             e.settings_open = true;
             e.show();
         });
+        let e = editor.clone();
+        app.on_set_trying(move |on| e.borrow_mut().set_trying(on));
+        let e = editor.clone();
+        app.on_try_press(move |x| e.borrow_mut().touch = Some((x, std::time::Instant::now())));
+        let e = editor.clone();
+        app.on_try_release(move |x| e.borrow_mut().try_release(x));
+        let e = editor.clone();
+        app.on_try_cancel(move || e.borrow_mut().touch = None);
         let e = editor.clone();
         app.on_undo(move || e.borrow_mut().step("undo"));
         let e = editor.clone();
@@ -504,7 +519,7 @@ impl Editor {
     }
 
     fn editable(&self) -> bool {
-        !self.store_error && self.shown_row().is_some()
+        !self.trying && !self.store_error && self.shown_row().is_some()
     }
 
     fn selected_index(&self) -> Option<usize> {
@@ -869,6 +884,9 @@ impl Editor {
     }
 
     fn caption(&self, widths: &[u32], selected: Option<usize>) -> String {
+        if self.trying {
+            return "Trying it: a tap, long press or swipe here is a touch on the strip, and really does what it does.".into();
+        }
         if !self.notice.is_empty() {
             return self.notice.clone();
         }
@@ -1554,6 +1572,41 @@ impl Editor {
             "import {}",
             serde_json::to_string(&import).unwrap_or_default()
         ));
+    }
+}
+
+/// Try mode.
+impl Editor {
+    fn set_trying(&mut self, on: bool) {
+        if on == self.trying {
+            return;
+        }
+        if on {
+            // A takeover being edited would cover what is tried.
+            self.stop_editing();
+            self.adding = None;
+            self.selected = None;
+            self.drag = Drag::None;
+        }
+        self.trying = on;
+        self.touch = None;
+        if let Some(app) = self.app.upgrade() {
+            app.set_trying(on);
+        }
+        self.show();
+    }
+
+    /// The press ended: send it to the daemon as a touch on the strip.
+    fn try_release(&mut self, x: f32) {
+        let Some((from, at)) = self.touch.take() else {
+            return;
+        };
+        let line = simulate::gesture(from, x, at.elapsed());
+        thread::spawn(move || {
+            if let Ok(mut client) = Client::connect() {
+                let _ = client.request(&line);
+            }
+        });
     }
 }
 

@@ -308,6 +308,13 @@ export component AppWindow inherits Window {
     in property <string> diagnostics;
     /// Run the checks again now.
     callback check-again();
+    /// Try mode: the preview acts as the strip, and a press on it is sent
+    /// as a touch (strip pixels at press and release).
+    in property <bool> trying;
+    callback set-trying(bool);
+    callback try-press(float);
+    callback try-release(float);
+    callback try-cancel();
     /// Every layout; the name of the one on the strip; what a new one can
     /// start from. Bumped when a typed layout name is refused.
     in property <[LayoutRow]> layouts;
@@ -473,6 +480,26 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                 }
 
+                // Edit, or try the strip out in the preview.
+                Button {
+                    text: "Edit";
+                    primary: !root.trying;
+                    enabled: root.connected;
+                    accessible-label: "Edit mode: clicks on the preview select widgets";
+                    clicked => {
+                        root.set-trying(false);
+                    }
+                }
+                Button {
+                    text: "Try it";
+                    primary: root.trying;
+                    enabled: root.connected;
+                    accessible-label: "Try mode: clicks on the preview act as touches on the strip";
+                    clicked => {
+                        root.set-trying(true);
+                    }
+                }
+
                 Button {
                     text: "Settings";
                     enabled: root.connected;
@@ -617,6 +644,25 @@ export component AppWindow inherits Window {
                             return accept;
                         }
                         reject
+                    }
+
+                    if root.trying: TouchArea {
+                        property <float> at: self.mouse-x / preview-area.unit;
+                        mouse-cursor: MouseCursor.pointer;
+                        accessible-role: button;
+                        accessible-label: "The strip, to try: a tap or swipe here acts on it";
+                        pointer-event(event) => {
+                            if event.button != PointerEventButton.left {
+                                return;
+                            }
+                            if event.kind == PointerEventKind.down {
+                                root.try-press(self.at);
+                            } else if event.kind == PointerEventKind.up {
+                                root.try-release(self.at);
+                            } else if event.kind == PointerEventKind.cancel {
+                                root.try-cancel();
+                            }
+                        }
                     }
 
                     if root.editable: Rectangle {

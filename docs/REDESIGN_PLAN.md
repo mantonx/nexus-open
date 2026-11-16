@@ -904,6 +904,17 @@ golang` finds nothing outside the changelog.
   Ctrl+Z 1 ms apart undid two changes (traced: the second waited for the
   first). My first runs of that test seemed to fail; the window under
   test was an older build.
+- 2026-11-15 — Phase 4 step 13: the preview as the simulator. Edit and
+  Try it buttons in the header. In Try mode the outlines go and a press
+  on the preview is sent to the daemon as a touch: a still press is a tap
+  (a long press from 0.5 s), one that moved more than 24 strip pixels a
+  drag from press to release (`nexus-ui/src/simulate.rs`). The daemon
+  turns each into the same samples the strip reports, so swipes, taps,
+  holds and sliders behave as on the strip, and really run their actions;
+  the caption says so. Verified against the service: a swipe went to
+  Performance and back, a tap on the clock opened Clock, a tap there
+  returned to System. Media and slider widgets were not touched, since
+  they act on the real player and volume.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
