@@ -26,6 +26,7 @@ use nexus_store::{Edit, Store, text};
 use serde_json::json;
 
 use crate::control::{self, Frame, Reply};
+use crate::notify::Notifier;
 
 /// How often to look for the device while it is unplugged.
 const RECONNECT_POLL: Duration = Duration::from_millis(250);
@@ -101,6 +102,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         weather: None,
         effects: crate::actions::Effects::new(),
         sources,
+        notifier: Notifier::from_env(),
     };
     daemon.sources.apply(&daemon.engine.config().sources);
     if options.demo {
@@ -113,6 +115,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         let _ = weather.send(daemon.engine.config().weather.clone());
         daemon.weather = Some(weather);
     }
+    daemon.notifier.ready();
     daemon.run(&rx)
 }
 
@@ -148,11 +151,15 @@ struct Daemon {
     weather: Option<Sender<Option<config::Weather>>>,
     /// The config's external source programs.
     sources: crate::sources::Sources,
+    /// systemd's readiness and watchdog. Pinged from this thread, since it
+    /// is the one that owns the device: a hang here freezes the strip.
+    notifier: Notifier,
 }
 
 impl Daemon {
     fn run(&mut self, rx: &Receiver<Msg>) -> Result<(), Box<dyn Error>> {
         loop {
+            self.notifier.alive();
             if self.device.is_none() && Instant::now() >= self.next_attempt {
                 self.connect();
             }
@@ -169,6 +176,10 @@ impl Daemon {
             if self.device.is_none() {
                 let retry = self.next_attempt.saturating_duration_since(Instant::now());
                 wait = Some(wait.map_or(retry, |w| w.min(retry)));
+            }
+            // An idle strip would otherwise sleep until a message comes.
+            if let Some(max) = self.notifier.max_wait() {
+                wait = Some(wait.map_or(max, |w| w.min(max)));
             }
             let first = match wait {
                 Some(w) => match rx.recv_timeout(w) {

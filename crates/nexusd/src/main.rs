@@ -18,6 +18,7 @@ use nexus_core::fonts::FontChoice;
 
 mod actions;
 mod control;
+mod notify;
 #[cfg(target_os = "linux")]
 mod preview;
 mod run;

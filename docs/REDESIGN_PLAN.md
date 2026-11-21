@@ -1059,6 +1059,25 @@ golang` finds nothing outside the changelog.
   Xwayland already running: 49–77 ms to a mapped window that already
   shows live data. The earlier 419–546 ms likely included KWin starting
   Xwayland on demand; the cold-cache run still needs Matt's sudo.
+- 2026-11-21 — Matt accepted the soak as it ran (13.5 hours awake, four
+  suspends, no restart): the 72-hour item is waived on that evidence, not
+  rerun. He chose not to install the wider udev rule yet; the installed
+  one still covers only the Nexus.
+- 2026-11-21 — Phase 5, the unit's watchdog. Root cause of the gap: the
+  unit was `Type=simple` and nexusd never spoke to systemd, so a daemon
+  thread stuck in a device write would leave the service "active" with
+  a frozen strip. Now `Type=notify` with `WatchdogSec=20s`: nexusd sends
+  `READY=1` once the socket and store are up, and the daemon thread itself
+  pings (a helper thread would keep pinging through a hang), at most every
+  5 s, waking an idle loop every 10 s to do so. No crate: one datagram to
+  `$NOTIFY_SOCKET` from std; off Linux it does nothing. Verified on the
+  service: pings arrive through the sandbox (60 s, no restart); SIGSTOP of
+  the daemon gave "Failed with result 'watchdog'", a core dump, and the
+  strip back 2 s later. Hardening with the UI running, from a headless KWin
+  session against the sandboxed service: live preview and signals, an edit
+  made in the window (move page) stored and undone to an identical export,
+  and a service restart with the window open reconnected within 4 s.
+  Launching programs from the sandbox was verified in Phase 3.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

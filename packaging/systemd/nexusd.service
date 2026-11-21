@@ -7,8 +7,12 @@ After=dbus.socket
 Conflicts=nexus-open.service
 
 [Service]
-Type=simple
+# notify: start counts as done once the control socket is up. The daemon
+# thread pings the watchdog; if it stalls for 20 s (a wedged device write,
+# a deadlock), systemd aborts it and Restart= brings it back.
+Type=notify
 ExecStart=/usr/bin/nexusd run
+WatchdogSec=20s
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=5
