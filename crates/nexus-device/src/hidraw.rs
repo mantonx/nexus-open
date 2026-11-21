@@ -144,3 +144,127 @@ pub fn find() -> Result<Option<PathBuf>, DeviceError> {
     }
     Ok(None)
 }
+
+/// One hidraw node of a Corsair device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Node {
+    pub path: PathBuf,
+    /// Its USB interface number.
+    pub interface: Option<u8>,
+    /// Whether this user can open it for reading and writing.
+    pub access: bool,
+    /// Processes that have it open, by pid and name.
+    pub holders: Vec<(u32, String)>,
+}
+
+/// A Corsair USB device and its hidraw nodes, in interface order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Found {
+    pub product: u16,
+    /// As the device names itself.
+    pub name: String,
+    pub nodes: Vec<Node>,
+}
+
+/// Every Corsair device plugged in. Reads sysfs and opens each node only to
+/// see whether it can be opened: nothing is sent to any device.
+pub fn scan() -> Vec<Found> {
+    let mut found: Vec<(PathBuf, Found)> = Vec::new();
+    let Ok(entries) = fs::read_dir("/sys/class/hidraw") else {
+        return Vec::new();
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let dev = entry.path().join("device");
+        let Ok(uevent) = fs::read_to_string(dev.join("uevent")) else {
+            continue;
+        };
+        let field = |key: &str| {
+            uevent
+                .lines()
+                .find_map(|l| l.strip_prefix(key))
+                .map(str::to_string)
+        };
+        // HID_ID=0003:00001B1C:00001B7C: bus, vendor, product.
+        let Some(id) = field("HID_ID=") else {
+            continue;
+        };
+        let mut parts = id.split(':').skip(1);
+        let (Some(vendor), Some(product)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        if u32::from_str_radix(vendor, 16).ok() != Some(u32::from(crate::catalog::CORSAIR)) {
+            continue;
+        }
+        let Ok(product) = u16::from_str_radix(product.trim_start_matches('0'), 16)
+            .or_else(|_| u16::from_str_radix(product, 16))
+        else {
+            continue;
+        };
+        let interface = fs::read_to_string(dev.join("../bInterfaceNumber"))
+            .ok()
+            .and_then(|s| u8::from_str_radix(s.trim(), 16).ok());
+        let path = Path::new("/dev").join(entry.file_name());
+        let access = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .is_ok();
+        let node = Node {
+            holders: holders(&path),
+            path,
+            interface,
+            access,
+        };
+        // The USB device: hid device -> interface -> device.
+        let usb = fs::canonicalize(&dev)
+            .ok()
+            .and_then(|d| d.parent()?.parent().map(Path::to_path_buf))
+            .unwrap_or_default();
+        match found.iter_mut().find(|(u, _)| *u == usb) {
+            Some((_, f)) => f.nodes.push(node),
+            None => found.push((
+                usb,
+                Found {
+                    product,
+                    name: field("HID_NAME=").unwrap_or_default(),
+                    nodes: vec![node],
+                },
+            )),
+        }
+    }
+    let mut out: Vec<Found> = found.into_iter().map(|(_, f)| f).collect();
+    for f in &mut out {
+        f.nodes.sort_by_key(|n| n.interface);
+    }
+    out
+}
+
+/// Processes with `node` open, found through /proc/*/fd. Processes of
+/// other users are not visible, which is fine: they could not open it
+/// either without the same access.
+pub fn holders(node: &Path) -> Vec<(u32, String)> {
+    let mut found = Vec::new();
+    let Ok(procs) = fs::read_dir("/proc") else {
+        return found;
+    };
+    for p in procs.flatten() {
+        let Some(pid) = p.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Ok(fds) = fs::read_dir(p.path().join("fd")) else {
+            continue;
+        };
+        if fds
+            .flatten()
+            .any(|fd| fs::read_link(fd.path()).is_ok_and(|target| target == node))
+        {
+            let name = fs::read_to_string(p.path().join("comm"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            found.push((pid, name));
+        }
+    }
+    found
+}

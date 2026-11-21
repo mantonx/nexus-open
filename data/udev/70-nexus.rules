@@ -1,8 +1,31 @@
-# Corsair iCUE Nexus (1b1c:1b8e) — grant the active desktop session access.
+# Corsair devices Nexus Open drives: grant the user at the seat access.
 #
 # This file must sort before 73-seat-late.rules: that file runs the
 # "uaccess" builtin, which only applies ACLs to devices already tagged.
 # The old 99-corsair-nexus.rules set the tag too late, so no ACL was applied.
+#
+# Only the interfaces the app uses are opened up. The K100's interface 0
+# is its typing interface (keyboard, media keys, mouse); it stays root's,
+# so nothing reading hidraw as the user can see keystrokes.
 
+# iCUE Nexus (1b1c:1b8e).
 SUBSYSTEM=="usb", ATTR{idVendor}=="1b1c", ATTR{idProduct}=="1b8e", TAG+="uaccess"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", TAG+="uaccess"
+
+# The rest match on properties 60-persistent-hidraw.rules sets on each
+# hidraw node. Plain ATTRS{} keys cannot do it: the vendor id is on the USB
+# device and the interface number on the USB interface, and all ATTRS{}
+# keys of one rule must match the same parent, so such a rule never matches.
+SUBSYSTEM!="hidraw", GOTO="nexus_hidraw_end"
+ENV{ID_USB_VENDOR_ID}!="1b1c", GOTO="nexus_hidraw_end"
+# LCD cap for Elite Capellix coolers (0c39): its display interface.
+ENV{ID_USB_MODEL_ID}=="0c39", ENV{ID_USB_INTERFACE_NUM}=="00", TAG+="uaccess"
+# iCUE Commander Core (0c32): both of its interfaces.
+ENV{ID_USB_MODEL_ID}=="0c32", ENV{ID_USB_INTERFACE_NUM}=="00|01", TAG+="uaccess"
+# K100 RGB (1b7c): control (1) and key and dial events (2), not typing (0).
+ENV{ID_USB_MODEL_ID}=="1b7c", ENV{ID_USB_INTERFACE_NUM}=="01|02", TAG+="uaccess"
+LABEL="nexus_hidraw_end"
+
+# uinput, so remapped keys can type as a keyboard does. The user at the
+# seat can then make input events, as Steam's rule for controllers allows.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

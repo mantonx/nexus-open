@@ -16,3 +16,30 @@ pub fn run() -> ExitCode {
         ExitCode::SUCCESS
     }
 }
+
+/// `nexusctl devices`.
+pub fn devices() -> ExitCode {
+    let list = nexus_doctor::devices();
+    if list.is_empty() {
+        say!("No Corsair devices found.\n");
+        return ExitCode::SUCCESS;
+    }
+    let width = list
+        .iter()
+        .map(|d| d.name.chars().count())
+        .max()
+        .unwrap_or(0);
+    for d in &list {
+        say!(
+            "{:width$}  {:04x}  {}  ({})\n",
+            d.name,
+            d.id,
+            d.state,
+            d.support
+        );
+        for line in d.fix.lines() {
+            say!("{:width$}        {line}\n", "");
+        }
+    }
+    ExitCode::SUCCESS
+}

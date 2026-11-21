@@ -1033,6 +1033,22 @@ golang` finds nothing outside the changelog.
   as his hand rebuild; imported, stored identically to the dry run, then
   undone. Also: nexusctl output goes through `say!`, so `| head` ends it
   quietly where `print!` panicked on the closed pipe.
+- 2026-11-21 — Device plan D1, first part (no sudo, nothing sent to any
+  device). `data/udev/70-nexus.rules` now covers the LCD cap (interface
+  0), the Commander Core (0 and 1) and the K100 (1 and 2, not its typing
+  interface 0), plus uinput; the Nexus lines are unchanged. A rule cannot
+  match vendor and interface with ATTRS{} (they are on different parents
+  and one rule's ATTRS{} must match one parent), so it matches the ID_USB_*
+  properties 60-persistent-hidraw.rules sets on each node. Checked without
+  installing, by `udevadm test --extra-rules-dir` on every node: exactly the
+  intended ones get uaccess; uinput could not be simulated (no module
+  loaded) and is the same line as Steam's rule. Not installed: GATE sudo.
+  `nexusctl devices` and a doctor note list each Corsair device, what it
+  is for and what blocks it, from sysfs and a test open; the /proc holder
+  scan moved into nexus-device for both. The troubleshooting test now
+  flattens whitespace: it had missed check names rustfmt wraps onto the
+  next line. Left for D1: the registry with hotplug and logind sleep, and
+  the exit test (replugs and suspends with Matt).
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

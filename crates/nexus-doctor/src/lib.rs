@@ -30,7 +30,98 @@ pub fn run() -> Vec<Check> {
     let status = daemon(&mut r);
     device(&mut r);
     store(&mut r, status.as_ref());
+    other_devices(&mut r);
     r.0
+}
+
+/// A Corsair device that is plugged in, and where it stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceLine {
+    pub name: String,
+    pub id: u16,
+    /// What the app does with it, or will.
+    pub support: String,
+    /// Ready, or what blocks it.
+    pub state: String,
+    /// What to do about it, if anything.
+    pub fix: String,
+}
+
+/// Every Corsair device plugged in. Nothing is sent to any of them.
+#[cfg(target_os = "linux")]
+pub fn devices() -> Vec<DeviceLine> {
+    use nexus_device::catalog::{self, Support};
+    nexus_device::hidraw::scan()
+        .into_iter()
+        .map(|f| {
+            let known = catalog::product(f.product);
+            let name = known.map_or(f.name.clone(), |p| p.name.to_string());
+            let support = match known.map(|p| p.support) {
+                Some(Support::Supported(what)) => format!("supported: {what}"),
+                Some(Support::Planned(what)) => format!("planned: {what}"),
+                None => "not supported".into(),
+            };
+            let used: Vec<&nexus_device::hidraw::Node> = f
+                .nodes
+                .iter()
+                .filter(|n| {
+                    known.is_some_and(|p| n.interface.is_some_and(|i| p.interfaces.contains(&i)))
+                })
+                .collect();
+            let others: Vec<String> = used
+                .iter()
+                .flat_map(|n| &n.holders)
+                .filter(|(_, who)| who != "nexusd")
+                .map(|(pid, who)| format!("{who} (pid {pid})"))
+                .collect();
+            let (state, fix) = if known.is_none() {
+                ("nothing to do".to_string(), String::new())
+            } else if used.iter().any(|n| !n.access) {
+                (
+                    "no access".to_string(),
+                    "Install the udev rule, then unplug the device and plug it back in:\n\
+                     sudo install -m 644 data/udev/70-nexus.rules /etc/udev/rules.d/\n\
+                     sudo udevadm control --reload"
+                        .to_string(),
+                )
+            } else if !others.is_empty() {
+                (
+                    format!("in use by {}", others.join(", ")),
+                    "Two programs driving one device fight over it; quit the other one.".into(),
+                )
+            } else {
+                ("ready".to_string(), String::new())
+            };
+            DeviceLine {
+                name,
+                id: f.product,
+                support,
+                state,
+                fix,
+            }
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn devices() -> Vec<DeviceLine> {
+    Vec::new()
+}
+
+/// Corsair devices other than the strip: a note, since none is needed
+/// for the strip and their support is still to come.
+fn other_devices(r: &mut Report) {
+    let others: Vec<DeviceLine> = devices().into_iter().filter(|d| d.id != 0x1b8e).collect();
+    if !others.is_empty() {
+        let names: Vec<String> = others
+            .iter()
+            .map(|d| format!("{} ({})", d.name, d.state))
+            .collect();
+        r.note(
+            "other devices",
+            &format!("{}; see nexusctl devices", names.join(", ")),
+        );
+    }
 }
 
 /// The checks as text, the way `nexusctl doctor` prints them and "Copy
@@ -212,7 +303,7 @@ fn device(r: &mut Report) {
         Err(e) => r.fail("access", &e.to_string(), ""),
     }
 
-    let holders = holders(&node);
+    let holders = nexus_device::hidraw::holders(&node);
     let others: Vec<&(u32, String)> = holders
         .iter()
         .filter(|(_, name)| name != "nexusd")
@@ -237,35 +328,6 @@ fn device(r: &mut Report) {
         };
         r.fail("holders", &format!("also open in {}", list.join(", ")), fix);
     }
-}
-
-/// Processes with `node` open, found through /proc/*/fd. Processes of
-/// other users are not visible, which is fine: they could not open it
-/// either without the same access.
-#[cfg(target_os = "linux")]
-fn holders(node: &Path) -> Vec<(u32, String)> {
-    let mut found = Vec::new();
-    let Ok(procs) = std::fs::read_dir("/proc") else {
-        return found;
-    };
-    for p in procs.flatten() {
-        let Some(pid) = p.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
-            continue;
-        };
-        let Ok(fds) = std::fs::read_dir(p.path().join("fd")) else {
-            continue;
-        };
-        if fds
-            .flatten()
-            .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|target| target == node))
-        {
-            let name = std::fs::read_to_string(p.path().join("comm"))
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default();
-            found.push((pid, name));
-        }
-    }
-    found
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -351,7 +413,13 @@ mod troubleshooting {
     fn every_check_has_a_section() {
         // A Windows checkout may have CRLF line endings.
         let page = include_str!("../../../docs/TROUBLESHOOTING.md").replace("\r\n", "\n");
-        let source = include_str!("lib.rs").replace("\r\n", "\n");
+        // Whitespace flattened: rustfmt may put a check's name on the line
+        // after `r.note(`.
+        let source = include_str!("lib.rs")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace("( \"", "(\"");
         let mut names: Vec<&str> = Vec::new();
         for call in [r#"r.ok(""#, r#"r.fail(""#, r#"r.note(""#, r#"what: ""#] {
             for part in source.split(call).skip(1) {

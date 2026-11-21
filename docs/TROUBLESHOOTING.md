@@ -96,3 +96,15 @@ default layout and changes are not saved. The database is never deleted
 or rewritten to recover; see [STORAGE.md](STORAGE.md) for its backups.
 
 `note store: … does not exist yet` is normal before the first start.
+
+## other devices
+
+`-- other devices: K100 RGB keyboard (no access), …; see nexusctl devices`
+
+Corsair devices other than the strip were found. None is needed for the
+strip, and their support is still being built, so this is a note, not a
+failure. `nexusctl devices` lists each one, what it will be for, and
+what blocks it: "no access" means the udev rule is not installed, or was
+installed after the device was plugged in (unplug it and plug it back
+in). The rule opens only the interfaces the app uses; a keyboard's typing
+interface stays closed.

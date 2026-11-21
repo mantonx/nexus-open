@@ -30,6 +30,9 @@ enum Command {
     Status,
     /// Check everything the strip needs and say how to fix what is wrong.
     Doctor,
+    /// List the Corsair devices plugged in: what each is for, and what
+    /// blocks it. Sends nothing to them.
+    Devices,
     /// List every signal and its latest value.
     Signals,
     /// Show a page: next, prev, a number counting from 1, or a name.
@@ -149,6 +152,7 @@ fn main() -> ExitCode {
     }
     let line = match &cli.command {
         Command::Doctor => return doctor::run(),
+        Command::Devices => return doctor::devices(),
         Command::ImportLegacy { .. } => unreachable!("handled above"),
         Command::Edit { .. } => unreachable!("handled above"),
         Command::Export { layout } => match layout {

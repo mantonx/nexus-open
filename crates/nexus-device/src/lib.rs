@@ -10,6 +10,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
 
+pub mod catalog;
 #[cfg(target_os = "linux")]
 pub mod hidraw;
 pub mod protocol;
