@@ -1049,6 +1049,16 @@ golang` finds nothing outside the changelog.
   flattens whitespace: it had missed check names rustfmt wraps onto the
   next line. Left for D1: the registry with hotplug and logind sleep, and
   the exit test (replugs and suspends with Matt).
+- 2026-11-21 — Fixed: the Signals list showed temperatures in °C for its
+  first frame, then °F. Root cause: readings reach the window before the
+  layout, which holds the unit, and the list used the default context
+  meanwhile. It now waits for the layout, and a new layout refreshes it,
+  so switching °C/°F no longer waits for the next reading either. Seen in
+  a capture taken the moment the window mapped; three captures after the
+  fix all show °F. Start time, release build, headless display with its
+  Xwayland already running: 49–77 ms to a mapped window that already
+  shows live data. The earlier 419–546 ms likely included KWin starting
+  Xwayland on demand; the cold-cache run still needs Matt's sudo.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

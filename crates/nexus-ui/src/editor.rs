@@ -357,6 +357,8 @@ impl Editor {
             self.page = new;
         }
         self.layout = Some(layout);
+        // The units may have changed, or this is the first layout.
+        self.show_signals();
         self.preview = None;
         if !matches!(self.drag, Drag::Pressed { .. }) {
             self.drag = Drag::None;
@@ -402,6 +404,11 @@ impl Editor {
     /// Puts the signal browser's rows in the window. Rows are updated in
     /// place while the names stay the same, which is every second.
     fn show_signals(&mut self) {
+        // Values are shown in the layout's units; readings arrive before
+        // the layout does, and would show in °C for a moment.
+        if self.layout.is_none() {
+            return;
+        }
         let rows: Vec<SignalRow> =
             signals::rows(&self.signals, &self.signal_filter, &self.context())
                 .into_iter()
