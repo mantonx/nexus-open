@@ -8,6 +8,7 @@
 
 pub mod edit;
 mod history;
+pub mod legacy;
 mod schema;
 pub mod text;
 

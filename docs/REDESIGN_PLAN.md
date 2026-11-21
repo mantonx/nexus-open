@@ -1007,6 +1007,32 @@ golang` finds nothing outside the changelog.
   as a restart, so the run was stopped and a new 72-hour one started; it
   ends 2026-11-18 22:52. No install until then. The first run's file is kept.
   Matt chose a converter for old layout YAML (Phase 5 gate).
+- 2026-11-21 — Soak result: 72 hours from 2026-11-15 22:52 with no
+  restart, threads 15 throughout, open files 26–29, CPU 0.5% median and
+  3.1% at most, nothing logged but device reconnects. But the machine was
+  suspended for 58.5 of the 72 hours, so the daemon ran about 13.5 hours;
+  it came through four suspends, the strip back within 3 s each time.
+  RSS fell from 40 to 12 MB, which says the kernel reclaimed pages while
+  asleep, not that nothing leaks. Not a pass of the 72-hour bar as
+  written: needs Matt's call (rerun with sleep inhibited, or accept).
+- 2026-11-21 — Fixed: each resume logged "no permission … install
+  data/udev/70-nexus.rules" and "no iCUE Nexus found" with the rule
+  installed. Root cause: the daemon retries at once, and catches the
+  strip's node while it is briefly gone and then briefly without the
+  seat's access. A device error is now logged only once it lasts 10 s;
+  `status` still says why at once.
+- 2026-11-21 — Phase 5 converter (Matt chose a converter).
+  `nexusctl import-legacy [PATH] [--print] [--name] [--activate]` reads the
+  old app's database read-only (or a YAML export) and adds a layout. Each
+  old plugin becomes the widget with its reading and the old plugin's
+  thresholds (75/90 °C, 70/90 %); everything else is listed: unknown
+  plugins, placeholders, cycle and detail taps, zone colors, bits per
+  second, VRAM, a subset of cores. The old app's database, not YAML, is
+  where users' layouts lived; YAML was only its default and its Export.
+  Verified on Matt's old database: four pages, the same widths and labels
+  as his hand rebuild; imported, stored identically to the dry run, then
+  undone. Also: nexusctl output goes through `say!`, so `| head` ends it
+  quietly where `print!` panicked on the closed pipe.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it

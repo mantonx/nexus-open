@@ -5,14 +5,14 @@ use std::process::ExitCode;
 use nexus_doctor::State;
 
 pub fn run() -> ExitCode {
-    println!("nexusctl {}", env!("CARGO_PKG_VERSION"));
+    say!("nexusctl {}\n", env!("CARGO_PKG_VERSION"));
     let checks = nexus_doctor::run();
-    print!("{}", nexus_doctor::text(&checks));
+    say!("{}", nexus_doctor::text(&checks));
     if checks.iter().any(|c| c.state == State::Fail) {
-        println!("\nSomething needs fixing; see FAIL above.");
+        say!("\nSomething needs fixing; see FAIL above.\n");
         ExitCode::FAILURE
     } else {
-        println!("\nEverything looks right.");
+        say!("\nEverything looks right.\n");
         ExitCode::SUCCESS
     }
 }

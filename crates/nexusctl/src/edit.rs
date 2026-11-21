@@ -28,14 +28,14 @@ fn edit_until_done(client: &mut Client, path: &Path, export: &mut Export) -> Res
         let written = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let text = without_messages(&written);
         if text == export.text {
-            println!("No changes.");
+            say!("No changes.\n");
             return Ok(());
         }
         if text
             .lines()
             .all(|l| l.trim().is_empty() || l.trim().starts_with('#'))
         {
-            println!("Emptied: nothing applied.");
+            say!("Emptied: nothing applied.\n");
             return Ok(());
         }
         let (config, notes) = match text::parse(&text) {
@@ -56,9 +56,10 @@ fn edit_until_done(client: &mut Client, path: &Path, export: &mut Export) -> Res
         let line = serde_json::to_string(&request).map_err(|e| e.to_string())?;
         match client.request(&format!("edit {line}")) {
             Ok(Ok(reply)) => {
-                println!(
-                    "Applied to layout \"{}\" (revision {}). Undo with: nexusctl undo",
-                    export.layout, reply["revision"]
+                say!(
+                    "Applied to layout \"{}\" (revision {}). Undo with: nexusctl undo\n",
+                    export.layout,
+                    reply["revision"]
                 );
                 for line in text::stray_comments(&text) {
                     eprintln!(

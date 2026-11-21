@@ -5,8 +5,17 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use nexus_control::{Client, SignalEntry, Status};
 
+/// Like `print!`, but a reader that goes away (`nexusctl export | head`)
+/// ends the program quietly, where `print!` would panic.
+macro_rules! say {
+    ($($arg:tt)*) => {
+        $crate::out(&format!($($arg)*))
+    };
+}
+
 mod doctor;
 mod edit;
+mod legacy;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -62,6 +71,22 @@ enum Command {
         #[arg(long)]
         activate: bool,
     },
+    /// Add a layout from the old Go and Flutter Nexus Open: its database,
+    /// or a YAML file its Export wrote. Says what could not be carried over.
+    ImportLegacy {
+        /// Default: the old app's database, nexus-open/nexus.db in the
+        /// config folder.
+        path: Option<std::path::PathBuf>,
+        /// Its name. Default: the old layout's name, or "Old layout".
+        #[arg(long)]
+        name: Option<String>,
+        /// Put it on the strip.
+        #[arg(long)]
+        activate: bool,
+        /// Only print the converted layout and what was left out.
+        #[arg(long, conflicts_with_all = ["name", "activate"])]
+        print: bool,
+    },
     /// Take back the last change.
     Undo,
     /// Make the last undone change again.
@@ -101,8 +126,30 @@ fn main() -> ExitCode {
             }
         };
     }
+    if let Command::ImportLegacy {
+        path,
+        name,
+        activate,
+        print,
+    } = &cli.command
+    {
+        if *print {
+            return legacy::run(None, path.as_deref(), None, false);
+        }
+        let Ok(mut client) = Client::connect() else {
+            eprintln!("nexusctl: nexusd is not running. Start it with: nexusd run");
+            return ExitCode::FAILURE;
+        };
+        return legacy::run(
+            Some(&mut client),
+            path.as_deref(),
+            name.as_deref(),
+            *activate,
+        );
+    }
     let line = match &cli.command {
         Command::Doctor => return doctor::run(),
+        Command::ImportLegacy { .. } => unreachable!("handled above"),
         Command::Edit { .. } => unreachable!("handled above"),
         Command::Export { layout } => match layout {
             Some(name) => format!("export {name}"),
@@ -178,58 +225,74 @@ fn main() -> ExitCode {
         Command::Signals => {
             let entries: Vec<SignalEntry> = serde_json::from_value(data).unwrap_or_default();
             if entries.is_empty() {
-                println!("no signals yet");
+                say!("no signals yet\n");
             }
             let width = entries.iter().map(|e| e.name.len()).max().unwrap_or(0);
             for e in entries {
-                println!("{:width$}  {}", e.name, e.value);
+                say!("{:width$}  {}\n", e.name, e.value);
             }
         }
         Command::Export { .. } => match serde_json::from_value::<nexus_control::Export>(data) {
-            Ok(export) => print!("{}", export.text),
+            Ok(export) => say!("{}", export.text),
             Err(e) => {
                 eprintln!("nexusctl: unexpected answer from nexusd: {e}");
                 return ExitCode::FAILURE;
             }
         },
-        Command::Import { activate, .. } => println!(
-            "Added the layout{}.",
+        Command::Import { activate, .. } => say!(
+            "Added the layout{}.\n",
             if activate {
                 " and put it on the strip"
             } else {
                 "; switch to it in the settings window"
             }
         ),
-        Command::Undo => println!("Undid: {}", data["label"].as_str().unwrap_or("?")),
-        Command::Redo => println!("Redid: {}", data["label"].as_str().unwrap_or("?")),
+        Command::Undo => say!("Undid: {}\n", data["label"].as_str().unwrap_or("?")),
+        Command::Redo => say!("Redid: {}\n", data["label"].as_str().unwrap_or("?")),
         _ => {}
     }
     ExitCode::SUCCESS
 }
 
 fn print_status(s: &Status) {
-    println!("nexusd {} (pid {})", s.version, s.pid);
+    say!("nexusd {} (pid {})\n", s.version, s.pid);
     match &s.device_error {
-        None => println!("device   connected"),
-        Some(why) => println!("device   not connected: {why}"),
+        None => say!("device   connected\n"),
+        Some(why) => say!("device   not connected: {why}\n"),
     }
     let position = s
         .pages
         .iter()
         .position(|p| p == &s.page)
         .map_or(0, |i| i + 1);
-    println!(
-        "page     {} ({position} of {}: {})",
+    say!(
+        "page     {} ({position} of {}: {})\n",
         s.page,
         s.pages.len(),
         s.pages.join(", ")
     );
-    println!("layout   {}", s.layout);
-    println!("store    {}", s.store_path);
+    say!("layout   {}\n", s.layout);
+    say!("store    {}\n", s.store_path);
     if let Some(e) = &s.store_error {
-        println!("         cannot be used; showing the default layout, changes are not saved:");
+        say!("         cannot be used; showing the default layout, changes are not saved:\n");
         for line in e.lines() {
-            println!("         {line}");
+            say!("         {line}\n");
         }
+    }
+}
+
+/// Writes to standard output; see `say!`.
+fn out(text: &str) {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    if let Err(e) = stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        if e.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("nexusctl: {e}");
+        std::process::exit(1);
     }
 }

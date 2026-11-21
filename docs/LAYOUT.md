@@ -9,6 +9,24 @@ a message that names the place, and nothing changes.
 
 Comments directly above a table (`#` lines) are kept as notes on it.
 
+## Coming from the old app
+
+The Go and Flutter Nexus Open kept its layout in
+`~/.config/nexus-open/nexus.db`. To bring it over:
+
+```
+nexusctl import-legacy --print     # see the result; changes nothing
+nexusctl import-legacy             # add it as a layout
+```
+
+Give a path to read another database, or a `.yaml` file the old app's
+Export wrote. The old database is only read, never changed. Each zone
+becomes the widget that shows the same reading, with the thresholds the
+old plugin colored at; what has no equivalent (a plugin of your own, a
+tap that cycled plugins, zone colors, VRAM use) is left out and listed.
+The old app's °F and weather place are listed too: set them in Settings
+if this app does not already have them.
+
 ## A whole layout
 
 ```toml
