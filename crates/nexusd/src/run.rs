@@ -29,6 +29,11 @@ use crate::control::{self, Frame, Reply};
 
 /// How often to look for the device while it is unplugged.
 const RECONNECT_POLL: Duration = Duration::from_millis(250);
+/// How long the device must stay unopenable before why is logged. After a
+/// resume the strip comes back within about 3 s, and on the way its node
+/// is briefly missing and then briefly without the seat's access, which
+/// is not worth telling anyone to install a udev rule over.
+const DEVICE_ERROR_GRACE: Duration = Duration::from_secs(10);
 /// Frame pacing while a page animates: about 60 fps. A frame takes the
 /// device 15–17 ms to accept, so this is close to the most it sustains.
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -85,6 +90,8 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         device: None,
         next_attempt: Instant::now(),
         last_device_error: None,
+        failing_since: None,
+        logged_device_error: None,
         tx: tx.clone(),
         viewers: Vec::new(),
         current: None,
@@ -120,8 +127,12 @@ struct Daemon {
     device: Option<Box<dyn Surface>>,
     /// When to next try to open the device, while it is missing.
     next_attempt: Instant,
-    /// Logged once, not on every retry.
+    /// Why the device cannot be opened right now, for `status`.
     last_device_error: Option<String>,
+    /// When opening it started failing.
+    failing_since: Option<Instant>,
+    /// The reason last logged: each is logged once, not on every retry.
+    logged_device_error: Option<String>,
     tx: Sender<Msg>,
     /// Settings windows receiving frames.
     viewers: Vec<SyncSender<Frame>>,
@@ -217,14 +228,19 @@ impl Daemon {
                 eprintln!("nexusd: device connected");
                 self.device = Some(device);
                 self.last_device_error = None;
+                self.failing_since = None;
+                self.logged_device_error = None;
                 self.engine.handle(Input::Redraw);
             }
             Err(e) => {
                 let message = e.to_string();
-                if self.last_device_error.as_ref() != Some(&message) {
+                let now = Instant::now();
+                let since = *self.failing_since.get_or_insert(now);
+                if worth_logging(since, now, &message, self.logged_device_error.as_deref()) {
                     eprintln!("nexusd: {message}");
-                    self.last_device_error = Some(message);
+                    self.logged_device_error = Some(message.clone());
                 }
+                self.last_device_error = Some(message);
                 self.next_attempt = match e {
                     // Retrying cannot help on an OS without a backend.
                     DeviceError::Unsupported => Instant::now() + Duration::from_secs(86_400),
@@ -664,4 +680,39 @@ fn open_device(tx: &Sender<Msg>) -> Result<Box<dyn Surface>, DeviceError> {
 #[cfg(not(target_os = "linux"))]
 fn open_device(_: &Sender<Msg>) -> Result<Box<dyn Surface>, DeviceError> {
     Err(DeviceError::Unsupported)
+}
+
+/// Whether a device error is worth logging: it has lasted the grace
+/// period, and it is not the reason already logged.
+fn worth_logging(since: Instant, now: Instant, message: &str, logged: Option<&str>) -> bool {
+    now.saturating_duration_since(since) >= DEVICE_ERROR_GRACE && logged != Some(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_device_error_is_logged_once_and_only_if_it_lasts() {
+        let start = Instant::now();
+        let soon = start + Duration::from_secs(3);
+        let later = start + DEVICE_ERROR_GRACE;
+        // The reconnect after a resume: never logged.
+        assert!(!worth_logging(start, soon, "no permission", None));
+        // A real problem: logged once it lasts, then not again.
+        assert!(worth_logging(start, later, "no permission", None));
+        assert!(!worth_logging(
+            start,
+            later,
+            "no permission",
+            Some("no permission")
+        ));
+        // A new reason is logged.
+        assert!(worth_logging(
+            start,
+            later,
+            "not found",
+            Some("no permission")
+        ));
+    }
 }
