@@ -1,42 +1,31 @@
-## Starter: Monitor. Temperatures and load side by side, then memory,
-## network and the time. Volume changes still show briefly.
+## Starter: Monitor. Each processor large, its temperature with its load
+## beside it; then memory, network and the time. Volume changes still show
+## briefly.
 
 [[page]]
 name = "Monitor"
 
 [[page.widget]]
 type = "value"
-width = 160
+width = 320
 label = "CPU"
 signal = "cpu.temp"
-graph = "area"
 warn = 75
 crit = 90
+second = "cpu.load"
+second_label = "load"
+second_warn = 85
 
 [[page.widget]]
 type = "value"
-width = 160
+width = 320
 label = "GPU"
 signal = "gpu.temp"
-graph = "area"
-warn = 75
+warn = 80
 crit = 90
-
-[[page.widget]]
-type = "value"
-width = 160
-label = "CPU load"
-signal = "cpu.load"
-graph = "line"
-warn = 85
-
-[[page.widget]]
-type = "value"
-width = 160
-label = "GPU load"
-signal = "gpu.load"
-graph = "line"
-warn = 85
+second = "gpu.load"
+second_label = "load"
+second_warn = 85
 
 [[page]]
 name = "System"
@@ -46,13 +35,13 @@ type = "value"
 width = 213
 label = "Memory"
 signal = "mem.used"
-graph = "line"
-warn = 90
+warn = 85
+crit = 95
 
 [[page.widget]]
 type = "rate"
 width = 213
-label = "Net"
+label = "Network"
 down = "net.down"
 up = "net.up"
 

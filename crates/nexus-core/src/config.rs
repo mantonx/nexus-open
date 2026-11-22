@@ -146,20 +146,77 @@ pub struct Weather {
     pub longitude: Option<f64>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
+    /// The face for words on the strip. Numerals are always Rubik.
     #[serde(deserialize_with = "font_from_id", serialize_with = "font_to_id")]
     pub font: FontChoice,
     pub temperature: Temperature,
     pub clock: ClockFormat,
-    /// The user's accent colour, written `"#rrggbb"`. `None`: the default.
+    /// The user's accent colour, written `"#rrggbb"` or as a preset's name
+    /// (`theme::ACCENT_PRESETS`). `None`: the default, lilac.
     #[serde(
         deserialize_with = "accent_from_text",
         serialize_with = "accent_to_text",
         skip_serializing_if = "Option::is_none"
     )]
     pub accent: Option<Rgb>,
+    /// Hours when the strip dims to `NIGHT_DIM`; none by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub night: Option<Night>,
+    /// Dim after a while with no touch and nothing at warning.
+    #[serde(skip_serializing_if = "is_yes")]
+    pub idle_dim: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            font: FontChoice::default(),
+            temperature: Temperature::default(),
+            clock: ClockFormat::default(),
+            accent: None,
+            night: None,
+            idle_dim: true,
+        }
+    }
+}
+
+/// Night hours, written `{ from = "22:30", to = "07:00" }`: from the first
+/// time up to the second, across midnight when the second is earlier.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Night {
+    pub from: String,
+    pub to: String,
+}
+
+impl Night {
+    /// Both times as minutes after midnight, if both are written "HH:MM".
+    pub fn minutes(&self) -> Option<(u32, u32)> {
+        Some((clock_minutes(&self.from)?, clock_minutes(&self.to)?))
+    }
+
+    /// Whether `minute` (after midnight) is in the night.
+    pub fn contains(&self, minute: u32) -> bool {
+        match self.minutes() {
+            Some((from, to)) if from <= to => (from..to).contains(&minute),
+            Some((from, to)) => minute >= from || minute < to,
+            None => false,
+        }
+    }
+}
+
+/// "07:30" as 450; `None` unless it is a time of day written "HH:MM".
+pub fn clock_minutes(text: &str) -> Option<u32> {
+    let (h, m) = text.trim().split_once(':')?;
+    let ok = |s: &str| s.len() == 2 && s.chars().all(|c| c.is_ascii_digit());
+    if !ok(h) || !ok(m) {
+        return None;
+    }
+    let (h, m): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
+    (h < 24 && m < 60).then_some(h * 60 + m)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -194,19 +251,34 @@ pub enum Widget {
     /// Date, time and AM/PM from the system clock.
     Clock {
         width: u32,
+        /// Not drawn: the clock has no icon. Kept, like on any widget.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
         #[serde(default)]
         tap: Option<Action>,
         #[serde(default)]
         hold: Option<Action>,
     },
-    /// One reading, such as a temperature, with optional graph and
-    /// thresholds.
+    /// One reading, such as a temperature, with its fixed-scale bar and
+    /// thresholds. The `weather.temp` signal draws as the weather.
     Value {
         width: u32,
         label: String,
         signal: String,
+        /// Accepted for layouts written before the strip's redesign; the
+        /// reading is drawn with its fixed-scale bar either way.
         #[serde(default)]
         graph: Option<GraphStyle>,
+        /// A Phosphor icon's name, instead of the one the signal gives.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+        /// The bar's scale `[min, max]` in the signal's base unit, instead
+        /// of the fixed one for its kind of reading.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<[f64; 2]>,
+        /// The second reading's name on hero cards.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        second_label: Option<String>,
         /// Thresholds in the signal's base unit (°C for temperatures), so
         /// they mean the same thing whichever display unit is chosen.
         #[serde(default)]
@@ -226,12 +298,14 @@ pub enum Widget {
         #[serde(default)]
         hold: Option<Action>,
     },
-    /// Download and upload rates with a graph of the download rate.
+    /// Download and upload rates, each over its fixed-scale bar.
     Rate {
         width: u32,
         label: String,
         down: String,
         up: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
         #[serde(default)]
         tap: Option<Action>,
         #[serde(default)]
@@ -248,6 +322,8 @@ pub enum Widget {
         /// show. Without one, it shows the last value set.
         #[serde(default)]
         signal: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
         #[serde(default)]
         tap: Option<Action>,
         #[serde(default)]
@@ -257,6 +333,8 @@ pub enum Widget {
     /// signals.
     Media {
         width: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
         #[serde(default)]
         tap: Option<Action>,
         #[serde(default)]
@@ -265,11 +343,15 @@ pub enum Widget {
     /// A control to press: an icon and a label. It shows nothing live.
     Key {
         width: u32,
-        /// The icon's name. Free-form for now: no icon set is chosen yet.
+        /// A Phosphor icon's name (`icons::NAMES`). A name the bundled set
+        /// lacks draws no icon.
         #[serde(default)]
         icon: Option<String>,
         #[serde(default)]
         label: Option<String>,
+        /// A second line under the label, on hero keys.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sub: Option<String>,
         #[serde(default)]
         tap: Option<Action>,
         #[serde(default)]
@@ -311,6 +393,18 @@ impl Widget {
             | Widget::Value { tap, .. }
             | Widget::Rate { tap, .. }
             | Widget::Key { tap, .. } => tap.as_ref(),
+        }
+    }
+
+    /// The icon the layout names for it, if any.
+    pub fn icon(&self) -> Option<&str> {
+        match self {
+            Widget::Clock { icon, .. }
+            | Widget::Slider { icon, .. }
+            | Widget::Media { icon, .. }
+            | Widget::Value { icon, .. }
+            | Widget::Rate { icon, .. }
+            | Widget::Key { icon, .. } => icon.as_deref(),
         }
     }
 
@@ -388,17 +482,28 @@ fn font_from_id<'de, D: Deserializer<'de>>(d: D) -> Result<FontChoice, D::Error>
     id.parse().map_err(serde::de::Error::custom)
 }
 
-/// Reads an accent colour written `"#rrggbb"`, in either case. The error
-/// names the key and shows the form.
+/// Reads an accent colour written `"#rrggbb"`, in either case, or a
+/// preset's name (`theme::ACCENT_PRESETS`). The error names the key and
+/// shows the forms.
 pub fn parse_colour(text: &str) -> Result<Rgb, String> {
+    if let Some(c) = crate::theme::accent_preset(text) {
+        return Ok(c);
+    }
     let hex = text
         .strip_prefix('#')
         .filter(|h| h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit()));
     match hex.and_then(|h| u32::from_str_radix(h, 16).ok()) {
         Some(v) => Ok(Rgb::hex(v)),
-        None => Err(format!(
-            "accent must be a colour written \"#rrggbb\", as in accent = \"#5aa0e0\"; \"{text}\" is not one"
-        )),
+        None => {
+            let names: Vec<&str> = crate::theme::ACCENT_PRESETS
+                .iter()
+                .map(|(n, _)| *n)
+                .collect();
+            Err(format!(
+                "accent must be a colour written \"#rrggbb\", as in accent = \"#5aa0e0\", or one of {}; \"{text}\" is neither",
+                names.join(", ")
+            ))
+        }
     }
 }
 
@@ -407,9 +512,15 @@ pub fn colour_text(c: Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
 }
 
+/// An accent as a layout writes it: a preset's name if it is one exactly,
+/// else `#5aa0e0`.
+pub fn accent_text(c: Rgb) -> String {
+    crate::theme::accent_preset_name(c).map_or_else(|| colour_text(c), str::to_string)
+}
+
 fn accent_to_text<S: Serializer>(accent: &Option<Rgb>, s: S) -> Result<S::Ok, S::Error> {
     match accent {
-        Some(c) => s.serialize_str(&colour_text(*c)),
+        Some(c) => s.serialize_str(&accent_text(*c)),
         None => s.serialize_none(),
     }
 }
@@ -553,6 +664,14 @@ impl Config {
         if let Some(w) = &self.weather {
             w.validate()?;
         }
+        if let Some(night) = &self.settings.night
+            && night.minutes().is_none()
+        {
+            return Err(ConfigError(format!(
+                "[settings] night: times are written \"HH:MM\", as in night = {{ from = \"22:30\", to = \"07:00\" }}; got from = \"{}\", to = \"{}\"",
+                night.from, night.to
+            )));
+        }
         Ok(())
     }
 }
@@ -605,9 +724,18 @@ impl Config {
                 second,
                 second_warn,
                 second_crit,
+                scale,
                 ..
             } = w
             {
+                if let Some([lo, hi]) = scale
+                    && !(lo.is_finite() && hi.is_finite() && lo < hi)
+                {
+                    return Err(ConfigError(format!(
+                        "{}: scale is [min, max] with min below max, as in scale = [0, 100]",
+                        at_widget(i)
+                    )));
+                }
                 match second {
                     Some(s) if s.trim().is_empty() => {
                         return Err(ConfigError(format!(
@@ -798,7 +926,8 @@ mod tests {
     fn default_layout_is_valid() {
         let c = Config::default_layout();
         assert!(!c.pages.is_empty());
-        assert_eq!(c.pages[0].name, "System");
+        let names: Vec<&str> = c.pages.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Home", "Music", "System", "Launch", "Desk"]);
     }
 
     #[test]

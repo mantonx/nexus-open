@@ -141,4 +141,14 @@ ALTER TABLE widget_2 RENAME TO widget;
 CREATE INDEX widget_on_page     ON widget(page_id, position);
 CREATE INDEX widget_on_takeover ON widget(takeover_id, position);
 "#,
+    // 3: night hours and idle dimming. Optional again: no night hours, and
+    // idle dimming on, are what a layout without them means.
+    r#"
+ALTER TABLE settings ADD COLUMN night_from TEXT
+  CHECK (night_from IS NULL OR night_from GLOB '[0-2][0-9]:[0-5][0-9]');
+ALTER TABLE settings ADD COLUMN night_to TEXT
+  CHECK (night_to IS NULL OR night_to GLOB '[0-2][0-9]:[0-5][0-9]');
+ALTER TABLE settings ADD COLUMN idle_dim INTEGER NOT NULL DEFAULT 1
+  CHECK (idle_dim IN (0, 1));
+"#,
 ];

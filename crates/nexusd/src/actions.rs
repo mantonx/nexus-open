@@ -148,8 +148,21 @@ pub fn systemd_unit() -> Option<String> {
         .map(str::to_string)
 }
 
+/// `~` or `~/…` at the start of a target is the home folder, so a layout
+/// can open it without knowing whose it is.
+fn home_relative(target: &str, home: Option<&str>) -> String {
+    match (target.strip_prefix('~'), home) {
+        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
+            format!("{home}{rest}")
+        }
+        _ => target.to_string(),
+    }
+}
+
 /// The command that opens a URL or file with the desktop's default app.
 fn opener(target: &str) -> Vec<String> {
+    let home = std::env::var("HOME").ok();
+    let target = &home_relative(target, home.as_deref());
     let argv: &[&str] = if cfg!(target_os = "macos") {
         &["open"]
     } else if cfg!(target_os = "windows") {
@@ -162,4 +175,19 @@ fn opener(target: &str) -> Vec<String> {
         .map(|s| s.to_string())
         .chain([target.to_string()])
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_leading_tilde_is_the_home_folder() {
+        let home = Some("/home/u");
+        assert_eq!(home_relative("~", home), "/home/u");
+        assert_eq!(home_relative("~/Music", home), "/home/u/Music");
+        assert_eq!(home_relative("~other", home), "~other");
+        assert_eq!(home_relative("https://x.org/~a", home), "https://x.org/~a");
+        assert_eq!(home_relative("~", None), "~");
+    }
 }

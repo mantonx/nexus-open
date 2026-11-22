@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(read.page(0).note, notes.page(0).note);
         assert_eq!(read.page(0).widget(1), "The media zone.");
         assert_eq!(read.takeover(0).note, "Pops up on a new track.");
-        assert!(text.contains("type = \"clock\"\nwidth = 107\n"), "{text}");
+        assert!(text.contains("type = \"clock\"\nwidth = 196\n"), "{text}");
     }
 
     #[test]
@@ -371,7 +371,7 @@ mod tests {
             .filter(|p| !p.note.is_empty())
             .map(|p| p.note.as_str())
             .collect();
-        assert_eq!(with_notes.len(), 1, "only the Sound page: {with_notes:?}");
+        assert_eq!(with_notes.len(), 1, "only the Music page: {with_notes:?}");
         assert!(notes.takeovers.iter().all(|t| t.note.is_empty()));
     }
 

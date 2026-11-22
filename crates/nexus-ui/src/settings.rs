@@ -2,7 +2,7 @@
 //! where the weather is for.
 
 use nexus_core::config::{
-    ClockFormat, Config, Settings, Temperature, Weather, colour_text, parse_colour,
+    ClockFormat, Config, Night, Settings, Temperature, Weather, colour_text, parse_colour,
 };
 use nexus_core::fonts::FontChoice;
 
@@ -13,6 +13,11 @@ pub const CLOCK: &str = "settings.clock";
 pub const FONT: &str = "settings.font";
 pub const WEATHER: &str = "settings.weather";
 pub const ACCENT: &str = "settings.accent";
+/// Not shown as fields yet; carried through the form so saving it keeps
+/// them. "22:30 07:00", or empty for no night hours.
+pub const NIGHT: &str = "settings.night";
+/// "on" or "off".
+pub const IDLE_DIM: &str = "settings.idle_dim";
 
 const FAHRENHEIT: &str = "°F (Fahrenheit)";
 const CELSIUS: &str = "°C (Celsius)";
@@ -52,6 +57,18 @@ pub fn flatten(c: &Config) -> Values {
             ACCENT.into(),
             c.settings.accent.map(colour_text).unwrap_or_default(),
         ),
+        (
+            NIGHT.into(),
+            c.settings
+                .night
+                .as_ref()
+                .map(|n| format!("{} {}", n.from, n.to))
+                .unwrap_or_default(),
+        ),
+        (
+            IDLE_DIM.into(),
+            if c.settings.idle_dim { "on" } else { "off" }.into(),
+        ),
     ])
 }
 
@@ -83,6 +100,11 @@ pub fn build(v: &Values) -> Result<(Settings, Option<Weather>), Missing> {
                 )
             })?),
         },
+        night: get(NIGHT).split_once(' ').map(|(from, to)| Night {
+            from: from.trim().into(),
+            to: to.trim().into(),
+        }),
+        idle_dim: get(IDLE_DIM) != "off",
     };
     Ok((settings, weather(get(WEATHER))?))
 }

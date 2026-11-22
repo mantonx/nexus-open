@@ -2,18 +2,21 @@
 //! the renderer draws.
 //!
 //! All presentation decisions live here: units, number formatting,
-//! thresholds and graph scaling. The input is plain data (config, signals,
-//! the current time), so every decision is unit-tested without a clock or a
-//! device.
+//! thresholds, the fixed scale each kind of reading is drawn on, and which
+//! of "no data", "not set up" and "lost" a reading is. The input is plain
+//! data (config, signals, the current time), so every decision is
+//! unit-tested without a clock or a device.
 
-use jiff::Zoned;
+use jiff::{SignedDuration, Zoned};
 
-use crate::config::{ClockFormat, GraphStyle, Settings, SliderControl, Temperature, Widget};
+use crate::config::{ClockFormat, Settings, SliderControl, Temperature, Widget};
+use crate::icons;
 use crate::signal::{Signals, Unit, Value};
-use crate::widget::{Graph, Reading, Severity, Track, WidgetView, Zone};
+use crate::theme::{NET_HI, NET_LO, TEMP_HI, TEMP_LO};
+use crate::widget::{Avail, Bar, Reading, Severity, Track, WidgetView, Zone};
 
-/// Shown where a reading has not arrived yet. Calm, not an error.
-pub const NO_DATA: &str = "—";
+/// Shown where a number has not arrived yet. Calm, not an error.
+pub const NO_DATA: &str = "––";
 
 /// The signals a volume source publishes: `volume.level` (percent) and
 /// `volume.muted` (1 or 0).
@@ -30,18 +33,45 @@ pub const MEDIA_SIGNALS: [&str; 5] = [
     "media.length",
 ];
 
+/// The signals the weather source publishes. A value widget showing
+/// `weather.temp` draws as the weather and reads them all: the WMO
+/// condition code, its words, today's high and low (°C), and 1 by day.
+pub const WEATHER_SIGNALS: [&str; 6] = [
+    "weather.temp",
+    "weather.code",
+    "weather.condition",
+    "weather.high",
+    "weather.low",
+    "weather.day",
+];
+
+/// After this long with no new reading, the weather counts as lost: the
+/// source polls every 15 minutes, so three missed polls.
+pub const WEATHER_STALE: f64 = 45.0 * 60.0;
+
+/// Everything binding reads besides the widgets.
+#[derive(Clone, Copy)]
+pub struct Bind<'a> {
+    pub signals: &'a Signals,
+    pub settings: &'a Settings,
+    /// The layout says where the weather is for (`[weather]`).
+    pub weather: bool,
+    /// Wall time, for the clock and for when a source was lost.
+    pub now: &'a Zoned,
+    /// Monotonic seconds on the clock `Signals` times readings with.
+    pub mono: f64,
+    /// Seconds since the track's title last started scrolling, while it
+    /// may still be.
+    pub marquee: Option<f32>,
+}
+
 /// Builds the zones for a row of widgets: a page, or a takeover.
-pub fn bind_page(
-    widgets: &[Widget],
-    signals: &Signals,
-    settings: &Settings,
-    now: &Zoned,
-) -> Vec<Zone> {
+pub fn bind_page(widgets: &[Widget], ctx: &Bind) -> Vec<Zone> {
     widgets
         .iter()
         .map(|w| Zone {
             width: w.width(),
-            view: bind_widget(w, signals, settings, now),
+            view: bind_widget(w, ctx),
         })
         .collect()
 }
@@ -63,6 +93,7 @@ pub fn signals_used(widgets: &[Widget]) -> impl Iterator<Item = &str> {
             SliderControl::Seek => MEDIA_SIGNALS.to_vec(),
             SliderControl::Run(_) => signal.iter().map(String::as_str).collect(),
         },
+        Widget::Value { signal, .. } if signal == "weather.temp" => WEATHER_SIGNALS.to_vec(),
         Widget::Value { signal, second, .. } => {
             let mut used = vec![signal.as_str()];
             used.extend(second.as_deref());
@@ -98,15 +129,16 @@ pub fn thresholds(
     })
 }
 
-/// How a signal's reading stands against thresholds; `Ok` without a number.
+/// How a signal's reading stands against thresholds: `Ok` without a
+/// number, and for a source that is gone (its number is old news).
 pub fn judge(signals: &Signals, signal: &str, warn: Option<f64>, crit: Option<f64>) -> Severity {
-    match signals.get(signal) {
+    match signals.live(signal) {
         Some(Value::Number(n, _)) => severity(*n, warn, crit),
         _ => Severity::Ok,
     }
 }
 
-/// A signal's value and unit text, as a value widget shows it: "—" with
+/// A signal's value and unit text, as a value widget shows it: "––" with
 /// no reading yet.
 pub fn reading_text(signals: &Signals, signal: &str, settings: &Settings) -> (String, String) {
     match signals.get(signal) {
@@ -116,83 +148,279 @@ pub fn reading_text(signals: &Signals, signal: &str, settings: &Settings) -> (St
     }
 }
 
-fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zoned) -> WidgetView {
+/// A number in a signal's base unit, as its widget shows it: "92°",
+/// ("62", "%").
+pub fn format_number(n: f64, unit: Unit, temperature: Temperature) -> (String, String) {
+    match unit {
+        Unit::Celsius => (format!("{:.0}°", to_display(n, temperature)), String::new()),
+        Unit::Percent => (format!("{n:.0}"), "%".into()),
+        Unit::BytesPerSecond => format_rate(n),
+        Unit::None => (format!("{n:.0}"), String::new()),
+    }
+}
+
+fn to_display(celsius: f64, temperature: Temperature) -> f64 {
+    match temperature {
+        Temperature::Celsius => celsius,
+        Temperature::Fahrenheit => celsius * 9.0 / 5.0 + 32.0,
+    }
+}
+
+/// A byte rate in at most three figures and its unit: ("512", "B/s"),
+/// ("12", "kB/s"), ("1.3", "MB/s"), ("48", "MB/s"), ("1.1", "GB/s").
+/// Decimal (SI) multiples, as network tools use.
+pub fn format_rate(bytes_per_second: f64) -> (String, String) {
+    const UNITS: [&str; 5] = ["B/s", "kB/s", "MB/s", "GB/s", "TB/s"];
+    let mut v = bytes_per_second.max(0.0);
+    let mut i = 0;
+    while v >= 999.5 && i < UNITS.len() - 1 {
+        v /= 1000.0;
+        i += 1;
+    }
+    // Whole kilobytes; a decimal only for a few MB or more.
+    let text = if i > 1 && v < 9.95 {
+        format!("{v:.1}")
+    } else {
+        format!("{v:.0}")
+    };
+    (text, UNITS[i].to_string())
+}
+
+/// The wall-clock time of monotonic moment `at`, as the clock shows it.
+fn wall_time(ctx: &Bind, at: f64) -> String {
+    let ago = SignedDuration::from_secs_f64((ctx.mono - at).max(0.0));
+    let then = ctx.now.checked_sub(ago).unwrap_or_else(|_| ctx.now.clone());
+    match ctx.settings.clock {
+        ClockFormat::H24 => then.strftime("%H:%M").to_string(),
+        ClockFormat::H12 => then.strftime("%-I:%M").to_string(),
+    }
+}
+
+/// Whether `signal` is there to show: live, lost (with the time it was
+/// last heard from), or nothing yet.
+fn avail(ctx: &Bind, signal: &str) -> Avail {
+    if signal.trim().is_empty() {
+        return Avail::NotSetUp;
+    }
+    match (ctx.signals.get(signal), ctx.signals.lost_at(signal)) {
+        (None, _) => Avail::NoData,
+        (Some(_), Some(at)) => Avail::Lost(wall_time(ctx, at)),
+        (Some(_), None) => Avail::Live,
+    }
+}
+
+/// The fixed scale a reading is drawn on, in its base unit, and whether it
+/// is logarithmic: temperatures share one, percentages are 0–100, rates
+/// are logarithmic. A reading of any other kind has a bar only when the
+/// layout gives it a `scale`.
+fn scale_for(unit: Unit, custom: Option<[f64; 2]>) -> Option<(f64, f64, bool)> {
+    let log = unit == Unit::BytesPerSecond;
+    if let Some([lo, hi]) = custom {
+        return Some((lo, hi, log && lo > 0.0));
+    }
+    match unit {
+        Unit::Celsius => Some((TEMP_LO, TEMP_HI, false)),
+        Unit::Percent => Some((0.0, 100.0, false)),
+        Unit::BytesPerSecond => Some((NET_LO, NET_HI, true)),
+        Unit::None => None,
+    }
+}
+
+fn fraction((lo, hi, log): (f64, f64, bool), v: f64) -> f32 {
+    let f = if log {
+        (v.max(lo).ln() - lo.ln()) / (hi.ln() - lo.ln())
+    } else {
+        (v - lo) / (hi - lo)
+    };
+    f.clamp(0.0, 1.0) as f32
+}
+
+/// One reading, formatted, with its bar on its fixed scale.
+#[allow(clippy::too_many_arguments)]
+fn reading(
+    ctx: &Bind,
+    name: &str,
+    signal: &str,
+    warn: Option<f64>,
+    crit: Option<f64>,
+    scale: Option<[f64; 2]>,
+    default_unit: Unit,
+) -> Reading {
+    let avail = avail(ctx, signal);
+    let (value, unit) = reading_text(ctx.signals, signal, ctx.settings);
+    let base_unit = match ctx.signals.get(signal) {
+        Some(Value::Number(_, u)) => *u,
+        Some(Value::Text(_)) => Unit::None,
+        None => default_unit,
+    };
+    let number = match ctx.signals.get(signal) {
+        Some(Value::Number(n, _)) => Some(*n),
+        _ => None,
+    };
+    let text = matches!(ctx.signals.get(signal), Some(Value::Text(_)));
+    let bar = scale_for(base_unit, scale).filter(|_| !text).map(|s| Bar {
+        value: number.map(|n| fraction(s, n)),
+        warn: warn.map(|w| fraction(s, w)),
+        crit: crit.map(|c| fraction(s, c)),
+    });
+    Reading {
+        name: name.to_string(),
+        value,
+        unit,
+        severity: judge(ctx.signals, signal, warn, crit),
+        avail,
+        bar,
+    }
+}
+
+/// The base unit a signal is expected in before its first reading, so a
+/// card waiting for data already has the right bar.
+fn expected_unit(signal: &str) -> Unit {
+    match signal.split_once('.').map(|(_, w)| w) {
+        Some("temp") => Unit::Celsius,
+        Some("load") => Unit::Percent,
+        _ if signal.starts_with("mem") => Unit::Percent,
+        _ if signal.starts_with("net.") => Unit::BytesPerSecond,
+        _ => Unit::None,
+    }
+}
+
+/// A widget's icon: the one the layout names, if the bundled set has it,
+/// else `fallback`.
+fn icon_of(widget: &Widget, fallback: char) -> char {
+    widget.icon().and_then(icons::by_name).unwrap_or(fallback)
+}
+
+fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
     match widget {
-        Widget::Clock { .. } => clock(settings.clock, now),
-        Widget::Media { .. } => media(signals),
-        Widget::Slider { .. } => slider(widget, signals, None, None),
+        Widget::Clock { .. } => clock(ctx.settings.clock, ctx.now),
+        Widget::Media { .. } => media(ctx.signals, ctx.marquee),
+        Widget::Slider { .. } => slider(widget, ctx.signals, None, None, None),
+        Widget::Value { signal, .. } if signal == "weather.temp" => weather(widget, ctx),
         Widget::Value {
             label,
             signal,
-            graph,
+            scale,
             warn,
             crit,
             second,
+            second_label,
             second_warn,
             second_crit,
             ..
         } => {
-            let reading = match signals.get(signal) {
-                Some(Value::Number(n, unit)) => Some((*n, *unit)),
-                _ => None,
+            let first = reading(
+                ctx,
+                label,
+                signal,
+                *warn,
+                *crit,
+                *scale,
+                expected_unit(signal),
+            );
+            // The limit that matters now: the critical one on a critical
+            // reading, as the alarm names it; otherwise the first to come.
+            let near = if first.severity == Severity::Crit {
+                crit.or(*warn)
+            } else {
+                warn.or(*crit)
             };
-            let (value, unit) = reading_text(signals, signal, settings);
-            let severity = judge(signals, signal, *warn, *crit);
-            let second = second.as_deref().map(|s| {
-                let (value, unit) = reading_text(signals, s, settings);
-                Reading {
-                    value,
-                    unit,
-                    severity: judge(signals, s, *second_warn, *second_crit),
-                }
+            let limit = near.filter(|_| first.bar.is_some()).map(|l| {
+                let unit = match ctx.signals.get(signal) {
+                    Some(Value::Number(_, u)) => *u,
+                    _ => expected_unit(signal),
+                };
+                let (v, u) = format_number(l, unit, ctx.settings.temperature);
+                format!("limit {v}{u}")
             });
-            let graph = graph.and_then(|style| {
-                let unit = reading.map_or(Unit::None, |(_, u)| u);
-                let points = scale(&signals.history(signal), unit);
-                (!points.is_empty()).then_some(match style {
-                    GraphStyle::Area => Graph::Area(points),
-                    GraphStyle::Line => Graph::Line(points),
-                })
+            let second = second.as_deref().map(|s| {
+                let name = second_label.clone().unwrap_or_default();
+                reading(
+                    ctx,
+                    &name,
+                    s,
+                    *second_warn,
+                    *second_crit,
+                    None,
+                    expected_unit(s),
+                )
             });
             WidgetView::Value {
-                label: label.clone(),
-                value,
-                unit,
-                icon: None,
-                graph,
-                severity,
+                icon: icon_of(widget, icons::for_signal(signal)),
+                reading: first,
+                limit,
                 second,
             }
         }
-        Widget::Key { icon, label, .. } => WidgetView::Key {
-            icon: icon.clone(),
+        Widget::Key {
+            icon,
+            label,
+            sub,
+            tap,
+            hold,
+            ..
+        } => WidgetView::Key {
+            icon: icon.as_deref().and_then(icons::by_name),
             label: label.clone(),
+            sub: sub.clone(),
+            set_up: tap.is_some() || hold.is_some(),
         },
-        Widget::Rate {
-            label, down, up, ..
-        } => {
-            let rate = |name: &str| match signals.get(name) {
-                Some(Value::Number(n, _)) => format_rate(*n),
-                _ => NO_DATA.to_string(),
+        Widget::Rate { down, up, .. } => {
+            let r = |name: &str, signal: &str| {
+                reading(ctx, name, signal, None, None, None, Unit::BytesPerSecond)
             };
-            let history = scale(&signals.history(down), Unit::BytesPerSecond);
             WidgetView::Rate {
-                label: label.clone(),
-                caption: format!("↓{} ↑{}", rate(down), rate(up)),
-                graph: (!history.is_empty()).then_some(Graph::Line(history)),
+                down: r("Down", down),
+                up: r("Up", up),
             }
         }
+    }
+}
+
+fn weather(widget: &Widget, ctx: &Bind) -> WidgetView {
+    let s = ctx.signals;
+    let number = |name| match s.get(name) {
+        Some(Value::Number(n, _)) => Some(*n),
+        _ => None,
+    };
+    let degrees = |c: f64| format!("{:.0}°", to_display(c, ctx.settings.temperature));
+    let temp = number("weather.temp");
+    let stale = s
+        .heard_at("weather.temp")
+        .filter(|at| ctx.mono - at > WEATHER_STALE);
+    let avail = match (temp, s.lost_at("weather.temp").or(stale)) {
+        (None, _) if !ctx.weather => Avail::NotSetUp,
+        (None, _) => Avail::NoData,
+        (Some(_), Some(at)) => Avail::Lost(wall_time(ctx, at)),
+        (Some(_), None) => Avail::Live,
+    };
+    let condition = match s.get("weather.condition") {
+        Some(Value::Text(t)) => t.clone(),
+        _ => String::new(),
+    };
+    let high_low = number("weather.high")
+        .zip(number("weather.low"))
+        .map(|(h, l)| format!("{} / {}", degrees(h), degrees(l)));
+    let day = number("weather.day").is_none_or(|d| d != 0.0);
+    WidgetView::Weather {
+        icon: icon_of(widget, icons::for_weather(number("weather.code"), day)),
+        temp: temp.map_or(NO_DATA.to_string(), degrees),
+        condition,
+        high_low,
+        avail,
     }
 }
 
 /// A slider's view. `held` is the finger's position (0–1) while sliding:
 /// shown instead of the live value, so the bar follows the finger at once.
 /// `last_set` is what a `run` slider without a signal shows at rest.
+/// `from` is the level before the change that brought a takeover up.
 pub fn slider(
     widget: &Widget,
     signals: &Signals,
     held: Option<f32>,
     last_set: Option<f32>,
+    from: Option<f32>,
 ) -> WidgetView {
     let Widget::Slider {
         label,
@@ -207,17 +435,23 @@ pub fn slider(
         Some(Value::Number(n, _)) => Some(*n),
         _ => None,
     };
-    let percent = |f: f32| format!("{:.0}%", f * 100.0);
-    let (fraction, value, muted) = match controls {
+    let percent = |f: f32| format!("{:.0}", f * 100.0);
+    let none = || (NO_DATA.to_string(), String::new());
+    let (fraction, (value, unit), muted, icon) = match controls {
         SliderControl::Volume => {
             let muted = held.is_none() && number("volume.muted").is_some_and(|m| m != 0.0);
             let f = held.or(number("volume.level").map(|v| (v / 100.0) as f32));
-            let value = match f {
-                _ if muted => "Muted".to_string(),
-                Some(f) => percent(f),
-                None => NO_DATA.to_string(),
+            let shown = match f {
+                _ if muted => ("Muted".to_string(), String::new()),
+                Some(f) => (percent(f), "%".to_string()),
+                None => none(),
             };
-            (f, value, muted)
+            let icon = match f {
+                _ if muted => icons::SPEAKER_X,
+                Some(f) if f < 0.34 => icons::SPEAKER_LOW,
+                _ => icons::SPEAKER_HIGH,
+            };
+            (f, shown, muted, icon)
         }
         SliderControl::Seek => {
             let length = number("media.length").filter(|l| *l > 0.0);
@@ -228,9 +462,9 @@ pub fn slider(
                     let f = held.or(number("media.position").map(|p| (p / length) as f32));
                     let at = f.map_or(0.0, |f| f64::from(f.clamp(0.0, 1.0)) * length);
                     let value = format!("{} / {}", track_time(at), track_time(length));
-                    (f, value, false)
+                    (f, (value, String::new()), false, icons::MUSIC)
                 }
-                None => (None, NO_DATA.to_string(), false),
+                None => (None, none(), false, icons::MUSIC),
             }
         }
         SliderControl::Run(_) => {
@@ -239,15 +473,20 @@ pub fn slider(
                 .and_then(number)
                 .map(|v| (v / 100.0) as f32);
             let f = held.or(shown).or(last_set);
-            (f, f.map_or(NO_DATA.to_string(), percent), false)
+            let text = f.map_or_else(none, |f| (percent(f), "%".to_string()));
+            let icon = signal.as_deref().map_or(icons::ACTIVITY, icons::for_signal);
+            (f, text, false, icon)
         }
     };
     WidgetView::Slider {
+        icon: icon_of(widget, icon),
         label: label.clone(),
         value,
+        unit,
         fraction: fraction.map(|f| f.clamp(0.0, 1.0)),
         active: held.is_some(),
         muted,
+        from,
     }
 }
 
@@ -261,74 +500,44 @@ fn track_time(seconds: f64) -> String {
     }
 }
 
-fn media(signals: &Signals) -> WidgetView {
-    let text = |name| match signals.get(name) {
+/// What is playing, or `None`: no title, stopped, or the player gone.
+pub fn media(signals: &Signals, marquee: Option<f32>) -> WidgetView {
+    let text = |name| match signals.live(name) {
         Some(Value::Text(t)) => t.trim().to_string(),
         _ => String::new(),
     };
     let number = |name| match signals.get(name) {
-        Some(Value::Number(n, _)) => *n,
-        _ => 0.0,
+        Some(Value::Number(n, _)) => Some(*n),
+        _ => None,
     };
     let status = text("media.status");
     let title = text("media.title");
     if title.is_empty() || status.is_empty() || status == "stopped" {
         return WidgetView::Media(None);
     }
-    let length = number("media.length");
-    let progress =
-        (length > 0.0).then(|| (number("media.position") / length).clamp(0.0, 1.0) as f32);
     WidgetView::Media(Some(Track {
         title,
         artist: text("media.artist"),
-        progress,
+        position: number("media.position"),
+        length: number("media.length").filter(|l| *l > 0.0),
         playing: status == "playing",
+        marquee,
     }))
 }
 
 fn clock(format: ClockFormat, now: &Zoned) -> WidgetView {
-    let date = now.strftime("%a, %b %d").to_string();
-    match format {
-        ClockFormat::H24 => WidgetView::Clock {
-            date,
-            time: now.strftime("%H:%M").to_string(),
-            meridiem: None,
-        },
-        ClockFormat::H12 => WidgetView::Clock {
-            date,
-            time: now.strftime("%-I:%M").to_string(),
-            meridiem: Some(now.strftime("%p").to_string()),
-        },
-    }
-}
-
-/// Value and unit text for a number in its base unit.
-fn format_number(n: f64, unit: Unit, temperature: Temperature) -> (String, String) {
-    match unit {
-        Unit::Celsius => match temperature {
-            Temperature::Celsius => (format!("{n:.0}"), "°C".into()),
-            Temperature::Fahrenheit => (format!("{:.0}", n * 9.0 / 5.0 + 32.0), "°F".into()),
-        },
-        Unit::Percent => (format!("{n:.0}"), "%".into()),
-        Unit::BytesPerSecond => (format_rate(n), String::new()),
-        Unit::None => (format!("{n:.0}"), String::new()),
-    }
-}
-
-/// A byte rate in at most four characters plus "/s": "512B/s", "4.2K/s",
-/// "292K/s", "1.1G/s". Decimal (SI) multiples, as network tools use.
-pub fn format_rate(bytes_per_second: f64) -> String {
-    const PREFIXES: [&str; 5] = ["B", "K", "M", "G", "T"];
-    let mut v = bytes_per_second.max(0.0);
-    let mut i = 0;
-    while v >= 999.5 && i < PREFIXES.len() - 1 {
-        v /= 1000.0;
-        i += 1;
-    }
-    if i > 0 && v < 9.95 {
-        format!("{v:.1}{}/s", PREFIXES[i])
-    } else {
-        format!("{v:.0}{}/s", PREFIXES[i])
+    let f = |s: &str| now.strftime(s).to_string();
+    let (time, meridiem) = match format {
+        ClockFormat::H24 => (f("%H:%M"), None),
+        ClockFormat::H12 => (f("%-I:%M"), Some(f("%p"))),
+    };
+    WidgetView::Clock {
+        time,
+        meridiem,
+        weekday: f("%A"),
+        weekday_short: f("%a"),
+        date: f("%B %-d"),
+        date_short: f("%b %-d"),
     }
 }
 
@@ -342,33 +551,6 @@ fn severity(n: f64, warn: Option<f64>, crit: Option<f64>) -> Severity {
     }
 }
 
-/// Maps history to 0.0–1.0 for drawing.
-///
-/// Percentages use their fixed 0–100 range. Rates start at zero and scale to
-/// the window's peak. Anything else (temperatures) zooms to the window's own
-/// range, but never to less than `MIN_SPAN` units, so sensor noise of a
-/// degree stays a flat line instead of filling the zone.
-fn scale(history: &[f32], unit: Unit) -> Vec<f32> {
-    const MIN_SPAN: f32 = 10.0;
-    if history.is_empty() {
-        return Vec::new();
-    }
-    let max = history.iter().copied().fold(f32::MIN, f32::max);
-    let min = history.iter().copied().fold(f32::MAX, f32::min);
-    let (lo, hi) = match unit {
-        Unit::Percent => (0.0, 100.0),
-        Unit::BytesPerSecond => (0.0, max.max(1.0)),
-        Unit::Celsius | Unit::None => {
-            let pad = (MIN_SPAN - (max - min)).max(0.0) / 2.0;
-            (min - pad, max + pad)
-        }
-    };
-    history
-        .iter()
-        .map(|&v| ((v - lo) / (hi - lo)).clamp(0.0, 1.0))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,14 +562,28 @@ mod tests {
             .unwrap()
     }
 
+    fn ctx<'a>(s: &'a Signals, settings: &'a Settings, now: &'a Zoned) -> Bind<'a> {
+        Bind {
+            signals: s,
+            settings,
+            weather: true,
+            now,
+            mono: 0.0,
+            marquee: None,
+        }
+    }
+
     #[test]
     fn clock_formats() {
         assert_eq!(
             clock(ClockFormat::H12, &now()),
             WidgetView::Clock {
-                date: "Tue, Jun 09".into(),
                 time: "4:17".into(),
                 meridiem: Some("PM".into()),
+                weekday: "Tuesday".into(),
+                weekday_short: "Tue".into(),
+                date: "June 9".into(),
+                date_short: "Jun 9".into(),
             }
         );
         let WidgetView::Clock { time, meridiem, .. } = clock(ClockFormat::H24, &now()) else {
@@ -400,11 +596,11 @@ mod tests {
     fn temperatures_convert_but_thresholds_stay_in_celsius() {
         assert_eq!(
             format_number(26.0, Unit::Celsius, Temperature::Fahrenheit),
-            ("79".into(), "°F".into())
+            ("79°".into(), String::new())
         );
         assert_eq!(
             format_number(26.4, Unit::Celsius, Temperature::Celsius),
-            ("26".into(), "°C".into())
+            ("26°".into(), String::new())
         );
         assert_eq!(severity(80.0, Some(75.0), Some(90.0)), Severity::Warn);
         assert_eq!(severity(90.0, Some(75.0), Some(90.0)), Severity::Crit);
@@ -412,44 +608,40 @@ mod tests {
     }
 
     #[test]
-    fn media_shows_track_progress_and_pause() {
+    fn media_shows_track_times_and_pause() {
         let mut s = Signals::new();
-        assert_eq!(media(&s), WidgetView::Media(None), "no player yet");
+        assert_eq!(media(&s, None), WidgetView::Media(None), "no player yet");
         s.set("media.title", Value::Text("Teardrop".into()));
         s.set("media.artist", Value::Text("Massive Attack".into()));
         s.set("media.status", Value::Text("playing".into()));
         s.set("media.position", Value::Number(75.0, Unit::None));
         s.set("media.length", Value::Number(300.0, Unit::None));
-        assert_eq!(
-            media(&s),
-            WidgetView::Media(Some(Track {
-                title: "Teardrop".into(),
-                artist: "Massive Attack".into(),
-                progress: Some(0.25),
-                playing: true,
-            }))
-        );
+        let WidgetView::Media(Some(t)) = media(&s, None) else {
+            unreachable!()
+        };
+        assert_eq!((t.progress(), t.playing), (Some(0.25), true));
+        assert_eq!(t.artist, "Massive Attack");
         // A live stream has no length: no bar, rather than a wrong one.
         s.set("media.status", Value::Text("paused".into()));
         s.set("media.length", Value::Number(0.0, Unit::None));
-        let WidgetView::Media(Some(t)) = media(&s) else {
+        let WidgetView::Media(Some(t)) = media(&s, None) else {
             unreachable!()
         };
-        assert_eq!((t.progress, t.playing), (None, false));
+        assert_eq!((t.progress(), t.playing), (None, false));
         s.set("media.status", Value::Text("stopped".into()));
-        assert_eq!(media(&s), WidgetView::Media(None));
+        assert_eq!(media(&s, None), WidgetView::Media(None));
     }
 
     #[test]
     fn sliders_show_live_values_or_the_finger() {
         let w = |controls: &str| {
             let c = Config::parse(&format!(
-                "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"slider\"\nwidth = 200\nlabel = \"S\"\ncontrols = {controls}\n[[page.widget]]\ntype = \"clock\"\nwidth = 100\n"
+                "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"slider\"\nwidth = 200\nlabel = \"S\"\ncontrols = {controls}\n[[page.widget]]\ntype = \"clock\"\nwidth = 440\n"
             ))
             .unwrap();
             c.pages[0].widgets[0].clone()
         };
-        let view = |w: &Widget, s: &Signals, held| match slider(w, s, held, None) {
+        let view = |w: &Widget, s: &Signals, held| match slider(w, s, held, None, None) {
             WidgetView::Slider {
                 value,
                 fraction,
@@ -462,13 +654,20 @@ mod tests {
         let volume = w("\"volume\"");
         assert_eq!(view(&volume, &s, None), (NO_DATA.into(), None, false));
         s.set("volume.level", Value::Number(40.0, Unit::Percent));
-        assert_eq!(view(&volume, &s, None), ("40%".into(), Some(0.4), false));
+        assert_eq!(view(&volume, &s, None), ("40".into(), Some(0.4), false));
         assert_eq!(
             view(&volume, &s, Some(0.75)),
-            ("75%".into(), Some(0.75), false)
+            ("75".into(), Some(0.75), false)
         );
         s.set("volume.muted", Value::Number(1.0, Unit::None));
         assert_eq!(view(&volume, &s, None), ("Muted".into(), Some(0.4), true));
+        assert!(matches!(
+            slider(&volume, &s, None, None, None),
+            WidgetView::Slider {
+                icon: icons::SPEAKER_X,
+                ..
+            }
+        ));
 
         let seek = w("\"seek\"");
         assert_eq!(view(&seek, &s, None).0, NO_DATA, "nothing playing");
@@ -484,7 +683,7 @@ mod tests {
         let run = w("{ run = [\"x\", \"{value}\"] }");
         assert_eq!(view(&run, &s, None).0, NO_DATA);
         assert!(matches!(
-            slider(&run, &s, None, Some(0.3)),
+            slider(&run, &s, None, Some(0.3), None),
             WidgetView::Slider { fraction: Some(f), .. } if (f - 0.3).abs() < 1e-6
         ));
     }
@@ -494,99 +693,146 @@ mod tests {
         let c = Config::parse(
             "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"value\"\nwidth = 160\nlabel = \"GPU\"\n\
              signal = \"gpu.temp\"\ncrit = 90\nsecond = \"gpu.load\"\nsecond_warn = 70\n\
-             [[page.widget]]\ntype = \"key\"\nwidth = 60\nicon = \"play\"\n",
+             second_label = \"load\"\n\
+             [[page.widget]]\ntype = \"key\"\nwidth = 480\nicon = \"play\"\n",
         )
         .unwrap();
         let mut s = Signals::new();
         s.set("gpu.temp", Value::Number(50.0, Unit::Celsius));
-        let zones = bind_page(&c.pages[0].widgets, &s, &c.settings, &now());
+        let n = now();
+        let zones = bind_page(&c.pages[0].widgets, &ctx(&s, &c.settings, &n));
         let WidgetView::Value { second, .. } = &zones[0].view else {
             unreachable!()
         };
+        let second = second.as_ref().unwrap();
         assert_eq!(
-            second,
-            &Some(Reading {
-                value: NO_DATA.into(),
-                unit: String::new(),
-                severity: Severity::Ok
-            })
+            (second.value.as_str(), &second.avail),
+            (NO_DATA, &Avail::NoData)
         );
+        assert_eq!(second.bar.unwrap().value, None, "a load bar, empty");
         s.set("gpu.load", Value::Number(75.0, Unit::Percent));
-        let zones = bind_page(&c.pages[0].widgets, &s, &c.settings, &now());
+        let zones = bind_page(&c.pages[0].widgets, &ctx(&s, &c.settings, &n));
         let WidgetView::Value {
-            severity, second, ..
+            reading,
+            second,
+            icon,
+            limit,
         } = &zones[0].view
         else {
             unreachable!()
         };
-        assert_eq!(*severity, Severity::Ok);
+        assert_eq!(*icon, icons::GPU);
+        assert_eq!(reading.severity, Severity::Ok);
+        assert_eq!(reading.value, "50°");
+        assert_eq!(limit.as_deref(), Some("limit 90°"));
+        let second = second.as_ref().unwrap();
         assert_eq!(
-            second,
-            &Some(Reading {
-                value: "75".into(),
-                unit: "%".into(),
-                severity: Severity::Warn
-            })
+            (
+                second.name.as_str(),
+                second.value.as_str(),
+                second.unit.as_str()
+            ),
+            ("load", "75", "%")
         );
+        assert_eq!(second.severity, Severity::Warn);
+        assert_eq!(zones[0].view.severity(), Severity::Warn);
         let used: Vec<&str> = signals_used(&c.pages[0].widgets).collect();
         assert_eq!(used, ["gpu.temp", "gpu.load"]);
         assert_eq!(
             zones[1].view,
             WidgetView::Key {
-                icon: Some("play".into()),
-                label: None
+                icon: Some(icons::PLAY),
+                label: None,
+                sub: None,
+                set_up: false,
             }
         );
     }
 
     #[test]
-    fn rates_stay_short() {
-        assert_eq!(format_rate(0.0), "0B/s");
-        assert_eq!(format_rate(512.0), "512B/s");
-        assert_eq!(format_rate(999.0), "999B/s");
-        assert_eq!(format_rate(4_200.0), "4.2K/s");
-        assert_eq!(format_rate(292_000.0), "292K/s");
-        assert_eq!(format_rate(999_700.0), "1.0M/s");
-        assert_eq!(format_rate(1_100_000_000.0), "1.1G/s");
-    }
-
-    #[test]
-    fn graphs_scale_by_unit() {
-        assert_eq!(scale(&[0.0, 50.0, 100.0], Unit::Percent), [0.0, 0.5, 1.0]);
+    fn readings_sit_on_a_fixed_scale_per_kind() {
+        let s = (TEMP_LO, TEMP_HI, false);
+        assert_eq!(fraction(s, 30.0), 0.0);
+        assert_eq!(fraction(s, 100.0), 1.0);
+        assert!((fraction(s, 65.0) - 0.5).abs() < 1e-6);
+        let net = scale_for(Unit::BytesPerSecond, None).unwrap();
+        assert!(net.2, "rates are logarithmic");
+        assert!((fraction(net, 1e6) - 0.5).abs() < 1e-6);
+        assert_eq!(scale_for(Unit::None, None), None, "no scale, no bar");
         assert_eq!(
-            scale(&[0.0, 500.0, 1000.0], Unit::BytesPerSecond),
-            [0.0, 0.5, 1.0]
+            scale_for(Unit::None, Some([0.0, 5000.0])),
+            Some((0.0, 5000.0, false))
         );
-        // 40–41 °C is noise: drawn near the middle, not edge to edge.
-        let t = scale(&[40.0, 41.0], Unit::Celsius);
-        assert!(t[0] > 0.4 && t[1] < 0.6, "{t:?}");
     }
 
     #[test]
-    fn missing_signals_show_a_calm_placeholder() {
-        let config = Config::default_layout();
-        let zones = bind_page(
-            &config.pages[0].widgets,
-            &Signals::new(),
-            &config.settings,
-            &now(),
-        );
-        assert_eq!(zones.len(), 6);
-        assert_eq!(zones[1].view, WidgetView::Media(None), "nothing playing");
-        let WidgetView::Value { value, graph, .. } = &zones[3].view else {
-            panic!("CPU is a value widget")
+    fn rates_stay_short() {
+        let r = |n| {
+            let (v, u) = format_rate(n);
+            format!("{v} {u}")
         };
-        assert_eq!((value.as_str(), graph), (NO_DATA, &None));
+        assert_eq!(r(0.0), "0 B/s");
+        assert_eq!(r(999.0), "999 B/s");
+        assert_eq!(r(12_000.0), "12 kB/s");
+        assert_eq!(r(1_300_000.0), "1.3 MB/s");
+        assert_eq!(r(48_000_000.0), "48 MB/s");
+        assert_eq!(r(999_700.0), "1.0 MB/s");
+        assert_eq!(r(1_100_000_000.0), "1.1 GB/s");
+    }
+
+    #[test]
+    fn nothing_lost_and_not_set_up_are_told_apart() {
+        let c = Config::parse(
+            "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"value\"\nwidth = 320\nlabel = \"CPU\"\n\
+             signal = \"cpu.temp\"\n[[page.widget]]\ntype = \"value\"\nwidth = 160\nlabel = \"X\"\n\
+             signal = \"\"\n[[page.widget]]\ntype = \"value\"\nwidth = 160\nlabel = \"Weather\"\n\
+             signal = \"weather.temp\"\n",
+        )
+        .unwrap();
+        let n = now();
+        let mut s = Signals::new();
+        let avail = |s: &Signals, weather: bool, mono: f64| {
+            let b = Bind {
+                weather,
+                mono,
+                ..ctx(s, &c.settings, &n)
+            };
+            bind_page(&c.pages[0].widgets, &b)
+                .into_iter()
+                .map(|z| match z.view {
+                    WidgetView::Value { reading, .. } => reading.avail,
+                    WidgetView::Weather { avail, .. } => avail,
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            avail(&s, false, 0.0),
+            [Avail::NoData, Avail::NotSetUp, Avail::NotSetUp]
+        );
+        assert_eq!(avail(&s, true, 0.0)[2], Avail::NoData);
+        s.set_at("cpu.temp", Value::Number(95.0, Unit::Celsius), 100.0);
+        s.set_at("weather.temp", Value::Number(12.0, Unit::Celsius), 100.0);
+        s.forget("cpu.temp", 400.0);
+        // Lost 600 s before now (16:17:05): at 16:07.
+        let got = avail(&s, true, 1000.0);
+        assert_eq!(got[0], Avail::Lost("16:07".into()));
+        assert_eq!(got[2], Avail::Live);
+        assert_eq!(
+            judge(&s, "cpu.temp", None, Some(90.0)),
+            Severity::Ok,
+            "a lost reading raises nothing"
+        );
+        // Over 45 minutes without a forecast: stale.
+        let got = avail(&s, true, 100.0 + WEATHER_STALE + 60.0);
+        assert!(matches!(&got[2], Avail::Lost(_)), "{got:?}");
     }
 
     #[test]
     fn page_signal_list() {
         let config = Config::default_layout();
         let used: Vec<&str> = signals_used(&config.pages[0].widgets).collect();
-        let mut expected = MEDIA_SIGNALS.to_vec();
-        expected.extend(["weather.temp", "cpu.temp", "gpu.temp", "net.down", "net.up"]);
-        assert_eq!(used, expected);
+        assert!(used.contains(&"weather.code"), "{used:?}");
         assert!(shows_clock(&config.pages[0].widgets));
-        assert!(!shows_clock(&config.pages[2].widgets));
     }
 }

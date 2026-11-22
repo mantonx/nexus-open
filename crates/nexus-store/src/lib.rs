@@ -17,7 +17,9 @@ use std::fmt;
 use std::path::Path;
 use std::time::Duration;
 
-use nexus_core::config::{Config, ConfigError, Page, Settings, Source, Takeover, Weather, Widget};
+use nexus_core::config::{
+    Config, ConfigError, Page, Settings, Source, Takeover, Weather, Widget, colour_text,
+};
 use rusqlite::{Connection, Transaction, params};
 use serde_json::{Map, Value as Json, json};
 
@@ -400,15 +402,25 @@ pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes
 
 fn read_settings(conn: &Connection) -> Result<(Settings, Option<Weather>, String), StoreError> {
     let row = conn.query_row(
-        "SELECT font, temperature, clock, weather_location, weather_latitude, weather_longitude, note, accent FROM settings",
+        "SELECT font, temperature, clock, weather_location, weather_latitude, weather_longitude, note, accent,
+                night_from, night_to, idle_dim FROM settings",
         [],
         |r| {
+            let night = match (
+                r.get::<_, Option<String>>(8)?,
+                r.get::<_, Option<String>>(9)?,
+            ) {
+                (Some(from), Some(to)) => json!({ "from": from, "to": to }),
+                _ => Json::Null,
+            };
             Ok((
                 json!({
                     "font": r.get::<_, String>(0)?,
                     "temperature": r.get::<_, String>(1)?,
                     "clock": r.get::<_, String>(2)?,
                     "accent": r.get::<_, Option<String>>(7)?,
+                    "night": night,
+                    "idle_dim": r.get::<_, bool>(10)?,
                 }),
                 Weather {
                     location: r.get(3)?,
@@ -587,14 +599,17 @@ pub(crate) fn write_settings(
     let s = serde_json::to_value(&config.settings).map_err(corrupt)?;
     let text = |key: &str| s[key].as_str().unwrap_or_default().to_string();
     let w = config.weather.as_ref();
+    let night = config.settings.night.as_ref();
     conn.execute(
-        "INSERT INTO settings (id, font, temperature, clock, weather_location, weather_latitude, weather_longitude, active_layout, note, accent)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO settings (id, font, temperature, clock, weather_location, weather_latitude, weather_longitude, active_layout, note, accent,
+                               night_from, night_to, idle_dim)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT (id) DO UPDATE SET
            font = excluded.font, temperature = excluded.temperature, clock = excluded.clock,
            weather_location = excluded.weather_location, weather_latitude = excluded.weather_latitude,
            weather_longitude = excluded.weather_longitude, active_layout = excluded.active_layout,
-           note = excluded.note, accent = excluded.accent",
+           note = excluded.note, accent = excluded.accent,
+           night_from = excluded.night_from, night_to = excluded.night_to, idle_dim = excluded.idle_dim",
         params![
             text("font"),
             text("temperature"),
@@ -604,7 +619,11 @@ pub(crate) fn write_settings(
             w.and_then(|w| w.longitude),
             active,
             note,
-            s["accent"].as_str(),
+            // Stored as hex, whatever name the layout gave it.
+            config.settings.accent.map(colour_text),
+            night.map(|n| n.from.clone()),
+            night.map(|n| n.to.clone()),
+            config.settings.idle_dim,
         ],
     )?;
     Ok(())
@@ -623,9 +642,15 @@ mod tests {
     use super::*;
     use nexus_core::config::{Action, Align};
 
+    /// The layout these tests store: the bundled default as it was before
+    /// the strip's redesign, kept so the tests do not follow the default.
+    fn fixture() -> Config {
+        Config::parse(include_str!("testdata/layout.toml")).unwrap()
+    }
+
     fn with_default() -> (Store, LayoutId) {
         let mut store = Store::open_in_memory().unwrap();
-        let config = Config::default_layout();
+        let config = fixture();
         let id = store
             .import("Default", &config, &Notes::default(), true)
             .unwrap();
@@ -637,7 +662,7 @@ mod tests {
         let (store, id) = with_default();
         assert_eq!(store.active_layout().unwrap(), id);
         let (config, _) = store.load(id).unwrap();
-        assert_eq!(config, Config::default_layout());
+        assert_eq!(config, fixture());
     }
 
     #[test]
@@ -773,11 +798,12 @@ mod tests {
     #[test]
     fn a_second_layout_keeps_the_settings_and_the_strip() {
         let (mut store, first) = with_default();
-        let mut other = Config::default_layout();
+        let mut other = fixture();
         other.settings.clock = nexus_core::config::ClockFormat::H12;
         other.pages.truncate(1);
         other.pages[0].widgets[0] = Widget::Clock {
             width: 107,
+            icon: None,
             tap: None,
             hold: None,
         };
@@ -789,7 +815,7 @@ mod tests {
         assert_eq!(loaded.pages.len(), 1);
         assert_eq!(
             loaded.settings.clock,
-            Config::default_layout().settings.clock,
+            fixture().settings.clock,
             "settings are app-wide; a starter does not change them"
         );
         assert_eq!(store.layouts().unwrap().len(), 2);
@@ -798,9 +824,10 @@ mod tests {
     #[test]
     fn invalid_layouts_are_refused_whole() {
         let mut store = Store::open_in_memory().unwrap();
-        let mut config = Config::default_layout();
+        let mut config = fixture();
         config.pages[0].widgets.push(Widget::Clock {
             width: 600,
+            icon: None,
             tap: None,
             hold: None,
         });
@@ -894,6 +921,7 @@ mod tests {
                 at: None,
                 widget: Widget::Clock {
                     width: 200,
+                    icon: None,
                     tap: Some(Action::Page("System".into())),
                     hold: None,
                 },
@@ -926,7 +954,10 @@ mod tests {
     fn as_schema_1(snapshot: &str) -> String {
         let mut state: Map<String, Json> = serde_json::from_str(snapshot).unwrap();
         for (table, columns) in [
-            ("settings", &["accent"][..]),
+            (
+                "settings",
+                &["accent", "night_from", "night_to", "idle_dim"][..],
+            ),
             ("takeover", &["align", "width"]),
         ] {
             for row in state[table].as_array_mut().unwrap() {
@@ -998,7 +1029,7 @@ mod tests {
             store.undo().unwrap().as_deref(),
             Some("Rename page to Machine")
         );
-        assert_eq!(store.load(layout).unwrap().0, Config::default_layout());
+        assert_eq!(store.load(layout).unwrap().0, fixture());
         drop(store);
         for suffix in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
@@ -1042,6 +1073,73 @@ mod tests {
         label = "Focus"
     "##;
 
+    /// A layout with every key the strip's redesign added.
+    const DESIGN_KEYS: &str = r##"
+        [settings]
+        accent = "teal"
+        night = { from = "22:30", to = "07:00" }
+        idle_dim = false
+        [[page]]
+        name = "A"
+        [[page.widget]]
+        type = "value"
+        width = 320
+        label = "Fan"
+        signal = "fan.rpm"
+        icon = "fan"
+        scale = [0, 3000]
+        second = "fan.load"
+        second_label = "duty"
+        [[page.widget]]
+        type = "key"
+        width = 160
+        icon = "browser"
+        label = "Browser"
+        sub = "Open the web"
+        tap = { open = "https://example.org" }
+        [[page.widget]]
+        type = "clock"
+        width = 160
+        icon = "clock"
+    "##;
+
+    #[test]
+    fn the_design_keys_round_trip_through_rows_and_text() {
+        let config = Config::parse(DESIGN_KEYS).unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        let id = store
+            .import("Design", &config, &Notes::default(), true)
+            .unwrap();
+        let (back, notes) = store.load(id).unwrap();
+        assert_eq!(back, config);
+        let text = text::write(&back, &notes);
+        for key in [
+            "accent = \"teal\"",
+            "idle_dim = false",
+            "from = \"22:30\"",
+            "scale = [",
+            "second_label = \"duty\"",
+            "sub = \"Open the web\"",
+            "icon = \"clock\"",
+        ] {
+            assert!(text.contains(key), "{key} in {text}");
+        }
+        assert_eq!(text::parse(&text).unwrap().0, config);
+        // Undone, the settings go back too.
+        let mut settings = back.settings.clone();
+        settings.night = None;
+        settings.idle_dim = true;
+        store
+            .edit(&Edit::SetSettings {
+                settings,
+                weather: None,
+            })
+            .unwrap();
+        assert_eq!(store.load(id).unwrap().0.settings.night, None);
+        store.undo().unwrap();
+        assert_eq!(store.load(id).unwrap().0, config);
+    }
+
     #[test]
     fn the_new_keys_round_trip_through_rows_and_text() {
         let config = Config::parse(NEW_KEYS).unwrap();
@@ -1056,7 +1154,7 @@ mod tests {
         assert!(text.contains("align = \"right\"\nwidth = 200\n"), "{text}");
         assert_eq!(text::parse(&text).unwrap().0, config);
         // An old layout writes none of them.
-        let old = text::write(&Config::default_layout(), &Notes::default());
+        let old = text::write(&fixture(), &Notes::default());
         for key in [
             "\naccent =",
             "\nalign =",
@@ -1101,6 +1199,7 @@ mod tests {
                     width: 80,
                     icon: Some("pause".into()),
                     label: None,
+                    sub: None,
                     tap: None,
                     hold: None,
                 },
@@ -1146,6 +1245,7 @@ mod tests {
                 at: None,
                 widget: Widget::Clock {
                     width: 100,
+                    icon: None,
                     tap: None,
                     hold: None,
                 },
