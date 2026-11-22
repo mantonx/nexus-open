@@ -84,6 +84,7 @@ export struct Starter {
 /// The header's status: see status.rs.
 export struct StatusView {
     tone: string,
+    icon: string,
     chip: string,
     headline: string,
     body: string,
@@ -91,6 +92,13 @@ export struct StatusView {
     retry: bool,
     log: bool,
     detail: string,
+}
+
+/// A news feed in Settings: its name (its title, else its site) and
+/// address.
+export struct FeedRow {
+    name: string,
+    address: string,
 }
 
 /// A modal sheet over the window: a title, a close button, and whatever
@@ -279,7 +287,7 @@ export component AppWindow inherits Window {
     in property <[Starter]> starters;
     /// A fresh store: offer the starters.
     in property <bool> first-run;
-    /// Preferences.
+    /// Settings.
     in property <int> pref-temperature;
     in property <int> pref-clock;
     in property <string> pref-accent;
@@ -295,6 +303,20 @@ export component AppWindow inherits Window {
     in property <[string]> fonts;
     in property <int> pref-font;
     in property <string> log-text;
+    /// Settings, News: the feeds, the chosen timings (-1: one set in a
+    /// file, said in the note), and the last feed check: "" (none),
+    /// "checking", "added" or "problem", with what it found.
+    in property <[FeedRow]> news-feeds;
+    in property <int> news-rotate: 1;
+    in property <int> news-max-age: 1;
+    in property <string> news-rotate-note;
+    in property <string> news-age-note;
+    in property <string> feed-state;
+    in property <string> feed-title;
+    in property <string> feed-detail;
+    in property <bool> feed-force;
+    /// Bumped to empty the address field after a feed is added.
+    in-out property <int> feed-epoch;
     /// Bumped to put typed names back after a refusal.
     in property <int> resets;
     in property <string> page-name;
@@ -353,12 +375,20 @@ export component AppWindow inherits Window {
     in property <string> start-failure;
     callback start-service();
     callback open-log();
+    callback open-help();
+    callback add-feed(string);
+    callback add-feed-anyway();
+    callback remove-feed(int);
+    callback move-feed(int, int);
+    callback news-choice(string, int);
 
     // ---- Window state ---------------------------------------------------
 
-    /// The open sheet: "", "gallery", "prefs", "about", "starters",
+    /// The open sheet: "", "gallery", "settings", "about", "starters",
     /// "rename", "log", "status".
     in-out property <string> sheet;
+    /// Settings' section: 0 the strip, 1 news, 2 this window.
+    in-out property <int> settings-tab;
     property <bool> copied;
     /// Pages being reordered by their grip: from and to, or -1.
     property <int> reorder-from: -1;
@@ -374,10 +404,20 @@ export component AppWindow inherits Window {
     property <length> unit: 1phx * zoom;
     property <length> strip-w: 640 * unit;
     property <length> strip-h: 48 * unit;
-    property <length> column-w: strip-w + 2 * bezel;
+    property <length> strip-col: strip-w + 2 * bezel;
+    /// The content column: as wide as the strip at 2x; at 1x, the whole
+    /// width, so the settings and captions use it (the strips stay at
+    /// exactly 1x, centred in it).
+    property <length> column-w: zoom == 2 ? strip-col : max(strip-col, board.visible-width - 2 * board-pad);
 
     public function show-sheet(name: string) {
         root.sheet = name;
+    }
+
+    /// Settings, at one of its sections.
+    public function show-settings(tab: int) {
+        root.settings-tab = tab;
+        root.sheet = "settings";
     }
 
     // The desktop's scheme, for Theme, and Slint's own widgets (scroll
@@ -513,10 +553,17 @@ export component AppWindow inherits Window {
                             height: 32px;
                             width: max(168px, chip-row.preferred-width);
                             border-radius: 16px;
-                            property <bool> trouble: root.status.tone == "warn" || root.status.tone == "stopped";
-                            background: trouble ? Theme.warn-surface : chip-touch.has-hover ? Theme.surface-2 : transparent;
-                            border-width: trouble ? 1px : 0px;
-                            border-color: Theme.warn.transparentize(0.5);
+                            // A failed start is the one real fault: critical.
+                            // What the app cannot do yet (no strip, in use, no
+                            // access, not running, starting) is a state, never
+                            // amber: amber means a reading.
+                            property <bool> failed: root.status.tone == "failed";
+                            property <bool> attention: root.status.tone == "app" || root.status.tone == "stopped" || root.status.tone == "starting";
+                            background: failed ? Theme.crit-surface
+                                : attention ? (chip-touch.has-hover ? Theme.surface-2.darker(0.04) : Theme.surface-2)
+                                : chip-touch.has-hover ? Theme.surface-2 : transparent;
+                            border-width: failed || attention ? 1px : 0px;
+                            border-color: failed ? Theme.crit.transparentize(0.4) : Theme.line-strong;
                             accessible-role: button;
                             accessible-label: @tr("Status: {}. Opens the details and fixes.", root.status.chip);
                             accessible-action-default => {
@@ -527,16 +574,24 @@ export component AppWindow inherits Window {
                                 padding-right: 12px;
                                 spacing: 7px;
                                 Icon {
-                                    glyph: root.status.tone == "stopped" ? Glyph.plug : status-chip.trouble ? Glyph.warning : root.status.tone == "note" ? Glyph.info : Glyph.ok;
+                                    glyph: root.status.icon == "fail" ? Glyph.fail
+                                        : root.status.icon == "plug" ? Glyph.plug
+                                        : root.status.icon == "busy" ? Glyph.app
+                                        : root.status.icon == "lock" ? Glyph.lock
+                                        : root.status.icon == "save" ? Glyph.save
+                                        : root.status.icon == "power" ? Glyph.power
+                                        : root.status.icon == "wait" ? Glyph.wait
+                                        : root.status.icon == "info" ? Glyph.info
+                                        : Glyph.ok-circle;
                                     fill: true;
-                                    color: status-chip.trouble ? Theme.warn : Theme.text-3;
+                                    color: status-chip.failed ? Theme.crit : status-chip.attention ? Theme.text-2 : Theme.text-3;
                                 }
                                 Text {
                                     text: root.status.chip == "" ? @tr("Checking…") : root.status.chip;
                                     font-family: Theme.font;
                                     font-size: Theme.size-label;
-                                    font-weight: status-chip.trouble ? 600 : 500;
-                                    color: status-chip.trouble ? Theme.warn : Theme.text-2;
+                                    font-weight: status-chip.failed || status-chip.attention ? 600 : 500;
+                                    color: status-chip.failed ? Theme.crit : status-chip.attention ? Theme.text : Theme.text-2;
                                     vertical-alignment: center;
                                 }
                             }
@@ -607,7 +662,7 @@ export component AppWindow inherits Window {
                         alignment: center;
                         more-button := IconButton {
                             icon: Glyph.dots;
-                            label: @tr("More: preferences, copy diagnostics, about");
+                            label: @tr("More: settings, help, copy diagnostics, about");
                             clicked => {
                                 more-menu.show();
                             }
@@ -632,18 +687,25 @@ export component AppWindow inherits Window {
                             width: root.column-w;
                             spacing: 0px;
 
-                            // Not connected: nothing here is live.
-                            if !root.connected: Rectangle {
+                            // Not connected: nothing here is live. A state, in
+                            // neutral; a start that failed is critical, with its
+                            // cause and the log as the next step.
+                            if !root.connected: offline := Rectangle {
+                                property <bool> failed: root.status.tone == "failed";
+                                property <bool> starting: root.status.tone == "starting";
                                 height: offline-row.preferred-height + 20px;
                                 border-radius: Theme.r-surface;
-                                background: root.start-failure != "" ? Theme.crit-surface : Theme.warn-surface;
+                                background: failed ? Theme.crit-surface : Theme.surface;
+                                border-width: 1px;
+                                border-color: failed ? Theme.crit.transparentize(0.5) : Theme.line-strong;
                                 offline-row := HorizontalLayout {
                                     padding: 10px;
                                     padding-left: 14px;
                                     spacing: 12px;
                                     Icon {
-                                        glyph: root.start-failure != "" ? Glyph.warning : Glyph.plug;
-                                        color: root.start-failure != "" ? Theme.crit : Theme.warn;
+                                        glyph: offline.failed ? Glyph.fail : offline.starting ? Glyph.wait : Glyph.power;
+                                        fill: true;
+                                        color: offline.failed ? Theme.crit : Theme.text-2;
                                         font-size: 18px;
                                     }
                                     VerticalLayout {
@@ -651,33 +713,49 @@ export component AppWindow inherits Window {
                                         spacing: 4px;
                                         horizontal-stretch: 1;
                                         Text {
-                                            text: @tr("Not connected to the strip's service, so editing is paused and these pictures are not live. Nothing is lost: a change waiting to be sent goes out when it is back.");
+                                            text: root.status.tone == "failed" ? @tr("The service did not start, so editing is paused and these pictures are not live.")
+                                                : root.status.tone == "starting" ? @tr("Starting the service… The pictures come back to life when it answers.")
+                                                : @tr("Not connected to the strip's service, so editing is paused and these pictures are not live. Nothing is lost: a change waiting to be sent goes out when it is back.");
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-body;
+                                            font-weight: root.status.tone == "failed" ? 600 : 400;
+                                            color: root.status.tone == "failed" ? Theme.crit : Theme.text;
+                                            wrap: word-wrap;
+                                            accessible-role: text;
+                                        }
+                                        // Why, in plain words: here, as there may be
+                                        // no strip to say it under.
+                                        if root.status.tone == "failed": Text {
+                                            text: @tr("{} The log may say more.", root.start-failure);
                                             font-family: Theme.font;
                                             font-size: Theme.size-body;
                                             color: Theme.text;
                                             wrap: word-wrap;
                                             accessible-role: text;
                                         }
-                                        // What the last try to start it said: here, as
-                                        // there may be no strip to say it under.
-                                        if root.start-failure != "": Text {
-                                            text: @tr("It did not start. {}", root.start-failure);
-                                            font-family: Theme.font;
-                                            font-size: Theme.size-body;
-                                            font-weight: 600;
-                                            color: Theme.crit;
-                                            wrap: word-wrap;
-                                            accessible-role: text;
-                                        }
                                     }
-                                    if root.status.start: VerticalLayout {
+                                    // Neutral keys, never the accent, on a banner.
+                                    if root.status.tone == "failed": VerticalLayout {
                                         alignment: center;
-                                        // Neutral, not the accent: on a warning ground
-                                        // the accent would read as part of the trouble.
                                         Button {
                                             tier: "default";
-                                            icon: Glyph.power;
-                                            text: root.start-failure != "" ? @tr("Try to start it again") : @tr("Start the service");
+                                            icon: Glyph.log;
+                                            text: @tr("Open the log");
+                                            clicked => {
+                                                root.open-log();
+                                                root.show-sheet("log");
+                                            }
+                                        }
+                                    }
+                                    if root.status.start || root.status.tone == "starting": VerticalLayout {
+                                        alignment: center;
+                                        Button {
+                                            tier: "default";
+                                            icon: root.status.tone == "starting" ? Glyph.wait : root.status.tone == "failed" ? Glyph.retry : Glyph.power;
+                                            text: root.status.tone == "starting" ? @tr("Starting…")
+                                                : root.status.tone == "failed" ? @tr("Try again") : @tr("Start the service");
+                                            enabled: root.status.tone != "starting";
+                                            label: root.status.tone == "failed" ? @tr("Try to start the service again") : "";
                                             clicked => {
                                                 root.start-service();
                                             }
@@ -748,373 +826,385 @@ export component AppWindow inherits Window {
                                     background: Theme.act-line;
                                 }
 
-                                // Name line.
+                                // The name and the strip, as one: at 1x they are
+                                // centred in the column, which the settings use.
                                 HorizontalLayout {
-                                    height: 34px;
-                                    spacing: 8px;
-                                    if is-page: Rectangle {
-                                        width: 20px;
-                                        accessible-role: none;
-                                        Icon {
-                                            glyph: Glyph.grip;
-                                            color: grip.has-hover || grip.pressed ? Theme.text : Theme.text-3;
-                                            font-size: 16px;
-                                        }
-                                        grip := TouchArea {
-                                            enabled: root.connected && !root.trying;
-                                            mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
-                                            // Rows here are about one strip and its
-                                            // name apart.
-                                            property <length> pitch: root.strip-h + 2 * root.bezel + 34px + 10px;
-                                            pointer-event(event) => {
-                                                if event.button != PointerEventButton.left {
-                                                    return;
-                                                }
-                                                if event.kind == PointerEventKind.down {
-                                                    root.reorder-from = row.index;
-                                                    root.reorder-to = row.index;
-                                                } else if event.kind == PointerEventKind.up {
-                                                    if root.reorder-from >= 0 && root.reorder-to != root.reorder-from {
-                                                        root.move-page(root.reorder-from, root.reorder-to);
-                                                    }
-                                                    root.reorder-from = -1;
-                                                    root.reorder-to = -1;
-                                                } else if event.kind == PointerEventKind.cancel {
-                                                    root.reorder-from = -1;
-                                                    root.reorder-to = -1;
-                                                }
+                                    alignment: center;
+                                    VerticalLayout {
+                                        width: root.strip-col;
+                                    // Name line.
+                                    HorizontalLayout {
+                                        height: 34px;
+                                        spacing: 8px;
+                                        if is-page: Rectangle {
+                                            width: 20px;
+                                            accessible-role: none;
+                                            Icon {
+                                                glyph: Glyph.grip;
+                                                color: grip.has-hover || grip.pressed ? Theme.text : Theme.text-3;
+                                                font-size: 16px;
                                             }
-                                            moved => {
-                                                if root.reorder-from >= 0 {
-                                                    root.reorder-to = max(0, min(root.page-count - 1,
-                                                        row.index + round((self.mouse-y - self.pressed-y) / self.pitch)));
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if !is-page: Rectangle {
-                                        width: 20px;
-                                        Icon {
-                                            glyph: Glyph.cards;
-                                            color: Theme.text-3;
-                                            font-size: 16px;
-                                        }
-                                    }
-                                    Text {
-                                        text: row.name;
-                                        font-family: Theme.font;
-                                        font-size: Theme.size-body + 1px;
-                                        font-weight: row.active ? 600 : 500;
-                                        color: Theme.text;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                        accessible-role: none;
-                                    }
-                                    if row.live && root.connected: VerticalLayout {
-                                        alignment: center;
-                                        horizontal-stretch: 0;
-                                        Rectangle {
-                                            height: 22px;
-                                            width: live-row.preferred-width;
-                                            border-radius: 11px;
-                                            background: Theme.surface-2;
-                                            live-row := HorizontalLayout {
-                                                padding-left: 8px;
-                                                padding-right: 9px;
-                                                spacing: 5px;
-                                                VerticalLayout {
-                                                    alignment: center;
-                                                    Rectangle {
-                                                        width: 7px;
-                                                        height: 7px;
-                                                        border-radius: 3.5px;
-                                                        background: Theme.text;
-                                                    }
-                                                }
-                                                Text {
-                                                    text: root.status.tone == "ok" ? @tr("On the strip")
-                                                        : row.kind == "page" ? @tr("Current page") : @tr("Showing now");
-                                                    font-family: Theme.font;
-                                                    font-size: Theme.size-small;
-                                                    font-weight: 500;
-                                                    color: Theme.text;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Text {
-                                        text: row.summary;
-                                        font-family: Theme.font;
-                                        font-size: Theme.size-label;
-                                        color: Theme.text-3;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                        horizontal-stretch: 1;
-                                    }
-                                }
-
-                                // The strip, in its bezel.
-                                strip-frame := Rectangle {
-                                    height: root.strip-h + 2 * root.bezel;
-                                    border-radius: 12px;
-                                    background: Theme.bezel;
-                                    border-width: row.active ? 2px : 1px;
-                                    border-color: row.active && !root.trying ? Theme.text-2 : row.active ? Theme.line-strong : Theme.dark ? Theme.line : Theme.bezel;
-                                    accessible-role: button;
-                                    accessible-label: row.live && root.status.tone == "ok"
-                                        ? @tr("{}, on the strip. {}", row.name, row.summary)
-                                        : row.live ? @tr("{}, the current page. {}", row.name, row.summary)
-                                        : row.kind == "page" ? @tr("{}, page {}. Shows it on the strip to edit it.", row.name, row.index + 1)
-                                        : @tr("{}, takeover. Shows it on the strip to edit it.", row.name);
-                                    accessible-action-default => {
-                                        root.strip-clicked(row.kind, row.index, -1);
-                                    }
-
-                                    strip-image := Image {
-                                        x: root.bezel;
-                                        y: root.bezel;
-                                        width: root.strip-w;
-                                        height: root.strip-h;
-                                        // The strip's own frame, except on the page being
-                                        // edited: there the outlines must sit on its
-                                        // widgets, not on an alarm or takeover covering them.
-                                        source: row.live && root.connected && (root.trying || !row.active) ? root.frame : row.frame;
-                                        image-rendering: pixelated;
-                                        accessible-role: none;
-                                    }
-
-                                    // A new takeover has no picture yet.
-                                    if row.kind == "new-takeover": Rectangle {
-                                        x: root.bezel;
-                                        y: root.bezel;
-                                        width: root.strip-w;
-                                        height: root.strip-h;
-                                        Text {
-                                            text: @tr("Choose what shows it, then add its widgets here");
-                                            font-family: Theme.font;
-                                            font-size: Theme.size-body;
-                                            color: #9c8c7c;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    // Not being edited: a click makes it the one.
-                                    if !row.active && row.kind != "new-takeover": Rectangle {
-                                        border-radius: 12px;
-                                        border-width: pick-strip.has-hover && root.connected ? 2px : 0px;
-                                        border-color: Theme.line-strong;
-                                        pick-strip := TouchArea {
-                                            enabled: root.connected;
-                                            mouse-cursor: root.connected ? MouseCursor.pointer : MouseCursor.default;
-                                            clicked => {
-                                                root.strip-clicked(row.kind, row.index, (self.mouse-x - root.bezel) / root.unit);
-                                            }
-                                        }
-                                    }
-
-                                    // Being edited: the widgets as a list, laid over
-                                    // the strip so the outlines are its items.
-                                    if row.active: keys := FocusScope {
-                                        // Its TouchArea focuses it; taking the press here would
-                                        // swallow the first click.
-                                        focus-on-click: false;
-                                        x: root.bezel;
-                                        y: root.bezel;
-                                        width: root.strip-w;
-                                        height: root.strip-h;
-                                        // A widget selected from elsewhere (a click on
-                                        // another strip, the gallery) takes the keys too.
-                                        property <int> sel: root.selected;
-                                        changed sel => {
-                                            if self.sel >= 0 && !self.has-focus {
-                                                self.focus();
-                                            }
-                                        }
-                                        // Reached by the keyboard: a ring round the
-                                        // whole strip, unlike the selection outline,
-                                        // which a click also gives.
-                                        property <bool> by-keys;
-                                        focus-gained(reason) => {
-                                            self.by-keys = reason == FocusReason.tab-navigation;
-                                        }
-                                        FocusRing {
-                                            x: -root.bezel - 4px;
-                                            y: -root.bezel - 4px;
-                                            width: root.strip-w + 2 * root.bezel + 8px;
-                                            height: root.strip-h + 2 * root.bezel + 8px;
-                                            radius: 13px;
-                                            shown: keys.has-focus && keys.by-keys;
-                                        }
-                                        accessible-role: list;
-                                        accessible-label: @tr("Widgets on {}. Left and right arrows select; with Control they move the widget, with Shift they resize it; Delete removes it.", row.name);
-                                        key-pressed(event) => {
-                                            if !root.editable {
-                                                return reject;
-                                            }
-                                            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
-                                                self.by-keys = true;
-                                                let step = event.text == Key.LeftArrow ? -1 : 1;
-                                                if event.modifiers.control {
-                                                    root.move-step(step);
-                                                } else if event.modifiers.shift {
-                                                    root.resize-step(step * 4);
-                                                } else {
-                                                    root.select-step(step);
-                                                }
-                                                return accept;
-                                            }
-                                            if event.text == Key.Delete && root.selected >= 0 {
-                                                root.delete-widget();
-                                                return accept;
-                                            }
-                                            if event.text == Key.Escape {
-                                                root.cancelled();
-                                                root.deselect();
-                                                return accept;
-                                            }
-                                            reject
-                                        }
-
-                                        if root.trying: TouchArea {
-                                            property <float> at: self.mouse-x / root.unit;
-                                            mouse-cursor: MouseCursor.pointer;
-                                            accessible-role: button;
-                                            accessible-label: @tr("The strip, to try: a tap or swipe here acts on it");
-                                            pointer-event(event) => {
-                                                if event.button != PointerEventButton.left {
-                                                    return;
-                                                }
-                                                if event.kind == PointerEventKind.down {
-                                                    root.try-press(self.at);
-                                                } else if event.kind == PointerEventKind.up {
-                                                    root.try-release(self.at);
-                                                } else if event.kind == PointerEventKind.cancel {
-                                                    root.try-cancel();
-                                                }
-                                            }
-                                        }
-
-                                        if root.editable && !root.trying: Rectangle {
-                                            for zone[i] in root.zones: Rectangle {
-                                                x: zone.x * root.unit;
-                                                width: zone.width * root.unit;
-                                                border-radius: 4px * root.zoom;
-                                                border-width: i == root.selected ? 2px : 1px;
-                                                border-color: i == root.selected ? #d2c2ad : #fbf1e333;
-                                                accessible-role: list-item;
-                                                accessible-label: @tr("{}, {} pixels wide", zone.name, zone.width);
-                                                accessible-item-selectable: true;
-                                                accessible-item-selected: i == root.selected;
-                                                accessible-item-index: i;
-                                            }
-                                            if root.snap-x >= 0: Rectangle {
-                                                x: root.snap-x * root.unit - 1px;
-                                                y: -root.bezel;
-                                                width: 2px;
-                                                height: parent.height + 2 * root.bezel;
-                                                background: Theme.accent-text;
-                                            }
-                                            if root.ghost-width > 0: Rectangle {
-                                                x: root.ghost-x * root.unit;
-                                                width: root.ghost-width * root.unit;
-                                                border-radius: 4px * root.zoom;
-                                                border-width: 2px;
-                                                border-color: Theme.accent-base;
-                                                background: Theme.accent-base.transparentize(0.7);
-                                            }
-                                            if root.ghost-width > 0: Rectangle {
-                                                x: root.drop-x * root.unit - 2px;
-                                                width: 4px;
-                                                border-radius: 2px;
-                                                background: Theme.accent-base;
-                                            }
-                                            touch := TouchArea {
-                                                property <float> at: self.mouse-x / root.unit;
-                                                property <float> reach: 5px / root.unit;
-                                                property <int> edge: root.edge-at(self.at, self.reach);
-                                                mouse-cursor: self.edge >= 0 ? MouseCursor.ew-resize
-                                                    : self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                                            grip := TouchArea {
+                                                enabled: root.connected && !root.trying;
+                                                mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                                                // Rows here are about one strip and its
+                                                // name apart.
+                                                property <length> pitch: root.strip-h + 2 * root.bezel + 34px + 10px;
                                                 pointer-event(event) => {
                                                     if event.button != PointerEventButton.left {
                                                         return;
                                                     }
                                                     if event.kind == PointerEventKind.down {
-                                                        keys.focus();
-                                                        root.pressed(self.at, self.reach);
+                                                        root.reorder-from = row.index;
+                                                        root.reorder-to = row.index;
                                                     } else if event.kind == PointerEventKind.up {
-                                                        root.released(self.at);
+                                                        if root.reorder-from >= 0 && root.reorder-to != root.reorder-from {
+                                                            root.move-page(root.reorder-from, root.reorder-to);
+                                                        }
+                                                        root.reorder-from = -1;
+                                                        root.reorder-to = -1;
                                                     } else if event.kind == PointerEventKind.cancel {
-                                                        root.cancelled();
+                                                        root.reorder-from = -1;
+                                                        root.reorder-to = -1;
                                                     }
                                                 }
                                                 moved => {
-                                                    root.dragged(self.at);
-                                                }
-                                            }
-                                            // The grip on the selected widget's right edge:
-                                            // drag it to resize.
-                                            if root.selected >= 0 && root.ghost-width == 0: Rectangle {
-                                                property <Zone> zn: root.zones[root.selected];
-                                                x: (zn.x + zn.width) * root.unit - self.width / 2;
-                                                y: (parent.height - self.height) / 2;
-                                                width: 10px;
-                                                height: min(30px, parent.height - 6px);
-                                                border-radius: 5px;
-                                                background: Theme.accent-base;
-                                                border-width: 2px;
-                                                border-color: #14110f;
-                                                accessible-role: none;
-                                                Rectangle {
-                                                    width: 2px;
-                                                    height: parent.height - 12px;
-                                                    border-radius: 1px;
-                                                    background: #14110f80;
+                                                    if root.reorder-from >= 0 {
+                                                        root.reorder-to = max(0, min(root.page-count - 1,
+                                                            row.index + round((self.mouse-y - self.pressed-y) / self.pitch)));
+                                                    }
                                                 }
                                             }
                                         }
-                                        // An empty page: the way to fill it, on it.
-                                        if row.empty && root.editable && !root.trying: Rectangle {
-                                            x: 4px;
-                                            y: 4px;
-                                            width: parent.width - 8px;
-                                            height: parent.height - 8px;
-                                            border-radius: 8px;
-                                            border-width: 1.5px;
-                                            border-color: Theme.accent-base;
-                                            background: empty-touch.has-hover ? #ffffff10 : transparent;
-                                            HorizontalLayout {
-                                                alignment: center;
-                                                spacing: 8px;
-                                                Icon {
-                                                    glyph: Glyph.plus;
-                                                    color: Theme.accent-text;
-                                                }
-                                                Text {
-                                                    text: @tr("Add a widget to this page");
-                                                    font-family: Theme.font;
-                                                    font-size: Theme.size-body;
-                                                    font-weight: 500;
-                                                    color: Theme.accent-text;
-                                                    vertical-alignment: center;
+                                        if !is-page: Rectangle {
+                                            width: 20px;
+                                            Icon {
+                                                glyph: Glyph.cards;
+                                                color: Theme.text-3;
+                                                font-size: 16px;
+                                            }
+                                        }
+                                        Text {
+                                            text: row.name;
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-body + 1px;
+                                            font-weight: row.active ? 600 : 500;
+                                            color: Theme.text;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            accessible-role: none;
+                                        }
+                                        if row.live && root.connected: VerticalLayout {
+                                            alignment: center;
+                                            horizontal-stretch: 0;
+                                            Rectangle {
+                                                height: 22px;
+                                                width: live-row.preferred-width;
+                                                border-radius: 11px;
+                                                background: Theme.surface-2;
+                                                live-row := HorizontalLayout {
+                                                    padding-left: 8px;
+                                                    padding-right: 9px;
+                                                    spacing: 5px;
+                                                    VerticalLayout {
+                                                        alignment: center;
+                                                        Rectangle {
+                                                            width: 7px;
+                                                            height: 7px;
+                                                            border-radius: 3.5px;
+                                                            background: Theme.text;
+                                                        }
+                                                    }
+                                                    Text {
+                                                        text: root.status.tone == "ok" ? @tr("On the strip")
+                                                            : row.kind == "page" ? @tr("Current page") : @tr("Showing now");
+                                                        font-family: Theme.font;
+                                                        font-size: Theme.size-small;
+                                                        font-weight: 500;
+                                                        color: Theme.text;
+                                                        vertical-alignment: center;
+                                                    }
                                                 }
                                             }
-                                            empty-touch := TouchArea {
-                                                mouse-cursor: MouseCursor.pointer;
-                                                clicked => {
-                                                    root.open-gallery();
-                                                    root.show-sheet("gallery");
-                                                }
-                                            }
+                                        }
+                                        Text {
+                                            text: row.summary;
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-label;
+                                            color: Theme.text-3;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
                                         }
                                     }
-                                    // Not live: the picture darkens as the strip
-                                    // dims, so the bezel stays a device on cream
-                                    // too (fading it into the page turned it taupe).
-                                    if !root.connected: Rectangle {
-                                        border-radius: parent.border-radius;
-                                        background: #14110fa0;
+
+                                    // The strip, in its bezel.
+                                    strip-frame := Rectangle {
+                                        height: root.strip-h + 2 * root.bezel;
+                                        border-radius: 12px;
+                                        background: Theme.bezel;
+                                        border-width: row.active ? 2px : 1px;
+                                        border-color: row.active && !root.trying ? Theme.text-2 : row.active ? Theme.line-strong : Theme.dark ? Theme.line : Theme.bezel;
+                                        accessible-role: button;
+                                        accessible-label: row.live && root.status.tone == "ok"
+                                            ? @tr("{}, on the strip. {}", row.name, row.summary)
+                                            : row.live ? @tr("{}, the current page. {}", row.name, row.summary)
+                                            : row.kind == "page" ? @tr("{}, page {}. Shows it on the strip to edit it.", row.name, row.index + 1)
+                                            : @tr("{}, takeover. Shows it on the strip to edit it.", row.name);
+                                        accessible-action-default => {
+                                            root.strip-clicked(row.kind, row.index, -1);
+                                        }
+
+                                        strip-image := Image {
+                                            x: root.bezel;
+                                            y: root.bezel;
+                                            width: root.strip-w;
+                                            height: root.strip-h;
+                                            // The strip's own frame, except on the page being
+                                            // edited: there the outlines must sit on its
+                                            // widgets, not on an alarm or takeover covering them.
+                                            source: row.live && root.connected && (root.trying || !row.active) ? root.frame : row.frame;
+                                            image-rendering: pixelated;
+                                            accessible-role: none;
+                                        }
+
+                                        // A new takeover has no picture yet.
+                                        if row.kind == "new-takeover": Rectangle {
+                                            x: root.bezel;
+                                            y: root.bezel;
+                                            width: root.strip-w;
+                                            height: root.strip-h;
+                                            Text {
+                                                text: @tr("Choose what shows it, then add its widgets here");
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-body;
+                                                color: #9c8c7c;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+
+                                        // Not being edited: a click makes it the one.
+                                        if !row.active && row.kind != "new-takeover": Rectangle {
+                                            border-radius: 12px;
+                                            border-width: pick-strip.has-hover && root.connected ? 2px : 0px;
+                                            border-color: Theme.line-strong;
+                                            pick-strip := TouchArea {
+                                                enabled: root.connected;
+                                                mouse-cursor: root.connected ? MouseCursor.pointer : MouseCursor.default;
+                                                clicked => {
+                                                    root.strip-clicked(row.kind, row.index, (self.mouse-x - root.bezel) / root.unit);
+                                                }
+                                            }
+                                        }
+
+                                        // Being edited: the widgets as a list, laid over
+                                        // the strip so the outlines are its items.
+                                        if row.active: keys := FocusScope {
+                                            // Its TouchArea focuses it; taking the press here would
+                                            // swallow the first click.
+                                            focus-on-click: false;
+                                            x: root.bezel;
+                                            y: root.bezel;
+                                            width: root.strip-w;
+                                            height: root.strip-h;
+                                            // A widget selected from elsewhere (a click on
+                                            // another strip, the gallery) takes the keys too.
+                                            property <int> sel: root.selected;
+                                            changed sel => {
+                                                if self.sel >= 0 && !self.has-focus {
+                                                    self.focus();
+                                                }
+                                            }
+                                            // Reached by the keyboard: a ring round the
+                                            // whole strip, unlike the selection outline,
+                                            // which a click also gives.
+                                            property <bool> by-keys;
+                                            focus-gained(reason) => {
+                                                self.by-keys = reason == FocusReason.tab-navigation;
+                                            }
+                                            FocusRing {
+                                                x: -root.bezel - 4px;
+                                                y: -root.bezel - 4px;
+                                                width: root.strip-w + 2 * root.bezel + 8px;
+                                                height: root.strip-h + 2 * root.bezel + 8px;
+                                                radius: 13px;
+                                                shown: keys.has-focus && keys.by-keys;
+                                            }
+                                            accessible-role: list;
+                                            accessible-label: @tr("Widgets on {}. Left and right arrows select; with Control they move the widget, with Shift they resize it; Delete removes it.", row.name);
+                                            key-pressed(event) => {
+                                                if !root.editable {
+                                                    return reject;
+                                                }
+                                                if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                                                    self.by-keys = true;
+                                                    let step = event.text == Key.LeftArrow ? -1 : 1;
+                                                    if event.modifiers.control {
+                                                        root.move-step(step);
+                                                    } else if event.modifiers.shift {
+                                                        root.resize-step(step * 4);
+                                                    } else {
+                                                        root.select-step(step);
+                                                    }
+                                                    return accept;
+                                                }
+                                                if event.text == Key.Delete && root.selected >= 0 {
+                                                    root.delete-widget();
+                                                    return accept;
+                                                }
+                                                if event.text == Key.Escape {
+                                                    root.cancelled();
+                                                    root.deselect();
+                                                    return accept;
+                                                }
+                                                reject
+                                            }
+
+                                            if root.trying: TouchArea {
+                                                property <float> at: self.mouse-x / root.unit;
+                                                mouse-cursor: MouseCursor.pointer;
+                                                accessible-role: button;
+                                                accessible-label: @tr("The strip, to try: a tap or swipe here acts on it");
+                                                pointer-event(event) => {
+                                                    if event.button != PointerEventButton.left {
+                                                        return;
+                                                    }
+                                                    if event.kind == PointerEventKind.down {
+                                                        root.try-press(self.at);
+                                                    } else if event.kind == PointerEventKind.up {
+                                                        root.try-release(self.at);
+                                                    } else if event.kind == PointerEventKind.cancel {
+                                                        root.try-cancel();
+                                                    }
+                                                }
+                                            }
+
+                                            if root.editable && !root.trying: Rectangle {
+                                                for zone[i] in root.zones: Rectangle {
+                                                    x: zone.x * root.unit;
+                                                    width: zone.width * root.unit;
+                                                    border-radius: 4px * root.zoom;
+                                                    border-width: i == root.selected ? 2px : 1px;
+                                                    border-color: i == root.selected ? #d2c2ad : #fbf1e333;
+                                                    accessible-role: list-item;
+                                                    accessible-label: @tr("{}, {} pixels wide", zone.name, zone.width);
+                                                    accessible-item-selectable: true;
+                                                    accessible-item-selected: i == root.selected;
+                                                    accessible-item-index: i;
+                                                }
+                                                if root.snap-x >= 0: Rectangle {
+                                                    x: root.snap-x * root.unit - 1px;
+                                                    y: -root.bezel;
+                                                    width: 2px;
+                                                    height: parent.height + 2 * root.bezel;
+                                                    background: Theme.accent-text;
+                                                }
+                                                if root.ghost-width > 0: Rectangle {
+                                                    x: root.ghost-x * root.unit;
+                                                    width: root.ghost-width * root.unit;
+                                                    border-radius: 4px * root.zoom;
+                                                    border-width: 2px;
+                                                    border-color: Theme.accent-base;
+                                                    background: Theme.accent-base.transparentize(0.7);
+                                                }
+                                                if root.ghost-width > 0: Rectangle {
+                                                    x: root.drop-x * root.unit - 2px;
+                                                    width: 4px;
+                                                    border-radius: 2px;
+                                                    background: Theme.accent-base;
+                                                }
+                                                touch := TouchArea {
+                                                    property <float> at: self.mouse-x / root.unit;
+                                                    property <float> reach: 5px / root.unit;
+                                                    property <int> edge: root.edge-at(self.at, self.reach);
+                                                    mouse-cursor: self.edge >= 0 ? MouseCursor.ew-resize
+                                                        : self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                                                    pointer-event(event) => {
+                                                        if event.button != PointerEventButton.left {
+                                                            return;
+                                                        }
+                                                        if event.kind == PointerEventKind.down {
+                                                            keys.focus();
+                                                            root.pressed(self.at, self.reach);
+                                                        } else if event.kind == PointerEventKind.up {
+                                                            root.released(self.at);
+                                                        } else if event.kind == PointerEventKind.cancel {
+                                                            root.cancelled();
+                                                        }
+                                                    }
+                                                    moved => {
+                                                        root.dragged(self.at);
+                                                    }
+                                                }
+                                                // The grip on the selected widget's right edge:
+                                                // drag it to resize.
+                                                // Not at the strip's end: that edge cannot move
+                                                // (the widget can only shrink from its left), and
+                                                // a grip there would sit on the edge flag. So a
+                                                // full-width takeover has none either.
+                                                if root.selected >= 0 && root.ghost-width == 0 && root.zones[root.selected].x + root.zones[root.selected].width < 640: Rectangle {
+                                                    property <Zone> zn: root.zones[root.selected];
+                                                    x: (zn.x + zn.width) * root.unit - self.width / 2;
+                                                    y: (parent.height - self.height) / 2;
+                                                    width: 10px;
+                                                    height: min(30px, parent.height - 6px);
+                                                    border-radius: 5px;
+                                                    background: Theme.accent-base;
+                                                    border-width: 2px;
+                                                    border-color: #14110f;
+                                                    accessible-role: none;
+                                                    Rectangle {
+                                                        width: 2px;
+                                                        height: parent.height - 12px;
+                                                        border-radius: 1px;
+                                                        background: #14110f80;
+                                                    }
+                                                }
+                                            }
+                                            // An empty page: the way to fill it, on it.
+                                            if row.empty && root.editable && !root.trying: Rectangle {
+                                                x: 4px;
+                                                y: 4px;
+                                                width: parent.width - 8px;
+                                                height: parent.height - 8px;
+                                                border-radius: 8px;
+                                                border-width: 1.5px;
+                                                border-color: Theme.accent-base;
+                                                background: empty-touch.has-hover ? #ffffff10 : transparent;
+                                                HorizontalLayout {
+                                                    alignment: center;
+                                                    spacing: 8px;
+                                                    Icon {
+                                                        glyph: Glyph.plus;
+                                                        color: Theme.accent-text;
+                                                    }
+                                                    Text {
+                                                        text: @tr("Add a widget to this page");
+                                                        font-family: Theme.font;
+                                                        font-size: Theme.size-body;
+                                                        font-weight: 500;
+                                                        color: Theme.accent-text;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                                empty-touch := TouchArea {
+                                                    mouse-cursor: MouseCursor.pointer;
+                                                    clicked => {
+                                                        root.open-gallery();
+                                                        root.show-sheet("gallery");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // Not live: the picture darkens as the strip
+                                        // dims, so the bezel stays a device on cream
+                                        // too (fading it into the page turned it taupe).
+                                        if !root.connected: Rectangle {
+                                            border-radius: parent.border-radius;
+                                            background: #14110fa0;
+                                        }
+                                    }
                                     }
                                 }
 
@@ -1125,65 +1215,72 @@ export component AppWindow inherits Window {
                                 }
 
                                 // Under the strip being edited: what is happening,
-                                // and what can be done to it.
-                                // At 1x the column is narrow: the words go on
-                                // their own line above the buttons.
-                                if row.active: HorizontalLayout {
+                                // and what can be done to it. At 1x the words get
+                                // their own line above the buttons, so none is cut.
+                                if row.active: VerticalLayout {
                                     padding-top: 8px;
                                     padding-bottom: 8px;
-                                    spacing: 8px;
-                                    min-height: 50px;
-                                    // At 1x it wraps beside the buttons, so Add stays
-                                    // on the caption's row.
-                                    Text {
+                                    spacing: 4px;
+                                    if root.zoom == 1: Text {
                                         text: root.problem != "" && root.connected ? root.problem : root.caption;
                                         font-family: Theme.font;
                                         font-size: Theme.size-label;
                                         color: root.problem != "" && root.connected ? Theme.crit : Theme.text-2;
                                         font-weight: root.problem != "" && root.connected ? 500 : 400;
                                         wrap: word-wrap;
-                                        vertical-alignment: center;
-                                        horizontal-stretch: 1;
-                                        // The row is not sized to wrapped words, so the
-                                        // narrow column asks for three lines.
-                                        min-height: root.zoom == 1 ? 3 * 17px : 0px;
                                         accessible-role: text;
                                     }
-                                    if !root.trying && row.kind != "new-takeover": HorizontalLayout {
-                                        spacing: 6px;
-                                        alignment: end;
-                                        // Back from a widget to what holds it: the
-                                        // page's name, or the takeover's triggers.
-                                        if root.selected >= 0: Button {
-                                            tier: "quiet";
-                                            compact: root.zoom == 1;
-                                            icon: row.kind == "page" ? Glyph.sliders : Glyph.cards;
-                                            text: row.kind == "page" ? @tr("Page settings") : @tr("Takeover settings");
-                                            label: row.kind == "page" ? @tr("Settings of the page {}", row.name) : @tr("Settings of the takeover {}: when it shows and for how long", row.name);
-                                            clicked => {
-                                                root.deselect();
-                                            }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        min-height: 34px;
+                                        if root.zoom == 2: Text {
+                                            text: root.problem != "" && root.connected ? root.problem : root.caption;
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-label;
+                                            color: root.problem != "" && root.connected ? Theme.crit : Theme.text-2;
+                                            font-weight: root.problem != "" && root.connected ? 500 : 400;
+                                            wrap: word-wrap;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                            accessible-role: text;
                                         }
-                                        Button {
-                                            tier: "quiet";
-                                            compact: root.zoom == 1;
-                                            icon: Glyph.widths;
-                                            text: @tr("Equal widths");
-                                            enabled: root.editable && root.zones.length > 1;
-                                            label: @tr("Give every widget on {} the same width", row.name);
-                                            clicked => {
-                                                root.equal-widths();
-                                            }
+                                        if root.zoom == 1: Rectangle {
+                                            horizontal-stretch: 1;
                                         }
-                                        Button {
-                                            tier: "primary";
-                                            icon: Glyph.plus;
-                                            text: root.selected >= 0 ? @tr("Add after") : @tr("Add");
-                                            enabled: root.editable && root.can-add;
-                                            label: root.can-add ? @tr("Add a widget to {}", row.name) : root.add-reason;
-                                            clicked => {
-                                                root.open-gallery();
-                                                root.show-sheet("gallery");
+                                        if !root.trying && row.kind != "new-takeover": HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: end;
+                                            // Back from a widget to what holds it: the
+                                            // page's name, or the takeover's triggers.
+                                            if root.selected >= 0: Button {
+                                                tier: "quiet";
+                                                icon: row.kind == "page" ? Glyph.sliders : Glyph.cards;
+                                                text: row.kind == "page" ? @tr("Page settings") : @tr("Takeover settings");
+                                                label: row.kind == "page" ? @tr("Settings of the page {}", row.name) : @tr("Settings of the takeover {}: when it shows and for how long", row.name);
+                                                clicked => {
+                                                    root.deselect();
+                                                }
+                                            }
+                                            Button {
+                                                tier: "quiet";
+                                                icon: Glyph.widths;
+                                                text: @tr("Equal widths");
+                                                enabled: root.editable && root.zones.length > 1;
+                                                label: @tr("Give every widget on {} the same width", row.name);
+                                                clicked => {
+                                                    root.equal-widths();
+                                                }
+                                            }
+                                            Button {
+                                                tier: "primary";
+                                                icon: Glyph.plus;
+                                                text: root.selected >= 0 ? @tr("Add after") : @tr("Add");
+                                                enabled: root.editable && root.can-add;
+                                                label: root.can-add ? @tr("Add a widget to {}", row.name) : root.add-reason;
+                                                clicked => {
+                                                    root.open-gallery();
+                                                    root.show-sheet("gallery");
+                                                }
                                             }
                                         }
                                     }
@@ -1206,6 +1303,7 @@ export component AppWindow inherits Window {
                                         panel-body := VerticalLayout {
                                             padding: 18px;
                                             padding-top: 14px;
+                                            padding-bottom: 22px;
                                             spacing: 12px;
                                             // The title of what the settings are for.
                                             HorizontalLayout {
@@ -1333,6 +1431,9 @@ export component AppWindow inherits Window {
                                                 remove-trigger(id) => {
                                                     root.remove-trigger(id);
                                                 }
+                                                edit-feeds => {
+                                                    root.show-settings(1);
+                                                }
                                             }
                                             if root.draft-hint != "": HorizontalLayout {
                                                 padding-left: Grid.label + 16px;
@@ -1361,7 +1462,7 @@ export component AppWindow inherits Window {
                                             }
                                             // The keyboard, shown where it is used.
                                             if root.panel-kind != "new-takeover": HorizontalLayout {
-                                                padding-top: 6px;
+                                                padding-top: 10px;
                                                 spacing: 16px;
                                                 Icon {
                                                     glyph: Glyph.keyboard;
@@ -1676,9 +1777,9 @@ export component AppWindow inherits Window {
         // Closed by its rows: the default policy would also close it on
         // the release of the click that opened it.
         close-policy: PopupClosePolicy.close-on-click-outside;
-        x: root.width - 250px;
+        x: root.width - 290px;
         y: header.height - 6px;
-        width: 240px;
+        width: 280px;
         Rectangle {
             background: Theme.surface;
             border-radius: Theme.r-surface;
@@ -1690,10 +1791,20 @@ export component AppWindow inherits Window {
                 padding: 6px;
                 MenuRow {
                     icon: Glyph.gear;
-                    text: @tr("Preferences…");
+                    text: @tr("Settings…");
                     enabled: root.connected;
                     clicked => {
-                        root.show-sheet("prefs");
+                        root.show-settings(0);
+                        // Last: closing drops the menu, and what is in it.
+                        more-menu.close();
+                    }
+                }
+                MenuRow {
+                    icon: Glyph.book;
+                    text: @tr("Help");
+                    note: @tr("opens in the browser");
+                    clicked => {
+                        root.open-help();
                         // Last: closing drops the menu, and what is in it.
                         more-menu.close();
                     }
@@ -1761,8 +1872,8 @@ export component AppWindow inherits Window {
                     alignment: start;
                     if root.status.start: Button {
                         tier: "primary";
-                        icon: Glyph.power;
-                        text: @tr("Start the service");
+                        icon: root.status.tone == "failed" ? Glyph.retry : Glyph.power;
+                        text: root.status.tone == "failed" ? @tr("Try again") : @tr("Start the service");
                         clicked => {
                             root.start-service();
                         }
@@ -2105,498 +2216,755 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.sheet == "prefs": Sheet {
-        title: @tr("Preferences");
-        subtitle: @tr("The strip settings are for every layout: they show at once, and undo takes them back.");
-        sheet-width: 680px;
+    if root.sheet == "settings": Sheet {
+        title: @tr("Settings");
+        subtitle: root.settings-tab == 0 ? @tr("For every layout: they show on the strip at once, and undo takes them back.")
+            : root.settings-tab == 1 ? @tr("Headlines on news widgets. Undo takes a change back.")
+            : @tr("Only this window: the strip and undo leave these alone.");
+        sheet-width: 700px;
         close => {
             root.sheet = "";
         }
         VerticalLayout {
             spacing: 18px;
             HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Temperatures");
-                    width: Grid.label;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
-                HorizontalLayout {
-                    alignment: start;
-                    Segmented {
-                        options: ["°C", "°F"];
-                        current: root.pref-temperature;
-                        label: @tr("Temperatures in");
-                        chose(i) => {
-                            root.set-pref("temperature", i == 1 ? "f" : "c");
-                        }
+                alignment: start;
+                Segmented {
+                    options: [@tr("Strip"), @tr("News"), @tr("This window")];
+                    icons: [Glyph.sliders, Glyph.newspaper, Glyph.palette];
+                    current: root.settings-tab;
+                    label: @tr("Settings section");
+                    chose(i) => {
+                        root.settings-tab = i;
                     }
                 }
             }
-            HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Clock");
-                    width: Grid.label;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
+            if root.settings-tab == 0: VerticalLayout {
+                spacing: 18px;
                 HorizontalLayout {
-                    alignment: start;
-                    Segmented {
-                        options: [@tr("24-hour"), @tr("12-hour")];
-                        current: root.pref-clock;
-                        label: @tr("Clock");
-                        chose(i) => {
-                            root.set-pref("clock", i == 1 ? "12" : "24");
-                        }
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Temperatures");
+                        width: Grid.label;
+                        color: Theme.text-2;
+                        font-weight: 500;
                     }
-                }
-            }
-            HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Accent");
-                    width: Grid.label;
-                    y: 6px;
-                    vertical-alignment: top;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
-                VerticalLayout {
-                    spacing: 10px;
                     HorizontalLayout {
-                        spacing: 8px;
                         alignment: start;
-                        for c[i] in root.accent-swatches: Rectangle {
-                            width: 34px;
-                            height: 34px;
-                            border-radius: 17px;
-                            background: c;
-                            border-width: i == root.accent-current ? 3px : 0px;
-                            border-color: Theme.text;
-                            accessible-role: button;
-                            accessible-label: root.accent-names[i];
-                            accessible-item-selectable: true;
-                            accessible-item-selected: i == root.accent-current;
-                            accessible-action-default => {
-                                root.set-pref("accent-preset", i);
+                        Segmented {
+                            options: ["°C", "°F"];
+                            current: root.pref-temperature;
+                            label: @tr("Temperatures in");
+                            chose(i) => {
+                                root.set-pref("temperature", i == 1 ? "f" : "c");
                             }
-                            if i == root.accent-current: Icon {
-                                glyph: Glyph.check;
-                                color: #14110f;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Clock");
+                        width: Grid.label;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Segmented {
+                            options: [@tr("24-hour"), @tr("12-hour")];
+                            current: root.pref-clock;
+                            label: @tr("Clock");
+                            chose(i) => {
+                                root.set-pref("clock", i == 1 ? "12" : "24");
                             }
-                            sw-touch := TouchArea {
-                                mouse-cursor: MouseCursor.pointer;
-                                clicked => {
-                                    sw-focus.focus();
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Accent");
+                        width: Grid.label;
+                        y: 6px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 10px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            for c[i] in root.accent-swatches: Rectangle {
+                                width: 34px;
+                                height: 34px;
+                                border-radius: 17px;
+                                background: c;
+                                border-width: i == root.accent-current ? 3px : 0px;
+                                border-color: Theme.text;
+                                accessible-role: button;
+                                accessible-label: root.accent-names[i];
+                                accessible-item-selectable: true;
+                                accessible-item-selected: i == root.accent-current;
+                                accessible-action-default => {
                                     root.set-pref("accent-preset", i);
                                 }
-                            }
-                            sw-focus := FocusScope {
-                                // Its ring is for focus reached by the keyboard; a click
-                                // focuses it too, and shows the press instead.
-                                property <bool> by-keys;
-                                focus-gained(reason) => {
-                                    self.by-keys = reason == FocusReason.tab-navigation;
+                                if i == root.accent-current: Icon {
+                                    glyph: Glyph.check;
+                                    color: #14110f;
                                 }
-                                // Its TouchArea focuses it; taking the press here would
-                                // swallow the first click.
-                                focus-on-click: false;
-                                key-pressed(event) => {
-                                    if event.text == " " || event.text == Key.Return {
+                                sw-touch := TouchArea {
+                                    mouse-cursor: MouseCursor.pointer;
+                                    clicked => {
+                                        sw-focus.focus();
                                         root.set-pref("accent-preset", i);
-                                        return accept;
                                     }
-                                    reject
+                                }
+                                sw-focus := FocusScope {
+                                    // Its ring is for focus reached by the keyboard; a click
+                                    // focuses it too, and shows the press instead.
+                                    property <bool> by-keys;
+                                    focus-gained(reason) => {
+                                        self.by-keys = reason == FocusReason.tab-navigation;
+                                    }
+                                    // Its TouchArea focuses it; taking the press here would
+                                    // swallow the first click.
+                                    focus-on-click: false;
+                                    key-pressed(event) => {
+                                        if event.text == " " || event.text == Key.Return {
+                                            root.set-pref("accent-preset", i);
+                                            return accept;
+                                        }
+                                        reject
+                                    }
+                                }
+                                FocusRing {
+                                    width: parent.width + 8px;
+                                    height: parent.height + 8px;
+                                    shown: sw-focus.has-focus && sw-focus.by-keys;
+                                    radius: 17px;
+                                }
+                                // Its name, as a tooltip: above, where nothing
+                                // drawn later covers it.
+                                if sw-touch.has-hover || (sw-focus.has-focus && sw-focus.by-keys): Rectangle {
+                                    y: -30px;
+                                    x: (parent.width - self.width) / 2;
+                                    width: sw-name.preferred-width + 16px;
+                                    height: 24px;
+                                    border-radius: 6px;
+                                    background: Theme.text;
+                                    sw-name := Text {
+                                        text: root.accent-names[i];
+                                        font-family: Theme.font;
+                                        font-size: Theme.size-small;
+                                        font-weight: 500;
+                                        color: Theme.surface;
+                                        accessible-role: none;
+                                    }
                                 }
                             }
-                            FocusRing {
-                                width: parent.width + 8px;
-                                height: parent.height + 8px;
-                                shown: sw-focus.has-focus && sw-focus.by-keys;
-                                radius: 17px;
-                            }
-                            // Its name, as a tooltip: above, where nothing
-                            // drawn later covers it.
-                            if sw-touch.has-hover || (sw-focus.has-focus && sw-focus.by-keys): Rectangle {
-                                y: -30px;
-                                x: (parent.width - self.width) / 2;
-                                width: sw-name.preferred-width + 16px;
-                                height: 24px;
-                                border-radius: 6px;
-                                background: Theme.text;
-                                sw-name := Text {
-                                    text: root.accent-names[i];
-                                    font-family: Theme.font;
-                                    font-size: Theme.size-small;
-                                    font-weight: 500;
-                                    color: Theme.surface;
-                                    accessible-role: none;
+                            for item in [{ v: root.pref-accent, epoch: root.resets }]: TextField {
+                                width: 130px;
+                                text: item.v;
+                                committed-value: item.v;
+                                placeholder: "#b6a2ff";
+                                label: @tr("Your own colour, written #rrggbb");
+                                accepted(text) => {
+                                    root.set-pref("accent", text);
+                                }
+                                committed(text) => {
+                                    root.set-pref("accent", text);
                                 }
                             }
                         }
-                        for item in [{ v: root.pref-accent, epoch: root.resets }]: TextField {
-                            width: 130px;
+                        // What the accent marks, as the strip draws it: things a
+                        // finger can act on, never readings or warnings.
+                        Rectangle {
+                            height: 92px;
+                            border-radius: Theme.r-surface;
+                            background: #14110f;
+                            HorizontalLayout {
+                                padding: 12px;
+                                spacing: 18px;
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 44px;
+                                        height: 33px;
+                                        border-radius: 9px;
+                                        background: Theme.accent-base;
+                                        Icon {
+                                            glyph: "\u{e3d0}";
+                                            fill: true;
+                                            color: Theme.accent-ink;
+                                            font-size: 20px;
+                                        }
+                                    }
+                                    Text {
+                                        text: @tr("Main key");
+                                        font-family: Theme.font;
+                                        font-size: 11px;
+                                        color: #9c8c7c;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 44px;
+                                        height: 33px;
+                                        border-radius: 9px;
+                                        background: #4a3e35;
+                                        Rectangle {
+                                            y: 0;
+                                            height: 1px;
+                                            width: parent.width - 16px;
+                                            background: #65564a;
+                                        }
+                                        Icon {
+                                            glyph: "\u{e28e}";
+                                            color: Theme.accent-text;
+                                            font-size: 20px;
+                                        }
+                                    }
+                                    Text {
+                                        text: @tr("Key");
+                                        font-family: Theme.font;
+                                        font-size: 11px;
+                                        color: #9c8c7c;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    alignment: center;
+                                    horizontal-stretch: 1;
+                                    Rectangle {
+                                        height: 33px;
+                                        Rectangle {
+                                            y: 14px;
+                                            height: 5px;
+                                            border-radius: 2.5px;
+                                            background: #3d342d;
+                                        }
+                                        Rectangle {
+                                            x: 0;
+                                            y: 14px;
+                                            width: parent.width * 0.6;
+                                            height: 5px;
+                                            border-radius: 2.5px;
+                                            background: Theme.accent-fill;
+                                        }
+                                        Rectangle {
+                                            x: parent.width * 0.6 - 8px;
+                                            y: 8.5px;
+                                            width: 16px;
+                                            height: 16px;
+                                            border-radius: 8px;
+                                            background: #e6d6c0;
+                                            border-width: 2px;
+                                            border-color: Theme.accent-base;
+                                        }
+                                    }
+                                    Text {
+                                        text: @tr("Slider");
+                                        font-family: Theme.font;
+                                        font-size: 11px;
+                                        color: #9c8c7c;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 96px;
+                                        height: 33px;
+                                        border-radius: 9px;
+                                        border-width: 1.5px;
+                                        border-color: Theme.accent-base;
+                                        Text {
+                                            text: @tr("Set up");
+                                            font-family: Theme.font;
+                                            font-weight: 600;
+                                            color: Theme.accent-text;
+                                        }
+                                    }
+                                    Text {
+                                        text: @tr("Not set up");
+                                        font-family: Theme.font;
+                                        font-size: 11px;
+                                        color: #9c8c7c;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 60px;
+                                        height: 33px;
+                                        border-radius: 9px;
+                                        background: #241e1a;
+                                        Text {
+                                            text: "52°";
+                                            font-family: Theme.font;
+                                            font-weight: 600;
+                                            font-size: 18px;
+                                            color: #fbf1e3;
+                                        }
+                                    }
+                                    Text {
+                                        text: @tr("Readings stay cream");
+                                        font-family: Theme.font;
+                                        font-size: 11px;
+                                        color: #9c8c7c;
+                                        horizontal-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                        Hint {
+                            text: root.accent-note != "" ? root.accent-note
+                                : @tr("The accent marks what a finger can act on: keys, sliders, things to set up. Readings and warnings never take it.");
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Weather for");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        for item in [{ v: root.pref-weather, epoch: root.resets }]: TextField {
                             text: item.v;
                             committed-value: item.v;
-                            placeholder: "#b6a2ff";
-                            label: @tr("Your own colour, written #rrggbb");
+                            placeholder: @tr("Your town, as in: Lyon, France");
+                            label: @tr("Weather for");
                             accepted(text) => {
-                                root.set-pref("accent", text);
+                                root.set-pref("weather", text);
                             }
                             committed(text) => {
-                                root.set-pref("accent", text);
+                                root.set-pref("weather", text);
                             }
                         }
+                        Hint {
+                            text: @tr("A town, or latitude and longitude. Empty: no weather. Looked up with Open-Meteo; it is never put in an exported layout.");
+                        }
                     }
-                    // What the accent marks, as the strip draws it: things a
-                    // finger can act on, never readings or warnings.
-                    Rectangle {
-                        height: 92px;
-                        border-radius: Theme.r-surface;
-                        background: #14110f;
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Strip lettering");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        Select {
+                            options: root.fonts;
+                            current: root.pref-font;
+                            label: @tr("Strip lettering");
+                            chose(i) => {
+                                root.set-pref("font", i);
+                            }
+                        }
+                        Hint {
+                            text: @tr("The typeface of words and numbers on the strip.");
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Dim when idle");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
                         HorizontalLayout {
-                            padding: 12px;
-                            spacing: 18px;
-                            VerticalLayout {
-                                spacing: 6px;
-                                alignment: center;
-                                Rectangle {
-                                    width: 44px;
-                                    height: 33px;
-                                    border-radius: 9px;
-                                    background: Theme.accent-base;
+                            alignment: start;
+                            Segmented {
+                                options: [@tr("On"), @tr("Off")];
+                                current: root.pref-idle-dim ? 0 : 1;
+                                label: @tr("Dim when idle");
+                                chose(i) => {
+                                    root.set-pref("idle-dim", i == 0 ? "on" : "off");
+                                }
+                            }
+                        }
+                        Hint {
+                            text: @tr("After five minutes with no touch the strip draws darker, never smaller. A warning stays bright.");
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Night hours");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: start;
+                            spacing: 10px;
+                            Segmented {
+                                options: [@tr("None"), @tr("Dim at night")];
+                                current: root.pref-night ? 1 : 0;
+                                label: @tr("Night hours");
+                                chose(i) => {
+                                    root.set-pref("night", i == 1 ? "on" : "off");
+                                }
+                            }
+                            if root.pref-night: HorizontalLayout {
+                                spacing: 8px;
+                                Label {
+                                    text: @tr("from");
+                                    vertical-alignment: center;
+                                    color: Theme.text-2;
+                                }
+                                for item in [{ v: root.pref-night-from, epoch: root.resets }]: TextField {
+                                    width: 76px;
+                                    text: item.v;
+                                    committed-value: item.v;
+                                    placeholder: "22:30";
+                                    label: @tr("Night starts at, HH:MM");
+                                    accepted(text) => {
+                                        root.set-pref("night-from", text);
+                                    }
+                                    committed(text) => {
+                                        root.set-pref("night-from", text);
+                                    }
+                                }
+                                Label {
+                                    text: @tr("to");
+                                    vertical-alignment: center;
+                                    color: Theme.text-2;
+                                }
+                                for item in [{ v: root.pref-night-to, epoch: root.resets }]: TextField {
+                                    width: 76px;
+                                    text: item.v;
+                                    committed-value: item.v;
+                                    placeholder: "07:00";
+                                    label: @tr("Night ends at, HH:MM");
+                                    accepted(text) => {
+                                        root.set-pref("night-to", text);
+                                    }
+                                    committed(text) => {
+                                        root.set-pref("night-to", text);
+                                    }
+                                }
+                            }
+                        }
+                        Hint {
+                            text: root.pref-night
+                                ? @tr("The strip dims further between these times, across midnight when the end is earlier.")
+                                : @tr("None: the strip keeps its brightness all night. Dim at night sets hours when it dims further.");
+                        }
+                    }
+                }
+            }
+            // News: the feeds the user added, and only those.
+            if root.settings-tab == 1: VerticalLayout {
+                spacing: 18px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Icon {
+                        glyph: Glyph.info;
+                        fill: true;
+                        color: Theme.text-3;
+                    }
+                    Text {
+                        text: @tr("Nexus Open fetches only the feeds you add.");
+                        font-family: Theme.font;
+                        font-weight: 500;
+                        color: Theme.text-2;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Feeds");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 8px;
+                        if root.news-feeds.length == 0: Text {
+                            text: @tr("No feeds yet. Paste a feed's address below to add one; the strip shows its headlines one at a time.");
+                            font-family: Theme.font;
+                            color: Theme.text-3;
+                            wrap: word-wrap;
+                            accessible-role: text;
+                        }
+                        for f[fi] in root.news-feeds: Rectangle {
+                            height: 50px;
+                            border-radius: Theme.r-control;
+                            background: Theme.surface-2;
+                            accessible-role: list-item;
+                            accessible-label: @tr("{}, feed {} of {}", f.name, fi + 1, root.news-feeds.length);
+                            accessible-description: f.address;
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 6px;
+                                spacing: 10px;
+                                VerticalLayout {
+                                    alignment: center;
                                     Icon {
-                                        glyph: "\u{e3d0}";
+                                        glyph: Glyph.newspaper;
                                         fill: true;
-                                        color: Theme.accent-ink;
-                                        font-size: 20px;
+                                        color: Theme.text-2;
                                     }
                                 }
-                                Text {
-                                    text: @tr("Main key");
-                                    font-family: Theme.font;
-                                    font-size: 11px;
-                                    color: #9c8c7c;
-                                    horizontal-alignment: center;
-                                }
-                            }
-                            VerticalLayout {
-                                spacing: 6px;
-                                alignment: center;
-                                Rectangle {
-                                    width: 44px;
-                                    height: 33px;
-                                    border-radius: 9px;
-                                    background: #4a3e35;
-                                    Rectangle {
-                                        y: 0;
-                                        height: 1px;
-                                        width: parent.width - 16px;
-                                        background: #65564a;
-                                    }
-                                    Icon {
-                                        glyph: "\u{e28e}";
-                                        color: Theme.accent-text;
-                                        font-size: 20px;
-                                    }
-                                }
-                                Text {
-                                    text: @tr("Key");
-                                    font-family: Theme.font;
-                                    font-size: 11px;
-                                    color: #9c8c7c;
-                                    horizontal-alignment: center;
-                                }
-                            }
-                            VerticalLayout {
-                                spacing: 6px;
-                                alignment: center;
-                                horizontal-stretch: 1;
-                                Rectangle {
-                                    height: 33px;
-                                    Rectangle {
-                                        y: 14px;
-                                        height: 5px;
-                                        border-radius: 2.5px;
-                                        background: #3d342d;
-                                    }
-                                    Rectangle {
-                                        x: 0;
-                                        y: 14px;
-                                        width: parent.width * 0.6;
-                                        height: 5px;
-                                        border-radius: 2.5px;
-                                        background: Theme.accent-fill;
-                                    }
-                                    Rectangle {
-                                        x: parent.width * 0.6 - 8px;
-                                        y: 8.5px;
-                                        width: 16px;
-                                        height: 16px;
-                                        border-radius: 8px;
-                                        background: #e6d6c0;
-                                        border-width: 2px;
-                                        border-color: Theme.accent-base;
-                                    }
-                                }
-                                Text {
-                                    text: @tr("Slider");
-                                    font-family: Theme.font;
-                                    font-size: 11px;
-                                    color: #9c8c7c;
-                                    horizontal-alignment: center;
-                                }
-                            }
-                            VerticalLayout {
-                                spacing: 6px;
-                                alignment: center;
-                                Rectangle {
-                                    width: 96px;
-                                    height: 33px;
-                                    border-radius: 9px;
-                                    border-width: 1.5px;
-                                    border-color: Theme.accent-base;
+                                VerticalLayout {
+                                    alignment: center;
+                                    horizontal-stretch: 1;
                                     Text {
-                                        text: @tr("Set up");
+                                        text: f.name;
                                         font-family: Theme.font;
-                                        font-weight: 600;
-                                        color: Theme.accent-text;
+                                        font-weight: 500;
+                                        color: Theme.text;
+                                        overflow: elide;
                                     }
-                                }
-                                Text {
-                                    text: @tr("Not set up");
-                                    font-family: Theme.font;
-                                    font-size: 11px;
-                                    color: #9c8c7c;
-                                    horizontal-alignment: center;
-                                }
-                            }
-                            VerticalLayout {
-                                spacing: 6px;
-                                alignment: center;
-                                Rectangle {
-                                    width: 60px;
-                                    height: 33px;
-                                    border-radius: 9px;
-                                    background: #241e1a;
                                     Text {
-                                        text: "52°";
+                                        text: f.address;
                                         font-family: Theme.font;
-                                        font-weight: 600;
-                                        font-size: 18px;
-                                        color: #fbf1e3;
+                                        font-size: Theme.size-small;
+                                        color: Theme.text-3;
+                                        overflow: elide;
                                     }
                                 }
-                                Text {
-                                    text: @tr("Readings stay cream");
-                                    font-family: Theme.font;
-                                    font-size: 11px;
-                                    color: #9c8c7c;
-                                    horizontal-alignment: center;
+                                VerticalLayout {
+                                    alignment: center;
+                                    IconButton {
+                                        icon: Glyph.up;
+                                        label: @tr("Move {} up", f.name);
+                                        enabled: fi > 0;
+                                        clicked => {
+                                            root.move-feed(fi, fi - 1);
+                                        }
+                                    }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    IconButton {
+                                        icon: Glyph.down;
+                                        label: @tr("Move {} down", f.name);
+                                        enabled: fi < root.news-feeds.length - 1;
+                                        clicked => {
+                                            root.move-feed(fi, fi + 1);
+                                        }
+                                    }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    IconButton {
+                                        icon: Glyph.trash;
+                                        label: @tr("Remove {} (undo brings it back)", f.name);
+                                        clicked => {
+                                            root.remove-feed(fi);
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                    Hint {
-                        text: root.accent-note != "" ? root.accent-note
-                            : @tr("The accent marks what a finger can act on: keys, sliders, things to set up. Readings and warnings never take it.");
-                    }
-                }
-            }
-            HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Weather for");
-                    width: Grid.label;
-                    y: 8px;
-                    vertical-alignment: top;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
-                VerticalLayout {
-                    spacing: 4px;
-                    for item in [{ v: root.pref-weather, epoch: root.resets }]: TextField {
-                        text: item.v;
-                        committed-value: item.v;
-                        placeholder: @tr("Your town, as in: Lyon, France");
-                        label: @tr("Weather for");
-                        accepted(text) => {
-                            root.set-pref("weather", text);
-                        }
-                        committed(text) => {
-                            root.set-pref("weather", text);
-                        }
-                    }
-                    Hint {
-                        text: @tr("A town, or latitude and longitude. Empty: no weather. Looked up with Open-Meteo; it is never put in an exported layout.");
-                    }
-                }
-            }
-            HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Strip lettering");
-                    width: Grid.label;
-                    y: 8px;
-                    vertical-alignment: top;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
-                VerticalLayout {
-                    spacing: 4px;
-                    Select {
-                        options: root.fonts;
-                        current: root.pref-font;
-                        label: @tr("Strip lettering");
-                        chose(i) => {
-                            root.set-pref("font", i);
-                        }
-                    }
-                    Hint {
-                        text: @tr("The typeface of words and numbers on the strip.");
-                    }
-                }
-            }
-            HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Dim when idle");
-                    width: Grid.label;
-                    y: 8px;
-                    vertical-alignment: top;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
-                VerticalLayout {
-                    spacing: 4px;
-                    HorizontalLayout {
-                        alignment: start;
-                        Segmented {
-                            options: [@tr("On"), @tr("Off")];
-                            current: root.pref-idle-dim ? 0 : 1;
-                            label: @tr("Dim when idle");
-                            chose(i) => {
-                                root.set-pref("idle-dim", i == 0 ? "on" : "off");
-                            }
-                        }
-                    }
-                    Hint {
-                        text: @tr("After five minutes with no touch the strip draws darker, never smaller. A warning stays bright.");
-                    }
-                }
-            }
-            HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Night hours");
-                    width: Grid.label;
-                    y: 8px;
-                    vertical-alignment: top;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
-                VerticalLayout {
-                    spacing: 4px;
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: 10px;
-                        Segmented {
-                            options: [@tr("None"), @tr("Dim at night")];
-                            current: root.pref-night ? 1 : 0;
-                            label: @tr("Night hours");
-                            chose(i) => {
-                                root.set-pref("night", i == 1 ? "on" : "off");
-                            }
-                        }
-                        if root.pref-night: HorizontalLayout {
+                        for item in [{ epoch: root.feed-epoch }]: HorizontalLayout {
                             spacing: 8px;
-                            Label {
-                                text: @tr("from");
-                                vertical-alignment: center;
-                                color: Theme.text-2;
-                            }
-                            for item in [{ v: root.pref-night-from, epoch: root.resets }]: TextField {
-                                width: 76px;
-                                text: item.v;
-                                committed-value: item.v;
-                                placeholder: "22:30";
-                                label: @tr("Night starts at, HH:MM");
+                            feed-field := TextField {
+                                placeholder: @tr("Paste a feed's address: https://…");
+                                label: @tr("A feed's address, to add");
+                                enabled: root.feed-state != "checking";
                                 accepted(text) => {
-                                    root.set-pref("night-from", text);
-                                }
-                                committed(text) => {
-                                    root.set-pref("night-from", text);
+                                    root.add-feed(text);
                                 }
                             }
-                            Label {
-                                text: @tr("to");
-                                vertical-alignment: center;
-                                color: Theme.text-2;
-                            }
-                            for item in [{ v: root.pref-night-to, epoch: root.resets }]: TextField {
-                                width: 76px;
-                                text: item.v;
-                                committed-value: item.v;
-                                placeholder: "07:00";
-                                label: @tr("Night ends at, HH:MM");
-                                accepted(text) => {
-                                    root.set-pref("night-to", text);
-                                }
-                                committed(text) => {
-                                    root.set-pref("night-to", text);
+                            Button {
+                                tier: root.news-feeds.length == 0 ? "primary" : "default";
+                                icon: Glyph.plus;
+                                text: @tr("Add");
+                                enabled: root.feed-state != "checking" && feed-field.text != "";
+                                label: @tr("Check this address and add the feed");
+                                clicked => {
+                                    root.add-feed(feed-field.text);
                                 }
                             }
                         }
-                    }
-                    Hint {
-                        text: root.pref-night
-                            ? @tr("The strip dims further between these times, across midnight when the end is earlier.")
-                            : @tr("None: the strip keeps its brightness all night. Dim at night sets hours when it dims further.");
-                    }
-                }
-            }
-            // The window's own preference: kept with the window, not in
-            // the layout, so it never enters undo.
-            Rectangle {
-                height: 1px;
-                background: Theme.line;
-            }
-            Text {
-                text: @tr("This window");
-                font-family: Theme.font;
-                font-size: Theme.size-title;
-                font-weight: 600;
-                color: Theme.text;
-                accessible-role: text;
-            }
-            HorizontalLayout {
-                spacing: 16px;
-                Label {
-                    text: @tr("Appearance");
-                    width: Grid.label;
-                    y: 8px;
-                    vertical-alignment: top;
-                    color: Theme.text-2;
-                    font-weight: 500;
-                }
-                VerticalLayout {
-                    spacing: 4px;
-                    HorizontalLayout {
-                        alignment: start;
-                        Segmented {
-                            options: [@tr("Match the system"), @tr("Light"), @tr("Dark")];
-                            current: Theme.forced;
-                            label: @tr("Appearance of this window");
-                            chose(i) => {
-                                root.set-appearance(i);
+                        // What checking the address found.
+                        if root.feed-state != "": Rectangle {
+                            property <bool> bad: root.feed-state == "problem";
+                            border-radius: Theme.r-control;
+                            background: bad ? Theme.crit-surface : Theme.surface;
+                            border-width: 1px;
+                            border-color: bad ? Theme.crit.transparentize(0.5) : Theme.line-strong;
+                            height: result-row.preferred-height;
+                            result-row := HorizontalLayout {
+                                padding: 10px;
+                                padding-left: 12px;
+                                spacing: 10px;
+                                VerticalLayout {
+                                    alignment: start;
+                                    padding-top: 1px;
+                                    Icon {
+                                        glyph: root.feed-state == "problem" ? Glyph.fail : root.feed-state == "checking" ? Glyph.wait : Glyph.ok-circle;
+                                        fill: true;
+                                        color: root.feed-state == "problem" ? Theme.crit : Theme.text-2;
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 3px;
+                                    horizontal-stretch: 1;
+                                    Text {
+                                        text: root.feed-title;
+                                        font-family: Theme.font;
+                                        font-weight: 600;
+                                        color: root.feed-state == "problem" ? Theme.crit : Theme.text;
+                                        wrap: word-wrap;
+                                        accessible-role: text;
+                                    }
+                                    if root.feed-detail != "": Text {
+                                        text: root.feed-detail;
+                                        font-family: Theme.font;
+                                        font-size: Theme.size-label;
+                                        color: Theme.text-2;
+                                        wrap: word-wrap;
+                                        accessible-role: text;
+                                    }
+                                }
+                                if root.feed-force: VerticalLayout {
+                                    alignment: center;
+                                    Button {
+                                        tier: "default";
+                                        text: @tr("Add anyway");
+                                        label: @tr("Add it anyway; its headlines show once the site answers");
+                                        clicked => {
+                                            root.add-feed-anyway();
+                                        }
+                                    }
+                                }
                             }
                         }
+                        Hint {
+                            text: @tr("An RSS, Atom or JSON feed. A site often links it as RSS or Feed, at the foot of its pages. Adding one checks it once.");
+                        }
                     }
-                    Hint {
-                        text: @tr("Only this window. The strip stays dark, and undo leaves this alone.");
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Show each for");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: start;
+                            Segmented {
+                                options: [@tr("8 s"), @tr("12 s"), @tr("20 s")];
+                                current: root.news-rotate;
+                                label: @tr("Each headline shows for");
+                                chose(i) => {
+                                    root.news-choice("rotate", i);
+                                }
+                            }
+                        }
+                        Hint {
+                            text: root.news-rotate-note != "" ? root.news-rotate-note
+                                : @tr("How long each headline stays before the next. A long press on the strip shows the next one at once.");
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Hide older than");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: start;
+                            Segmented {
+                                options: [@tr("1 day"), @tr("2 days"), @tr("A week")];
+                                current: root.news-max-age;
+                                label: @tr("Hide headlines older than");
+                                chose(i) => {
+                                    root.news-choice("max-age", i);
+                                }
+                            }
+                        }
+                        Hint {
+                            text: root.news-age-note != "" ? root.news-age-note
+                                : @tr("Older headlines are not shown, so a feed that stops posting does not leave old news on the strip.");
+                        }
+                    }
+                }
+            }
+            // The window's own: kept with the window, not in the layout,
+            // so it never enters undo.
+            if root.settings-tab == 2: VerticalLayout {
+                spacing: 18px;
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Appearance");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: start;
+                            Segmented {
+                                options: [@tr("Match the system"), @tr("Light"), @tr("Dark")];
+                                current: Theme.forced;
+                                label: @tr("Appearance of this window");
+                                chose(i) => {
+                                    root.set-appearance(i);
+                                }
+                            }
+                        }
+                        Hint {
+                            text: @tr("Only this window. The strip stays dark, and undo leaves this alone.");
+                        }
                     }
                 }
             }
@@ -2695,14 +3063,21 @@ export component AppWindow inherits Window {
                     color: Theme.text-3;
                     vertical-alignment: center;
                 }
-                // Its own badge and two lines of small print under it.
+                // Its own badge (its small print is a fixed 10 px, part of
+                // Slint's widget), and the same said legibly beside it.
                 Rectangle {
                     width: 170px;
                     height: 96px;
                     AboutSlint { }
                 }
-                Rectangle {
+                Text {
+                    text: @tr("The Slint toolkit draws this window, used under its royalty-free licence. slint.dev");
+                    font-family: Theme.font;
+                    font-size: Theme.size-label;
+                    color: Theme.text-2;
+                    vertical-alignment: center;
                     horizontal-stretch: 1;
+                    wrap: word-wrap;
                 }
             }
         }

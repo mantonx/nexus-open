@@ -28,9 +28,14 @@ pub const FAKE_DEVICE_ENV: &str = "NEXUS_UI_FAKE_DEVICE";
 /// What the chip and its panel show.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct View {
-    /// "ok", "note" (works, worth knowing), "warn" (the strip is not
-    /// showing the layout) or "stopped".
+    /// "ok", "note" (works, worth knowing), "app" (the app cannot show
+    /// the layout on the strip: a state to fix, not a reading, so never
+    /// amber), "stopped", "starting", or "failed" (a try to start it
+    /// failed: the one real fault, shown critical).
     pub tone: &'static str,
+    /// What the chip's icon means: "ok", "info", "plug", "busy", "lock",
+    /// "save", "power", "wait" or "fail".
+    pub icon: &'static str,
     /// The chip's words.
     pub chip: String,
     pub headline: String,
@@ -57,6 +62,7 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
     let Some(status) = status else {
         return View {
             tone: "stopped",
+            icon: "power",
             chip: "Not running".into(),
             headline: "Nexus Open's service is not running".into(),
             body: "The strip keeps its last picture until the service runs again. Your layouts are safe, and a change made here waits and is sent once it is back.".into(),
@@ -68,7 +74,8 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
     };
     if let Some(e) = &status.store_error {
         return View {
-            tone: "warn",
+            tone: "app",
+            icon: "save",
             chip: "Cannot save".into(),
             headline: "Changes cannot be saved".into(),
             body: format!(
@@ -89,6 +96,7 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
         if !others.is_empty() {
             return View {
                 tone: "note",
+                icon: "info",
                 chip: "Strip connected".into(),
                 headline: "The strip is working".into(),
                 body: "It shows your layout and follows every change here. One check found something worth fixing; the details are below.".into(),
@@ -99,6 +107,7 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
         }
         return View {
             tone: "ok",
+            icon: "ok",
             chip: "Strip connected".into(),
             headline: "The strip is working".into(),
             body: "It shows your layout and follows every change made here at once.".into(),
@@ -110,8 +119,9 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
 
 /// Why the daemon has no strip, in plain words.
 fn device_view(why: &str, fix: &str) -> View {
-    let warn = |chip: &str, headline: &str, body: String| View {
-        tone: "warn",
+    let warn = |icon: &'static str, chip: &str, headline: &str, body: String| View {
+        tone: "app",
+        icon,
         chip: chip.into(),
         headline: headline.into(),
         body,
@@ -123,7 +133,8 @@ fn device_view(why: &str, fix: &str) -> View {
     if why.contains("--no-device") {
         return View {
             tone: "note",
-            chip: "Without the strip".into(),
+            icon: "info",
+            chip: "Running, no strip".into(),
             headline: "Running without the strip".into(),
             body: "The service was started for testing and leaves the strip alone. Everything here works; the pictures come from the service.".into(),
             ..View::default()
@@ -133,6 +144,7 @@ fn device_view(why: &str, fix: &str) -> View {
         let who = who.trim();
         if who.starts_with("another program") {
             return warn(
+                "busy",
                 "Strip in use",
                 "Another program is using the strip",
                 "While it does, Nexus Open cannot draw on it. Quit the other program (an older Nexus Open: from its tray icon), then press Try again. If the strip stays dark, unplug it and plug it back in.".into(),
@@ -140,6 +152,7 @@ fn device_view(why: &str, fix: &str) -> View {
         }
         if who.contains("nexus-open") {
             return warn(
+                "busy",
                 "Strip in use",
                 "The old Nexus Open app has the strip",
                 "Quit it from its tray icon, then unplug the strip and plug it back in: the old app does not hand it back by itself. Nexus Open picks it up as soon as it is free.".into(),
@@ -147,6 +160,7 @@ fn device_view(why: &str, fix: &str) -> View {
         }
         let name = program_name(who);
         return warn(
+            "busy",
             "Strip in use",
             &format!("{name} is using the strip"),
             format!(
@@ -156,6 +170,7 @@ fn device_view(why: &str, fix: &str) -> View {
     }
     if why.contains("left without its driver") {
         return warn(
+            "plug",
             "Replug the strip",
             "The strip needs to be plugged in again",
             "A program that used it let go without handing it back. Unplug the strip and plug it back in; Nexus Open picks it up by itself.".into(),
@@ -164,6 +179,7 @@ fn device_view(why: &str, fix: &str) -> View {
     if why.contains("not there yet") {
         return View {
             tone: "note",
+            icon: "wait",
             chip: "Starting".into(),
             headline: "The strip is getting ready".into(),
             body: "It was just plugged in, or the computer just woke. It shows your layout in a few seconds.".into(),
@@ -173,6 +189,7 @@ fn device_view(why: &str, fix: &str) -> View {
     }
     if why.contains("no permission") {
         return warn(
+            "lock",
             "No access",
             "Nexus Open may not use the strip",
             "The rule that lets it reach the strip is missing. Reinstalling Nexus Open puts it back; then unplug the strip and plug it back in.".into(),
@@ -180,6 +197,7 @@ fn device_view(why: &str, fix: &str) -> View {
     }
     if why.contains("no iCUE Nexus found") || why.contains("unplugged") {
         return warn(
+            "plug",
             "No strip",
             "The strip is not plugged in",
             "Plug in the iCUE Nexus. It shows your layout as soon as it is found; nothing else to do.".into(),
@@ -190,6 +208,7 @@ fn device_view(why: &str, fix: &str) -> View {
         first.make_ascii_uppercase();
     }
     warn(
+        "plug",
         "Strip problem",
         "The strip cannot be used",
         format!("{body}."),
@@ -338,18 +357,38 @@ fn could_not_run(e: &std::io::Error) -> String {
     }
 }
 
-/// The stopped view after a try to start it failed: the chip and the
-/// card say so, with the reason, instead of only "not running".
+/// The stopped view after a try to start it failed: the one real fault
+/// here, so it is shown critical, chip and banner alike, with the reason
+/// and the log as the next step.
 pub fn did_not_start(mut v: View, why: &str) -> View {
+    v.tone = "failed";
+    v.icon = "fail";
     v.chip = "Did not start".into();
     v.headline = "The service did not start".into();
     v.body = format!(
-        "{why} Open the log to see what it said, or copy the diagnostics to ask for help. Your layouts are safe."
+        "{why} The log may say more. Your layouts are safe; copy the diagnostics to ask for help."
     );
     v.log = true;
     v.start = true;
     v
 }
+
+/// The stopped view while a try to start it is under way: never the same
+/// as stopped, so a press of Start or Try again always shows it was heard.
+pub fn starting(mut v: View) -> View {
+    v.tone = "starting";
+    v.icon = "wait";
+    v.chip = "Starting…".into();
+    v.headline = "Starting the service…".into();
+    v.body = "This takes a few seconds. The window picks the strip up again by itself.".into();
+    v.start = false;
+    v.retry = false;
+    v.log = false;
+    v
+}
+
+/// Why a start that ran has still not answered.
+pub const NO_ANSWER: &str = "It was started, but it has not answered after ten seconds.";
 
 #[cfg(test)]
 mod tests {
@@ -409,6 +448,33 @@ mod tests {
         );
         assert_eq!(v.chip, "Replug the strip");
         assert!(v.body.starts_with("A program that used it"));
+    }
+
+    #[test]
+    fn app_states_are_never_amber_and_a_failed_start_is_critical() {
+        for why in [
+            "the strip is in use by steam (pid 4242)",
+            "no iCUE Nexus found; is it plugged in?",
+            "no permission to open /dev/hidraw3",
+        ] {
+            let v = view(Some(&status(Some(why))), &[]);
+            assert_eq!(v.tone, "app", "{why}");
+        }
+        assert_eq!(view(Some(&status(Some("no permission"))), &[]).icon, "lock");
+        let failed = did_not_start(view(None, &[]), "No reason.");
+        assert_eq!((failed.tone, failed.icon), ("failed", "fail"));
+        assert!(failed.log && failed.start);
+        let starting = starting(view(None, &[]));
+        assert_eq!(starting.tone, "starting");
+        assert_ne!(starting.chip, view(None, &[]).chip);
+        assert!(!starting.start, "nothing to press twice while it starts");
+    }
+
+    #[test]
+    fn running_without_the_strip_reads_as_a_state() {
+        let v = view(Some(&status(Some("started with --no-device"))), &[]);
+        assert_eq!(v.chip, "Running, no strip");
+        assert_eq!(v.tone, "note");
     }
 
     #[test]

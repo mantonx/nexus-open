@@ -14,6 +14,8 @@ dirs = "7.0.0"
 nexus-control = { path = "../nexus-control" }
 nexus-core = { path = "../nexus-core" }
 nexus-doctor = { path = "../nexus-doctor" }
+# Checks a feed address once when it is added in Settings.
+nexus-sources = { path = "../nexus-sources" }
 nexus-store = { path = "../nexus-store" }
 shlex = "2.0.1"
 serde_json = "1.0.154"
