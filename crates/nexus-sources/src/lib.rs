@@ -1,4 +1,5 @@
-//! Built-in sources: readings from this machine, and the weather.
+//! Built-in sources: readings from this machine, the weather and news
+//! headlines.
 //!
 //! A source publishes raw readings in base units (°C, percent, bytes per
 //! second) under fixed signal names; how they look is up to the widgets.
@@ -19,11 +20,17 @@ mod gpu;
 mod machine;
 #[cfg(target_os = "linux")]
 mod media;
+pub mod news;
 #[cfg(target_os = "linux")]
 mod volume;
 mod weather;
 
+pub use news::spawn as spawn_news;
 pub use weather::spawn as spawn_weather;
+
+/// Sent with every web request, so a service can tell who is asking
+/// without anything else about the user.
+pub(crate) const USER_AGENT: &str = concat!("nexus-open/", env!("CARGO_PKG_VERSION"));
 
 /// Sends a command to the media player the media widget shows. Linux only
 /// for now; elsewhere it does nothing.

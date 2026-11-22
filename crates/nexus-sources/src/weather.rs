@@ -35,7 +35,7 @@ pub fn spawn(
         .spawn(move || {
             let agent: ureq::Agent = ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
-                .user_agent(concat!("nexus-open/", env!("CARGO_PKG_VERSION")))
+                .user_agent(crate::USER_AGENT)
                 .build()
                 .into();
             let mut config: Option<Weather> = None;

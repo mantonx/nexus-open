@@ -1,6 +1,6 @@
 [package]
 name = "nexus-sources"
-description = "Built-in sources: readings from this machine and the weather"
+description = "Built-in sources: readings from this machine, the weather and news feeds"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+feed-rs = "3.0.0"
 nexus-core = { path = "../nexus-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -22,3 +23,6 @@ zbus = "5.19.0"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+toml = { version = "1.2.1", default-features = false, features = ["display", "parse", "serde", "std"] }
