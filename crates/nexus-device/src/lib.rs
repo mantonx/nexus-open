@@ -35,8 +35,22 @@ pub trait Surface {
 
 #[derive(Debug)]
 pub enum DeviceError {
-    /// No Nexus is plugged in.
+    /// No Nexus is plugged in: the USB device itself is absent.
     NotFound,
+    /// The Nexus is plugged in and bound to the HID driver, but its hidraw
+    /// node is not there yet, as for a moment after a replug or a resume.
+    NotReady,
+    /// Another program has taken the strip's display interface from the
+    /// HID driver (through libusb or usbfs). Holds the processes found
+    /// with its USB device open, by pid and name; empty when none can be
+    /// seen, as inside nexusd's sandbox, which cannot read other
+    /// processes' file descriptors.
+    InUse(Vec<(u32, String)>),
+    /// The strip's display interface is bound to no driver and no
+    /// process has it open: a program detached the HID driver and exited
+    /// without reattaching it. Only a replug (or a root rebind) brings it
+    /// back.
+    Detached,
     /// The Nexus is present but this user may not open it.
     PermissionDenied(PathBuf),
     /// The Nexus was unplugged while in use.
@@ -52,6 +66,20 @@ impl fmt::Display for DeviceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DeviceError::NotFound => write!(f, "no iCUE Nexus found; is it plugged in?"),
+            DeviceError::NotReady => write!(
+                f,
+                "the iCUE Nexus is plugged in but its hidraw node is not there yet"
+            ),
+            DeviceError::InUse(holders) if holders.is_empty() => write!(
+                f,
+                "the strip is in use by another program; `nexusctl doctor` names it"
+            ),
+            DeviceError::InUse(holders) => write!(f, "the strip is in use by {}", names(holders)),
+            DeviceError::Detached => write!(
+                f,
+                "the strip was left without its driver by another program; \
+                 unplug it and plug it back in"
+            ),
             DeviceError::PermissionDenied(path) => write!(
                 f,
                 "no permission to open {}; install data/udev/70-nexus.rules into \
@@ -71,6 +99,15 @@ impl fmt::Display for DeviceError {
             DeviceError::Io(e) => write!(f, "device I/O error: {e}"),
         }
     }
+}
+
+/// Processes as "nexus-open (pid 42), other (pid 43)".
+pub fn names(holders: &[(u32, String)]) -> String {
+    holders
+        .iter()
+        .map(|(pid, name)| format!("{name} (pid {pid})"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl std::error::Error for DeviceError {

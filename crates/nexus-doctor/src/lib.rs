@@ -6,6 +6,8 @@
 use std::path::Path;
 
 use nexus_control::{Client, Status};
+#[cfg(target_os = "linux")]
+use nexus_device::DeviceError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -51,16 +53,56 @@ pub struct DeviceLine {
 #[cfg(target_os = "linux")]
 pub fn devices() -> Vec<DeviceLine> {
     use nexus_device::catalog::{self, Support};
-    nexus_device::hidraw::scan()
+    use nexus_device::hidraw::{self, Missing};
+
+    let found = hidraw::scan();
+    // A device whose interfaces were all taken from the HID driver has no
+    // hidraw node, so the scan cannot see it; the USB bus can.
+    let hidden: Vec<DeviceLine> = catalog::PRODUCTS
+        .iter()
+        .filter(|p| !found.iter().any(|f| f.product == p.id))
+        .filter_map(|p| {
+            let missing = hidraw::missing(p.id, p.interfaces[0]);
+            (missing != Missing::Unplugged).then(|| {
+                let e = DeviceError::from(missing);
+                DeviceLine {
+                    name: p.name.into(),
+                    id: p.id,
+                    support: support(p.support),
+                    state: blocked_state(&e),
+                    fix: blocked_fix(&e, thing(p.id)),
+                }
+            })
+        })
+        .collect();
+
+    fn support(s: Support) -> String {
+        match s {
+            Support::Supported(what) => format!("supported: {what}"),
+            Support::Planned(what) => format!("planned: {what}"),
+        }
+    }
+    fn thing(id: u16) -> &'static str {
+        if id == 0x1b8e {
+            "the strip"
+        } else {
+            "the device"
+        }
+    }
+
+    found
         .into_iter()
         .map(|f| {
             let known = catalog::product(f.product);
+            // An interface the app opens that has no hidraw node.
+            let blocked = known.and_then(|p| {
+                p.interfaces
+                    .iter()
+                    .find(|i| !f.nodes.iter().any(|n| n.interface == Some(**i)))
+                    .map(|i| DeviceError::from(hidraw::missing(p.id, *i)))
+            });
             let name = known.map_or(f.name.clone(), |p| p.name.to_string());
-            let support = match known.map(|p| p.support) {
-                Some(Support::Supported(what)) => format!("supported: {what}"),
-                Some(Support::Planned(what)) => format!("planned: {what}"),
-                None => "not supported".into(),
-            };
+            let support = known.map_or("not supported".into(), |p| support(p.support));
             let used: Vec<&nexus_device::hidraw::Node> = f
                 .nodes
                 .iter()
@@ -76,6 +118,8 @@ pub fn devices() -> Vec<DeviceLine> {
                 .collect();
             let (state, fix) = if known.is_none() {
                 ("nothing to do".to_string(), String::new())
+            } else if let Some(e) = &blocked {
+                (blocked_state(e), blocked_fix(e, thing(f.product)))
             } else if used.iter().any(|n| !n.access) {
                 (
                     "no access".to_string(),
@@ -100,7 +144,66 @@ pub fn devices() -> Vec<DeviceLine> {
                 fix,
             }
         })
+        .chain(hidden)
         .collect()
+}
+
+/// How `nexusctl devices` puts why a device cannot be opened.
+#[cfg(target_os = "linux")]
+fn blocked_state(e: &DeviceError) -> String {
+    match e {
+        DeviceError::InUse(holders) if holders.is_empty() => "in use by another program".into(),
+        DeviceError::InUse(holders) => format!("in use by {}", nexus_device::names(holders)),
+        DeviceError::Detached => "left without its driver".into(),
+        DeviceError::NotReady => "starting".into(),
+        DeviceError::NotFound => "not plugged in".into(),
+        e => e.to_string(),
+    }
+}
+
+/// What to do when `thing` ("the strip") cannot be opened because another
+/// program took it, or let go of it without giving it back.
+///
+/// The old Go Nexus Open claims the strip through usbfs, detaching the HID
+/// driver with USBDEVFS_DISCONNECT, and on exit only releases the
+/// interface: it never reattaches the driver (USBDEVFS_CONNECT), and the
+/// kernel does not rebind by itself. So after quitting it the strip stays
+/// dark until it is replugged; rebinding by hand needs root. A libusb
+/// program that set auto-detach does reattach, so for other programs the
+/// replug is only needed if the strip stays dark.
+#[cfg(target_os = "linux")]
+fn blocked_fix(e: &DeviceError, thing: &str) -> String {
+    let replug = format!("unplug {thing} and plug it back in");
+    let after = "nexusd picks it up again by itself.";
+    match e {
+        DeviceError::InUse(holders) if holders.iter().any(|(_, n)| n == "nexus-open") => format!(
+            "The old Nexus Open has taken {thing}. Quit it: click its tray icon and choose Quit.\n\
+             Then {replug}: the old app does not hand {thing} back when it quits. {after}"
+        ),
+        DeviceError::InUse(holders) if !holders.is_empty() => format!(
+            "Quit {}. If {thing} stays dark after that, {replug}. {after}",
+            nexus_device::names(holders)
+        ),
+        DeviceError::InUse(_) => format!(
+            "Another program has taken {thing}, but this user cannot see which; it may run \
+             as another user. Quit it (the old Nexus Open: from its tray icon).\n\
+             If {thing} stays dark after that, {replug}. {after}"
+        ),
+        DeviceError::Detached => {
+            let mut replug = replug;
+            replug[..1].make_ascii_uppercase();
+            format!(
+                "{replug}; {after}\n\
+                 A program that used it, such as the old Nexus Open, let go without \
+                 giving it back to its driver."
+            )
+        }
+        DeviceError::NotReady => format!(
+            "Normal for a few seconds after {thing} is plugged in or the computer wakes.\n\
+             If it lasts, {replug}."
+        ),
+        _ => String::new(),
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -268,12 +371,12 @@ fn device(r: &mut Report) {
         .iter()
         .any(|d| Path::new(d).join("70-nexus.rules").exists());
 
-    let node = match nexus_device::hidraw::find() {
-        Ok(Some(node)) => {
+    let node = match nexus_device::hidraw::locate() {
+        Ok(node) => {
             r.ok("device", &format!("iCUE Nexus found at {}", node.display()));
             node
         }
-        Ok(None) => {
+        Err(DeviceError::NotFound) => {
             r.fail(
                 "device",
                 "no iCUE Nexus found",
@@ -282,7 +385,7 @@ fn device(r: &mut Report) {
             return;
         }
         Err(e) => {
-            r.fail("device", &e.to_string(), "");
+            r.fail("device", &e.to_string(), &blocked_fix(&e, "the strip"));
             return;
         }
     };
@@ -386,6 +489,28 @@ mod tests {
             text(&checks),
             "  ok    daemon: running\n  FAIL  access: permission denied\n        Unplug it.\n        Plug it back in.\n"
         );
+    }
+
+    /// The old app never gives the strip back to its driver, so quitting
+    /// it is not enough: the fix must say to replug.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_strip_taken_by_the_old_app_needs_a_replug_after_quitting_it() {
+        let old = DeviceError::InUse(vec![(42, "nexus-open".into())]);
+        let fix = blocked_fix(&old, "the strip");
+        assert!(fix.contains("tray icon"), "{fix}");
+        assert!(
+            fix.contains("Then unplug the strip and plug it back in"),
+            "{fix}"
+        );
+        let left = blocked_fix(&DeviceError::Detached, "the strip");
+        assert!(
+            left.starts_with("Unplug the strip and plug it back in"),
+            "{left}"
+        );
+        let unseen = blocked_fix(&DeviceError::InUse(vec![]), "the strip");
+        assert!(unseen.contains("cannot see which"), "{unseen}");
+        assert_eq!(blocked_state(&old), "in use by nexus-open (pid 42)");
     }
 
     #[test]

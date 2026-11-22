@@ -88,7 +88,9 @@ fn wait_for_device() -> Nexus {
             Ok(device) => return device,
             // Right after replug the node can exist before udev has applied
             // the ACL, so permission errors are retried too.
-            Err(DeviceError::NotFound | DeviceError::PermissionDenied(_)) => {
+            Err(
+                DeviceError::NotFound | DeviceError::NotReady | DeviceError::PermissionDenied(_),
+            ) => {
                 thread::sleep(RECONNECT_POLL);
             }
             Err(e) => {
