@@ -88,6 +88,9 @@ pub struct Theme {
     pub palette: Palette,
     pub type_scale: TypeScale,
     pub grid: Grid,
+    /// The accent colour the user chose (`settings.accent`), or `None` for
+    /// the default. Nothing draws with it yet.
+    pub accent: Option<Rgb>,
 }
 
 impl Default for Theme {
@@ -130,6 +133,7 @@ impl Default for Theme {
                 unit_gap: 2.0,
                 graph_top: 30.0,
             },
+            accent: None,
         }
     }
 }

@@ -275,6 +275,9 @@ fn print_status(s: &Status) {
         s.pages.len(),
         s.pages.join(", ")
     );
+    if let Some(label) = &s.alarm {
+        say!("alarm    {label} is critical; tap OK on the strip, or swipe\n");
+    }
     say!("layout   {}\n", s.layout);
     say!("store    {}\n", s.store_path);
     if let Some(e) = &s.store_error {

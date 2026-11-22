@@ -740,7 +740,7 @@ impl Editor {
         // Kept as the edit, not the line: the revision it is made against
         // is the one current when it is sent, after the one before it.
         if self.busy {
-            self.waiting.push_back(Waiting::Edit(edit));
+            self.waiting.push_back(Waiting::Edit(Box::new(edit)));
             return;
         }
         let base = self.layout.as_ref().map(|l| l.revision);
@@ -1435,14 +1435,16 @@ impl Editor {
         self.problem.clear();
         match (built, editing) {
             (Ok(s), None) => {
-                // A new one starts with a clock across the strip, to be
-                // changed like any widget.
+                // A new one starts with a clock across it, to be changed
+                // like any widget.
                 let takeover = Takeover {
                     name: s.name.clone(),
                     on_change: s.on_change,
                     seconds: s.seconds,
+                    align: s.align,
+                    width: s.width,
                     widgets: vec![Widget::Clock {
-                        width: STRIP,
+                        width: s.width.unwrap_or(STRIP),
                         tap: None,
                         hold: None,
                     }],
@@ -1459,7 +1461,12 @@ impl Editor {
                 self.drafts.clear();
                 self.draft_hint.clear();
                 let old = &self.layout.as_ref().expect("editing one").config.takeovers[i];
-                if old.name != s.name || old.on_change != s.on_change || old.seconds != s.seconds {
+                let same = old.name == s.name
+                    && old.on_change == s.on_change
+                    && old.seconds == s.seconds
+                    && old.align == s.align
+                    && old.width == s.width;
+                if !same {
                     if old.name != s.name {
                         // Followed by its new name once the layout says so.
                         self.edit_after = Some(s.name.clone());
@@ -1469,6 +1476,8 @@ impl Editor {
                         name: s.name,
                         on_change: s.on_change,
                         seconds: s.seconds,
+                        align: s.align,
+                        width: s.width,
                     });
                 }
             }
@@ -1648,14 +1657,14 @@ impl Editor {
 
 /// A change made while another was on its way.
 enum Waiting {
-    Edit(Edit),
+    Edit(Box<Edit>),
     Line(String),
 }
 
 impl Editor {
     fn send_next(&mut self) {
         match self.waiting.pop_front() {
-            Some(Waiting::Edit(edit)) => self.send(edit),
+            Some(Waiting::Edit(edit)) => self.send(*edit),
             Some(Waiting::Line(line)) => self.request(line),
             None => {}
         }
@@ -1825,6 +1834,12 @@ pub fn describe(w: &Widget) -> String {
     match w {
         Widget::Clock { .. } => "Clock".into(),
         Widget::Media { .. } => "Now playing".into(),
+        Widget::Key { icon, label, .. } => label
+            .iter()
+            .chain(icon)
+            .find(|s| !s.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| "Key".into()),
         Widget::Value { label, .. } | Widget::Rate { label, .. } | Widget::Slider { label, .. } => {
             if label.trim().is_empty() {
                 match w {

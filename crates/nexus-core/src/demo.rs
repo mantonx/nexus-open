@@ -37,6 +37,7 @@ pub fn system_page() -> Vec<Zone> {
                 icon: Some('\u{f185}'),
                 graph: None,
                 severity: Severity::Ok,
+                second: None,
             },
         },
         Zone {
@@ -48,6 +49,7 @@ pub fn system_page() -> Vec<Zone> {
                 icon: None,
                 graph: Some(Graph::Area(flat.clone())),
                 severity: Severity::Ok,
+                second: None,
             },
         },
         Zone {
@@ -59,6 +61,7 @@ pub fn system_page() -> Vec<Zone> {
                 icon: None,
                 graph: Some(Graph::Area(flat)),
                 severity: Severity::Warn,
+                second: None,
             },
         },
         Zone {

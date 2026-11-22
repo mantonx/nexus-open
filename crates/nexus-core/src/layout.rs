@@ -10,7 +10,7 @@ use jiff::Zoned;
 
 use crate::config::{ClockFormat, GraphStyle, Settings, SliderControl, Temperature, Widget};
 use crate::signal::{Signals, Unit, Value};
-use crate::widget::{Graph, Severity, Track, WidgetView, Zone};
+use crate::widget::{Graph, Reading, Severity, Track, WidgetView, Zone};
 
 /// Shown where a reading has not arrived yet. Calm, not an error.
 pub const NO_DATA: &str = "—";
@@ -63,9 +63,57 @@ pub fn signals_used(widgets: &[Widget]) -> impl Iterator<Item = &str> {
             SliderControl::Seek => MEDIA_SIGNALS.to_vec(),
             SliderControl::Run(_) => signal.iter().map(String::as_str).collect(),
         },
-        Widget::Value { signal, .. } => vec![signal.as_str()],
+        Widget::Value { signal, second, .. } => {
+            let mut used = vec![signal.as_str()];
+            used.extend(second.as_deref());
+            used
+        }
         Widget::Rate { down, up, .. } => vec![down.as_str(), up.as_str()],
+        Widget::Key { .. } => vec![],
     })
+}
+
+/// The readings a row's value widgets judge against thresholds: each
+/// signal with its warn and crit, the second reading included.
+pub fn thresholds(
+    widgets: &[Widget],
+) -> impl Iterator<Item = (&Widget, &str, Option<f64>, Option<f64>)> {
+    widgets.iter().flat_map(|w| match w {
+        Widget::Value {
+            signal,
+            warn,
+            crit,
+            second,
+            second_warn,
+            second_crit,
+            ..
+        } => {
+            let mut out = vec![(w, signal.as_str(), *warn, *crit)];
+            if let Some(second) = second {
+                out.push((w, second.as_str(), *second_warn, *second_crit));
+            }
+            out
+        }
+        _ => vec![],
+    })
+}
+
+/// How a signal's reading stands against thresholds; `Ok` without a number.
+pub fn judge(signals: &Signals, signal: &str, warn: Option<f64>, crit: Option<f64>) -> Severity {
+    match signals.get(signal) {
+        Some(Value::Number(n, _)) => severity(*n, warn, crit),
+        _ => Severity::Ok,
+    }
+}
+
+/// A signal's value and unit text, as a value widget shows it: "—" with
+/// no reading yet.
+pub fn reading_text(signals: &Signals, signal: &str, settings: &Settings) -> (String, String) {
+    match signals.get(signal) {
+        Some(Value::Number(n, u)) => format_number(*n, *u, settings.temperature),
+        Some(Value::Text(t)) => (t.clone(), String::new()),
+        None => (NO_DATA.to_string(), String::new()),
+    }
 }
 
 fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zoned) -> WidgetView {
@@ -79,18 +127,25 @@ fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zo
             graph,
             warn,
             crit,
+            second,
+            second_warn,
+            second_crit,
             ..
         } => {
             let reading = match signals.get(signal) {
                 Some(Value::Number(n, unit)) => Some((*n, *unit)),
                 _ => None,
             };
-            let (value, unit) = match (reading, signals.get(signal)) {
-                (Some((n, u)), _) => format_number(n, u, settings.temperature),
-                (None, Some(Value::Text(t))) => (t.clone(), String::new()),
-                (None, _) => (NO_DATA.to_string(), String::new()),
-            };
-            let severity = reading.map_or(Severity::Ok, |(n, _)| severity(n, *warn, *crit));
+            let (value, unit) = reading_text(signals, signal, settings);
+            let severity = judge(signals, signal, *warn, *crit);
+            let second = second.as_deref().map(|s| {
+                let (value, unit) = reading_text(signals, s, settings);
+                Reading {
+                    value,
+                    unit,
+                    severity: judge(signals, s, *second_warn, *second_crit),
+                }
+            });
             let graph = graph.and_then(|style| {
                 let unit = reading.map_or(Unit::None, |(_, u)| u);
                 let points = scale(&signals.history(signal), unit);
@@ -106,8 +161,13 @@ fn bind_widget(widget: &Widget, signals: &Signals, settings: &Settings, now: &Zo
                 icon: None,
                 graph,
                 severity,
+                second,
             }
         }
+        Widget::Key { icon, label, .. } => WidgetView::Key {
+            icon: icon.clone(),
+            label: label.clone(),
+        },
         Widget::Rate {
             label, down, up, ..
         } => {
@@ -427,6 +487,56 @@ mod tests {
             slider(&run, &s, None, Some(0.3)),
             WidgetView::Slider { fraction: Some(f), .. } if (f - 0.3).abs() < 1e-6
         ));
+    }
+
+    #[test]
+    fn a_second_reading_is_bound_with_its_own_thresholds() {
+        let c = Config::parse(
+            "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"value\"\nwidth = 160\nlabel = \"GPU\"\n\
+             signal = \"gpu.temp\"\ncrit = 90\nsecond = \"gpu.load\"\nsecond_warn = 70\n\
+             [[page.widget]]\ntype = \"key\"\nwidth = 60\nicon = \"play\"\n",
+        )
+        .unwrap();
+        let mut s = Signals::new();
+        s.set("gpu.temp", Value::Number(50.0, Unit::Celsius));
+        let zones = bind_page(&c.pages[0].widgets, &s, &c.settings, &now());
+        let WidgetView::Value { second, .. } = &zones[0].view else {
+            unreachable!()
+        };
+        assert_eq!(
+            second,
+            &Some(Reading {
+                value: NO_DATA.into(),
+                unit: String::new(),
+                severity: Severity::Ok
+            })
+        );
+        s.set("gpu.load", Value::Number(75.0, Unit::Percent));
+        let zones = bind_page(&c.pages[0].widgets, &s, &c.settings, &now());
+        let WidgetView::Value {
+            severity, second, ..
+        } = &zones[0].view
+        else {
+            unreachable!()
+        };
+        assert_eq!(*severity, Severity::Ok);
+        assert_eq!(
+            second,
+            &Some(Reading {
+                value: "75".into(),
+                unit: "%".into(),
+                severity: Severity::Warn
+            })
+        );
+        let used: Vec<&str> = signals_used(&c.pages[0].widgets).collect();
+        assert_eq!(used, ["gpu.temp", "gpu.load"]);
+        assert_eq!(
+            zones[1].view,
+            WidgetView::Key {
+                icon: Some("play".into()),
+                label: None
+            }
+        );
     }
 
     #[test]

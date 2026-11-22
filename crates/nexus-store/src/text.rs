@@ -62,7 +62,7 @@ const HELP: &str = "\
 ## Nexus Open: what the strip shows. Saving applies it.
 ##
 ## The strip is 640 px wide; each page's widget widths add up to 640 or less.
-## Widgets: clock, value, rate, slider, media. Tap and hold actions:
+## Widgets: clock, value, rate, slider, media, key. Tap and hold actions:
 ##   tap = { page = \"Clock\" }   next, prev or a page name
 ##   tap = { media = \"play-pause\" }   play-pause, next, previous, stop
 ##   tap = { run = [\"pavucontrol\"] }   a program and its arguments, no shell

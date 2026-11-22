@@ -271,6 +271,9 @@ pub struct Status {
     /// The takeover covering the page, if one is.
     #[serde(default)]
     pub takeover: Option<String>,
+    /// The label of the reading the critical alarm names, while it is up.
+    #[serde(default)]
+    pub alarm: Option<String>,
     /// The store's revision: when it moves, the layout or settings changed.
     #[serde(default)]
     pub revision: i64,

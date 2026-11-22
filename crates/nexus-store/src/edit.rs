@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use nexus_core::config::{
-    Action, Config, ConfigError, Settings, Source, Takeover, Weather, Widget,
+    Action, Align, Config, ConfigError, Settings, Source, Takeover, Weather, Widget,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -89,6 +89,11 @@ pub enum Edit {
         name: String,
         on_change: Vec<String>,
         seconds: f64,
+        /// Missing: full, as before these existed.
+        #[serde(default)]
+        align: Align,
+        #[serde(default)]
+        width: Option<u32>,
     },
     DeleteTakeover {
         takeover: i64,
@@ -260,11 +265,13 @@ pub(crate) fn apply(conn: &Connection, edit: &Edit) -> Result<(), StoreError> {
             name,
             on_change,
             seconds,
+            align,
+            width,
         } => {
             changed(
                 conn.execute(
-                    "UPDATE takeover SET name = ?2, seconds = ?3 WHERE id = ?1",
-                    params![takeover, name, seconds],
+                    "UPDATE takeover SET name = ?2, seconds = ?3, align = ?4, width = ?5 WHERE id = ?1",
+                    params![takeover, name, seconds, align.id(), width],
                 )?,
                 "takeover",
                 *takeover,
@@ -306,7 +313,8 @@ pub(crate) fn apply(conn: &Connection, edit: &Edit) -> Result<(), StoreError> {
             let w = weather.as_ref();
             conn.execute(
                 "UPDATE settings SET font = ?1, temperature = ?2, clock = ?3,
-                   weather_location = ?4, weather_latitude = ?5, weather_longitude = ?6",
+                   weather_location = ?4, weather_latitude = ?5, weather_longitude = ?6,
+                   accent = ?7",
                 params![
                     text("font"),
                     text("temperature"),
@@ -314,6 +322,7 @@ pub(crate) fn apply(conn: &Connection, edit: &Edit) -> Result<(), StoreError> {
                     w.and_then(|w| w.location.clone()),
                     w.and_then(|w| w.latitude),
                     w.and_then(|w| w.longitude),
+                    s["accent"].as_str(),
                 ],
             )?;
         }
@@ -609,15 +618,30 @@ pub(crate) fn put_takeover(
     let id = match id {
         Some(id) => {
             conn.execute(
-                "UPDATE takeover SET name = ?2, seconds = ?3, note = ?4 WHERE id = ?1",
-                params![id, takeover.name, takeover.seconds, note],
+                "UPDATE takeover SET name = ?2, seconds = ?3, note = ?4, align = ?5, width = ?6 WHERE id = ?1",
+                params![
+                    id,
+                    takeover.name,
+                    takeover.seconds,
+                    note,
+                    takeover.align.id(),
+                    takeover.width
+                ],
             )?;
             id
         }
         None => {
             conn.execute(
-                "INSERT INTO takeover (layout_id, position, name, seconds, note) VALUES (?1, -1, ?2, ?3, ?4)",
-                params![layout, takeover.name, takeover.seconds, note],
+                "INSERT INTO takeover (layout_id, position, name, seconds, note, align, width)
+                 VALUES (?1, -1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    layout,
+                    takeover.name,
+                    takeover.seconds,
+                    note,
+                    takeover.align.id(),
+                    takeover.width
+                ],
             )?;
             conn.last_insert_rowid()
         }
