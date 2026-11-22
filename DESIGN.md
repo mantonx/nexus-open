@@ -334,6 +334,7 @@ card beside it (content centres in its room when it has spare width).
 | Media | play/pause key + elapsed + progress line | artwork + title / artist + a raised `MEDIA_KEY_W` 36 × 33 play/pause key at the right, `PAD` in from the card's edge, accent-filled (the whole card is the hit zone; the key says so) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
 | Key | icon (label from 96 px) | icon + label | icon + label + second line ("Hold for a new window") |
+| News | the whole card a key: newspaper `ICON_KEY` 22 in the accent + the headline's age ("12 min") at `TITLE` 20, centred; no headline, which would be two words at this width | the whole card a key: the headline at `TITLE` 20 on line one, the full width, cut by `fit`; line two the newspaper at `ICON_SMALL` 17 in the accent + "Harbour Gazette · 12 min" at `LABEL` 18 in TEXT2. The age stays whole: the source is cut first, and left out when fewer than four letters of it would be left | as medium, with more of the headline (about 25 characters at 312 px, 45 at 512; a medium 200 px card has room for about 15) |
 
 Frames: `specimen-*.png` draws every widget in zones of 128, 200 and
 312 px (cards of 124, 196 and 308) in each state. A compact reading of
@@ -409,7 +410,7 @@ What can be touched looks like it; what cannot does not.
 | A raised face (KEY, lit top edge) with an accent glyph | Tap | Transport keys, launch keys |
 | A face filled with the accent, dark glyph | The main tap here | Play/pause (the alarm's OK is white on red instead) |
 | A cream disc with an accent ring on a pill track | Drag sideways | Sliders |
-| A whole card raised (KEY, lit top edge) with an accent glyph | Tap | Launch keys; a media card with nothing playing that can open the player |
+| A whole card raised (KEY, lit top edge) with an accent glyph | Tap | Launch keys; a media card with nothing playing that can open the player; a news card with a headline (the newspaper is the accent glyph; the headline itself stays cream) |
 | A dashed accent outline with accent words | Tap to set this up (opens the settings window there) | Any widget not set up |
 | Flat card, no accent | Inert: swipe passes through | Readings, clock, weather |
 
@@ -444,6 +445,10 @@ What can be touched looks like it; what cannot does not.
 | Paused | Play glyph in the key, artwork dimmed, title in TEXT2, "Paused" in place of the artist, progress line TEXT3 | `specimen-media-paused` |
 | Nothing playing | When the layout says how to open the music player (the media widget's own `tap`, or a Music key, by the `music-notes` icon or the label "Music", whose tap runs or opens something; `Config::music_action`): the whole card is a key, the note in the accent, "Nothing playing" / "Tap to open music" ("Open music" where that is cut; "Open" / "music" at compact), and a tap does that. A Music key that only shows a page opens no player, so with the default layout nothing resolves and the card stays quiet: a dashed TEXT3 sleeve with a note, "Nothing playing" / "Play some music", no key look | `specimen-media-nothing-playing`, `specimen-media-nothing-playing-opens`, `-opens-pressed` |
 | Muted | Speaker with a cross; "Muted" in place of the number (compact, medium) or the number in TEXT3 (hero); fill and ring grey | `specimen-slider-muted` |
+| News: a headline | The whole card a key (see the size classes); tap opens the article, hold shows the next headline, with the usual press and hold fill | `specimen-news-live`, `-pressed`, `-holding`, `-short`, `news-page` |
+| News: no headline yet | The feeds work (or are being read for the first time) and nothing has come: a flat card, the newspaper in outline in TEXT3, "No news yet" in TEXT2 (`BODY` at medium, `TITLE` at hero, "No news" / "yet" at compact). Not a key: there is nothing to open | `specimen-news-no-data` |
+| News: lost | Every feed failing and the last headline older than `max_age`: that headline kept, flat card, everything TEXT3, the newspaper with the broken-link badge; its age keeps growing ("2 d"). Not a key. Never an error message: what failed goes to the log | `specimen-news-lost` |
+| News: not set up | No feeds: the dashed outline, plus icon, "News / Add a feed in Settings" ("Add a feed" where that is cut; "News / Set up" at compact) | `specimen-news-not-set-up` |
 
 "No data", "not set up" and "source lost" never look alike: dashes on a
 normal card, a dashed outline with no card, and a grey number with a
@@ -465,6 +470,11 @@ then stays at rest (so it never moves in the corner of the eye for
 long). The full title is always shown in the now-playing takeover
 (`TITLE_BIG` 26 px; 22 characters fit with room to spare; a longer one
 uses the same marquee there).
+
+A **news headline never moves**: it ends in an ellipsis by the same
+`fit` rule and the next one replaces it after `rotate`. A marquee runs
+once per change; with a new headline every 12 s it would never rest.
+Tap the card to read the article.
 
 ### Page markers
 
@@ -552,6 +562,7 @@ something settling), except where noted.
 | Alarm breathing | `MS_ALARM_BREATHE` 2.4 s, sine | Slow, like breathing, not flashing |
 | Thumb grow on hold | `MS_PRESS` | |
 | Marquee | see Long titles | |
+| New headline | immediate | Replaced at once, no fade or slide: every `rotate` (12 s) is too often for motion in the corner of the eye. Never a takeover |
 
 ### Idle and night
 
@@ -578,7 +589,7 @@ something settling), except where noted.
 ### Icons
 
 **Phosphor** 2.1.2 (MIT, `@phosphor-icons/web`), two weights subset into
-`assets/fonts/Phosphor-Fill.ttf` and `Phosphor-Bold.ttf` (66 glyphs,
+`assets/fonts/Phosphor-Fill.ttf` and `Phosphor-Bold.ttf` (67 glyphs,
 `pyftsubset`; licence in `assets/fonts/licenses/Phosphor-LICENSE.txt`).
 Phosphor's rounded joins and terminals match Rubik; Font Awesome (still
 bundled for the shipped widgets) is blockier and is not used here.
@@ -598,6 +609,7 @@ bundled for the shipped widgets) is blockier and is not used here.
 | map-pin-plus | U+E314 | Fill | Weather not set up |
 | plus | U+E3D4 | Fill | Anything else not set up |
 | link-break | U+E2E4 | Fill | Source lost |
+| newspaper | U+E344 | Bold | News (Bold: the card is a key) |
 | warning | U+E4E0 | Fill | The alarm |
 | globe-simple, folder-simple, gear, game-controller | U+E28E, E25A, E270, E26E | Bold | Default launch keys |
 
@@ -632,6 +644,9 @@ All optional; existing layouts keep working unchanged.
 | `width` | `[[takeover]]` | px | Its width when `align` is `left` or `right`; snapped to the nearest card edge of the page under it when that is within 40 % of it |
 | `type = "key"` | widget | with `icon`, optional `label`, `sub`, `tap`, `hold` | The new key widget: runs `tap` (any existing action: `run`, `open`, `page`, `media`, `publish`); `hold` fires at 0.5 s |
 | `critical` | `[[takeover]]`-like rule, built in | – | The alarm needs no key: any widget with `crit` arms it |
+| `[news]` | top level | `feeds`, `rotate`, `max_age` | The feeds to read; see docs/LAYOUT.md |
+| `type = "news"` | widget | optional `tap`, `hold` | One headline at a time; tap opens it, hold shows the next |
+| `news = "open"` / `"next"` | action | – | Open the headline showing; show the next one |
 
 `graph = "area" | "line"` on existing `value` widgets is accepted and drawn
 as the fixed-scale bar (see Open questions). `warn` and `crit` stay in the
