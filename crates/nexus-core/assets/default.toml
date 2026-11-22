@@ -2,6 +2,9 @@
 ##
 ## The strip is 640 px wide. Each page is a row of widgets, left to right; a
 ## page's widget widths must add up to 640 or less. Swipe to change page.
+## Every widget is drawn as a card a little inside its width, so widths that
+## add up to 640 leave even gaps. What a card shows grows with its width:
+## up to 149 px is compact, up to 299 medium, 300 and over hero.
 ##
 ## Signals are named readings published by sources, in base units:
 ##   cpu.temp, gpu.temp, weather.temp   degrees Celsius
@@ -12,154 +15,165 @@
 ## Thresholds (warn, crit) use those base units too.
 ##
 ## Any widget can act on a tap and on a long press (hold), for example:
-##   tap = { page = "Clock" }               next, prev, or a page name
+##   tap = { page = "Desk" }                next, prev, or a page name
 ##   tap = { media = "play-pause" }         play-pause, next, previous, stop
 ##   tap = { run = ["pavucontrol"] }        a program and its arguments, no shell
 ##   hold = { open = "https://example.org" } a URL or file, in the default app
 ##   tap = { publish = { signal = "mode", value = "focus" } }
+## and can name its icon, from the bundled Phosphor set (docs/LAYOUT.md):
+##   icon = "fan"
 
 [settings]
-font = "ibm-plex-sans"       # ibm-plex-sans, atkinson-hyperlegible, roboto, noto-sans, lato
+font = "rubik"               # the face for words: rubik, ibm-plex-sans, atkinson-hyperlegible, roboto, noto-sans, lato
 temperature = "celsius"      # celsius or fahrenheit
 clock = "24h"                # 24h or 12h
+## accent = "lilac"          # lilac, sky, teal, mint, rose, lemon, or "#rrggbb"
+## night = { from = "22:30", to = "07:00" }   # the strip dims in these hours
+## idle_dim = false          # on unless set: dims after 5 minutes with no touch
 
 ## Weather comes from Open-Meteo, which is sent this location (or the
-## coordinates) and nothing else. Uncomment and set it to show weather.temp:
+## coordinates) and nothing else. Uncomment and set it to show the weather:
 ## [weather]
 ## location = "Lisbon"          # or "City, region, country" to pick the right one
 ## latitude = 38.72             # optional: coordinates instead of a name
 ## longitude = -9.14
 
+## Home: the time, the weather, the CPU and what is playing.
 [[page]]
-name = "System"
+name = "Home"
 
 [[page.widget]]
 type = "clock"
-width = 107
-tap = { page = "Clock" }
-
-[[page.widget]]
-type = "media"
-width = 107
-tap = { media = "play-pause" }
-hold = { media = "next" }
+width = 196
+tap = { page = "Desk" }
 
 [[page.widget]]
 type = "value"
-width = 107
+width = 124
 label = "Weather"
 signal = "weather.temp"
 
 [[page.widget]]
 type = "value"
-width = 107
+width = 124
 label = "CPU"
 signal = "cpu.temp"
-graph = "area"
 warn = 75
 crit = 90
-
-[[page.widget]]
-type = "value"
-width = 106
-label = "GPU"
-signal = "gpu.temp"
-graph = "area"
-warn = 75
-crit = 90
-
-[[page.widget]]
-type = "rate"
-width = 106
-label = "Net"
-down = "net.down"
-up = "net.up"
-
-[[page]]
-name = "Performance"
-
-[[page.widget]]
-type = "value"
-width = 240
-label = "CPU"
-signal = "cpu.temp"
-graph = "area"
-warn = 75
-crit = 90
-
-[[page.widget]]
-type = "value"
-width = 240
-label = "GPU"
-signal = "gpu.temp"
-graph = "area"
-warn = 75
-crit = 90
-
-[[page.widget]]
-type = "rate"
-width = 160
-label = "Net"
-down = "net.down"
-up = "net.up"
-
-[[page]]
-name = "Load"
-
-[[page.widget]]
-type = "value"
-width = 213
-label = "CPU load"
-signal = "cpu.load"
-graph = "line"
-warn = 85
-
-[[page.widget]]
-type = "value"
-width = 213
-label = "GPU load"
-signal = "gpu.load"
-graph = "line"
-warn = 85
-
-[[page.widget]]
-type = "value"
-width = 214
-label = "Memory"
-signal = "mem.used"
-graph = "line"
-warn = 90
-
-[[page]]
-name = "Clock"
-
-[[page.widget]]
-type = "clock"
-width = 640
 tap = { page = "System" }
 
-# Drag along a slider to set it. A touch that lands on a slider belongs to
-# it, so swipe pages from the media widget on this page.
+## The whole card plays and pauses; a long press skips.
+[[page.widget]]
+type = "media"
+width = 196
+hold = { media = "next" }
+
+# Music: the track with its transport keys, and the volume. A touch that
+# lands on the slider belongs to it, so swipe pages from the media card.
 [[page]]
-name = "Sound"
+name = "Music"
 
 [[page.widget]]
 type = "media"
-width = 214
-tap = { media = "play-pause" }
-hold = { media = "next" }
+width = 428
 
 [[page.widget]]
 type = "slider"
-width = 213
-label = "Position"
-controls = "seek"
-
-[[page.widget]]
-type = "slider"
-width = 213
+width = 212
 label = "Volume"
 controls = "volume"
+
+## System: each part's temperature with its load beside it.
+[[page]]
+name = "System"
+
+[[page.widget]]
+type = "value"
+width = 204
+label = "CPU"
+signal = "cpu.temp"
+warn = 75
+crit = 90
+second = "cpu.load"
+second_label = "load"
+
+[[page.widget]]
+type = "value"
+width = 204
+label = "GPU"
+signal = "gpu.temp"
+warn = 80
+crit = 90
+second = "gpu.load"
+second_label = "load"
+
+[[page.widget]]
+type = "value"
+width = 108
+label = "Memory"
+signal = "mem.used"
+warn = 85
+crit = 95
+
+[[page.widget]]
+type = "rate"
+width = 124
+label = "Network"
+down = "net.down"
+up = "net.up"
+
+## Launch: keys that work on any Linux desktop. Open goes through the
+## desktop's default app (xdg-open); "~" is your home folder.
+[[page]]
+name = "Launch"
+
+[[page.widget]]
+type = "clock"
+width = 128
+
+[[page.widget]]
+type = "key"
+width = 128
+icon = "globe-simple"
+label = "Browser"
+tap = { open = "https://duckduckgo.com" }
+
+[[page.widget]]
+type = "key"
+width = 128
+icon = "folder-simple"
+label = "Files"
+tap = { open = "~" }
+
+[[page.widget]]
+type = "key"
+width = 128
+icon = "gear"
+label = "Settings"
+tap = { run = ["nexusd", "ui"] }
+
+[[page.widget]]
+type = "key"
+width = 128
+icon = "music-notes"
+label = "Music"
+tap = { page = "Music" }
+hold = { media = "play-pause" }
+
+## Desk: the time and the weather, large, to read from across the room.
+[[page]]
+name = "Desk"
+
+[[page.widget]]
+type = "clock"
+width = 332
+tap = { page = "Home" }
+
+[[page.widget]]
+type = "value"
+width = 308
+label = "Weather"
+signal = "weather.temp"
 
 ## External sources are programs that publish signals: one JSON object per
 ## line, such as {"disk.used": {"value": 71, "unit": "percent"}}. They run in
@@ -170,12 +184,13 @@ controls = "volume"
 ## name = "disk"
 ## run = ["sh", "disk.sh"]
 
-## Takeovers briefly cover the whole strip when a signal changes: a new
-## track, a new volume. Not when a reading first arrives, and not while the
-## page on the strip already shows that signal. A touch keeps one up for its
-## full time again; a swipe, or the time running out, puts the page back.
-## Widgets are written as on a page.
+## Takeovers briefly cover the strip, or one end of it, when a signal
+## changes: a new track, a new volume. Not when a reading first arrives, and
+## not while the page on the strip already shows that signal. A touch keeps
+## one up for its full time again; a swipe, or the time running out, puts
+## the page back. Widgets are written as on a page.
 
+## A new track: the whole strip, with its keys.
 [[takeover]]
 name = "Now playing"
 on_change = ["media.title"]
@@ -183,23 +198,18 @@ seconds = 5
 
 [[takeover.widget]]
 type = "media"
-width = 320
-tap = { media = "play-pause" }
-hold = { media = "next" }
+width = 640
 
-[[takeover.widget]]
-type = "slider"
-width = 320
-label = "Position"
-controls = "seek"
-
+## A new volume: over the right half, showing the change.
 [[takeover]]
 name = "Volume"
 on_change = ["volume.level", "volume.muted"]
 seconds = 2
+align = "right"
+width = 320
 
 [[takeover.widget]]
 type = "slider"
-width = 640
+width = 320
 label = "Volume"
 controls = "volume"

@@ -10,8 +10,34 @@
 use crate::canvas::Canvas;
 use crate::fonts::FontChoice;
 use crate::text::{Font, TextEngine};
-use crate::theme::{Rgb, TextStyle, Theme};
+use crate::theme::{Rgb, TextStyle};
 use crate::{HEIGHT, WIDTH};
+
+/// The colours the card was read with in U0: the strip's palette before
+/// its redesign, kept here so the card's frames stay the ones measured.
+struct Palette {
+    background: Rgb,
+    /// The old greys, which the contrast ladder must include (a test).
+    #[cfg_attr(not(test), allow(dead_code))]
+    divider: Rgb,
+    #[cfg_attr(not(test), allow(dead_code))]
+    label: Rgb,
+    value: Rgb,
+    #[cfg_attr(not(test), allow(dead_code))]
+    unit: Rgb,
+    warn: Rgb,
+    crit: Rgb,
+}
+
+const P: Palette = Palette {
+    background: Rgb::hex(0x050505),
+    divider: Rgb::hex(0x222222),
+    label: Rgb::hex(0xb8b8b8),
+    value: Rgb::hex(0xececec),
+    unit: Rgb::hex(0x8a8a8a),
+    warn: Rgb::hex(0xf0a830),
+    crit: Rgb::hex(0xe2625f),
+};
 
 /// Numeral sizes on the numeral ladders, in pixels.
 pub const NUMERAL_SIZES: [u32; 7] = [14, 18, 22, 26, 30, 34, 38];
@@ -62,8 +88,7 @@ pub struct CardFrame {
 /// the number N in its badge.
 pub fn frames() -> Vec<CardFrame> {
     let mut d = Draw::new();
-    let theme = Theme::default();
-    let p = &theme.palette;
+    let p = &P;
     let builders: [fn(&mut Draw, &mut Canvas) -> Built; 10] = [
         edges,
         |d, c| numerals(d, c, Face::Plex, 400.0),
@@ -116,13 +141,12 @@ impl Draw {
             v.extend(f.fallback);
             v
         };
-        let theme = Theme::default();
         Self {
             engine: TextEngine::new(),
             plex: stack(FontChoice::IbmPlexSans),
             roboto: stack(FontChoice::Roboto),
-            value: theme.palette.value,
-            background: theme.palette.background,
+            value: P.value,
+            background: P.background,
         }
     }
 
@@ -420,7 +444,7 @@ fn contrast(d: &mut Draw, c: &mut Canvas) -> Built {
 /// Severity: white, warn and critical, each as text on black and as a
 /// filled block with dark text.
 fn severity(d: &mut Draw, c: &mut Canvas) -> Built {
-    let p = Theme::default().palette;
+    let p = &P;
     let bg = d.background;
     for ((x, _), colour) in columns(3).zip([p.value, p.warn, p.crit]) {
         let x = x as f32;
@@ -525,7 +549,7 @@ mod tests {
             }
         }
         // The next row and column in are not edge colours.
-        let bg = Theme::default().palette.background;
+        let bg = P.background;
         assert_eq!(pixel(c, 300, 4), bg);
         assert_eq!(pixel(c, 300, HEIGHT - 5), bg);
         assert_eq!(pixel(c, 4, 24), bg);
@@ -536,7 +560,7 @@ mod tests {
     fn only_the_edge_frame_draws_in_the_outer_rows_and_columns() {
         // Whether the bezel hides them is what frame 1 asks, so no other
         // frame may put anything there.
-        let bg = Theme::default().palette.background;
+        let bg = P.background;
         for f in frames().iter().filter(|f| f.name != "edges") {
             for y in (0..4).chain(HEIGHT - 4..HEIGHT) {
                 for x in 0..WIDTH {
@@ -571,7 +595,7 @@ mod tests {
 
     #[test]
     fn contrast_ladder_includes_todays_greys() {
-        let p = Theme::default().palette;
+        let p = &P;
         for c in [p.divider, p.unit, p.label] {
             assert!(c.r == c.g && c.g == c.b);
             assert!(GREYS.contains(&c.r), "#{:02x} missing", c.r);

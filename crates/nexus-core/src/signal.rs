@@ -60,6 +60,11 @@ pub enum Value {
 struct Entry {
     value: Value,
     history: VecDeque<f32>,
+    /// Monotonic seconds of the last reading, when the caller gave one.
+    heard: Option<f64>,
+    /// The source went away at this monotonic time; the value is the last
+    /// one it gave.
+    lost: Option<f64>,
 }
 
 /// The latest value of every signal, plus recent history for numbers.
@@ -81,6 +86,8 @@ impl Signals {
             .or_insert_with(|| Entry {
                 value: value.clone(),
                 history: VecDeque::with_capacity(HISTORY),
+                heard: None,
+                lost: None,
             });
         if let Value::Number(n, _) = value {
             if entry.history.len() == HISTORY {
@@ -89,6 +96,42 @@ impl Signals {
             entry.history.push_back(n as f32);
         }
         entry.value = value;
+        entry.lost = None;
+    }
+
+    /// Records a reading heard at monotonic time `at`, as `set` does.
+    pub fn set_at(&mut self, name: &str, value: Value, at: f64) {
+        self.set(name, value);
+        if let Some(e) = self.entries.get_mut(name) {
+            e.heard = Some(at);
+        }
+    }
+
+    /// When the latest reading came, if it came through `set_at`.
+    pub fn heard_at(&self, name: &str) -> Option<f64> {
+        self.entries.get(name).and_then(|e| e.heard)
+    }
+
+    /// The signal's source went away at monotonic time `at`: the last
+    /// value is kept, to be shown as lost, until a new reading comes.
+    /// Nothing happens for a signal never published.
+    pub fn forget(&mut self, name: &str, at: f64) {
+        if let Some(e) = self.entries.get_mut(name) {
+            e.lost.get_or_insert(at);
+        }
+    }
+
+    /// When the signal's source went away, while it is gone.
+    pub fn lost_at(&self, name: &str) -> Option<f64> {
+        self.entries.get(name).and_then(|e| e.lost)
+    }
+
+    /// The latest reading from a source that is still there.
+    pub fn live(&self, name: &str) -> Option<&Value> {
+        self.entries
+            .get(name)
+            .filter(|e| e.lost.is_none())
+            .map(|e| &e.value)
     }
 
     /// The latest reading, if the signal has ever been published.
@@ -144,5 +187,23 @@ mod tests {
         assert!(s.history("media.title").is_empty());
         assert_eq!(s.get("nope"), None);
         assert_eq!(s.names(), ["media.title"]);
+    }
+
+    #[test]
+    fn a_lost_source_keeps_its_last_value_until_it_returns() {
+        let mut s = Signals::new();
+        s.forget("cpu.temp", 1.0);
+        assert_eq!(s.lost_at("cpu.temp"), None, "never published");
+        s.set_at("cpu.temp", Value::Number(50.0, Unit::Celsius), 2.0);
+        s.forget("cpu.temp", 3.0);
+        s.forget("cpu.temp", 4.0);
+        assert_eq!(s.lost_at("cpu.temp"), Some(3.0), "the first loss counts");
+        assert_eq!(s.live("cpu.temp"), None);
+        assert!(s.get("cpu.temp").is_some(), "the last value is kept");
+        s.set_at("cpu.temp", Value::Number(51.0, Unit::Celsius), 5.0);
+        assert_eq!(
+            (s.lost_at("cpu.temp"), s.heard_at("cpu.temp")),
+            (None, Some(5.0))
+        );
     }
 }

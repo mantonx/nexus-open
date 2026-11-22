@@ -115,6 +115,68 @@ impl Canvas {
         }
     }
 
+    /// Scales every pixel's brightness by `k` (0–1), as a dimmer backlight
+    /// would, except in the columns `keep` lists.
+    pub fn dim(&mut self, k: f32, keep: &[std::ops::Range<u32>]) {
+        if k >= 1.0 {
+            return;
+        }
+        let k = (k.max(0.0) * 256.0).round() as u32;
+        let w = self.width();
+        let data = self.pixmap.data_mut();
+        for (i, px) in data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let x = i as u32 % w;
+            if keep.iter().any(|r| r.contains(&x)) {
+                continue;
+            }
+            for c in &mut px[..3] {
+                *c = ((u32::from(*c) * k + 128) >> 8) as u8;
+            }
+        }
+    }
+
+    /// Lays `src` over this canvas at column `x` and `dy` rows down, mixed
+    /// in at `alpha` (0–1). Rows and columns that fall outside are clipped.
+    /// Used to fade a takeover in and out.
+    pub fn blend_from(&mut self, src: &Canvas, x: i32, dy: i32, alpha: f32) {
+        let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+        if a == 0 {
+            return;
+        }
+        let (dw, dh) = (self.width() as i32, self.height() as i32);
+        let sw = src.width() as i32;
+        let src_data = src.pixmap.data();
+        let dst = self.pixmap.data_mut();
+        for sy in 0..src.height() as i32 {
+            let y = sy + dy;
+            if y < 0 || y >= dh {
+                continue;
+            }
+            for sx in 0..sw {
+                let px = x + sx;
+                if px < 0 || px >= dw {
+                    continue;
+                }
+                let s = ((sy * sw + sx) * 4) as usize;
+                let d = ((y * dw + px) * 4) as usize;
+                for c in 0..3 {
+                    dst[d + c] = mix(src_data[s + c], dst[d + c], a);
+                }
+            }
+        }
+    }
+
+    /// The colour at (`x`, `y`). Used by tests and tools.
+    pub fn pixel(&self, x: u32, y: u32) -> Rgb {
+        let i = ((y * self.width() + x) * 4) as usize;
+        let d = self.pixmap.data();
+        Rgb {
+            r: d[i],
+            g: d[i + 1],
+            b: d[i + 2],
+        }
+    }
+
     /// Saves the canvas as a PNG. Used by tests and development tools.
     pub fn save_png(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
         self.pixmap
