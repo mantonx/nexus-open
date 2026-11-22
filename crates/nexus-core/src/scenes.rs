@@ -208,6 +208,7 @@ pub fn frames(accents: &[(&str, Rgb)]) -> Vec<Frame> {
     default_pages(&mut out);
     takeovers(&mut out);
     news_page(&mut out);
+    live_pages(&mut out);
     specimens(&mut out);
     for (name, rgb) in accents {
         scenes(
@@ -356,6 +357,133 @@ width = 128
 type = "news"
 width = 512
 "#;
+
+/// An hour-long track 9 min 26 s in, and one past its first hour.
+const LONG_TRACK: (f64, f64) = (566.0, 2592.0);
+const HOURS_TRACK: (f64, f64) = (3753.0, 7800.0);
+
+/// The track, paused, at `at` seconds of `length`.
+fn track_at(e: &mut Engine, (at, length): (f64, f64)) {
+    e.handle(Input::Signal(
+        "media.position".into(),
+        Value::Number(at, Unit::None),
+    ));
+    e.handle(Input::Signal(
+        "media.length".into(),
+        Value::Number(length, Unit::None),
+    ));
+}
+
+/// The owner's layout as the strip first drew it, where it went wrong
+/// (2026-11-22): six widgets on a page, so every zone is 106 or 107 px,
+/// two of them compact temperatures in °F; a media page with a seek
+/// slider and an hour-long track; and a page with no widgets yet.
+fn live_pages(out: &mut Out) {
+    let now = demo::sample_time();
+    let row = |w: &str| format!("[[page]]\nname = \"{w}\"\n");
+    let text = format!(
+        "{}{}{}",
+        row("Glance")
+            + "[[page.widget]]\ntype = \"clock\"\nwidth = 107\n"
+            + "[[page.widget]]\ntype = \"media\"\nwidth = 107\n"
+            + &value("Weather", "weather.temp", 107, "")
+            + &value("CPU", "cpu.temp", 107, "warn = 75\ncrit = 90\n")
+            + &value("GPU", "gpu.temp", 106, "warn = 80\ncrit = 90\n")
+            + "[[page.widget]]\ntype = \"rate\"\nwidth = 106\nlabel = \"Network\"\ndown = \"net.down\"\nup = \"net.up\"\n",
+        row("Media")
+            + "[[page.widget]]\ntype = \"media\"\nwidth = 214\n"
+            + "[[page.widget]]\ntype = \"slider\"\nwidth = 213\nlabel = \"Seek\"\ncontrols = \"seek\"\n"
+            + "[[page.widget]]\ntype = \"slider\"\nwidth = 213\nlabel = \"Volume\"\ncontrols = \"volume\"\n",
+        row("Empty"),
+    );
+    let mut c = layout(None, true);
+    c.pages
+        .extend(Config::parse(&text).expect("a valid layout").pages);
+    let world = World {
+        cpu: 111.0,
+        gpu: 120.0,
+        down: 8_000.0,
+        track: Some(false),
+        ..idle()
+    };
+    let mut e = engine(c.clone(), &world, "Glance");
+    track_at(&mut e, LONG_TRACK);
+    out.save("live", "live-p1-compact-temps", shot(&mut e, &now, 1.0));
+    // The same page with a three-digit rate: "512 kB/s" in 106 px.
+    let busy = World {
+        down: 512_000.0,
+        ..world.clone()
+    };
+    let mut e = engine(c.clone(), &busy, "Glance");
+    track_at(&mut e, LONG_TRACK);
+    out.save("live", "live-p1-rate", shot(&mut e, &now, 1.0));
+    let mut e = engine(c.clone(), &world, "Media");
+    track_at(&mut e, LONG_TRACK);
+    out.save("live", "live-p5-seek", shot(&mut e, &now, 1.0));
+    let mut e = engine(c.clone(), &world, "Media");
+    track_at(&mut e, HOURS_TRACK);
+    out.save("live", "live-p5-seek-hours", shot(&mut e, &now, 1.0));
+    let mut e = engine(c, &world, "Empty");
+    out.save("live", "live-p6-empty-page", shot(&mut e, &now, 1.0));
+
+    // One compact temperature at every width a layout may give it, widest
+    // first: each step of the ladder, the name in place of the icon, and
+    // the icon alone where no number fits.
+    let widths = [125, 112, 106, 96, 88, 72, 41];
+    let mut text = row("Narrow");
+    for w in widths {
+        text += &value("CPU", "cpu.temp", w, "warn = 75\ncrit = 90\n");
+    }
+    let mut c = layout(None, true);
+    c.pages = Config::parse(&text).expect("a valid layout").pages;
+    let mut e = engine(c, &world, "Narrow");
+    out.save("live", "narrow-values", shot(&mut e, &now, 1.0));
+
+    // Every compact card that shows a number, at its worst value, in the
+    // zones a layout gives compact cards: nothing may run past its card.
+    let widths = [124, 112, 106, 102, 100, 96];
+    let worst = World {
+        cpu_load: 100.0,
+        mem: 100.0,
+        down: 999_000_000.0,
+        ..world.clone()
+    };
+    let rate = |w: u32| {
+        format!(
+            "[[page.widget]]\ntype = \"rate\"\nwidth = {w}\nlabel = \"Network\"\ndown = \"net.down\"\nup = \"net.up\"\n"
+        )
+    };
+    let load = |w: u32| value("CPU load", "cpu.load", w, "");
+    let mem = |w: u32| value("Memory", "mem.used", w, "warn = 85\ncrit = 95\n");
+    let wx = |w: u32| value("Weather", "weather.temp", w, "");
+    let kinds: [(&str, &dyn Fn(u32) -> String); 4] = [
+        ("rate", &rate),
+        ("load", &load),
+        ("memory", &mem),
+        ("weather", &wx),
+    ];
+    for (kind, widget) in kinds {
+        let mut text = row("Sweep");
+        for w in widths {
+            text += &widget(w);
+        }
+        let mut c = layout(None, true);
+        c.pages = Config::parse(&text).expect("a valid layout").pages;
+        let mut e = engine(c, &worst, "Sweep");
+        if kind == "weather" {
+            // 104 °F, the hottest three digits a forecast gives.
+            e.handle(Input::Signal(
+                "weather.temp".into(),
+                Value::Number(f(104.0), Unit::Celsius),
+            ));
+        }
+        out.save(
+            "live",
+            format!("overflow-sweep-{kind}"),
+            shot(&mut e, &now, 1.0),
+        );
+    }
+}
 
 fn default_pages(out: &mut Out) {
     let now = demo::sample_time();
@@ -924,6 +1052,38 @@ fn specimens(out: &mut Out) {
         "slider-muted",
         &volume,
         &muted,
+        true,
+        1000.0,
+        Finger::None,
+        same,
+    );
+
+    // Times are never cut: "/ 43:12" goes first, then a step smaller,
+    // then the time; past an hour too.
+    let seek = format!(
+        "[[page.widget]]\ntype = \"slider\"\nwidth = {w}\nlabel = \"Seek\"\ncontrols = \"seek\"\n"
+    );
+    let at = |(pos, len): (f64, f64), playing: bool| {
+        let mut t = track(playing);
+        t.retain(|(n, _)| !matches!(*n, "media.position" | "media.length"));
+        t.push(("media.position", Value::Number(pos, Unit::None)));
+        t.push(("media.length", Value::Number(len, Unit::None)));
+        signals(t)
+    };
+    for (name, times) in [
+        ("slider-seek", LONG_TRACK),
+        ("slider-seek-hours", HOURS_TRACK),
+    ] {
+        let s = at(times, true);
+        specimen(out, r, name, &seek, &s, true, 1000.0, Finger::None, same);
+    }
+    let hours = at(HOURS_TRACK, true);
+    specimen(
+        out,
+        r,
+        "media-hours",
+        &media,
+        &hours,
         true,
         1000.0,
         Finger::None,

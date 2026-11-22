@@ -436,6 +436,9 @@ pub const SCENE_KEY_W: f32 = 50.0;
 /// The play/pause key drawn on a medium media card (the whole card is the
 /// hit zone; this is what says so).
 pub const MEDIA_KEY_W: f32 = 36.0;
+/// The room a hero media card keeps for the artist beside the elapsed
+/// time: with less, the time goes rather than leave "…" there.
+pub const MEDIA_ARTIST_MIN: f32 = 40.0;
 /// Artwork: a rounded square.
 pub const ART: f32 = 33.0;
 pub const ART_SCENE: f32 = 35.0;

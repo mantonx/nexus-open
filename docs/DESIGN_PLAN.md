@@ -479,3 +479,34 @@ README clip (now of the new strip), release verification.
   his music or changed his volume. The rig now gives the daemon a private
   bus and no sound server (890a3bb). Checked: the rig sees no media and
   no volume.
+- 2026-11-22 — Three defects on Matt's live layout, fixed; each rule
+  provisional, Matt to overturn (DESIGN.md, Size classes, Numbers are
+  never cut, States, open question 17):
+  - A value card always says what it reads. Compact cards are laid out
+    for the widest value of their unit ("212°", "100%"), never the value
+    now, and keep the icon by stepping numeral and icon down together
+    (32/22 to 20/17); narrower, the name above the numeral; narrower
+    still, the icon alone. A widget with no label is named for its
+    signal ("CPU"). Owner's 106 px temperatures: 26 px numerals, 17 px
+    icon. Cost: memory on the default System page drops to 22/17.
+  - Numbers and times are never ellipsized. A time drops "/ total", then
+    a style, then goes, chosen once per track for its widest elapsed
+    time; `fit` cuts before a word with a figure in it; ages, high/low,
+    "From 9:30", "Lost at 10:41" shorten in whole forms or go. Cost: a
+    107 px compact media card shows no time (it used to run into the
+    padding).
+  - An empty page says "Empty page / Add widgets in Settings", centred,
+    TEXT2, on bare ground: no card, outline or accent.
+  - Found, not fixed: a compact rate card in a 106 px zone runs
+    "12 kB/s" past its edge.
+  Frames: `live-p1-compact-temps`, `live-p5-seek`, `live-p5-seek-hours`,
+  `live-p6-empty-page`, `narrow-values`, `specimen-slider-seek`,
+  `specimen-slider-seek-hours`, `specimen-media-hours`. Not yet judged
+  by an isolated critique.
+- 2026-11-22 — The same rule for compact rate and weather cards,
+  provisional: laid out for "888 MB/s" and "888°", steps down the type
+  scale, then (rate) the arrow and unit stacked over a 20 px number.
+  The unit is not shortened: "12 kB" reads as an amount. Fixes the 106
+  px rate running "12 kB/s" off its card, and weather running "104°" off
+  at every compact width. Cost: default System network 32 to 20 px,
+  Home weather 40 to 32. Frames `live-p1-rate`, `overflow-sweep-*`.
