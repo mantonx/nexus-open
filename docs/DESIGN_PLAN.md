@@ -206,3 +206,25 @@ README clip (now of the new strip), release verification.
   strip first, three directions mocked up, new window concept, redesign
   before release. Not judged in the critique: the physical panel
   (brightness, angle, colour), the light theme, drag feel, HiDPI.
+- 2026-11-22 — U0 tools built, by delegated agents, reviewed and merged.
+  The doctor, `status` and the window's banner now tell apart: not plugged
+  in; in use by a named program; left without its driver (what the old Go
+  app does when it quits: it detaches usbhid and never reattaches, so a
+  replug is needed). Seen live on Matt's machine. `nexusd preview --card`
+  shows a ten-frame legibility card and `--frames DIR` shows any folder of
+  640×48 PNGs; both need `nexusd.service` stopped first, since opening the
+  strip does not lock it. Neither has been run on the panel yet.
+- 2026-11-22 — U1 rendered: three directions, the same six scenes each,
+  as frames from the real drawing stack. The scene frames are in
+  `docs/design/u1/` (named so each scene shows A instrument, B by context,
+  C better cards); the code is on local branches `design/u1-instrument`,
+  `design/u1-context` and `design/u1-cards`, not merged until one is
+  chosen. Provisional sizes (30 px numerals, nothing under 14 px), since
+  the card has not been read yet. Weak points as their authors and the
+  review found them. A: densest (32 px numerals), media cramped, bars say
+  little at idle. B: largest figures (52 px) but depends on knowing a game
+  is running, which the daemon cannot tell; the edge key's readouts are
+  small. C: least change to layouts, most conventional; long titles cut
+  off; the current page's marker is hard to see. All three needed Plex's
+  width axis and tabular figures, which `TextEngine` does not set yet.
+  **GATE open:** Matt picks.
