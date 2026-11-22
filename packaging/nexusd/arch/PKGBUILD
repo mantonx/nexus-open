@@ -1,0 +1,64 @@
+# Maintainer: Matt <matthew.panton@gmail.com>
+#
+# Nexus Open, the Rust app: nexusd (the daemon and, as `nexusd ui`, the
+# settings window) and nexusctl. Builds from a release tag's source.
+# To build this checkout instead: packaging/nexusd/arch/build-local.sh
+#
+# The package keeps the old Go app's name, so it replaces it in place.
+
+pkgname=nexus-open
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Drives the Corsair iCUE Nexus touch strip, with a settings window (not made or endorsed by Corsair)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/mantonx/nexus-open'
+# The app is MIT; the fonts compiled into it are OFL-1.1 (Rubik, Lato, Noto
+# Sans, Roboto, IBM Plex Sans, Atkinson Hyperlegible), MIT (Phosphor icons)
+# and Bitstream-Vera (DejaVu Sans).
+license=('MIT' 'OFL-1.1' 'Bitstream-Vera')
+depends=(
+    'gcc-libs' 'glibc'
+    'fontconfig' 'freetype2'
+    # Loaded at run time by the settings window:
+    'libxkbcommon'
+    'hicolor-icon-theme'
+    'systemd'
+)
+optdepends=(
+    'wayland: the settings window on a Wayland desktop'
+    'libxkbcommon-x11: the settings window on an X11 desktop'
+    'libxcursor: the settings window on an X11 desktop'
+    'libxrandr: the settings window on an X11 desktop'
+    'libxi: the settings window on an X11 desktop'
+    'libglvnd: OpenGL drawing for the settings window (it falls back to software)'
+)
+makedepends=('cargo')
+install=nexus-open.install
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# Filled in by the release workflow for the AUR; build-local.sh skips it.
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release -p nexusd -p nexusctl
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo test --frozen --release -p nexus-device -p nexus-doctor -p nexus-store
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    packaging/nexusd/stage.sh "$pkgdir" target/release
+}

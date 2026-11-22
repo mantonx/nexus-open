@@ -1,0 +1,11 @@
+#!/bin/sh
+# The udev rule is gone: stop udev applying it to new devices.
+set -e
+
+case "$1" in
+remove | purge)
+    udevadm control --reload-rules 2>/dev/null || true
+    ;;
+esac
+
+exit 0
