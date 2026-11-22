@@ -1836,6 +1836,7 @@ pub fn describe(w: &Widget) -> String {
     match w {
         Widget::Clock { .. } => "Clock".into(),
         Widget::Media { .. } => "Now playing".into(),
+        Widget::News { .. } => "News".into(),
         Widget::Key { icon, label, .. } => label
             .iter()
             .chain(icon)

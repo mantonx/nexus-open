@@ -215,6 +215,50 @@ fn headlines_age_out_while_rotating() {
 }
 
 #[test]
+fn with_every_feed_failing_the_last_headline_stays_lost() {
+    let (mut s, published, now, wall) = with_stories(2);
+    s.config.as_mut().unwrap().max_age = Duration::from_secs(150);
+    s.rebuild(now, wall);
+    s.show(wall);
+    assert_eq!(number(&published.borrow()[0], "news.lost"), 0.0);
+    // The feed starts failing; its headlines stay while they are young.
+    s.feeds[0].failed("offline".into(), now, &Timings::REAL);
+    s.advance(now, wall + Duration::from_secs(30));
+    assert_eq!(text(&published.borrow()[1], "news.title"), "Story 1");
+    assert_eq!(number(&published.borrow()[1], "news.lost"), 0.0);
+    // Ten minutes on, all too old: the one shown last stays, lost.
+    s.advance(now, wall + Duration::from_secs(600));
+    {
+        let p = published.borrow();
+        let last = p.last().unwrap();
+        assert_eq!(text(last, "news.title"), "Story 1");
+        assert_eq!(text(last, "news.link"), "https://e.example/1");
+        assert_eq!(number(last, "news.lost"), 1.0);
+        assert_eq!(number(last, "news.age"), 660.0, "and keeps ageing");
+        assert_eq!(number(last, "news.count"), 0.0);
+    }
+    // The feed comes back with nothing new: a blank, not lost.
+    s.feeds[0].succeeded(now, &Timings::REAL);
+    s.advance(now, wall + Duration::from_secs(600));
+    let p = published.borrow();
+    let last = p.last().unwrap();
+    assert_eq!(text(last, "news.title"), "");
+    assert_eq!(number(last, "news.lost"), 0.0);
+}
+
+#[test]
+fn a_feed_that_is_fine_but_quiet_blanks_rather_than_lost() {
+    let (mut s, published, now, wall) = with_stories(1);
+    s.config.as_mut().unwrap().max_age = Duration::from_secs(150);
+    s.rebuild(now, wall);
+    s.show(wall);
+    s.advance(now, wall + Duration::from_secs(600));
+    let p = published.borrow();
+    assert_eq!(text(p.last().unwrap(), "news.title"), "");
+    assert_eq!(number(p.last().unwrap(), "news.lost"), 0.0);
+}
+
+#[test]
 fn undated_entries_keep_their_first_seen_time() {
     let mut feed = Feed::new("https://nasty.example/".into(), Instant::now());
     let parsed = parse::parse(&fixture("nasty.xml"), "https://nasty.example/").unwrap();

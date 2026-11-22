@@ -177,6 +177,19 @@ pub enum WidgetView {
         /// as a mark, with the change from it.
         from: Option<f32>,
     },
+    /// One news headline. Live, the whole card is a key (a tap opens the
+    /// article); the words stay in the text ramp, since they are
+    /// information.
+    News {
+        icon: char,
+        /// The headline, whole: cut to fit when drawn.
+        headline: String,
+        /// The feed's name: "BBC News".
+        source: String,
+        /// "12 min", "now".
+        age: String,
+        avail: Avail,
+    },
     /// A control to press.
     Key {
         icon: Option<char>,
@@ -1062,6 +1075,10 @@ impl Pen<'_> {
                 | WidgetView::Key { .. }
                 | WidgetView::Media(Some(_))
                 | WidgetView::OpenMusic
+                | WidgetView::News {
+                    avail: Avail::Live,
+                    ..
+                }
         );
         match view {
             WidgetView::Clock {
@@ -1138,6 +1155,13 @@ impl Pen<'_> {
                     None => self.slider(x, w, cls, &s),
                 }
             }
+            WidgetView::News {
+                icon,
+                headline,
+                source,
+                age,
+                avail,
+            } => self.news(x, w, cls, *icon, headline, source, age, avail, press),
             WidgetView::Key {
                 icon,
                 label,
@@ -2386,6 +2410,127 @@ impl Pen<'_> {
                 self.text_c(Face::Word, &KEY_LABEL, &l, x + w / 2.0, cy + 6.5, TEXT);
             }
         }
+    }
+
+    /// A news headline. Live, the whole card is a key, as a launch key is:
+    /// raised face, lit top edge, and the newspaper in the accent, since a
+    /// tap opens the article; the headline and its source stay in the text
+    /// ramp. The headline gets the card's whole width on the first line,
+    /// cut after a whole word with an ellipsis, and never scrolls. A
+    /// compact card has no room for a headline that can be read, so it
+    /// shows the newspaper and the headline's age.
+    #[allow(clippy::too_many_arguments)]
+    fn news(
+        &mut self,
+        x: f32,
+        w: f32,
+        cls: Class,
+        icon: char,
+        headline: &str,
+        source: &str,
+        age: &str,
+        avail: &Avail,
+        press: Press,
+    ) {
+        if *avail == Avail::NotSetUp {
+            let long = "Add a feed in Settings";
+            let room = x + w - PAD - (x + PAD + 2.0 + ICON_MEDIUM + 9.0);
+            let hint = if self.measure(Face::Word, &BODY, long) <= room {
+                long
+            } else {
+                "Add a feed"
+            };
+            self.setup_prompt(x, w, cls, icons::PLUS, "News", hint, "News");
+            return;
+        }
+        if *avail == Avail::NoData {
+            // Waiting for the first headline: a quiet card that does
+            // nothing, with the newspaper in outline.
+            self.card(x, w, CARD, Press::default());
+            let cy = CARD_Y + CARD_H / 2.0 + 0.5;
+            let isz = if cls == Class::Compact {
+                ICON_COMPACT
+            } else {
+                ICON_MEDIUM
+            };
+            let ix = x + PAD + isz / 2.0;
+            self.icon(true, icon, isz, ix, cy, TEXT3);
+            let tx = x + PAD + isz + 8.0;
+            let room = x + w - PAD - tx;
+            if cls == Class::Compact {
+                self.text(Face::Word, &LABEL, "No news", tx, BASE_LINE1 - 1.0, TEXT2);
+                self.text(Face::Word, &LABEL, "yet", tx, BASE_LINE2 - 3.0, TEXT2);
+            } else {
+                let st = if cls == Class::Hero { TITLE } else { BODY };
+                let l = self.fit(Face::Word, &st, "No news yet", room);
+                self.text(Face::Word, &st, &l, tx, 32.0, TEXT2);
+            }
+            return;
+        }
+        let live = *avail == Avail::Live;
+        let pressed = live && press.on;
+        let dy = if pressed { 1.0 } else { 0.0 };
+        if live {
+            self.key_face(x, CARD_Y, w, CARD_H, CARD_R, pressed, false);
+            self.hold_fill(x, w, KEY.mix(self.a.base, HOLD_MIX), press);
+        } else {
+            // Lost: every feed failing and the last headline too old. A
+            // flat card in TEXT3 with the broken link; a tap does nothing.
+            self.card(x, w, CARD, Press::default());
+        }
+        let glyph_c = if pressed { TEXT } else { self.a.text };
+        let (head_c, line2_c) = if live { (TEXT, TEXT2) } else { (TEXT3, TEXT3) };
+        if cls == Class::Compact {
+            let tw = self.measure(Face::Word, &TITLE, age);
+            let total = ICON_KEY + ICON_GAP + tw;
+            let x0 = x + ((w - total) / 2.0).max(PAD);
+            let cy = CARD_Y + CARD_H / 2.0 + 0.5 + dy;
+            self.news_glyph(live, icon, ICON_KEY, x0 + ICON_KEY / 2.0, cy, glyph_c);
+            let tx = x0 + ICON_KEY + ICON_GAP;
+            let age = self.fit(Face::Word, &TITLE, age, x + w - PAD - tx);
+            self.text(Face::Word, &TITLE, &age, tx, cy + 7.0, head_c);
+            return;
+        }
+        let (tx, right) = (x + PAD, x + w - PAD);
+        let line1 = self.fit(Face::Word, &TITLE, headline, right - tx);
+        self.text(Face::Word, &TITLE, &line1, tx, BASE_LINE1 + dy, head_c);
+        // The second line: the newspaper, then "BBC News · 12 min". The age
+        // stays whole; the source is cut first, and left out before it
+        // would be cut to nothing.
+        let base2 = BASE_LINE2 - 1.0 + dy;
+        let icy = base2 - LABEL.size * 0.35;
+        let ix = tx + ICON_SMALL / 2.0;
+        self.news_glyph(live, icon, ICON_SMALL, ix, icy, glyph_c);
+        let lx = tx + ICON_SMALL + ICON_GAP;
+        let room = right - lx;
+        let sep = " · ";
+        let tail = self.measure(Face::Word, &LABEL, &format!("{sep}{age}"));
+        let words = if source.is_empty() || age.is_empty() {
+            let one = if source.is_empty() { age } else { source };
+            self.fit(Face::Word, &LABEL, one, room)
+        } else {
+            let fitted = self.fit(Face::Word, &LABEL, source, room - tail);
+            if fitted.chars().count() < 4 {
+                self.fit(Face::Word, &LABEL, age, room)
+            } else {
+                format!("{fitted}{sep}{age}")
+            }
+        };
+        self.text(Face::Word, &LABEL, &words, lx, base2, line2_c);
+    }
+
+    /// The newspaper on a news card: in outline, as on a key; in the
+    /// accent while live, TEXT3 with the broken link once lost.
+    fn news_glyph(&mut self, live: bool, ch: char, size: f32, cx: f32, cy: f32, c: Rgb) {
+        if live {
+            self.icon(true, ch, size, cx, cy, c);
+            return;
+        }
+        self.icon(true, ch, size, cx, cy, TEXT3);
+        let bs = ICON_BADGE + 1.0;
+        let (bx, by) = (cx + size * 0.42, cy + size * 0.32);
+        self.circle(bx, by, bs * 0.62 + 1.0, CARD);
+        self.icon(true, icons::LINK_BREAK, bs, bx, by, TEXT2);
     }
 
     /// "Not set up": a dashed accent outline and plain words.

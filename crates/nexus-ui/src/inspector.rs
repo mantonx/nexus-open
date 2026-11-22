@@ -122,6 +122,7 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
     match widget {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
+        Widget::News { .. } => put("type", "news"),
         Widget::Key { label, sub, .. } => {
             put("type", KEY);
             put("label", label.as_deref().unwrap_or_default());
@@ -214,7 +215,7 @@ fn flatten_action(v: &mut Values, prefix: &str, action: Option<&Action>) {
         v.insert(key, s.to_string());
     };
     match action {
-        None => put("", NOTHING),
+        None | Some(Action::News(_)) => put("", NOTHING),
         Some(Action::Page(p)) if p == "next" => put("", NEXT_PAGE),
         Some(Action::Page(p)) if p == "prev" => put("", PREV_PAGE),
         Some(Action::Page(p)) => {

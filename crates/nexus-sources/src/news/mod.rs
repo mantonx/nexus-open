@@ -15,13 +15,18 @@
 //! - `news.age`: seconds since the headline was published, a plain number
 //!   (there is no unit for time spans, so it is [`Unit::None`], as
 //!   `media.position` is);
-//! - `news.count`: how many headlines are kept.
+//! - `news.count`: how many headlines are kept;
+//! - `news.lost`: 1 while every feed is failing and no headline is new
+//!   enough to show, else 0.
 //!
 //! With no feeds, or none read yet, nothing is published; if headlines were
 //! shown and then go (the last feed removed, everything too old), the text
 //! signals are blanked and the numbers set to 0, as the media source does
-//! when nothing is playing. Problems go to the log, once per feed each time
-//! its state changes, never into the signals.
+//! when nothing is playing. The exception is a source that has lost every
+//! feed: when its last headlines grow too old it keeps the one it showed
+//! last, with `news.lost` 1, so the widget can show it greyed instead of
+//! acting as if there were no news. Problems go to the log, once per feed
+//! each time its state changes, never into the signals.
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -29,7 +34,6 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use nexus_core::signal::{Unit, Value};
-use serde::{Deserialize, Serialize};
 
 use crate::Reading;
 
@@ -43,45 +47,13 @@ pub use fetch::check_url;
 use fetch::{Fetched, Validators};
 use parse::Item;
 
-/// How long each headline shows by default.
-pub const DEFAULT_ROTATE: Duration = Duration::from_secs(12);
 /// How old a headline may be by default before it is dropped.
-pub const DEFAULT_MAX_AGE: Duration = Duration::from_secs(48 * 3600);
-/// The shortest `rotate` honoured. Faster than this a headline cannot be
-/// read before it changes, and the strip would never be at rest.
-pub const MIN_ROTATE: Duration = Duration::from_secs(2);
-
-/// The news settings: which feeds, and how headlines are shown.
-///
-/// In a config file, durations are a number of seconds (`rotate = 12`) or
-/// a number with a unit: `"30s"`, `"15m"`, `"48h"`, `"2d"`.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct NewsConfig {
-    /// Feed addresses (RSS, Atom or JSON Feed), in the order the user added
-    /// them; on a tie the earlier feed's copy of a story is the one shown.
-    /// Only `https://` and `http://` addresses are fetched; others are
-    /// reported in the log and skipped. Empty means no news at all.
-    pub feeds: Vec<String>,
-    /// How long each headline shows before the next. At least
-    /// [`MIN_ROTATE`]; shorter values are treated as that.
-    #[serde(with = "duration")]
-    pub rotate: Duration,
-    /// Headlines published longer ago than this are not shown, so a feed
-    /// that stops updating does not leave week-old news on the strip.
-    #[serde(with = "duration")]
-    pub max_age: Duration,
-}
-
-impl Default for NewsConfig {
-    fn default() -> Self {
-        NewsConfig {
-            feeds: Vec::new(),
-            rotate: DEFAULT_ROTATE,
-            max_age: DEFAULT_MAX_AGE,
-        }
-    }
-}
+pub use nexus_core::config::NEWS_MAX_AGE as DEFAULT_MAX_AGE;
+/// The shortest `rotate` honoured.
+pub use nexus_core::config::NEWS_MIN_ROTATE as MIN_ROTATE;
+/// How long each headline shows by default.
+pub use nexus_core::config::NEWS_ROTATE as DEFAULT_ROTATE;
+pub use nexus_core::config::NewsConfig;
 
 /// How often feeds are asked, and how failures back off. Fixed in use;
 /// tests shorten them so a local server can be exercised in milliseconds.
@@ -291,6 +263,9 @@ struct Source<P> {
     /// Whether a headline has been published since the last blank, so a
     /// blank is sent once when they go, and never before any came.
     shown: bool,
+    /// The headline last published, kept on the strip as lost when every
+    /// feed fails and nothing new enough is left.
+    last: Option<Item>,
 }
 
 impl<P: FnMut(Vec<Reading>) -> bool> Source<P> {
@@ -307,6 +282,7 @@ impl<P: FnMut(Vec<Reading>) -> bool> Source<P> {
             at: None,
             next_turn: None,
             shown: false,
+            last: None,
         }
     }
 
@@ -386,6 +362,9 @@ impl<P: FnMut(Vec<Reading>) -> bool> Source<P> {
                 None => Feed::new(url.to_string(), now),
             })
             .collect();
+        if config.is_none() {
+            self.last = None;
+        }
         self.config = config;
         self.rebuild(now, SystemTime::now());
         self.show(SystemTime::now());
@@ -466,18 +445,32 @@ impl<P: FnMut(Vec<Reading>) -> bool> Source<P> {
         self.show(wall);
     }
 
+    /// Every feed that can be fetched has failed its last attempt.
+    fn failing(&self) -> bool {
+        let mut usable = self.feeds.iter().filter(|f| f.usable).peekable();
+        usable.peek().is_some() && usable.all(|f| f.failures > 0)
+    }
+
     fn show(&mut self, wall: SystemTime) {
-        let item = self.at.and_then(|i| self.kept.get(i));
+        let item = self.at.and_then(|i| self.kept.get(i)).cloned();
+        // Nothing new enough, and no feed to bring anything newer: the
+        // last headline stays, marked lost, rather than a blank that would
+        // read as "no news".
+        let lost = item.is_none() && self.shown && self.failing();
+        let item = if lost { self.last.clone() } else { item };
         if item.is_none() && !self.shown {
             return;
         }
         self.shown = item.is_some();
-        let readings = readings(item, self.kept.len(), wall);
+        if !lost {
+            self.last.clone_from(&item);
+        }
+        let readings = readings(item.as_ref(), self.kept.len(), lost, wall);
         self.alive &= (self.publish)(readings);
     }
 }
 
-fn readings(item: Option<&Item>, count: usize, wall: SystemTime) -> Vec<Reading> {
+fn readings(item: Option<&Item>, count: usize, lost: bool, wall: SystemTime) -> Vec<Reading> {
     let text = |f: fn(&Item) -> &str| Value::Text(item.map(f).unwrap_or_default().to_string());
     let age = item.map_or(0.0, |i| {
         wall.duration_since(i.published)
@@ -490,83 +483,6 @@ fn readings(item: Option<&Item>, count: usize, wall: SystemTime) -> Vec<Reading>
         ("news.link", text(|i| &i.link)),
         ("news.age", Value::Number(age, Unit::None)),
         ("news.count", Value::Number(count as f64, Unit::None)),
+        ("news.lost", Value::Number(f64::from(lost), Unit::None)),
     ]
-}
-
-/// Durations in the config: seconds as a number, or a number with a unit.
-mod duration {
-    use std::fmt;
-    use std::time::Duration;
-
-    use serde::de::{self, Visitor};
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&format(*d))
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
-        d.deserialize_any(DurationVisitor)
-    }
-
-    struct DurationVisitor;
-
-    impl Visitor<'_> for DurationVisitor {
-        type Value = Duration;
-
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str(r#"seconds, or a time such as "30s", "15m", "48h" or "2d""#)
-        }
-
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Duration, E> {
-            Ok(Duration::from_secs(v))
-        }
-
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Duration, E> {
-            u64::try_from(v)
-                .map(Duration::from_secs)
-                .map_err(|_| E::invalid_value(de::Unexpected::Signed(v), &self))
-        }
-
-        fn visit_f64<E: de::Error>(self, v: f64) -> Result<Duration, E> {
-            Duration::try_from_secs_f64(v)
-                .map_err(|_| E::invalid_value(de::Unexpected::Float(v), &self))
-        }
-
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<Duration, E> {
-            parse(v).ok_or_else(|| E::invalid_value(de::Unexpected::Str(v), &self))
-        }
-    }
-
-    pub fn parse(text: &str) -> Option<Duration> {
-        let text = text.trim();
-        let split = text
-            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-            .unwrap_or(text.len());
-        let (number, unit) = text.split_at(split);
-        let number: f64 = number.parse().ok()?;
-        let scale = match unit.trim() {
-            "" | "s" => 1.0,
-            "m" | "min" => 60.0,
-            "h" => 3600.0,
-            "d" => 86400.0,
-            _ => return None,
-        };
-        Duration::try_from_secs_f64(number * scale).ok()
-    }
-
-    /// The largest of h, m and s that writes it as a whole number, so
-    /// 48 hours stays "48h" rather than "2d" or "172800s".
-    pub fn format(d: Duration) -> String {
-        let secs = d.as_secs();
-        if d.subsec_nanos() != 0 {
-            format!("{}s", d.as_secs_f64())
-        } else if secs != 0 && secs.is_multiple_of(3600) {
-            format!("{}h", secs / 3600)
-        } else if secs != 0 && secs.is_multiple_of(60) {
-            format!("{}m", secs / 60)
-        } else {
-            format!("{secs}s")
-        }
-    }
 }

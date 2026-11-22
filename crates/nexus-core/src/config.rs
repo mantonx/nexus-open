@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -41,6 +42,9 @@ pub struct Config {
     pub pages: Vec<Page>,
     /// Where the weather is for. Without it there is no weather reading.
     pub weather: Option<Weather>,
+    /// The news feeds. Without it, or with no feeds, nothing is fetched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub news: Option<NewsConfig>,
     /// Rows that briefly cover the strip when a signal changes.
     #[serde(rename = "takeover", default)]
     pub takeovers: Vec<Takeover>,
@@ -144,6 +148,133 @@ pub struct Weather {
     /// Coordinates in degrees. When given, the location is not looked up.
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+}
+
+/// How long each headline shows by default.
+pub const NEWS_ROTATE: Duration = Duration::from_secs(12);
+/// How old a headline may be by default before it is dropped.
+pub const NEWS_MAX_AGE: Duration = Duration::from_secs(48 * 3600);
+/// The shortest `rotate` honoured. Faster than this a headline cannot be
+/// read before it changes, and the strip would never be at rest.
+pub const NEWS_MIN_ROTATE: Duration = Duration::from_secs(2);
+
+/// The `[news]` section: which feeds, and how headlines are shown.
+///
+/// Durations are a number of seconds (`rotate = 12`) or a number with a
+/// unit: `"30s"`, `"15m"`, `"48h"`, `"2d"`.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NewsConfig {
+    /// Feed addresses (RSS, Atom or JSON Feed), in the order the user added
+    /// them; on a tie the earlier feed's copy of a story is the one shown.
+    /// Only `https://` and `http://` addresses are fetched; others are
+    /// reported in the log and skipped. Empty means no news at all.
+    pub feeds: Vec<String>,
+    /// How long each headline shows before the next. At least
+    /// [`NEWS_MIN_ROTATE`]; shorter values are treated as that.
+    #[serde(with = "duration")]
+    pub rotate: Duration,
+    /// Headlines published longer ago than this are not shown, so a feed
+    /// that stops updating does not leave week-old news on the strip.
+    #[serde(with = "duration")]
+    pub max_age: Duration,
+}
+
+impl Default for NewsConfig {
+    fn default() -> Self {
+        NewsConfig {
+            feeds: Vec::new(),
+            rotate: NEWS_ROTATE,
+            max_age: NEWS_MAX_AGE,
+        }
+    }
+}
+
+impl NewsConfig {
+    /// Whether it names any feed at all: without one the news widget is
+    /// "not set up".
+    pub fn has_feeds(&self) -> bool {
+        self.feeds.iter().any(|f| !f.trim().is_empty())
+    }
+}
+
+/// Durations in the config: seconds as a number, or a number with a unit.
+pub mod duration {
+    use std::fmt;
+    use std::time::Duration;
+
+    use serde::de::{self, Visitor};
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&format(*d))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        d.deserialize_any(DurationVisitor)
+    }
+
+    struct DurationVisitor;
+
+    impl Visitor<'_> for DurationVisitor {
+        type Value = Duration;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str(r#"seconds, or a time such as "30s", "15m", "48h" or "2d""#)
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Duration, E> {
+            Ok(Duration::from_secs(v))
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Duration, E> {
+            u64::try_from(v)
+                .map(Duration::from_secs)
+                .map_err(|_| E::invalid_value(de::Unexpected::Signed(v), &self))
+        }
+
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<Duration, E> {
+            Duration::try_from_secs_f64(v)
+                .map_err(|_| E::invalid_value(de::Unexpected::Float(v), &self))
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Duration, E> {
+            parse(v).ok_or_else(|| E::invalid_value(de::Unexpected::Str(v), &self))
+        }
+    }
+
+    /// "90s", "15m", "48h", "2d", or a bare number of seconds.
+    pub fn parse(text: &str) -> Option<Duration> {
+        let text = text.trim();
+        let split = text
+            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .unwrap_or(text.len());
+        let (number, unit) = text.split_at(split);
+        let number: f64 = number.parse().ok()?;
+        let scale = match unit.trim() {
+            "" | "s" => 1.0,
+            "m" | "min" => 60.0,
+            "h" => 3600.0,
+            "d" => 86400.0,
+            _ => return None,
+        };
+        Duration::try_from_secs_f64(number * scale).ok()
+    }
+
+    /// The largest of h, m and s that writes it as a whole number, so
+    /// 48 hours stays "48h" rather than "2d" or "172800s".
+    pub fn format(d: Duration) -> String {
+        let secs = d.as_secs();
+        if d.subsec_nanos() != 0 {
+            format!("{}s", d.as_secs_f64())
+        } else if secs != 0 && secs.is_multiple_of(3600) {
+            format!("{}h", secs / 3600)
+        } else if secs != 0 && secs.is_multiple_of(60) {
+            format!("{}m", secs / 60)
+        } else {
+            format!("{secs}s")
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -340,6 +471,18 @@ pub enum Widget {
         #[serde(default)]
         hold: Option<Action>,
     },
+    /// One news headline at a time, from the `news.*` signals, with its
+    /// source and age. A tap opens the article and a hold shows the next
+    /// headline, unless `tap` or `hold` say otherwise.
+    News {
+        width: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
+    },
     /// A control to press: an icon and a label. It shows nothing live.
     Key {
         width: u32,
@@ -367,6 +510,7 @@ impl Widget {
             | Widget::Media { width, .. }
             | Widget::Value { width, .. }
             | Widget::Rate { width, .. }
+            | Widget::News { width, .. }
             | Widget::Key { width, .. } => *width,
         }
     }
@@ -379,6 +523,7 @@ impl Widget {
             | Widget::Media { width, .. }
             | Widget::Value { width, .. }
             | Widget::Rate { width, .. }
+            | Widget::News { width, .. }
             | Widget::Key { width, .. } => *width = new,
         }
         self
@@ -392,6 +537,7 @@ impl Widget {
             | Widget::Media { tap, .. }
             | Widget::Value { tap, .. }
             | Widget::Rate { tap, .. }
+            | Widget::News { tap, .. }
             | Widget::Key { tap, .. } => tap.as_ref(),
         }
     }
@@ -404,6 +550,7 @@ impl Widget {
             | Widget::Media { icon, .. }
             | Widget::Value { icon, .. }
             | Widget::Rate { icon, .. }
+            | Widget::News { icon, .. }
             | Widget::Key { icon, .. } => icon.as_deref(),
         }
     }
@@ -416,6 +563,7 @@ impl Widget {
             | Widget::Media { hold, .. }
             | Widget::Value { hold, .. }
             | Widget::Rate { hold, .. }
+            | Widget::News { hold, .. }
             | Widget::Key { hold, .. } => hold.as_ref(),
         }
     }
@@ -438,6 +586,20 @@ pub enum Action {
     Media(MediaCommand),
     /// Set a signal to a value: a number if it reads as one, else text.
     Publish { signal: String, value: String },
+    /// The news headline: open it, or show the next one.
+    News(NewsCommand),
+}
+
+/// What a `news` action does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NewsCommand {
+    /// Open the article showing (`news.link`) in the default browser: the
+    /// one showing when the finger landed, so a headline that changes
+    /// under the finger does not open a different story.
+    Open,
+    /// Show the next headline now.
+    Next,
 }
 
 /// What a slider sets.
@@ -629,6 +791,11 @@ impl Config {
             }
             if t.on_change.is_empty() || t.on_change.iter().any(|s| s.trim().is_empty()) {
                 return err("on_change needs signal names, as in on_change = [\"media.title\"]");
+            }
+            if t.on_change.iter().any(|s| s.starts_with("news.")) {
+                return err(
+                    "news never takes over the strip: a headline is not certain enough to interrupt; put a news widget on a page instead",
+                );
             }
             if !TAKEOVER_SECONDS.contains(&t.seconds) {
                 return err(&format!(
@@ -1207,6 +1374,68 @@ mod tests {
             let e = src(body).unwrap_err().0;
             assert!(e.contains(says), "{body}: {e}");
         }
+    }
+
+    #[test]
+    fn news_has_feeds_a_widget_and_actions() {
+        let c = Config::parse(&format!(
+            "[news]\nfeeds = [\"https://news.example/rss.xml\"]\nrotate = \"20s\"\n{PAGE}\
+             [[page.widget]]\ntype = \"news\"\nwidth = 320\nhold = {{ news = \"open\" }}\n\
+             tap = {{ news = \"next\" }}\n"
+        ))
+        .unwrap();
+        let news = c.news.as_ref().unwrap();
+        assert!(news.has_feeds());
+        assert_eq!(news.rotate, Duration::from_secs(20));
+        assert_eq!(news.max_age, NEWS_MAX_AGE, "the default");
+        let w = &c.pages[0].widgets[0];
+        assert_eq!(w.tap(), Some(&Action::News(NewsCommand::Next)));
+        assert_eq!(w.hold(), Some(&Action::News(NewsCommand::Open)));
+        // Written back in the same shape (the store's text round trip
+        // checks the whole section).
+        assert_eq!(duration::format(news.rotate), "20s");
+        // No section, or no feeds: nothing to fetch.
+        assert_eq!(Config::parse(PAGE).unwrap().news, None);
+        assert!(!NewsConfig::default().has_feeds());
+        let blank = NewsConfig {
+            feeds: vec![" ".into()],
+            ..NewsConfig::default()
+        };
+        assert!(!blank.has_feeds());
+        for (bad, says) in [
+            ("[news]\nfeed = []\n", "feed"),
+            ("[news]\nrotate = \"soon\"\n", "soon"),
+            ("[news]\nmax_age = -1\n", "max_age"),
+        ] {
+            let e = err(&format!("{bad}{PAGE}"));
+            assert!(e.contains(says), "{bad}: {e}");
+        }
+        let e = err(&format!(
+            "{PAGE}[[page.widget]]\ntype = \"news\"\nwidth = 320\ntap = {{ news = \"later\" }}\n"
+        ));
+        assert!(e.contains("later"), "{e}");
+    }
+
+    #[test]
+    fn durations_are_written_in_the_largest_whole_unit() {
+        let d = |s| Duration::from_secs(s);
+        assert_eq!(duration::format(d(48 * 3600)), "48h");
+        assert_eq!(duration::format(d(90)), "90s");
+        assert_eq!(duration::format(d(900)), "15m");
+        assert_eq!(duration::format(Duration::from_millis(7500)), "7.5s");
+        assert_eq!(duration::parse("2d"), Some(d(172_800)));
+        assert_eq!(duration::parse(" 15 min "), Some(d(900)));
+        assert_eq!(duration::parse("5 weeks"), None);
+    }
+
+    /// The News page docs/LAYOUT.md offers is the one the frames draw.
+    #[test]
+    fn the_layout_reference_offers_the_news_page() {
+        let page = include_str!("../../../docs/LAYOUT.md").replace("\r\n", "\n");
+        assert!(
+            page.contains(&format!("```toml\n{}```", crate::scenes::NEWS_PAGE)),
+            "docs/LAYOUT.md has the News page of scenes::NEWS_PAGE"
+        );
     }
 
     /// docs/LAYOUT.md's examples are real: each complete one parses.

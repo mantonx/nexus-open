@@ -45,6 +45,19 @@ pub const WEATHER_SIGNALS: [&str; 6] = [
     "weather.day",
 ];
 
+/// The signals the news source publishes and the news widget reads: the
+/// headline showing, its feed's name, the article's address, its age in
+/// seconds, how many headlines are kept, and 1 while every feed is
+/// failing and the headline kept is older than `max_age`.
+pub const NEWS_SIGNALS: [&str; 6] = [
+    "news.title",
+    "news.source",
+    "news.link",
+    "news.age",
+    "news.count",
+    "news.lost",
+];
+
 /// After this long with no new reading, the weather counts as lost: the
 /// source polls every 15 minutes, so three missed polls.
 pub const WEATHER_STALE: f64 = 45.0 * 60.0;
@@ -56,6 +69,8 @@ pub struct Bind<'a> {
     pub settings: &'a Settings,
     /// The layout says where the weather is for (`[weather]`).
     pub weather: bool,
+    /// The layout names at least one news feed (`[news]`).
+    pub news: bool,
     /// Wall time, for the clock and for when a source was lost.
     pub now: &'a Zoned,
     /// Monotonic seconds on the clock `Signals` times readings with.
@@ -103,8 +118,30 @@ pub fn signals_used(widgets: &[Widget]) -> impl Iterator<Item = &str> {
             used
         }
         Widget::Rate { down, up, .. } => vec![down.as_str(), up.as_str()],
+        Widget::News { .. } => NEWS_SIGNALS.to_vec(),
         Widget::Key { .. } => vec![],
     })
+}
+
+/// A headline is showing and can be opened: the source is not lost, and
+/// it gave a title and a link. Only then does a news widget's own tap
+/// and hold do anything, and only then is it drawn as a key.
+pub fn news_live(signals: &Signals) -> bool {
+    let text = |name| matches!(signals.live(name), Some(Value::Text(t)) if !t.trim().is_empty());
+    let lost = matches!(signals.live("news.lost"), Some(Value::Number(n, _)) if *n != 0.0);
+    !lost && text("news.title") && text("news.link")
+}
+
+/// A headline's age as the news widget says it: "now" under a minute,
+/// then "12 min", "3 h", "2 d", rounded down.
+pub fn news_age(seconds: f64) -> String {
+    let s = seconds.max(0.0) as u64;
+    match s {
+        0..60 => "now".into(),
+        60..3600 => format!("{} min", s / 60),
+        3600..86_400 => format!("{} h", s / 3600),
+        _ => format!("{} d", s / 86_400),
+    }
 }
 
 /// The readings a row's value widgets judge against thresholds: each
@@ -379,6 +416,7 @@ fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
             sub: sub.clone(),
             set_up: tap.is_some() || hold.is_some(),
         },
+        Widget::News { .. } => news(widget, ctx),
         Widget::Rate { down, up, .. } => {
             let r = |name: &str, signal: &str| {
                 reading(ctx, name, signal, None, None, None, Unit::BytesPerSecond)
@@ -421,6 +459,44 @@ fn weather(widget: &Widget, ctx: &Bind) -> WidgetView {
         temp: temp.map_or(NO_DATA.to_string(), degrees),
         condition,
         high_low,
+        avail,
+    }
+}
+
+fn news(widget: &Widget, ctx: &Bind) -> WidgetView {
+    let s = ctx.signals;
+    let text = |name| match s.get(name) {
+        Some(Value::Text(t)) => t.trim().to_string(),
+        _ => String::new(),
+    };
+    let headline = text("news.title");
+    let lost = matches!(s.get("news.lost"), Some(Value::Number(n, _)) if *n != 0.0)
+        || s.lost_at("news.title").is_some();
+    let avail = match () {
+        _ if !ctx.news => Avail::NotSetUp,
+        _ if headline.is_empty() => Avail::NoData,
+        _ if lost => {
+            let at = s.lost_at("news.title").or(s.heard_at("news.lost"));
+            Avail::Lost(at.map(|at| wall_time(ctx, at)).unwrap_or_default())
+        }
+        _ => Avail::Live,
+    };
+    // The age as of when it was published, plus the time since: a lost
+    // headline is not published again, and it keeps getting older.
+    let age = match (s.get("news.age"), s.heard_at("news.age")) {
+        (Some(Value::Number(n, _)), Some(at)) => news_age(n + (ctx.mono - at).max(0.0)),
+        (Some(Value::Number(n, _)), None) => news_age(*n),
+        _ => String::new(),
+    };
+    WidgetView::News {
+        icon: icon_of(widget, icons::NEWSPAPER),
+        headline,
+        source: text("news.source"),
+        age: if avail == Avail::NoData {
+            String::new()
+        } else {
+            age
+        },
         avail,
     }
 }
@@ -581,6 +657,7 @@ mod tests {
             signals: s,
             settings,
             weather: true,
+            news: true,
             now,
             mono: 0.0,
             marquee: None,
@@ -851,5 +928,80 @@ mod tests {
         let used: Vec<&str> = signals_used(&config.pages[0].widgets).collect();
         assert!(used.contains(&"weather.code"), "{used:?}");
         assert!(shows_clock(&config.pages[0].widgets));
+    }
+
+    #[test]
+    fn a_headlines_age_is_said_in_words() {
+        assert_eq!(news_age(0.0), "now");
+        assert_eq!(news_age(59.9), "now");
+        assert_eq!(news_age(60.0), "1 min");
+        assert_eq!(news_age(12.0 * 60.0 + 30.0), "12 min");
+        assert_eq!(news_age(3599.0), "59 min");
+        assert_eq!(news_age(3600.0), "1 h");
+        assert_eq!(news_age(23.0 * 3600.0), "23 h");
+        assert_eq!(news_age(2.0 * 86_400.0 + 5.0), "2 d");
+        assert_eq!(news_age(-5.0), "now", "a clock behind the feed's");
+    }
+
+    #[test]
+    fn news_is_not_set_up_waiting_live_or_lost() {
+        let c = Config::parse(
+            "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"news\"\nwidth = 320\n",
+        )
+        .unwrap();
+        let n = now();
+        let view = |s: &Signals, news: bool, mono: f64| {
+            let b = Bind {
+                news,
+                mono,
+                ..ctx(s, &c.settings, &n)
+            };
+            bind_page(&c.pages[0].widgets, &b).remove(0).view
+        };
+        let avail = |v: &WidgetView| match v {
+            WidgetView::News { avail, .. } => avail.clone(),
+            _ => unreachable!(),
+        };
+        let mut s = Signals::new();
+        assert_eq!(avail(&view(&s, false, 0.0)), Avail::NotSetUp);
+        assert_eq!(avail(&view(&s, true, 0.0)), Avail::NoData);
+        assert!(!news_live(&s));
+        let publish = |s: &mut Signals, title: &str, lost: f64| {
+            for (name, v) in [
+                ("news.title", Value::Text(title.into())),
+                ("news.source", Value::Text("Gazette".into())),
+                ("news.link", Value::Text("https://news.example/1".into())),
+                ("news.age", Value::Number(90.0, Unit::None)),
+                ("news.lost", Value::Number(lost, Unit::None)),
+            ] {
+                s.set_at(name, v, 100.0);
+            }
+        };
+        publish(&mut s, "Ferry back", 0.0);
+        assert_eq!(
+            view(&s, true, 100.0),
+            WidgetView::News {
+                icon: icons::NEWSPAPER,
+                headline: "Ferry back".into(),
+                source: "Gazette".into(),
+                age: "1 min".into(),
+                avail: Avail::Live,
+            }
+        );
+        assert!(news_live(&s));
+        // Not published again for a while: it keeps getting older.
+        let WidgetView::News { age, .. } = view(&s, true, 100.0 + 3600.0) else {
+            unreachable!()
+        };
+        assert_eq!(age, "1 h");
+        // Blanked: the headlines went, and the feeds work.
+        publish(&mut s, "", 0.0);
+        assert_eq!(avail(&view(&s, true, 100.0)), Avail::NoData);
+        assert!(!news_live(&s));
+        publish(&mut s, "Ferry back", 1.0);
+        assert!(matches!(avail(&view(&s, true, 100.0)), Avail::Lost(_)));
+        assert!(!news_live(&s), "a lost headline is not opened");
+        let used: Vec<&str> = signals_used(&c.pages[0].widgets).collect();
+        assert_eq!(used, NEWS_SIGNALS);
     }
 }

@@ -62,11 +62,12 @@ const HELP: &str = "\
 ## Nexus Open: what the strip shows. Saving applies it.
 ##
 ## The strip is 640 px wide; each page's widget widths add up to 640 or less.
-## Widgets: clock, value, rate, slider, media, key. Tap and hold actions:
+## Widgets: clock, value, rate, slider, media, key, news. Tap and hold actions:
 ##   tap = { page = \"Clock\" }   next, prev or a page name
 ##   tap = { media = \"play-pause\" }   play-pause, next, previous, stop
 ##   tap = { run = [\"pavucontrol\"] }   a program and its arguments, no shell
 ##   hold = { open = \"https://example.org\" }   a URL or file
+##   hold = { news = \"next\" }   open (the headline showing) or next
 ## A comment directly above a [[page]], [[page.widget]], [[takeover]] or
 ## [[source]] line is kept as that item's note. Other comments are not kept.
 ";
@@ -231,6 +232,10 @@ pub fn write(config: &Config, notes: &Notes) -> String {
     if let Some(weather) = &config.weather {
         header(&mut out, "", "[weather]");
         keys(&mut out, weather, &[]);
+    }
+    if let Some(news) = &config.news {
+        header(&mut out, "", "[news]");
+        keys(&mut out, news, &[]);
     }
     for (i, page) in config.pages.iter().enumerate() {
         let n = notes.page(i);

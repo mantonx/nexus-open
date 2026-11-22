@@ -169,6 +169,43 @@ widget shows the last one dimmed, with the time it is from.
 | `location`               | `"City"`, or `"City, region, country"` to pick the right one |
 | `latitude`, `longitude`  | Degrees, both or neither. When given, nothing is looked up.  |
 
+## `[news]`
+
+Optional. Without it, or with no feeds, there is no news and nothing is
+fetched. Each feed is asked for its headlines every 15 minutes, and
+nothing else is sent. A feed that fails is tried again after a minute,
+then two, four, and so on up to half an hour; its last headlines stay
+meanwhile.
+
+| Key       | Value                                                                    | Default |
+| --------- | ------------------------------------------------------------------------ | ------- |
+| `feeds`   | Feed addresses (RSS, Atom or JSON Feed), `https://` or `http://`. On a tie the earlier feed's copy of a story is shown | none |
+| `rotate`  | How long each headline shows before the next; at least 2 seconds         | `"12s"` |
+| `max_age` | Headlines published longer ago are not shown                             | `"48h"` |
+
+A duration is a number of seconds (`rotate = 12`) or a number with a
+unit: `"30s"`, `"15m"`, `"48h"`, `"2d"`. Up to 50 headlines are kept
+across all feeds, newest first, and shown one at a time on every news
+widget.
+
+A page for the news, with a clock beside it:
+
+```toml
+[news]
+feeds = ["https://news.example/rss.xml"]
+
+[[page]]
+name = "News"
+
+[[page.widget]]
+type = "clock"
+width = 128
+
+[[page.widget]]
+type = "news"
+width = 512
+```
+
 ## `[[page]]`
 
 One or more, shown in order; swipe to change page. Each has a unique
@@ -190,6 +227,7 @@ the name of an icon (below) to draw instead of the one it would choose.
 | `media`  | none                                                                     | Title, artist and progress from the `media.*` signals, with transport keys |
 | `slider` | `label`, `controls`; optional `signal`                                   | A bar to drag                                                |
 | `key`    | optional `icon`, `label`, `sub`                                          | A control to press; nothing live. `sub` is a second line under the label on a key 300 px or wider |
+| `news`   | none                                                                     | The headline showing, and from medium up where it is from and how old it is (`Harbour Gazette · 12 min`) |
 
 How much a widget shows depends on its width: up to 149 px it is
 compact (the reading alone), up to 299 px medium (with its label, or a
@@ -223,6 +261,18 @@ at the right end, or previous, play/pause and next from 400 px. A long
 press on a key is a slow tap. Elsewhere on the widget its own `tap` and
 `hold` apply. With nothing playing there are no keys.
 
+A news widget shows one headline at a time, cut short with an ellipsis
+when it is too long; it never scrolls. A compact one has room for the
+newspaper icon and the headline's age only. A tap opens the headline in
+the default browser (the one showing when the finger landed, even if
+the next arrives before it lifts), and a hold shows the next one; its
+own `tap` and `hold` replace them. Without a `[news]` feed it says how
+to add one. While the first headlines are fetched it says "No news
+yet"; with every feed failing and nothing new enough left, the last
+headline stays, dimmed, marked with a broken link, its age still
+growing. Neither of those can be tapped. News never covers the strip: a takeover cannot be
+raised by a `news.` signal.
+
 Icons: `activity`, `arrow-down`, `arrow-fat-down`, `arrow-fat-up`,
 `arrow-up`, `arrows-left-right`, `bell`, `browser`, `calculator`,
 `calendar-blank`, `camera`, `chat-circle`, `check`, `check-circle`,
@@ -231,7 +281,7 @@ Icons: `activity`, `arrow-down`, `arrow-fat-down`, `arrow-fat-up`,
 `game-controller`, `gauge`, `gear`, `globe-simple`, `graphics-card`,
 `hand-pointing`, `hand-tap`, `headphones`, `house`, `image`,
 `lightning`, `link-break`, `map-pin`, `map-pin-plus`, `memory`, `moon`,
-`moon-stars`, `music-note`, `music-notes`, `pause`, `play`, `plugs`,
+`moon-stars`, `music-note`, `music-notes`, `newspaper`, `pause`, `play`, `plugs`,
 `plus`, `power`, `rocket-launch`, `skip-back`, `skip-forward`,
 `speaker-high`, `speaker-low`, `speaker-none`, `speaker-x`,
 `squares-four`, `sun`, `terminal-window`, `thermometer`,
@@ -268,6 +318,12 @@ Lifting sooner is a tap.
 | `{ run = ["pavucontrol", "-t", "3"] }`         | Starts a program with arguments. No shell: write `["sh", "-c", "…"]` for one |
 | `{ open = "https://example.org" }`             | Opens a URL or file in the desktop's default app; a leading `~` is your home folder |
 | `{ publish = { signal = "mode", value = "focus" } }` | Sets a signal: a number if it reads as one, else text  |
+| `{ news = "open" }`                            | Opens the headline showing in the default browser            |
+| `{ news = "next" }`                            | Shows the next headline now                                  |
+
+Only `https://` and `http://` links are opened, passed to the desktop's
+opener as they are, never through a shell. A link with spaces, control
+characters or invisible characters in it is not opened.
 
 ## `[[takeover]]`
 
@@ -334,8 +390,9 @@ run = ["python3", "stars.py"]
 | `run`     | The program and its arguments, with no shell. A relative program is found in the config folder. |
 | `enabled` | `false` keeps it without running it. Default `true`.                         |
 
-An exported layout leaves out `[weather]` and the sources: a layout file
-is made to be shared, and those say where you live and what is on your
+An exported layout leaves out `[weather]`, `[news]` and the sources: a
+layout file is made to be shared, and those say where you live, what you
+read (a feed address can hold a private key) and what is on your
 computer.
 
 ## Signals
@@ -354,6 +411,10 @@ Signals are named readings, in base units. The built-in sources publish:
 | `volume.muted`                                           | 1 if muted, else 0 |
 | `media.title`, `media.artist`, `media.status`            | text              |
 | `media.position`, `media.length`                         | seconds           |
+| `news.title`, `news.source`, `news.link`                 | text              |
+| `news.age`                                               | seconds since the headline was published |
+| `news.count`                                             | how many headlines are kept |
+| `news.lost`                                              | 1 while every feed fails and the headline shown is too old, else 0 |
 
 The settings window's Signals list shows every signal published right
 now, with its value. When a source stops publishing a signal, a widget
