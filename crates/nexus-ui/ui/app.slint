@@ -845,8 +845,9 @@ export component AppWindow inherits Window {
                                     border-width: row.active ? 2px : 1px;
                                     border-color: row.active && !root.trying ? Theme.act-line.transparentize(0.3) : row.active ? Theme.line-strong : Theme.dark ? Theme.line : Theme.bezel;
                                     accessible-role: button;
-                                    accessible-label: row.live
+                                    accessible-label: row.live && root.status.tone == "ok"
                                         ? @tr("{}, on the strip. {}", row.name, row.summary)
+                                        : row.live ? @tr("{}, the current page. {}", row.name, row.summary)
                                         : row.kind == "page" ? @tr("{}, page {}. Shows it on the strip to edit it.", row.name, row.index + 1)
                                         : @tr("{}, takeover. Shows it on the strip to edit it.", row.name);
                                     accessible-action-default => {
