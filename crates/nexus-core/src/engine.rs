@@ -2119,6 +2119,33 @@ mod tests {
     }
 
     #[test]
+    fn a_takeover_fades_in_and_out_and_frames_come_only_while_it_moves() {
+        let mut e = covered();
+        let now = at("16:17:05");
+        e.handle(title("First"));
+        let page = e.frame(&now, 0.0).expect("the page").rgba().to_vec();
+        e.tick(10.0);
+        e.handle(title("Second"));
+        let mid = e.frame(&now, 10.1).expect("fading in").rgba().to_vec();
+        assert_eq!(e.next_wait(&now, 10.1), Some(Duration::ZERO), "paced");
+        let full = e.frame(&now, 10.5).expect("faded in").rgba().to_vec();
+        assert!(mid != page && mid != full, "part way between the two");
+        assert!(e.next_wait(&now, 10.5) > Some(Duration::from_secs(4)));
+        assert!(e.frame(&now, 11.0).is_none(), "nothing moves: no frame");
+        // At its time the takeover fades out over the page, from the frame
+        // that finds it over.
+        let mut t = 14.0;
+        while e.takeover().is_some() {
+            t += 0.05;
+            e.frame(&now, t);
+        }
+        assert!(t < 15.5, "over after its five seconds: {t}");
+        let out = e.frame(&now, t + 0.15).expect("fading out").rgba().to_vec();
+        assert!(out != page && out != full);
+        assert_eq!(e.frame(&now, 16.0).expect("gone").rgba(), &page[..]);
+    }
+
+    #[test]
     fn no_takeover_for_what_the_page_already_shows() {
         let mut e = covered();
         e.handle(Input::ShowPage(1)); // the media page
@@ -2506,10 +2533,13 @@ mod tests {
         let frame = e.frame(&now, 1.0).expect("drawn at once");
         let [r, g, _] = pixel(&frame, 300, 2);
         assert!(r > 160 && g < 70, "filled red, breathing: {r} {g}");
-        // A tap off the OK key does nothing; on it, acknowledges.
+        // A tap off the OK key does nothing, even just left of it; on it,
+        // acknowledges.
         trace(&mut e, &[(2.0, 100.0), (2.05, 100.0)], 2.1);
         assert!(e.alarm().is_some());
-        trace(&mut e, &[(3.0, 600.0), (3.05, 600.0)], 3.1);
+        trace(&mut e, &[(2.3, 540.0), (2.35, 540.0)], 2.4);
+        assert!(e.alarm().is_some(), "540 is left of the key");
+        trace(&mut e, &[(3.0, 550.0), (3.05, 550.0)], 3.1);
         assert_eq!(e.alarm(), None, "acknowledged");
         assert!(e.take_effects().is_empty());
         assert!(e.frame(&now, 3.1).is_some(), "the page again");
@@ -2853,6 +2883,155 @@ mod tests {
                 Effect::Act(Action::Run(vec!["notify-send".into(), "held".into()])),
             ]
         );
+    }
+
+    // Dimming.
+
+    #[test]
+    fn the_strip_dims_when_idle_and_at_night_but_not_over_trouble() {
+        let mut e = alarmed();
+        let day = at("16:17:05");
+        reading(&mut e, 0.0, "cpu.temp", 50.0);
+        assert!(e.frame(&day, 0.0).is_some());
+        let idle = f64::from(theme::IDLE_DIM_AFTER_S);
+        assert_eq!(e.brightness(&day), 1.0);
+        // Wakes in time to dim (the clock's minute may come first).
+        assert!(e.next_wait(&day, 1.0) <= Some(Duration::from_secs_f64(idle - 1.0)));
+        e.tick(idle + 1.0);
+        assert_eq!(e.brightness(&day), theme::IDLE_DIM);
+        // A touch wakes it.
+        trace(&mut e, &[(idle + 2.0, 300.0)], idle + 2.05);
+        assert_eq!(e.brightness(&day), 1.0);
+        // A warning on any page keeps it bright.
+        reading(&mut e, idle + 3.0, "gpu.temp", 80.0);
+        e.tick(2.0 * idle + 10.0);
+        assert_eq!(e.brightness(&day), 1.0, "a warning is showing");
+        reading(&mut e, 2.0 * idle + 11.0, "gpu.temp", 60.0);
+        assert_eq!(e.brightness(&day), theme::IDLE_DIM);
+
+        // Night: dimmer still, whatever the touches; the alarm undims.
+        let mut c = e.config.clone();
+        c.settings.night = Config::parse(
+            "[settings]\nnight = { from = \"22:30\", to = \"07:00\" }\n[[page]]\nname = \"A\"\n",
+        )
+        .unwrap()
+        .settings
+        .night;
+        c.settings.idle_dim = false;
+        e.handle(Input::Config(Box::new(c)));
+        let late = at("23:40:00");
+        assert_eq!(e.brightness(&day), 1.0, "idle_dim off");
+        assert_eq!(e.brightness(&late), theme::NIGHT_DIM);
+        reading(&mut e, 2.0 * idle + 20.0, "cpu.temp", 95.0);
+        assert!(e.alarm().is_some());
+        assert_eq!(e.brightness(&late), 1.0, "the alarm is never dimmed");
+    }
+
+    // Media transport keys.
+
+    /// A media widget of each width on one page, from x = 0, playing.
+    fn media_row(widths: &[u32]) -> Engine {
+        let mut text = String::from("[[page]]\nname = \"A\"\n");
+        for w in widths {
+            text.push_str(&format!(
+                "[[page.widget]]\ntype = \"media\"\nwidth = {w}\nhold = {{ media = \"next\" }}\n"
+            ));
+        }
+        let mut e = Engine::new(Config::parse(&text).unwrap());
+        for (name, v) in [
+            ("media.title", "Weird Fishes"),
+            ("media.artist", "Radiohead"),
+            ("media.status", "Playing"),
+        ] {
+            e.handle(Input::Signal(name.into(), Value::Text(v.into())));
+        }
+        assert!(e.frame(&at("16:17:05"), 0.0).is_some());
+        e
+    }
+
+    /// The middle of each drawn target of a media widget `width` wide that
+    /// starts at `x0`.
+    fn key_centres(x0: f32, width: u32) -> Vec<f32> {
+        media_keys(width)
+            .iter()
+            .map(|k| x0 + (k.span.start + k.span.end) / 2.0)
+            .collect()
+    }
+
+    fn media_act(c: MediaCommand) -> Effect {
+        Effect::Act(Action::Media(c))
+    }
+
+    #[test]
+    fn media_keys_are_where_they_are_drawn() {
+        // Compact (128), medium (200), hero with one key (312).
+        let mut e = media_row(&[128, 200, 312]);
+        let compact = key_centres(0.0, 128);
+        let hero = key_centres(328.0, 312);
+        assert_eq!((compact.len(), hero.len()), (1, 1));
+        press(&mut e, compact[0], 0.05);
+        press(&mut e, 228.0, 0.05); // anywhere on the medium card
+        press(&mut e, hero[0], 0.05);
+        assert_eq!(
+            e.take_effects(),
+            vec![media_act(MediaCommand::PlayPause); 3]
+        );
+        // Beside a compact or hero key is the widget, which has no tap.
+        press(&mut e, 120.0, 0.05);
+        press(&mut e, 340.0, 0.05);
+        assert!(e.take_effects().is_empty());
+        // A long press on a key is a slow tap; on the medium card, whose
+        // whole face is the key, it is the widget's own hold.
+        press(&mut e, compact[0], 0.9);
+        press(&mut e, 228.0, 0.9);
+        assert_eq!(
+            e.take_effects(),
+            [
+                media_act(MediaCommand::PlayPause),
+                media_act(MediaCommand::Next),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wide_media_widget_has_three_keys_in_order() {
+        let mut e = media_row(&[428]);
+        let keys = key_centres(0.0, 428);
+        assert_eq!(keys.len(), 3);
+        for x in &keys {
+            press(&mut e, *x, 0.05);
+        }
+        assert_eq!(
+            e.take_effects(),
+            [
+                media_act(MediaCommand::Previous),
+                media_act(MediaCommand::PlayPause),
+                media_act(MediaCommand::Next),
+            ]
+        );
+        // Between two keys, and on the title, is the widget: it has no tap.
+        let spans = media_keys(428);
+        press(
+            &mut e,
+            (spans[0].span.end + spans[1].span.start) / 2.0,
+            0.05,
+        );
+        press(&mut e, 40.0, 0.05);
+        assert!(e.take_effects().is_empty());
+    }
+
+    #[test]
+    fn nothing_playing_has_no_keys() {
+        let config = Config::parse(
+            "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"media\"\nwidth = 428\n",
+        )
+        .unwrap();
+        let mut e = Engine::new(config);
+        assert!(e.frame(&at("16:17:05"), 0.0).is_some());
+        for x in key_centres(0.0, 428) {
+            press(&mut e, x, 0.05);
+        }
+        assert!(e.take_effects().is_empty());
     }
 
     #[test]
