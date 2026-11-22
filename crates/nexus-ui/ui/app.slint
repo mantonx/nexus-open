@@ -131,6 +131,8 @@ component Sheet inherits Rectangle {
         drop-shadow-color: #00000070;
         clip: true;
         TouchArea { }
+        // Around the content, so Escape closes the sheet from a field in it
+        // too: a key the field does not use goes up to its ancestors.
         FocusScope {
             init => {
                 self.focus();
@@ -142,52 +144,52 @@ component Sheet inherits Rectangle {
                 }
                 reject
             }
-        }
-        VerticalLayout {
-            HorizontalLayout {
-                height: 60px;
-                padding-left: 24px;
-                padding-right: 12px;
-                spacing: 12px;
-                VerticalLayout {
-                    alignment: center;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: root.title;
-                        font-family: Theme.font;
-                        font-size: Theme.size-heading;
-                        font-weight: 600;
-                        color: Theme.text;
-                        accessible-role: text;
+            VerticalLayout {
+                HorizontalLayout {
+                    height: 60px;
+                    padding-left: 24px;
+                    padding-right: 12px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: root.title;
+                            font-family: Theme.font;
+                            font-size: Theme.size-heading;
+                            font-weight: 600;
+                            color: Theme.text;
+                            accessible-role: text;
+                        }
+                        if root.subtitle != "": Text {
+                            text: root.subtitle;
+                            font-family: Theme.font;
+                            font-size: Theme.size-label;
+                            color: Theme.text-3;
+                            overflow: elide;
+                        }
                     }
-                    if root.subtitle != "": Text {
-                        text: root.subtitle;
-                        font-family: Theme.font;
-                        font-size: Theme.size-label;
-                        color: Theme.text-3;
-                        overflow: elide;
-                    }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    IconButton {
-                        icon: Glyph.close;
-                        label: @tr("Close");
-                        clicked => {
-                            root.close();
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: Glyph.close;
+                            label: @tr("Close");
+                            clicked => {
+                                root.close();
+                            }
                         }
                     }
                 }
-            }
-            body := ScrollView {
-                vertical-stretch: 1;
-                inner := VerticalLayout {
-                    alignment: start;
-                    padding-left: 24px;
-                    padding-right: 24px;
-                    padding-bottom: 24px;
-                    padding-top: 4px;
-                    @children
+                body := ScrollView {
+                    vertical-stretch: 1;
+                    inner := VerticalLayout {
+                        alignment: start;
+                        padding-left: 24px;
+                        padding-right: 24px;
+                        padding-bottom: 24px;
+                        padding-top: 4px;
+                        @children
+                    }
                 }
             }
         }
@@ -2768,7 +2770,8 @@ export component AppWindow inherits Window {
                                         overflow: elide;
                                     }
                                 }
-                                VerticalLayout {
+                                // One feed has no order to change.
+                                if root.news-feeds.length > 1: VerticalLayout {
                                     alignment: center;
                                     IconButton {
                                         icon: Glyph.up;
@@ -2779,7 +2782,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                VerticalLayout {
+                                if root.news-feeds.length > 1: VerticalLayout {
                                     alignment: center;
                                     IconButton {
                                         icon: Glyph.down;

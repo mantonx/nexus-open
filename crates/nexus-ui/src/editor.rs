@@ -1159,10 +1159,10 @@ impl Editor {
             // move, and the grip would sit on the edge flag.
             (_, Some(i)) if widths.iter().sum::<u32>() >= STRIP && i + 1 == widgets.len() => {
                 if i == 0 {
-                    format!("{}, the whole strip. Drag it to move it.", sized(i))
+                    format!("{}, the whole strip. Make it narrower in Width below to put another beside it.", sized(i))
                 } else {
                     format!(
-                        "{}, {} of {}, to the strip's end. Drag it to move it; drag the grip on its left to resize.",
+                        "{}, {} of {}, to the strip's end. Drag it to move it; resize it in Width below.",
                         sized(i),
                         i + 1,
                         widgets.len()
@@ -1313,7 +1313,11 @@ impl Editor {
                     width.help = if min == max {
                         "Nothing beside it can give it room: make a neighbour narrower first.".into()
                     } else {
-                        "The arrow keys step by 1, with Shift by 10. The widget on its right gives or takes the difference, as when the grip on the strip is dragged.".into()
+                        if i + 1 < self.layout_widths().len() {
+                            "The arrow keys step by 1, with Shift by 10. The widget on its right gives or takes the difference, as when the grip on the strip is dragged.".into()
+                        } else {
+                            "The arrow keys step by 1, with Shift by 10. It grows into the free room at the strip's end, and narrower leaves room there.".into()
+                        }
                     };
                 }
                 fields.push(Field {
