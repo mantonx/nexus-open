@@ -105,39 +105,47 @@ pub fn to_send(c: NewsConfig) -> Option<NewsConfig> {
 }
 
 /// Why a feed could not be added, in plain words, and whether to offer
-/// "Add anyway" (when the site may only be down for now).
-pub fn problem(p: &Problem) -> (String, bool) {
-    match p {
+/// "Add anyway" (when the site may only be down for now): what happened,
+/// then what to do.
+pub fn problem(p: &Problem) -> (String, String, bool) {
+    let (what, next, force) = match p {
         Problem::NotWebAddress => (
-            "That is not a web address. A feed's address starts with https://".into(),
+            "That is not a web address",
+            "A feed's address starts with https://, as in https://example.org/feed.",
             false,
         ),
         Problem::NoAnswer => (
-            "No answer from that site. Check the address, or that this computer is online."
-                .into(),
+            "No answer from that site",
+            "Check the address, and that this computer is online. If the site is only down for now, add it anyway.",
             true,
         ),
         Problem::Redirects => (
-            "That address keeps sending the request elsewhere, so no feed was found.".into(),
+            "That address keeps sending the request elsewhere",
+            "No feed was found at the end of it. Try the address the site gives for its feed.",
             false,
         ),
         Problem::NotFound => (
-            "That site has nothing at this address. Check it for typing mistakes.".into(),
+            "That site has nothing at this address",
+            "Check it for typing mistakes, or find the feed's address again on the site.",
             false,
         ),
-        Problem::Status(status) => (
-            format!("That site answered with an error ({status}). It may work again later."),
+        Problem::Status(_) => (
+            "That site answered with an error",
+            "It may work again later. If you are sure of the address, add it anyway.",
             true,
         ),
         Problem::NotAFeed => (
-            "That address is not a feed. On the site, look for a link named RSS, Atom or Feed, and paste that one.".into(),
+            "That address is not a feed",
+            "It is a web page. On the site, look for a link named RSS, Atom or Feed, and paste that address.",
             false,
         ),
         Problem::TooBig => (
-            "That feed is too large to read (over 2 MB).".into(),
+            "That feed is too large to read",
+            "It is over 2 MB, more than a feed of headlines should be. The site may offer a smaller one.",
             false,
         ),
-    }
+    };
+    (what.into(), next.into(), force)
 }
 
 /// A feed's name in the list: the title found when it was checked, else
@@ -220,13 +228,14 @@ mod tests {
             Problem::NotAFeed,
             Problem::TooBig,
         ] {
-            let (words, _) = problem(&p);
+            let (what, next, _) = problem(&p);
+            let words = format!("{what}. {next}");
             assert!(words.starts_with("That") || words.starts_with("No answer"), "{words}");
             for jargon in ["ureq", "error:", "404", "parse"] {
                 assert!(!words.contains(jargon), "{words}");
             }
         }
-        assert!(problem(&Problem::NoAnswer).1, "a site that is down can be added anyway");
-        assert!(!problem(&Problem::NotAFeed).1);
+        assert!(problem(&Problem::NoAnswer).2, "a site that is down can be added anyway");
+        assert!(!problem(&Problem::NotAFeed).2);
     }
 }

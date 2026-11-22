@@ -107,6 +107,10 @@ component Sheet inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
     in property <length> sheet-width: 720px;
+    /// As tall as the window allows, whatever it holds: for a sheet with
+    /// sections, so switching between them does not resize it, and wrapped
+    /// words (which a layout does not measure) are never cut.
+    in property <bool> tall: false;
     callback close();
     background: Theme.scrim;
     TouchArea {
@@ -116,7 +120,7 @@ component Sheet inherits Rectangle {
     }
     card := Rectangle {
         width: min(root.sheet-width, root.width - 32px);
-        height: min(inner.preferred-height + 64px, root.height - 48px);
+        height: root.tall ? min(700px, root.height - 48px) : min(inner.preferred-height + 64px, root.height - 48px);
         x: (root.width - self.width) / 2;
         y: max(24px, (root.height - self.height) / 2);
         background: Theme.surface;
@@ -178,6 +182,7 @@ component Sheet inherits Rectangle {
             body := ScrollView {
                 vertical-stretch: 1;
                 inner := VerticalLayout {
+                    alignment: start;
                     padding-left: 24px;
                     padding-right: 24px;
                     padding-bottom: 24px;
@@ -2222,6 +2227,7 @@ export component AppWindow inherits Window {
             : root.settings-tab == 1 ? @tr("Headlines on news widgets. Undo takes a change back.")
             : @tr("Only this window: the strip and undo leave these alone.");
         sheet-width: 700px;
+        tall: true;
         close => {
             root.sheet = "";
         }

@@ -1309,12 +1309,11 @@ impl Editor {
                 let (min, max) = geometry::width_bounds(&self.layout_widths(), i);
                 if let Some(width) = fields.iter_mut().find(|f| f.key == "width") {
                     width.kind = Kind::Stepper { min, max };
+                    // The range is beside the field.
                     width.help = if min == max {
-                        format!("{min} px: nothing beside it can give it room. Make a neighbour narrower first.")
+                        "Nothing beside it can give it room: make a neighbour narrower first.".into()
                     } else {
-                        format!(
-                            "{min} to {max} px here. The arrow keys step by 1, with Shift by 10. The grip on the strip does the same: the widget on its right gives or takes the difference."
-                        )
+                        "The arrow keys step by 1, with Shift by 10. The widget on its right gives or takes the difference, as when the grip on the strip is dragged.".into()
                     };
                 }
                 fields.push(Field {
@@ -2453,9 +2452,9 @@ impl Editor {
                 }
             }
             Err(p) => {
-                let (words, force) = news::problem(&p);
+                let (what, next, force) = news::problem(&p);
                 self.feed_pending = force.then(|| url.to_string());
-                self.feed_result("problem", &words, url, force);
+                self.feed_result("problem", &what, &next, force);
             }
         }
     }
