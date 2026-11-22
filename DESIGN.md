@@ -331,7 +331,7 @@ card beside it (content centres in its room when it has spare width).
 | Load, memory | icon + 62% at 32; bar | icon + 62% at 36, name; bar | icon + 62% at 40, name over "limit 85%"; bar the whole card |
 | Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
 | Weather | icon + 58° at 40 | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
-| Media | play/pause key + elapsed + progress line | artwork + title / artist + a raised `MEDIA_KEY_W` 36 × 33 play/pause key at the right, accent-filled (the whole card is the hit zone; the key says so) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
+| Media | play/pause key + elapsed + progress line | artwork + title / artist + a raised `MEDIA_KEY_W` 36 × 33 play/pause key at the right, `PAD` in from the card's edge, accent-filled (the whole card is the hit zone; the key says so) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
 | Key | icon (label from 96 px) | icon + label | icon + label + second line ("Hold for a new window") |
 
@@ -438,7 +438,7 @@ What can be touched looks like it; what cannot does not.
 | Warning | Whole card WARN_SURFACE; the warning reading's numeral, icon and bar WARN, a second reading that is fine stays cream (so an amber numeral always means warning); page marker WARN and longer | `specimen-value-warning`, `specimen-value2-warning`, `3-hot` |
 | Critical | Whole card CRIT; everything white; track CRIT_DEEP, and limit notches under the white fill CRIT_DEEP so they stay visible; a hero card names the critical limit, as the alarm does; page marker CRIT and longer; plus the alarm | `specimen-value-critical`, `takeover-after-ok-system` |
 | No data (source works, no reading yet) | Normal card; the numeral is two TEXT3 dashes; "No reading" (medium) / "No reading yet" (hero); empty bar | `specimen-value-no-data`, `specimen-weather-no-data` |
-| Source lost / stale | The last value kept in TEXT3; the reading's own icon kept (at compact and medium it is the card's name) in TEXT3 with a broken-link badge on its lower right, cut out by a ring of the card (weather: the icon becomes a cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
+| Source lost / stale | The last value kept in TEXT3; the reading's own icon kept (at compact and medium it is the card's name) in TEXT3 with a broken-link badge on its lower right, cut out by a ring of the card (weather: the icon becomes a cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. A second reading on a lost card is drawn lost too (TEXT3, its own badge, an empty bar), so a lost card never carries a bright number. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
 | Not set up | No fill; dashed accent outline; plus or pin icon; "Weather / Set up" (compact), "Weather / Add your town" | `specimen-*-not-set-up`, `6-first-run` |
 | Pressed, holding, dragging | See Keys | |
 | Paused | Play glyph in the key, artwork dimmed, title in TEXT2, "Paused" in place of the artist, progress line TEXT3 | `specimen-media-paused` |
@@ -451,9 +451,14 @@ broken-link icon.
 
 ### Long titles
 
-A title that does not fit is **never cut by accident**. In a widget it
-rests truncated with an 18 px fade into the card (`text_fade`), and
-scrolls as a marquee: after `MS_MARQUEE_REST` 2.5 s it scrolls left at
+A title that does not fit is **never cut by accident**, and no text
+anywhere ends in a letter cut through. At rest it ends in an ellipsis,
+as every other text that does not fit (`fit`): after a whole word when
+that keeps at least 60 % of what a cut between letters would ("Weird…"
+in a medium media card, "Weird Fishes…" in a hero one), else between
+letters ("Radiohe…"), separators ("/", "–", "·") dropped before it.
+Only while it moves does it fade into the card at the edge it slides
+under (`text_fade`, 18 px). It scrolls as a marquee: after `MS_MARQUEE_REST` 2.5 s it scrolls left at
 `MARQUEE_PX_PER_S` 28 px/s until its end shows, rests 2.5 s, fades back
 to the start, and does this **once per track change and once per tap**,
 then stays at rest (so it never moves in the corner of the eye for
@@ -700,6 +705,12 @@ signal's base unit (°C).
     `xdg-mime query default audio/mpeg` names, launched with
     `gtk-launch`), or the default layout could name a player. Matt to
     choose.
+16. **The System page does not name CPU and GPU.** At medium a value
+    card with a second reading has no room for its name, so the two
+    cards differ by icon alone (the U3 polish 2 review). A user can
+    already name it (`label`, shown at hero) or give it a hero card;
+    whether medium cards name themselves, and at what cost to the
+    numerals, is Matt's to decide.
 
 ## Shared identity
 

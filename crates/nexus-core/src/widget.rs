@@ -701,20 +701,37 @@ impl Pen<'_> {
     }
 
     /// `t` shortened with an ellipsis to fit `room`.
+    /// `t`, or as much of it as fits in `room` with an ellipsis: cut after
+    /// a whole word when that keeps most of what a cut between letters
+    /// would ("Weird Fishes…" over "Weird Fishes / Ar…"), else between
+    /// letters. Never a letter cut through.
     fn fit(&mut self, f: Face, s: &TextStyle, t: &str, room: f32) -> String {
         if self.measure(f, s, t) <= room {
             return t.to_string();
         }
-        let mut best = String::from("…");
+        let trim = |p: &str| {
+            p.trim_end_matches([' ', '/', '-', '–', '·', ',', ':', '&'])
+                .to_string()
+        };
+        let mut glyph = 0;
         for (e, _) in t.char_indices().skip(1) {
-            let cand = format!("{}…", t[..e].trim_end());
-            if self.measure(f, s, &cand) <= room {
-                best = cand;
+            if self.measure(f, s, &format!("{}…", trim(&t[..e]))) <= room {
+                glyph = e;
             } else {
                 break;
             }
         }
-        best
+        let kept = trim(&t[..glyph]);
+        let word = t[..glyph]
+            .rfind(' ')
+            .map(|i| trim(&t[..i]))
+            .filter(|w| !w.is_empty() && w.chars().count() * 5 >= kept.chars().count() * 3);
+        let cut = word.unwrap_or(kept);
+        if cut.is_empty() {
+            "…".to_string()
+        } else {
+            format!("{cut}…")
+        }
     }
 
     /// A title that may not fit between `x` and `right`: at rest it fades
@@ -742,6 +759,14 @@ impl Pen<'_> {
         let rest = MS_MARQUEE_REST as f32 / 1000.0;
         let scroll = over / MARQUEE_PX_PER_S;
         let back = 0.4;
+        // At rest the title ends in an ellipsis after a whole word, as every
+        // other text that does not fit; only a moving title fades at the
+        // edge it slides under.
+        if !marquee.is_some_and(|m| m < 2.0 * rest + scroll + back) {
+            let fitted = self.fit(f, s, t, right - x);
+            self.text(f, s, &fitted, x, base, c);
+            return;
+        }
         let (offset, alpha) = match marquee {
             Some(m) if m < rest => (0.0, 1.0),
             Some(m) if m < rest + scroll => ((m - rest) * MARQUEE_PX_PER_S, 1.0),
@@ -1199,6 +1224,17 @@ impl Pen<'_> {
         press: Press,
     ) {
         let (second_icon, second) = (second.map(|s| s.0), second.map(|s| s.1));
+        // A lost card says so all over: a second reading on it is drawn lost
+        // too, never a bright number beside a grey one.
+        let relost = match (second, &r.avail) {
+            (Some(s), Avail::Lost(_)) if s.avail == Avail::Live => Some(Reading {
+                avail: r.avail.clone(),
+                bar: s.bar.map(|b| Bar { value: None, ..b }),
+                ..s.clone()
+            }),
+            _ => None,
+        };
+        let second = relost.as_ref().or(second);
         if r.avail == Avail::NotSetUp {
             self.setup_prompt(
                 x,
@@ -1297,12 +1333,18 @@ impl Pen<'_> {
                     let ks = reading_ink(sev, s.severity);
                     let (stxt, sbar) = shown(s);
                     let live = s.avail == Avail::Live;
-                    let su = if live { s.unit.as_str() } else { "" };
+                    // Lost keeps its unit, greyed; no data has none.
+                    let su = if s.avail == Avail::NoData {
+                        ""
+                    } else {
+                        s.unit.as_str()
+                    };
                     let sc = if live { ks.num } else { TEXT3 };
+                    let sl = if live { ks.label } else { TEXT3 };
                     let sw = self.num_unit_w(&p.second, &stxt, su, &UNIT);
                     let sx = right - sw;
                     if sx > nx + nw + SECOND_GAP {
-                        self.num_unit(&p.second, &stxt, su, &UNIT, sx, base, sc, ks.label);
+                        self.num_unit(&p.second, &stxt, su, &UNIT, sx, base, sc, sl);
                     }
                     // Its own icon names it ("6%" alone is a riddle), just
                     // before its number. The bars split where the widest
@@ -1379,8 +1421,14 @@ impl Pen<'_> {
                     let ks = reading_ink(sev, s.severity);
                     let (stxt, _) = shown(s);
                     let live = s.avail == Avail::Live;
-                    let su = if live { s.unit.as_str() } else { "" };
+                    // Lost keeps its unit, greyed; no data has none.
+                    let su = if s.avail == Avail::NoData {
+                        ""
+                    } else {
+                        s.unit.as_str()
+                    };
                     let sc = if live { ks.num } else { TEXT3 };
+                    let sl = if live { ks.label } else { TEXT3 };
                     // Its name before its number, on the numeral's baseline.
                     let sw = self.num_unit_w(&NUM_SECOND, &stxt, su, &UNIT);
                     let nm = self.measure(Face::Word, &LABEL, &s.name) + 6.0;
@@ -1390,9 +1438,9 @@ impl Pen<'_> {
                         return;
                     }
                     let sx = right - sw;
-                    self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, ks.label);
+                    self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, sl);
                     if named {
-                        self.text(Face::Word, &LABEL, &s.name, sx - nm, base, ks.label);
+                        self.text(Face::Word, &LABEL, &s.name, sx - nm, base, sl);
                     }
                     col_right = right - colw - 14.0;
                 }
@@ -1781,14 +1829,14 @@ impl Pen<'_> {
                 draw::art(self.c, ax, art_y, ART, ART_R, &t.title, !t.playing);
                 // The whole card is play/pause; a raised key at its right,
                 // as the hero card has, says so. It sinks with the card.
-                let kx = x + w - PAD + 3.0 - MEDIA_KEY_W;
+                let kx = x + w - PAD - MEDIA_KEY_W;
                 self.key_face(kx, KEY_Y, MEDIA_KEY_W, KEY_H, KEY_R, card_press.on, true);
                 let dy = if card_press.on { 1.0 } else { 0.0 };
                 let cy = KEY_Y + KEY_H / 2.0 + dy;
                 let icx = kx + MEDIA_KEY_W / 2.0;
                 self.icon(false, glyph, ICON_KEY - 2.0, icx, cy, self.a.ink);
                 let tx = ax + ART + 10.0;
-                let right = kx - 8.0;
+                let right = kx - 5.0;
                 self.title(
                     Face::Word,
                     &TITLE,

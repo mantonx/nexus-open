@@ -389,3 +389,9 @@ README clip (now of the new strip), release verification.
   to "Weird Fis"; and the new medium media key ends 4 px from the card's
   edge, so a red edge flag at 636–639 reads as stuck to it (a regression
   here: the key should keep the full `PAD`).
+
+  Then, without a rescore: the medium media key keeps the full `PAD`; no
+  text ends in a letter cut through (a title at rest ends in an ellipsis
+  after a whole word, or between letters; it fades only while moving);
+  a lost card's second reading is drawn lost too. "System does not name
+  CPU and GPU" is DESIGN.md open question 16.
