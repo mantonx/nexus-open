@@ -522,7 +522,10 @@ fn a_feed_that_cannot_be_read_says_why_by_kind() {
     assert_eq!(check::check_within(&url, WAIT), Err(Problem::NotFound));
     let (url, _r) = serve(vec![Reply::new(503, Vec::new())]);
     assert_eq!(check::check_within(&url, WAIT), Err(Problem::Status(503)));
-    assert_eq!(check_feed("file:///etc/passwd"), Err(Problem::NotWebAddress));
+    assert_eq!(
+        check_feed("file:///etc/passwd"),
+        Err(Problem::NotWebAddress)
+    );
     // Nothing listens there: bound, then closed.
     let port = TcpListener::bind("127.0.0.1:0")
         .unwrap()

@@ -288,8 +288,7 @@ fn start_service() {
                 Ok(()) => slint::Timer::single_shot(START_WAIT, move || {
                     if STARTING.with(std::cell::Cell::get) == Some(try_no) {
                         STARTING.with(|s| s.set(None));
-                        START_FAILED
-                            .with(|f| *f.borrow_mut() = Some(status::NO_ANSWER.into()));
+                        START_FAILED.with(|f| *f.borrow_mut() = Some(status::NO_ANSWER.into()));
                         with_app(show_status);
                     }
                 }),

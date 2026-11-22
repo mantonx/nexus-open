@@ -54,7 +54,10 @@ pub enum Kind {
     /// An icon's name, chosen from the picker of the strip's icons.
     Icon,
     /// A whole number between two bounds, stepped by the arrow keys.
-    Stepper { min: u32, max: u32 },
+    Stepper {
+        min: u32,
+        max: u32,
+    },
     /// The news feeds: how many, and a way to Settings, where they are
     /// edited (they are shared by every news widget).
     Feeds,
@@ -995,7 +998,10 @@ mod tests {
             .into_iter()
             .find(|f| f.key == "feeds")
             .unwrap();
-        assert_eq!((feeds.kind, feeds.value.as_str()), (Kind::Feeds, "No feeds yet"));
+        assert_eq!(
+            (feeds.kind, feeds.value.as_str()),
+            (Kind::Feeds, "No feeds yet")
+        );
         let tap = fields(&v, &ctx)
             .into_iter()
             .find(|f| f.key == "tap")

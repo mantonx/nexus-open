@@ -506,7 +506,11 @@ impl Editor {
                 chosen: now.is_empty(),
                 id: SharedString::new(),
                 name: "The widget's own".into(),
-                icon: self.own_icon().map(|c| c.to_string()).unwrap_or_default().into(),
+                icon: self
+                    .own_icon()
+                    .map(|c| c.to_string())
+                    .unwrap_or_default()
+                    .into(),
                 value: SharedString::new(),
             };
             let rows: Vec<PickRow> = std::iter::once(own)
@@ -1159,7 +1163,10 @@ impl Editor {
             // move, and the grip would sit on the edge flag.
             (_, Some(i)) if widths.iter().sum::<u32>() >= STRIP && i + 1 == widgets.len() => {
                 if i == 0 {
-                    format!("{}, the whole strip. Make it narrower in Width below to put another beside it.", sized(i))
+                    format!(
+                        "{}, the whole strip. Make it narrower in Width below to put another beside it.",
+                        sized(i)
+                    )
                 } else {
                     format!(
                         "{}, {} of {}, to the strip's end. Drag it to move it; resize it in Width below.",
@@ -1311,7 +1318,8 @@ impl Editor {
                     width.kind = Kind::Stepper { min, max };
                     // The range is beside the field.
                     width.help = if min == max {
-                        "Nothing beside it can give it room: make a neighbour narrower first.".into()
+                        "Nothing beside it can give it room: make a neighbour narrower first."
+                            .into()
                     } else {
                         if i + 1 < self.layout_widths().len() {
                             "The arrow keys step by 1, with Shift by 10. The widget on its right gives or takes the difference, as when the grip on the strip is dragged.".into()
@@ -2383,19 +2391,14 @@ impl Editor {
         let age = news::max_age_index(&c);
         app.set_news_rotate(rotate.map_or(-1, |i| i as i32));
         app.set_news_max_age(age.map_or(-1, |i| i as i32));
-        app.set_news_rotate_note(
-            rotate
-                .is_none()
-                .then(|| format!("Now {}, from the layout file.", news::spoken(c.rotate)))
-                .unwrap_or_default()
-                .into(),
-        );
-        app.set_news_age_note(
-            age.is_none()
-                .then(|| format!("Now {}, from the layout file.", news::spoken(c.max_age)))
-                .unwrap_or_default()
-                .into(),
-        );
+        // A duration set in a layout file that is none of the choices: said
+        // under them, since no choice is shown as picked.
+        let note = |chosen: Option<usize>, d| match chosen {
+            Some(_) => String::new(),
+            None => format!("Now {}, from the layout file.", news::spoken(d)),
+        };
+        app.set_news_rotate_note(note(rotate, c.rotate).into());
+        app.set_news_age_note(note(age, c.max_age).into());
     }
 
     fn feed_result(&self, state: &str, title: &str, detail: &str, force: bool) {
@@ -2423,12 +2426,14 @@ impl Editor {
         let try_no = self.feed_try;
         self.feed_result("checking", "Checking the feed…", &url, false);
         let checked = url.clone();
-        let _ = thread::Builder::new().name("feed-check".into()).spawn(move || {
-            let result = nexus_sources::news::check_feed(&checked);
-            let _ = slint::invoke_from_event_loop(move || {
-                with_editor(|e| e.feed_checked(try_no, &checked, result));
+        let _ = thread::Builder::new()
+            .name("feed-check".into())
+            .spawn(move || {
+                let result = nexus_sources::news::check_feed(&checked);
+                let _ = slint::invoke_from_event_loop(move || {
+                    with_editor(|e| e.feed_checked(try_no, &checked, result));
+                });
             });
-        });
     }
 
     fn feed_checked(
@@ -2442,7 +2447,8 @@ impl Editor {
         }
         match result {
             Ok(found) => {
-                self.feed_titles.insert(url.to_string(), found.title.clone());
+                self.feed_titles
+                    .insert(url.to_string(), found.title.clone());
                 let detail = match &found.newest {
                     Some(h) => format!("Newest: {h}"),
                     None => "It has no headlines yet; they show when it posts some.".into(),
@@ -2675,7 +2681,11 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
             None => Default::default(),
         }
     } else if matches!(f.kind, Kind::Feeds) {
-        (f.value.clone(), nexus_core::icons::NEWSPAPER.to_string(), String::new())
+        (
+            f.value.clone(),
+            nexus_core::icons::NEWSPAPER.to_string(),
+            String::new(),
+        )
     } else {
         Default::default()
     };

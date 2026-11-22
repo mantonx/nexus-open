@@ -249,9 +249,21 @@ mod tests {
     #[test]
     fn width_bounds_are_what_a_resize_can_reach() {
         assert_eq!(width_bounds(&[200, 300, 100], 0), (40, 460));
-        assert_eq!(width_bounds(&[200, 300, 100], 2), (40, 140), "into the free 40");
-        assert_eq!(width_bounds(&[320, 320], 1), (40, 320), "nothing free at the end");
-        assert_eq!(width_bounds(&[30, 100], 0), (30, 90), "already under the minimum");
+        assert_eq!(
+            width_bounds(&[200, 300, 100], 2),
+            (40, 140),
+            "into the free 40"
+        );
+        assert_eq!(
+            width_bounds(&[320, 320], 1),
+            (40, 320),
+            "nothing free at the end"
+        );
+        assert_eq!(
+            width_bounds(&[30, 100], 0),
+            (30, 90),
+            "already under the minimum"
+        );
         let (_, max) = width_bounds(&[200, 300, 100], 0);
         assert_eq!(resize(&[200, 300, 100], 0, 1000)[0], max);
     }

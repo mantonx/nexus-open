@@ -87,11 +87,7 @@ impl std::fmt::Display for Failure {
             Failure::Address(why) | Failure::Parse(why) => f.write_str(why),
             Failure::Net(e) => f.write_str(&describe(e)),
             Failure::Status(status) => write!(f, "the server answered {status}"),
-            Failure::TooBig => write!(
-                f,
-                "the feed is larger than {} MB",
-                MAX_BODY / 1024 / 1024
-            ),
+            Failure::TooBig => write!(f, "the feed is larger than {} MB", MAX_BODY / 1024 / 1024),
         }
     }
 }

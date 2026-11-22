@@ -25,7 +25,9 @@ pub fn current(news: Option<&NewsConfig>) -> NewsConfig {
 
 /// Which choice a duration is, if it is one of them.
 pub fn rotate_index(c: &NewsConfig) -> Option<usize> {
-    ROTATE.iter().position(|s| Duration::from_secs(*s) == c.rotate)
+    ROTATE
+        .iter()
+        .position(|s| Duration::from_secs(*s) == c.rotate)
 }
 
 pub fn max_age_index(c: &NewsConfig) -> Option<usize> {
@@ -41,7 +43,7 @@ pub fn spoken(d: Duration) -> String {
     match s {
         0..=119 => format!("{s} s"),
         _ if s < 2 * 3600 => format!("{} min", s / 60),
-        _ if s < 2 * 86_400 || s % 86_400 != 0 => format!("{} h", s / 3600),
+        _ if s < 2 * 86_400 || !s.is_multiple_of(86_400) => format!("{} h", s / 3600),
         _ => format!("{} days", s / 86_400),
     }
 }
@@ -216,7 +218,10 @@ mod tests {
             name("https://www.news.example/rss?k=1", None),
             "news.example"
         );
-        assert_eq!(name("https://x.example/", Some("Harbour Gazette")), "Harbour Gazette");
+        assert_eq!(
+            name("https://x.example/", Some("Harbour Gazette")),
+            "Harbour Gazette"
+        );
         assert_eq!(count(&[]), "No feeds yet");
         assert_eq!(count(&["https://a".into(), "https://b".into()]), "2 feeds");
         for p in [
@@ -230,12 +235,18 @@ mod tests {
         ] {
             let (what, next, _) = problem(&p);
             let words = format!("{what}. {next}");
-            assert!(words.starts_with("That") || words.starts_with("No answer"), "{words}");
+            assert!(
+                words.starts_with("That") || words.starts_with("No answer"),
+                "{words}"
+            );
             for jargon in ["ureq", "error:", "404", "parse"] {
                 assert!(!words.contains(jargon), "{words}");
             }
         }
-        assert!(problem(&Problem::NoAnswer).2, "a site that is down can be added anyway");
+        assert!(
+            problem(&Problem::NoAnswer).2,
+            "a site that is down can be added anyway"
+        );
         assert!(!problem(&Problem::NotAFeed).2);
     }
 }
