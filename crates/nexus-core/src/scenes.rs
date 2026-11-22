@@ -263,6 +263,18 @@ fn scenes(
         let mut e = engine(c, &critical(), "S");
         out.save(group, name("severity"), shot(&mut e, &now, 1.0));
     }
+    if want("narrow-keys") {
+        // Sixteen keys at the 40 px minimum, none set up: each shows its
+        // icon in its outline, and no words run into the next.
+        let mut c = layout(accent, true);
+        let text = format!(
+            "[[page]]\nname = \"K\"\n{}",
+            "[[page.widget]]\ntype = \"key\"\nwidth = 40\n".repeat(16)
+        );
+        c.pages = Config::parse(&text).expect("a valid layout").pages;
+        let mut e = engine(c, &idle(), "K");
+        out.save(group, name("narrow-keys"), shot(&mut e, &now, 1.0));
+    }
 }
 
 /// A value widget's TOML.

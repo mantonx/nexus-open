@@ -2402,13 +2402,16 @@ impl Pen<'_> {
     ) {
         self.setup_card(x, w);
         let cy = CARD_Y + CARD_H / 2.0 + 0.5;
+        // Too narrow for "Set up" beside the icon: the icon alone, in its
+        // dashed outline, never words running into the next card.
+        let set_up = self.measure(Face::Word, &BODY, "Set up");
+        if cls == Class::Compact && w < ICON_COMPACT + 7.0 + set_up + PAD * 1.5 {
+            self.icon(false, icon, ICON_COMPACT, x + w / 2.0, cy, self.a.base);
+            return;
+        }
         if cls == Class::Compact {
             // Two short lines: what it is, and what to do.
-            let lw = self.measure(Face::Word, &BODY, short).max(self.measure(
-                Face::Word,
-                &BODY,
-                "Set up",
-            ));
+            let lw = self.measure(Face::Word, &BODY, short).max(set_up);
             let total = ICON_COMPACT + 7.0 + lw;
             let x0 = x + ((w - total) / 2.0).max(PAD - 2.0);
             self.icon(
