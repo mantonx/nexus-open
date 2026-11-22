@@ -459,3 +459,27 @@ README clip (now of the new strip), release verification.
   headline's end on a hero card, when it fits. Costs the accent newspaper
   on most cards (the raised card carries the tap). DESIGN.md, Long
   titles. To be read on the panel.
+- 2026-11-22 — Three defects on Matt's live layout, fixed; each rule
+  provisional, Matt to overturn (DESIGN.md, Size classes, Numbers are
+  never cut, States, open question 17):
+  - A value card always says what it reads. Compact cards are laid out
+    for the widest value of their unit ("212°", "100%"), never the value
+    now, and keep the icon by stepping numeral and icon down together
+    (32/22 to 20/17); narrower, the name above the numeral; narrower
+    still, the icon alone. A widget with no label is named for its
+    signal ("CPU"). Owner's 106 px temperatures: 26 px numerals, 17 px
+    icon. Cost: memory on the default System page drops to 22/17.
+  - Numbers and times are never ellipsized. A time drops "/ total", then
+    a style, then goes, chosen once per track for its widest elapsed
+    time; `fit` cuts before a word with a figure in it; ages, high/low,
+    "From 9:30", "Lost at 10:41" shorten in whole forms or go. Cost: a
+    107 px compact media card shows no time (it used to run into the
+    padding).
+  - An empty page says "Empty page / Add widgets in Settings", centred,
+    TEXT2, on bare ground: no card, outline or accent.
+  - Found, not fixed: a compact rate card in a 106 px zone runs
+    "12 kB/s" past its edge.
+  Frames: `live-p1-compact-temps`, `live-p5-seek`, `live-p5-seek-hours`,
+  `live-p6-empty-page`, `narrow-values`, `specimen-slider-seek`,
+  `specimen-slider-seek-hours`, `specimen-media-hours`. Not yet judged
+  by an isolated critique.
