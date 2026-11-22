@@ -2210,12 +2210,16 @@ impl Editor {
         app.set_pref_accent(p.accent.as_str().into());
         app.set_accent_current(p.preset.map_or(-1, |i| i as i32));
         let picked = l.config.settings.accent.unwrap_or(crate::accent::DEFAULT);
-        app.set_accent_note(if crate::accent::near_severity(picked) {
-            "This colour is close to the strip's warning amber or alarm red. Warnings stay clear by their size, but the strip may look busier.".into()
+        app.set_accent_note(if crate::accent::snapped(picked) {
+            crate::i18n::shown("This colour sits too close to the strip's warning amber or alarm red, so the strip moves it to the nearest hue it can use: the one shown here.").into()
         } else {
             SharedString::new()
         });
         app.set_pref_weather(p.weather.as_str().into());
+        app.set_pref_idle_dim(p.idle_dim);
+        app.set_pref_night(!p.night_from.is_empty());
+        app.set_pref_night_from(p.night_from.as_str().into());
+        app.set_pref_night_to(p.night_to.as_str().into());
         app.set_fonts(ModelRc::new(VecModel::from(
             p.fonts
                 .iter()

@@ -116,14 +116,21 @@ pub fn run() -> Result<(), slint::PlatformError> {
         }
     });
     set_accent(None);
+    // Each swatch as the strip draws it (its key face), not the raw preset.
     let swatches: Vec<slint::Color> = accent::PRESETS
         .iter()
-        .map(|(_, c)| accent::slint(*c))
+        .map(|(_, c)| accent::slint(accent::roles(*c).base))
         .collect();
     app.set_accent_swatches(ModelRc::new(VecModel::from(swatches)));
     let names: Vec<SharedString> = accent::PRESETS
         .iter()
-        .map(|(n, _)| i18n::shown(n).into())
+        .map(|(n, _)| {
+            let mut name = i18n::shown(n);
+            if let Some(first) = name.get_mut(..1) {
+                first.make_ascii_uppercase();
+            }
+            name.into()
+        })
         .collect();
     app.set_accent_names(ModelRc::new(VecModel::from(names)));
     show_status(&app);

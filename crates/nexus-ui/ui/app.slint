@@ -288,6 +288,10 @@ export component AppWindow inherits Window {
     in property <int> accent-current: -1;
     in property <string> accent-note;
     in property <string> pref-weather;
+    in property <bool> pref-idle-dim: true;
+    in property <bool> pref-night;
+    in property <string> pref-night-from;
+    in property <string> pref-night-to;
     in property <[string]> fonts;
     in property <int> pref-font;
     in property <string> log-text;
@@ -1063,14 +1067,17 @@ export component AppWindow inherits Window {
                                 // and what can be done to it.
                                 // At 1x the column is narrow: the words go on
                                 // their own line above the buttons.
-                                if row.active && root.zoom == 1: Text {
-                                    text: root.problem != "" ? root.problem : root.caption;
-                                    font-family: Theme.font;
-                                    font-size: Theme.size-label;
-                                    color: root.problem != "" ? Theme.crit : Theme.text-2;
-                                    font-weight: root.problem != "" ? 500 : 400;
-                                    wrap: word-wrap;
-                                    accessible-role: text;
+                                if row.active && root.zoom == 1: VerticalLayout {
+                                    padding-top: 10px;
+                                    Text {
+                                        text: root.problem != "" ? root.problem : root.caption;
+                                        font-family: Theme.font;
+                                        font-size: Theme.size-label;
+                                        color: root.problem != "" ? Theme.crit : Theme.text-2;
+                                        font-weight: root.problem != "" ? 500 : 400;
+                                        wrap: word-wrap;
+                                        accessible-role: text;
+                                    }
                                 }
                                 if row.active: HorizontalLayout {
                                     padding-top: 8px;
@@ -2336,6 +2343,102 @@ export component AppWindow inherits Window {
                     }
                     Hint {
                         text: @tr("The typeface of words and numbers on the strip.");
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Dim when idle");
+                    width: Grid.label;
+                    y: 8px;
+                    vertical-alignment: top;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        alignment: start;
+                        Segmented {
+                            options: [@tr("On"), @tr("Off")];
+                            current: root.pref-idle-dim ? 0 : 1;
+                            label: @tr("Dim when idle");
+                            chose(i) => {
+                                root.set-pref("idle-dim", i == 0 ? "on" : "off");
+                            }
+                        }
+                    }
+                    Hint {
+                        text: @tr("After five minutes with no touch the strip draws darker, never smaller. A warning stays bright.");
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Night hours");
+                    width: Grid.label;
+                    y: 8px;
+                    vertical-alignment: top;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 10px;
+                        Segmented {
+                            options: [@tr("None"), @tr("Dim at night")];
+                            current: root.pref-night ? 1 : 0;
+                            label: @tr("Night hours");
+                            chose(i) => {
+                                root.set-pref("night", i == 1 ? "on" : "off");
+                            }
+                        }
+                        if root.pref-night: HorizontalLayout {
+                            spacing: 8px;
+                            Label {
+                                text: @tr("from");
+                                vertical-alignment: center;
+                                color: Theme.text-2;
+                            }
+                            for item in [{ v: root.pref-night-from, epoch: root.resets }]: TextField {
+                                width: 76px;
+                                text: item.v;
+                                committed-value: item.v;
+                                placeholder: "22:30";
+                                label: @tr("Night starts at, HH:MM");
+                                accepted(text) => {
+                                    root.set-pref("night-from", text);
+                                }
+                                committed(text) => {
+                                    root.set-pref("night-from", text);
+                                }
+                            }
+                            Label {
+                                text: @tr("to");
+                                vertical-alignment: center;
+                                color: Theme.text-2;
+                            }
+                            for item in [{ v: root.pref-night-to, epoch: root.resets }]: TextField {
+                                width: 76px;
+                                text: item.v;
+                                committed-value: item.v;
+                                placeholder: "07:00";
+                                label: @tr("Night ends at, HH:MM");
+                                accepted(text) => {
+                                    root.set-pref("night-to", text);
+                                }
+                                committed(text) => {
+                                    root.set-pref("night-to", text);
+                                }
+                            }
+                        }
+                    }
+                    Hint {
+                        text: @tr("The strip dims further between these times, across midnight when the end is earlier.");
                     }
                 }
             }

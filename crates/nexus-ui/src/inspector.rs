@@ -145,10 +145,16 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
             ..
         } => {
             put("type", READING);
-            // Carried, like the icon: "0 5000", or empty.
+            // "20 60", or empty; in the shown unit, like the thresholds.
             put(
                 "scale",
-                &scale.map_or(String::new(), |[lo, hi]| format!("{lo} {hi}")),
+                &scale.map_or(String::new(), |[lo, hi]| {
+                    format!(
+                        "{} {}",
+                        number(threshold_out(lo, signal, ctx)),
+                        number(threshold_out(hi, signal, ctx))
+                    )
+                }),
             );
             put("second_label", second_label.as_deref().unwrap_or_default());
             put("label", label);
@@ -318,7 +324,10 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
                 .collect::<Result<Vec<_>, _>>()
             {
                 Ok(v) if v.is_empty() => None,
-                Ok(v) if v.len() == 2 && v[0] < v[1] => Some([v[0], v[1]]),
+                Ok(v) if v.len() == 2 && v[0] < v[1] => Some([
+                    threshold_in(v[0], &signal, ctx),
+                    threshold_in(v[1], &signal, ctx),
+                ]),
                 _ => {
                     return Err(Missing::Invalid(
                         "The scale is two numbers, the lowest first.".into(),
@@ -484,13 +493,15 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 Kind::Signal,
                 reading_help(&get("signal"), ctx),
             );
-            add(
-                "graph",
-                "Graph",
-                segmented(&[NO_GRAPH, AREA, LINE]),
-                String::new(),
-            );
             let unit = threshold_unit(&get("signal"), ctx);
+            add(
+                "scale",
+                "Bar from–to",
+                Kind::Text,
+                format!(
+                    "Two numbers{unit}, the lowest first, as in: 20 60. Empty: the signal's usual scale."
+                ),
+            );
             add(
                 "warn",
                 "Warn at",
@@ -527,6 +538,12 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                     Kind::Number,
                     format!("For the second reading{unit}. Empty: never."),
                 );
+                add(
+                    "second_label",
+                    "Second label",
+                    Kind::Text,
+                    "Its name where it is named, as in the alarm: \"load\" makes \"CPU load\". Empty: the signal's last word.".into(),
+                );
             }
         }
         KEY => {
@@ -537,6 +554,12 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 "The icon's name, as in: play.".into(),
             );
             add("label", "Label", Kind::Text, String::new());
+            add(
+                "sub",
+                "Second line",
+                Kind::Text,
+                "Under the label, on a key 300 px or wider.".into(),
+            );
         }
         RATE => {
             add("label", "Label", Kind::Text, String::new());
@@ -579,6 +602,15 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             }
         }
         _ => {}
+    }
+    // Any widget may draw another icon than its own; a key's is above.
+    if ty != KEY {
+        add(
+            "icon",
+            "Icon",
+            Kind::Text,
+            "Optional: an icon's name, as in: thermometer. Empty: the widget's own.".into(),
+        );
     }
     for (prefix, label) in [("tap", "Tap"), ("hold", "Long press")] {
         let action = get(prefix);
@@ -935,6 +967,25 @@ mod tests {
             .map(|f| f.key)
             .collect();
         assert!(keys.contains(&"icon".into()) && keys.contains(&"label".into()));
+        assert!(keys.contains(&"sub".into()));
+        let Outcome::Send(Widget::Key { sub, .. }) =
+            apply(&key, &Values::new(), "sub", "Spotify", &ctx)
+        else {
+            panic!("not sent");
+        };
+        assert_eq!(sub.as_deref(), Some("Spotify"));
+        // Every widget offers its icon; a reading its bar's scale.
+        let media = Widget::Media {
+            width: 120,
+            icon: None,
+            tap: None,
+            hold: None,
+        };
+        let media_keys: Vec<String> = fields(&flatten(&media, &ctx), &ctx)
+            .into_iter()
+            .map(|f| f.key)
+            .collect();
+        assert!(media_keys.contains(&"icon".into()));
         let Outcome::Send(Widget::Key { label, .. }) =
             apply(&key, &Values::new(), "label", "Play", &ctx)
         else {
@@ -967,6 +1018,25 @@ mod tests {
             (second.as_deref(), second_crit),
             (Some("cpu.temp"), Some(90.0))
         );
+        // A bar's scale is typed in the shown unit too, and named where
+        // the second reading is named.
+        let Outcome::Send(scaled) = apply(&with, &Values::new(), "scale", "86 212", &ctx) else {
+            panic!("not sent");
+        };
+        let Widget::Value { scale, .. } = &scaled else {
+            panic!("not a value");
+        };
+        assert_eq!(*scale, Some([30.0, 100.0]));
+        assert_eq!(flatten(&scaled, &ctx)["scale"], "86 212");
+        let shown: Vec<String> = fields(&flatten(&scaled, &ctx), &ctx)
+            .into_iter()
+            .map(|f| f.key)
+            .collect();
+        assert!(shown.contains(&"second_label".into()) && shown.contains(&"icon".into()));
+        assert!(matches!(
+            apply(&scaled, &Values::new(), "scale", "60 20", &ctx),
+            Outcome::Invalid(_)
+        ));
     }
 
     #[test]
