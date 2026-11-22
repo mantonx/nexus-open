@@ -244,4 +244,19 @@ README clip (now of the new strip), release verification.
   default; the first release is for anyone with the strip, no terminal.
   Still open in U0: the legibility card has not been read (the strip needs
   a replug first), so U2's sizes stay provisional.
+- 2026-11-22 — Matt set the goal "finish the redesign" and the work
+  continues without stopping at each gate. Decisions the plan marked as
+  his are taken provisionally by the agent, recorded here, and remain his
+  to overturn. The legibility card is still unread, so every type size
+  stays a named constant that can be re-tuned in minutes.
+- 2026-11-22 — Behaviour rules fixed for U3 (provisional, see above), so
+  the engine work can start before the look is final. Sliders are
+  relative: a touch landing changes nothing, a drag moves the value by
+  the distance travelled. A long press fires at the threshold while still
+  held, and shows its progress. A reading that rises past its critical
+  threshold raises a full-strip alarm until OK is tapped, it is swiped
+  away, or the reading has been back under for 10 s; it re-arms after 30 s
+  under. A takeover may cover part of the strip (`align`, `width`). New:
+  a `key` widget (icon, label, tap and hold actions), a second reading on
+  a value widget, an `accent` setting, and page state for the markers.
 
