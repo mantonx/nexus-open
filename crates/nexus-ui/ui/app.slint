@@ -8,7 +8,7 @@
 // in strip pixels; Rust works out what they mean and sends back the zones
 // to draw.
 
-import { Button, VerticalBox, HorizontalBox, Palette, LineEdit, ComboBox, TextEdit, ScrollView, ListView } from "std-widgets.slint";
+import { AboutSlint, Button, VerticalBox, HorizontalBox, Palette, LineEdit, ComboBox, TextEdit, ScrollView, ListView } from "std-widgets.slint";
 
 /// One widget on the page, in strip pixels.
 /// Colors with a meaning, chosen for each color scheme: on a light
@@ -311,6 +311,11 @@ export component AppWindow inherits Window {
     in property <string> diagnostics;
     /// Run the checks again now.
     callback check-again();
+    /// This window's version; the daemon's, once it has answered; where
+    /// the project lives. For the About dialog.
+    in property <string> version;
+    in property <string> daemon-version;
+    in property <string> homepage;
     /// Try mode: the preview acts as the strip, and a press on it is sent
     /// as a touch (strip pixels at press and release).
     in property <bool> trying;
@@ -536,6 +541,16 @@ export component AppWindow inherits Window {
                     enabled: root.connected && root.redo-label != "";
                     clicked => {
                         root.redo();
+                    }
+                }
+
+                // In the toolbar, the window's top level, and never disabled:
+                // Slint's royalty-free license asks for its AboutSlint widget in
+                // an About screen reached from there.
+                Button {
+                    text: @tr("About");
+                    clicked => {
+                        about.show();
                     }
                 }
 
@@ -1118,5 +1133,61 @@ export component AppWindow inherits Window {
             }
         }
 
+    }
+
+    about := PopupWindow {
+        width: min(440px, root.width - 32px);
+        x: (root.width - self.width) / 2;
+        y: 72px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 8px;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: #00000060;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+
+                Text {
+                    text: @tr("Nexus Open");
+                    font-size: 18px;
+                    font-weight: 600;
+                }
+                Text {
+                    text: root.daemon-version == "" || root.daemon-version == root.version
+                        ? @tr("Version {}", root.version)
+                        : @tr("Version {} (nexusd {})", root.version, root.daemon-version);
+                    color: Palette.foreground.transparentize(0.35);
+                }
+                Text {
+                    text: @tr("Drives the Corsair iCUE Nexus touch strip. Not made or endorsed by Corsair.");
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: @tr("Free software under the MIT license: {}", root.homepage);
+                    wrap: word-wrap;
+                }
+                AboutSlint { }
+                HorizontalLayout {
+                    alignment: end;
+                    Button {
+                        text: @tr("Close");
+                        // Built afresh each time the dialog opens, so this
+                        // puts the keyboard here every time.
+                        init => {
+                            self.focus();
+                        }
+                        clicked => {
+                            about.close();
+                        }
+                    }
+                }
+            }
+        }
     }
 }

@@ -77,6 +77,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
     }
     // Creating the window also creates Slint's platform (the winit backend).
     let app = AppWindow::new()?;
+    app.set_version(env!("CARGO_PKG_VERSION").into());
+    app.set_homepage(env!("CARGO_PKG_REPOSITORY").into());
     // On Wayland the app ID is how the desktop finds the window's icon and
     // groups it in the task bar. It needs the platform to exist, and must be
     // set before the window is shown by `run`.
@@ -337,6 +339,7 @@ fn poll_status(app: &Weak<AppWindow>) {
                 .map_or(0, |i| i + 1);
             let label = format!("{position} of {}", status.pages.len());
             let shown = app.upgrade_in_event_loop(move |app| {
+                app.set_daemon_version(status.version.as_str().into());
                 editor::status(&status);
                 app.set_page_name(status.page.into());
                 app.set_page_position(label.into());
