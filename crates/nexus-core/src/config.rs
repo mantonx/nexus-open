@@ -298,7 +298,7 @@ pub enum Widget {
         #[serde(default)]
         hold: Option<Action>,
     },
-    /// Download and upload rates with a graph of the download rate.
+    /// Download and upload rates, each over its fixed-scale bar.
     Rate {
         width: u32,
         label: String,

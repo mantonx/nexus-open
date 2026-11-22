@@ -1552,14 +1552,25 @@ impl Engine {
 
 /// The readings with a critical threshold on the layout's pages, by
 /// signal, keeping the state of those in `old`. A signal on several
-/// widgets is watched at the lowest `crit`, named by that widget's label.
+/// widgets is watched at the lowest `crit`, named by that widget's label;
+/// a second reading by the label and its `second_label` ("GPU load").
 fn watches(config: &Config, old: &HashMap<String, Watch>) -> HashMap<String, Watch> {
     let mut out: HashMap<String, Watch> = HashMap::new();
     for page in &config.pages {
         for (widget, signal, _, crit) in thresholds(&page.widgets) {
-            let (Some(crit), Widget::Value { label, .. }) = (crit, widget) else {
+            let (
+                Some(crit),
+                Widget::Value {
+                    label,
+                    signal: first,
+                    second_label,
+                    ..
+                },
+            ) = (crit, widget)
+            else {
                 continue;
             };
+            let is_second = signal != first;
             if out.get(signal).is_some_and(|w| w.crit <= crit) {
                 continue;
             }
@@ -1572,9 +1583,18 @@ fn watches(config: &Config, old: &HashMap<String, Watch>) -> HashMap<String, Wat
                 armed: true,
             });
             watch.crit = crit;
-            watch.label = label.clone();
+            watch.label = if is_second {
+                let name = second_label
+                    .clone()
+                    .unwrap_or_else(|| signal.rsplit('.').next().unwrap_or(signal).to_string());
+                format!("{label} {name}").trim().to_string()
+            } else {
+                label.clone()
+            };
+            // The widget's own icon stands for its first reading.
             watch.icon = widget
                 .icon()
+                .filter(|_| !is_second)
                 .and_then(icons::by_name)
                 .unwrap_or_else(|| icons::for_signal(signal));
             out.insert(signal.to_string(), watch);
@@ -2629,11 +2649,12 @@ mod tests {
             ("GPU", 2),
             "the most recent"
         );
-        // A second reading has its own threshold and label.
+        // A second reading has its own threshold, and is named by the
+        // widget's label and its own (here none: the signal's last word).
         reading(&mut e, 2.0, "mem.used", 97.0);
         assert_eq!(
             (alarm_label(&e).as_deref(), e.alarm().unwrap().count),
-            (Some("Load"), 3)
+            (Some("Load used"), 3)
         );
         trace(&mut e, &[(3.0, 630.0), (3.05, 630.0)], 3.1);
         assert_eq!(e.alarm(), None, "all acknowledged");
