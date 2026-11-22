@@ -221,6 +221,8 @@ fn style(size: f32, weight: f32) -> TextStyle {
     TextStyle {
         size,
         weight,
+        width: 100.0,
+        tabular: false,
         tracking: 0.0,
     }
 }
