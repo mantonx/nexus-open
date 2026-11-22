@@ -88,6 +88,10 @@ pub struct Reading {
     pub avail: Avail,
     /// Its fixed-scale bar; `None` for a reading with no scale.
     pub bar: Option<Bar>,
+    /// The value and unit at their widest for this signal ("100°", "100"
+    /// and "%"), known before the first reading: what a card that must
+    /// not rearrange as the value changes is laid out for.
+    pub widest: (String, String),
 }
 
 /// A track as the media widget shows it.
@@ -154,6 +158,9 @@ pub enum WidgetView {
     Rate { down: Reading, up: Reading },
     /// The track playing, or `None` when nothing is.
     Media(Option<Track>),
+    /// Nothing playing, and a tap opens the music player (the widget's
+    /// own `tap`, or `Config::music_action`): drawn as a key.
+    OpenMusic,
     Slider {
         icon: char,
         label: String,
@@ -615,17 +622,38 @@ fn fig_mid(num: &TextStyle, base: f32) -> f32 {
 
 /// The value to lay a card out for, so it does not rearrange as the
 /// reading changes: its digits as 8s (tabular, all one width), and at
-/// least two of them.
-fn steady_probe(t: &str) -> String {
+/// least `min` of them. A value with no digits ("––") is `min` 8s.
+fn wide_probe(t: &str, min: usize) -> String {
     let digits = t.chars().filter(char::is_ascii_digit).count();
-    let mut out: String = t
-        .chars()
-        .map(|c| if c.is_ascii_digit() { '8' } else { c })
-        .collect();
-    if digits == 1 {
+    let mut out: String = if digits == 0 {
+        String::new()
+    } else {
+        t.chars()
+            .map(|c| if c.is_ascii_digit() { '8' } else { c })
+            .collect()
+    };
+    for _ in digits..min {
         out.insert(0, '8');
     }
     out
+}
+
+/// The gap before a medium card's second reading, and the room its icon
+/// takes before its number.
+const SECOND_GAP: f32 = 5.0;
+const SECOND_ICON_W: f32 = ICON_SMALL + 2.0;
+
+/// Sizes for a medium value card with a second reading, chosen from the
+/// card's width and the readings' units alone.
+struct SecondPlan {
+    /// The first reading's numeral and icon.
+    num: TextStyle,
+    icon: f32,
+    /// The second reading's numeral, and its widest width with its unit.
+    second: TextStyle,
+    second_w: f32,
+    /// The widest of both, and the second's icon, fit.
+    fits: bool,
 }
 
 fn fmt_time(s: f64) -> String {
@@ -673,20 +701,37 @@ impl Pen<'_> {
     }
 
     /// `t` shortened with an ellipsis to fit `room`.
+    /// `t`, or as much of it as fits in `room` with an ellipsis: cut after
+    /// a whole word when that keeps most of what a cut between letters
+    /// would ("Weird Fishes…" over "Weird Fishes / Ar…"), else between
+    /// letters. Never a letter cut through.
     fn fit(&mut self, f: Face, s: &TextStyle, t: &str, room: f32) -> String {
         if self.measure(f, s, t) <= room {
             return t.to_string();
         }
-        let mut best = String::from("…");
+        let trim = |p: &str| {
+            p.trim_end_matches([' ', '/', '-', '–', '·', ',', ':', '&'])
+                .to_string()
+        };
+        let mut glyph = 0;
         for (e, _) in t.char_indices().skip(1) {
-            let cand = format!("{}…", t[..e].trim_end());
-            if self.measure(f, s, &cand) <= room {
-                best = cand;
+            if self.measure(f, s, &format!("{}…", trim(&t[..e]))) <= room {
+                glyph = e;
             } else {
                 break;
             }
         }
-        best
+        let kept = trim(&t[..glyph]);
+        let word = t[..glyph]
+            .rfind(' ')
+            .map(|i| trim(&t[..i]))
+            .filter(|w| !w.is_empty() && w.chars().count() * 5 >= kept.chars().count() * 3);
+        let cut = word.unwrap_or(kept);
+        if cut.is_empty() {
+            "…".to_string()
+        } else {
+            format!("{cut}…")
+        }
     }
 
     /// A title that may not fit between `x` and `right`: at rest it fades
@@ -714,6 +759,14 @@ impl Pen<'_> {
         let rest = MS_MARQUEE_REST as f32 / 1000.0;
         let scroll = over / MARQUEE_PX_PER_S;
         let back = 0.4;
+        // At rest the title ends in an ellipsis after a whole word, as every
+        // other text that does not fit; only a moving title fades at the
+        // edge it slides under.
+        if !marquee.is_some_and(|m| m < 2.0 * rest + scroll + back) {
+            let fitted = self.fit(f, s, t, right - x);
+            self.text(f, s, &fitted, x, base, c);
+            return;
+        }
         let (offset, alpha) = match marquee {
             Some(m) if m < rest => (0.0, 1.0),
             Some(m) if m < rest + scroll => ((m - rest) * MARQUEE_PX_PER_S, 1.0),
@@ -790,6 +843,48 @@ impl Pen<'_> {
     }
 
     // ------------------------------------------------------------ shapes
+
+    /// The sizes for a medium value card of inner width `w` with a second
+    /// reading: the largest that hold the widest values of both (three
+    /// digits) and the second's icon. The second steps down first (26,
+    /// 22), then the first with it (32 and 22, 32 and 20: a 200 px card
+    /// inside a 204 px zone), then the first again (28 and 20: a 200 px
+    /// zone).
+    fn second_plan(
+        &mut self,
+        w: f32,
+        first: &(String, String),
+        second: &(String, String),
+    ) -> SecondPlan {
+        let room = w - 2.0 * PAD;
+        let (p1, unit) = (wide_probe(&first.0, 3), first.1.as_str());
+        let (p2, sunit) = (wide_probe(&second.0, 3), second.1.as_str());
+        let steps = [
+            (NUM_BANDED, ICON_MEDIUM, NUM_SECOND),
+            (NUM_BANDED, ICON_MEDIUM, NUM_SECOND_TIGHT),
+            (NUM_COMPACT, ICON_COMPACT, NUM_SECOND_TIGHT),
+            (NUM_COMPACT, ICON_COMPACT, NUM_SECOND_SMALL),
+            (NUM_COMPACT_TIGHT, ICON_COMPACT, NUM_SECOND_SMALL),
+        ];
+        let mut plan = None;
+        for (num, icon, second) in steps {
+            let w1 = self.num_unit_w(&num, &p1, unit, &UNIT);
+            let w2 = self.num_unit_w(&second, &p2, sunit, &UNIT);
+            let need = icon + ICON_GAP + w1 + SECOND_GAP + SECOND_ICON_W + w2;
+            let fits = need <= room;
+            plan = Some(SecondPlan {
+                num,
+                icon,
+                second,
+                second_w: w2,
+                fits,
+            });
+            if fits {
+                break;
+            }
+        }
+        plan.expect("steps is not empty")
+    }
 
     /// A reading's icon; a lost one carries a broken-link badge at its
     /// lower right, cut out of the icon by a ring of the card.
@@ -963,7 +1058,10 @@ impl Pen<'_> {
         let cls = class(zw);
         self.control = matches!(
             view,
-            WidgetView::Slider { .. } | WidgetView::Key { .. } | WidgetView::Media(Some(_))
+            WidgetView::Slider { .. }
+                | WidgetView::Key { .. }
+                | WidgetView::Media(Some(_))
+                | WidgetView::OpenMusic
         );
         match view {
             WidgetView::Clock {
@@ -1016,6 +1114,7 @@ impl Pen<'_> {
             ),
             WidgetView::Rate { down, up } => self.network(x, w, cls, down, up, press),
             WidgetView::Media(track) => self.media(zx, x, w, zw, track.as_ref(), press),
+            WidgetView::OpenMusic => self.media_open(x, w, cls, press),
             WidgetView::Slider {
                 icon,
                 value,
@@ -1125,6 +1224,17 @@ impl Pen<'_> {
         press: Press,
     ) {
         let (second_icon, second) = (second.map(|s| s.0), second.map(|s| s.1));
+        // A lost card says so all over: a second reading on it is drawn lost
+        // too, never a bright number beside a grey one.
+        let relost = match (second, &r.avail) {
+            (Some(s), Avail::Lost(_)) if s.avail == Avail::Live => Some(Reading {
+                avail: r.avail.clone(),
+                bar: s.bar.map(|b| Bar { value: None, ..b }),
+                ..s.clone()
+            }),
+            _ => None,
+        };
+        let second = relost.as_ref().or(second);
         if r.avail == Avail::NotSetUp {
             self.setup_prompt(
                 x,
@@ -1205,42 +1315,48 @@ impl Pen<'_> {
                 } else {
                     BASE_MEDIUM - 2.0
                 };
-                let ix = x + PAD + ICON_MEDIUM / 2.0;
-                self.reading_icon(
-                    lost,
-                    glyph,
-                    ICON_MEDIUM,
-                    ix,
-                    fig_mid(&NUM_BANDED, base),
-                    icon_c,
-                );
-                let nx = x + PAD + ICON_MEDIUM + ICON_GAP;
                 let right = x + w - PAD;
-                let txt = self.fit(Face::Num, &NUM_BANDED, &txt, right - nx);
-                let nw = self.num_unit(&NUM_BANDED, &txt, unit, &UNIT, nx, base, num_c, kr.label);
-                if let Some(s) = second {
+                // With a second reading the card is laid out for the widest
+                // both can be (three digits each: "199°", "100%"), never for
+                // the values now, so nothing on it goes or moves as they
+                // change: the sizes step down until the second's icon fits.
+                let plan = second.map(|s| self.second_plan(w, &r.widest, &s.widest));
+                let (num, isz) = plan
+                    .as_ref()
+                    .map_or((NUM_BANDED, ICON_MEDIUM), |p| (p.num, p.icon));
+                let ix = x + PAD + isz / 2.0;
+                self.reading_icon(lost, glyph, isz, ix, fig_mid(&num, base), icon_c);
+                let nx = x + PAD + isz + ICON_GAP;
+                let txt = self.fit(Face::Num, &num, &txt, right - nx);
+                let nw = self.num_unit(&num, &txt, unit, &UNIT, nx, base, num_c, kr.label);
+                if let (Some(s), Some(p)) = (second, plan) {
                     let ks = reading_ink(sev, s.severity);
                     let (stxt, sbar) = shown(s);
                     let live = s.avail == Avail::Live;
-                    let su = if live { s.unit.as_str() } else { "" };
+                    // Lost keeps its unit, greyed; no data has none.
+                    let su = if s.avail == Avail::NoData {
+                        ""
+                    } else {
+                        s.unit.as_str()
+                    };
                     let sc = if live { ks.num } else { TEXT3 };
-                    let sw = self.num_unit_w(&NUM_SECOND, &stxt, su, &UNIT);
+                    let sl = if live { ks.label } else { TEXT3 };
+                    let sw = self.num_unit_w(&p.second, &stxt, su, &UNIT);
                     let sx = right - sw;
-                    if sx > nx + nw + 6.0 {
-                        self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, ks.label);
+                    if sx > nx + nw + SECOND_GAP {
+                        self.num_unit(&p.second, &stxt, su, &UNIT, sx, base, sc, sl);
                     }
-                    // Its own icon names it ("6%" alone is a riddle), and
-                    // its bar starts under the icon, so a low fill sits
-                    // there and not beside the digit like a decimal point.
-                    let iw = ICON_SMALL + 3.0;
-                    let mut split = (sx - 10.0).max(nx + nw + 6.0);
-                    if let Some(si) = second_icon.filter(|_| sx - iw >= nx + nw + 8.0) {
+                    // Its own icon names it ("6%" alone is a riddle), just
+                    // before its number. The bars split where the widest
+                    // second reading's icon would start, whatever the
+                    // values: a fixed scale keeps its length.
+                    let split = right - p.second_w - SECOND_ICON_W;
+                    if let Some(si) = second_icon.filter(|_| p.fits) {
                         let gc = if live { ks.icon } else { TEXT3 };
-                        let icx = sx - iw + ICON_SMALL / 2.0;
-                        let icy = fig_mid(&NUM_SECOND, base);
+                        let icx = sx - SECOND_ICON_W + ICON_SMALL / 2.0;
+                        let icy = fig_mid(&p.second, base);
                         let slost = matches!(s.avail, Avail::Lost(_));
                         self.reading_icon(slost, si, ICON_SMALL, icx, icy, gc);
-                        split = sx - iw;
                     }
                     if let Some(b) = bar {
                         let bw = split - 8.0 - (x + PAD);
@@ -1265,7 +1381,7 @@ impl Pen<'_> {
                     // does not leave just as the reading climbs into its
                     // warning; when the whole name does not fit, its first
                     // word ("CPU" of "CPU load": the icon says load).
-                    let probe: String = steady_probe(&txt);
+                    let probe: String = wide_probe(&txt, 2);
                     let pw = self.num_unit_w(&NUM_BANDED, &probe, unit, &UNIT).max(nw);
                     let room = right - (nx + pw + 8.0);
                     let first = words.split(' ').next().unwrap_or_default().to_string();
@@ -1305,8 +1421,14 @@ impl Pen<'_> {
                     let ks = reading_ink(sev, s.severity);
                     let (stxt, _) = shown(s);
                     let live = s.avail == Avail::Live;
-                    let su = if live { s.unit.as_str() } else { "" };
+                    // Lost keeps its unit, greyed; no data has none.
+                    let su = if s.avail == Avail::NoData {
+                        ""
+                    } else {
+                        s.unit.as_str()
+                    };
                     let sc = if live { ks.num } else { TEXT3 };
+                    let sl = if live { ks.label } else { TEXT3 };
                     // Its name before its number, on the numeral's baseline.
                     let sw = self.num_unit_w(&NUM_SECOND, &stxt, su, &UNIT);
                     let nm = self.measure(Face::Word, &LABEL, &s.name) + 6.0;
@@ -1316,9 +1438,9 @@ impl Pen<'_> {
                         return;
                     }
                     let sx = right - sw;
-                    self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, ks.label);
+                    self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, sl);
                     if named {
-                        self.text(Face::Word, &LABEL, &s.name, sx - nm, base, ks.label);
+                        self.text(Face::Word, &LABEL, &s.name, sx - nm, base, sl);
                     }
                     col_right = right - colw - 14.0;
                 }
@@ -1705,18 +1827,16 @@ impl Pen<'_> {
             Class::Medium => {
                 let ax = x + PAD - 3.0;
                 draw::art(self.c, ax, art_y, ART, ART_R, &t.title, !t.playing);
-                // The card is a play/pause key: a small accent badge says so.
-                let (bx, by) = (ax + ART - 4.0, art_y + ART - 4.0);
-                let surface = if card_press.on {
-                    CARD.mix(KEY, 0.4)
-                } else {
-                    CARD
-                };
-                self.circle(bx, by, 8.5, surface);
-                self.circle(bx, by, 7.0, self.a.base);
-                self.icon(false, glyph, ICON_BADGE, bx, by, self.a.ink);
+                // The whole card is play/pause; a raised key at its right,
+                // as the hero card has, says so. It sinks with the card.
+                let kx = x + w - PAD - MEDIA_KEY_W;
+                self.key_face(kx, KEY_Y, MEDIA_KEY_W, KEY_H, KEY_R, card_press.on, true);
+                let dy = if card_press.on { 1.0 } else { 0.0 };
+                let cy = KEY_Y + KEY_H / 2.0 + dy;
+                let icx = kx + MEDIA_KEY_W / 2.0;
+                self.icon(false, glyph, ICON_KEY - 2.0, icx, cy, self.a.ink);
                 let tx = ax + ART + 10.0;
-                let right = x + w - PAD;
+                let right = kx - 5.0;
                 self.title(
                     Face::Word,
                     &TITLE,
@@ -1938,6 +2058,40 @@ impl Pen<'_> {
                 self.text(Face::Word, &BODY, &hint, tx, BASE_LINE2 - 1.0, TEXT3);
             }
         }
+    }
+
+    /// Nothing playing, and a tap opens the music player: the whole card
+    /// is a key (raised face, lit top edge, accent glyph), and says what
+    /// a tap does.
+    fn media_open(&mut self, x: f32, w: f32, cls: Class, press: Press) {
+        let pressed = press.on;
+        self.key_face(x, CARD_Y, w, CARD_H, CARD_R, pressed, false);
+        let dy = if pressed { 1.0 } else { 0.0 };
+        let ic = if pressed { TEXT } else { self.a.text };
+        let cy = CARD_Y + CARD_H / 2.0 + 0.5 + dy;
+        let isz = match cls {
+            Class::Compact => ICON_KEY,
+            Class::Medium => ICON_MEDIUM - 2.0,
+            Class::Hero => ICON_HERO - 2.0,
+        };
+        let ix = x + PAD + 2.0 + isz / 2.0;
+        self.icon(true, icons::MUSIC, isz, ix, cy, ic);
+        let tx = x + PAD + 2.0 + isz + 9.0;
+        let room = x + w - PAD - tx;
+        let (l1, l2, st1) = match cls {
+            Class::Compact => ("Open", "music", LABEL),
+            Class::Medium => ("Nothing playing", "Tap to open music", BODY),
+            Class::Hero => ("Nothing playing", "Tap to open music", TITLE),
+        };
+        let l1 = self.fit(Face::Word, &st1, l1, room);
+        let l2 = if self.measure(Face::Word, &BODY, l2) <= room {
+            l2
+        } else {
+            "Open music"
+        };
+        let l2 = self.fit(Face::Word, &BODY, l2, room);
+        self.text(Face::Word, &st1, &l1, tx, BASE_LINE1 + dy, TEXT);
+        self.text(Face::Word, &BODY, &l2, tx, BASE_LINE2 - 1.0 + dy, TEXT2);
     }
 
     fn slider(&mut self, x: f32, w: f32, cls: Class, s: &SliderLook) {
@@ -2365,6 +2519,22 @@ struct SliderLook<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_medium_second_reading_keeps_its_icon_at_its_widest() {
+        let mut r = Renderer::new(Theme::default(), crate::fonts::FontChoice::default().load());
+        let mut c = Canvas::new(WIDTH, HEIGHT, CARD);
+        let mut p = r.pen(&mut c);
+        let pc = ("100".to_string(), "%".to_string());
+        for temp in ["212°", "100°"] {
+            let first = (temp.to_string(), String::new());
+            for zone in [200.0, 204.0] {
+                let plan = p.second_plan(zone - 2.0 * CARD_INSET, &first, &pc);
+                assert!(plan.fits, "{temp} in a {zone} px zone");
+                assert!(plan.second.size >= TEXT_FLOOR);
+            }
+        }
+    }
 
     #[test]
     fn classes_by_width() {

@@ -485,6 +485,7 @@ fn specimen(
         now: &now,
         mono,
         marquee: None,
+        music: config.music_action(),
     };
     let zones = bind_page(&config.pages[0].widgets, &ctx);
     let mut frame = Canvas::new(WIDTH, HEIGHT, GROUND);
@@ -800,6 +801,18 @@ fn specimens(out: &mut Out) {
         Finger::None,
         same,
     );
+    // The same, in a layout that says how to open the music player (here
+    // the widget's own tap; a Music key that runs a player does the same):
+    // the card is a key that opens it.
+    let media_open = format!(
+        "[[page.widget]]\ntype = \"media\"\nwidth = {w}\ntap = {{ run = [\"rhythmbox\"] }}\n"
+    );
+    for (name, finger) in [
+        ("media-nothing-playing-opens", Finger::None),
+        ("media-nothing-playing-opens-pressed", Finger::On),
+    ] {
+        specimen(out, r, name, &media_open, &none, true, 1000.0, finger, same);
+    }
 
     let volume = format!(
         "[[page.widget]]\ntype = \"slider\"\nwidth = {w}\nlabel = \"Volume\"\ncontrols = \"volume\"\n"

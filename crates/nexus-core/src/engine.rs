@@ -939,7 +939,8 @@ impl Engine {
             Gesture::Tap { x } => {
                 if let Some((_, key)) = self.media_key_at(x) {
                     self.act(Action::Media(key));
-                } else if let Some(action) = self.widget_at(x).and_then(Widget::tap).cloned() {
+                } else if let Some(action) = self.widget_at(x).and_then(|w| self.tap_of(w)).cloned()
+                {
                     self.act(action);
                 }
             }
@@ -1076,6 +1077,7 @@ impl Engine {
             now,
             mono: self.now,
             marquee,
+            music: self.config.music_action(),
         };
         let mut zones = bind_page(self.widgets(row), &ctx);
         for (zone, w) in zones.iter_mut().zip(self.widths(row)) {
@@ -1113,6 +1115,15 @@ impl Engine {
         keys.iter()
             .position(|k| k.span.contains(&local))
             .map(|i| (i, keys[i].key))
+    }
+
+    /// What a tap on `widget` does: its own `tap`, or, on a media widget
+    /// with nothing playing, what opens the music player.
+    fn tap_of<'a>(&'a self, widget: &'a Widget) -> Option<&'a Action> {
+        match widget {
+            Widget::Media { tap: None, .. } => self.config.music_action(),
+            w => w.tap(),
+        }
     }
 
     /// The transport command under x, and whether it is drawn as a key.
@@ -1453,7 +1464,7 @@ impl Engine {
             return Some(Lit::Zone(row, zone, Some(part)));
         }
         let w = &self.widgets(row)[zone];
-        (w.tap().is_some() || w.hold().is_some()).then_some(Lit::Zone(row, zone, None))
+        (self.tap_of(w).is_some() || w.hold().is_some()).then_some(Lit::Zone(row, zone, None))
     }
 
     fn act(&mut self, action: Action) {
@@ -1903,14 +1914,16 @@ mod tests {
         let lit = theme::CARD.mix(theme::KEY, 0.4);
         let lit = [lit.r, lit.g, lit.b];
 
+        // The clock shows page B on a tap. (The idle media card beside it
+        // is drawn as a key, which sinks rather than lights.)
         e.handle(Input::Touch {
             down: true,
-            x: 150.0,
+            x: 50.0,
             at: 10.0,
         });
         let frame = e.frame(&now, 10.0).expect("the first sample redraws");
-        assert_eq!(pixel(&frame, 150, 9), lit, "media zone lit");
-        assert_ne!(pixel(&frame, 50, 9), lit, "clock zone not lit");
+        assert_eq!(pixel(&frame, 50, 9), lit, "clock zone lit");
+        assert_ne!(pixel(&frame, 150, 9), lit, "media zone not lit");
 
         e.handle(Input::Touch {
             down: false,
@@ -1918,7 +1931,7 @@ mod tests {
             at: 10.1,
         });
         let frame = e.frame(&now, 10.1).expect("lifting redraws");
-        assert_ne!(pixel(&frame, 150, 9), lit);
+        assert_ne!(pixel(&frame, 50, 9), lit);
 
         // No action under the finger: nothing lights, nothing redraws.
         e.handle(Input::Touch {
@@ -1927,6 +1940,20 @@ mod tests {
             at: 11.0,
         });
         assert!(e.frame(&now, 11.0).is_none());
+    }
+
+    #[test]
+    fn an_idle_media_card_opens_what_the_music_key_runs() {
+        let text = "[[page]]\nname = \"A\"\n\
+            [[page.widget]]\ntype = \"media\"\nwidth = 320\n\
+            [[page.widget]]\ntype = \"key\"\nwidth = 320\nlabel = \"Music\"\n\
+            tap = { run = [\"rhythmbox\"] }\n";
+        let mut e = Engine::new(Config::parse(text).expect("valid"));
+        press(&mut e, 150.0, 0.1);
+        assert_eq!(
+            e.take_effects(),
+            [Effect::Act(Action::Run(vec!["rhythmbox".into()]))]
+        );
     }
 
     #[test]

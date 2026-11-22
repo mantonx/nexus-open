@@ -144,8 +144,8 @@ panel they may need to be lighter; that is a U0 measurement.
 
 The accent marks what a finger can act on: the primary key's face (play
 and pause, OK is the exception), slider thumbs and fills, glyphs on keys,
-the dashed "set up" outline and its words, the media widget's
-play/pause badge (the whole medium card is the key it labels), the rim
+the dashed "set up" outline and its words, the medium media card's
+play/pause key (the whole card is the key it labels), the rim
 of a partial takeover that holds a control, and the rim of anything
 pressed. **It never fills a card, never colours a reading, never colours
 a page marker, and never colours information**: the volume change
@@ -159,7 +159,7 @@ and its chroma is capped; every role's lightness is fixed, in OKLCH:
 
 | Role | Field | OKLCH L | Chroma | Use |
 |---|---|---|---|---|
-| base | `Accent::base` | `ACCENT_L` 0.80 | min(user, `ACCENT_C_MAX` 0.15) | Key faces, thumbs, dashed outline, badge |
+| base | `Accent::base` | `ACCENT_L` 0.80 | min(user, `ACCENT_C_MAX` 0.15) | Key faces, thumbs, dashed outline |
 | ink | `Accent::ink` | = GROUND | – | Glyphs on `base` (always dark: 9.7–10.2:1 on the four accents) |
 | text | `Accent::text` | `ACCENT_TEXT_L` 0.84 | min(user, 0.12) | Accent words and icons on a card (9.8–10.2:1 on CARD) |
 | fill | `Accent::fill` | `ACCENT_FILL_L` 0.66 | min(user, 0.12) | Slider fill: a step darker so a long fill stays calm |
@@ -248,6 +248,8 @@ Every size is a constant in `theme.rs`. Cap height is 0.70 em; at about
 | `NUM_BANDED` | 36 | 600 | −0.4 | 25 px, 5.0 mm | Medium numerals with a bar band below (values, network at hero). |
 | `NUM_COMPACT` | 32 | 600 | −0.3 | 22 px, 4.4 mm | Compact numerals; the medium slider's number. |
 | `NUM_SECOND` | 26 | 600 | −0.2 | 18 px | A second reading beside the first (load), upload rate. |
+| `NUM_SECOND_TIGHT` | 22 | 600 | −0.2 | 15.5 px | A medium card's second reading when 26 would not leave room for its icon beside the widest first. |
+| `NUM_SECOND_SMALL` | 20 | 600 | −0.2 | 14 px | The step under that: a 200 px card with "212°" and "100%" and the icon. |
 | `TITLE_BIG` | 26 | 560 | −0.2 | 18 px | The track title in the now-playing takeover. |
 | `UNIT_HERO` | 22 | 560 | 0 | | "%" after a hero numeral. |
 | `TITLE` | 20 | 560 | 0 | | Track title, weekday, weather condition, alarm headline, compact slider number. |
@@ -325,11 +327,11 @@ card beside it (content centres in its room when it has spare width).
 |---|---|---|---|
 | Clock | 10:53 at 32, centred | 10:53 at 40 + "Sun" / "Nov 22" | 10:53 at 50 + "Sunday" / "November 22" |
 | Value (temperature) | icon + 115° at 32; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 40; the name over the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it); the bar band runs the **whole card** under them |
-| Value + second reading | as compact (second hidden) | icon + 115° at 36, the second's own 17 px icon (a gauge for load) + "6%" at 26 right; two bars in the band, the second's starting under its icon (a low fill sits under the icon, not beside the digit as a decimal point). A two-digit second beside a three-digit first ("172° 62%") leaves no room for the icon at 200 px: it goes, open question 14 | icon + 115° at 40, name; the second named on the numeral's baseline at the right ("load 6%" at 26); the first reading's bar runs the whole card, the second has none (a percent is its own scale) |
+| Value + second reading | as compact (second hidden) | Laid out for the widest both readings can be (three digits each, "212°" / "100°" and "100%", from the units alone, before the first reading), never for the values now: nothing goes or moves as they change. Icon + 115°, the second's own 17 px icon (a gauge for load) just before "6%" at the right; two bars in the band, split where the widest second's icon starts. Sizes step down until that fits: 36 / 26, 36 / 22, 32 / 22, 32 / 20 (a 204 px zone, the System page), 28 / 20 (a 200 px zone), the first's icon 22 from the third step | icon + 115° at 40, name; the second named on the numeral's baseline at the right ("load 6%" at 26); the first reading's bar runs the whole card, the second has none (a percent is its own scale) |
 | Load, memory | icon + 62% at 32; bar | icon + 62% at 36, name; bar | icon + 62% at 40, name over "limit 85%"; bar the whole card |
 | Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
 | Weather | icon + 58° at 40 | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
-| Media | play/pause key + elapsed + progress line | artwork with play/pause badge + title / artist (whole card is the key) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
+| Media | play/pause key + elapsed + progress line | artwork + title / artist + a raised `MEDIA_KEY_W` 36 × 33 play/pause key at the right, `PAD` in from the card's edge, accent-filled (the whole card is the hit zone; the key says so) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
 | Key | icon (label from 96 px) | icon + label | icon + label + second line ("Hold for a new window") |
 
@@ -407,7 +409,7 @@ What can be touched looks like it; what cannot does not.
 | A raised face (KEY, lit top edge) with an accent glyph | Tap | Transport keys, launch keys |
 | A face filled with the accent, dark glyph | The main tap here | Play/pause (the alarm's OK is white on red instead) |
 | A cream disc with an accent ring on a pill track | Drag sideways | Sliders |
-| An accent badge on artwork | The whole card is play/pause | Media, medium |
+| A whole card raised (KEY, lit top edge) with an accent glyph | Tap | Launch keys; a media card with nothing playing that can open the player |
 | A dashed accent outline with accent words | Tap to set this up (opens the settings window there) | Any widget not set up |
 | Flat card, no accent | Inert: swipe passes through | Readings, clock, weather |
 
@@ -436,11 +438,11 @@ What can be touched looks like it; what cannot does not.
 | Warning | Whole card WARN_SURFACE; the warning reading's numeral, icon and bar WARN, a second reading that is fine stays cream (so an amber numeral always means warning); page marker WARN and longer | `specimen-value-warning`, `specimen-value2-warning`, `3-hot` |
 | Critical | Whole card CRIT; everything white; track CRIT_DEEP, and limit notches under the white fill CRIT_DEEP so they stay visible; a hero card names the critical limit, as the alarm does; page marker CRIT and longer; plus the alarm | `specimen-value-critical`, `takeover-after-ok-system` |
 | No data (source works, no reading yet) | Normal card; the numeral is two TEXT3 dashes; "No reading" (medium) / "No reading yet" (hero); empty bar | `specimen-value-no-data`, `specimen-weather-no-data` |
-| Source lost / stale | The last value kept in TEXT3; the reading's own icon kept (at compact and medium it is the card's name) in TEXT3 with a broken-link badge on its lower right, cut out by a ring of the card (weather: the icon becomes a cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
+| Source lost / stale | The last value kept in TEXT3; the reading's own icon kept (at compact and medium it is the card's name) in TEXT3 with a broken-link badge on its lower right, cut out by a ring of the card (weather: the icon becomes a cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. A second reading on a lost card is drawn lost too (TEXT3, its own badge, an empty bar), so a lost card never carries a bright number. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
 | Not set up | No fill; dashed accent outline; plus or pin icon; "Weather / Set up" (compact), "Weather / Add your town" | `specimen-*-not-set-up`, `6-first-run` |
 | Pressed, holding, dragging | See Keys | |
 | Paused | Play glyph in the key, artwork dimmed, title in TEXT2, "Paused" in place of the artist, progress line TEXT3 | `specimen-media-paused` |
-| Nothing playing | A dashed TEXT3 sleeve with a note, "Nothing playing" / "Play some music"; no keys | `specimen-media-nothing-playing` |
+| Nothing playing | When the layout says how to open the music player (the media widget's own `tap`, or a Music key, by the `music-notes` icon or the label "Music", whose tap runs or opens something; `Config::music_action`): the whole card is a key, the note in the accent, "Nothing playing" / "Tap to open music" ("Open music" where that is cut; "Open" / "music" at compact), and a tap does that. A Music key that only shows a page opens no player, so with the default layout nothing resolves and the card stays quiet: a dashed TEXT3 sleeve with a note, "Nothing playing" / "Play some music", no key look | `specimen-media-nothing-playing`, `specimen-media-nothing-playing-opens`, `-opens-pressed` |
 | Muted | Speaker with a cross; "Muted" in place of the number (compact, medium) or the number in TEXT3 (hero); fill and ring grey | `specimen-slider-muted` |
 
 "No data", "not set up" and "source lost" never look alike: dashes on a
@@ -449,9 +451,14 @@ broken-link icon.
 
 ### Long titles
 
-A title that does not fit is **never cut by accident**. In a widget it
-rests truncated with an 18 px fade into the card (`text_fade`), and
-scrolls as a marquee: after `MS_MARQUEE_REST` 2.5 s it scrolls left at
+A title that does not fit is **never cut by accident**, and no text
+anywhere ends in a letter cut through. At rest it ends in an ellipsis,
+as every other text that does not fit (`fit`): after a whole word when
+that keeps at least 60 % of what a cut between letters would ("Weird…"
+in a medium media card, "Weird Fishes…" in a hero one), else between
+letters ("Radiohe…"), separators ("/", "–", "·") dropped before it.
+Only while it moves does it fade into the card at the edge it slides
+under (`text_fade`, 18 px). It scrolls as a marquee: after `MS_MARQUEE_REST` 2.5 s it scrolls left at
 `MARQUEE_PX_PER_S` 28 px/s until its end shows, rests 2.5 s, fades back
 to the start, and does this **once per track change and once per tap**,
 then stays at rest (so it never moves in the corner of the eye for
@@ -687,11 +694,23 @@ signal's base unit (°C).
     at hero.
 13. **Edge flags** sit partly in columns 0–1, which the bezel may hide
     (`SAFE`); 2 px of each is on the visible part even so. A U0 check.
-14. **The medium second reading's icon** goes when a two-digit second
-    sits beside a three-digit first (172° and 62% at 200 px: 8 px
-    short), so there it is a number with no name again. Celsius readings
-    (two digits) keep it. Smaller second numerals, or a wider card for
-    a value with a second reading, would keep it; Matt to choose.
+14. *Closed (U3 polish 2, provisional, Matt to overturn):* a card's
+    layout never changes with its value. The medium value card with a
+    second reading is laid out for both at their widest and its sizes
+    step down (to 28 / 20 px at 200 px) so the second's icon always fits.
+15. **Opening the music player on the default layout.** The default
+    Music key shows the Music page, which opens no player, so the idle
+    media card stays quiet out of the box. Linux has no generic "open the
+    music player" command; the daemon could resolve one (the desktop file
+    `xdg-mime query default audio/mpeg` names, launched with
+    `gtk-launch`), or the default layout could name a player. Matt to
+    choose.
+16. **The System page does not name CPU and GPU.** At medium a value
+    card with a second reading has no room for its name, so the two
+    cards differ by icon alone (the U3 polish 2 review). A user can
+    already name it (`label`, shown at hero) or give it a hero card;
+    whether medium cards name themselves, and at what cost to the
+    numerals, is Matt's to decide.
 
 ## Shared identity
 

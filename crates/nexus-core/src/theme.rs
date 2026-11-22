@@ -302,6 +302,12 @@ pub const NUM_COMPACT: TextStyle = style(32.0, W_NUM, -0.3);
 pub const NUM_COMPACT_TIGHT: TextStyle = style(28.0, W_NUM, -0.3);
 /// A second reading beside the first; the upload rate.
 pub const NUM_SECOND: TextStyle = style(26.0, W_NUM, -0.2);
+/// A second reading in a medium value card too narrow for `NUM_SECOND`
+/// beside the widest first reading and the second's icon.
+pub const NUM_SECOND_TIGHT: TextStyle = style(22.0, W_NUM, -0.2);
+/// The step under that: a 200 px card with "199°" and "100%" (both
+/// three digits) and the second's icon. Never under `TEXT_FLOOR`.
+pub const NUM_SECOND_SMALL: TextStyle = style(20.0, W_NUM, -0.2);
 /// The track title in the now-playing takeover.
 pub const TITLE_BIG: TextStyle = style(26.0, W_TITLE, -0.2);
 /// "%" after a hero numeral.
@@ -325,7 +331,7 @@ pub const LABEL: TextStyle = style(18.0, W_TITLE, 0.2);
 pub const TEXT_FLOOR: f32 = 18.0;
 
 /// Every text style, for checks such as the floor.
-pub const TEXT_STYLES: [TextStyle; 15] = [
+pub const TEXT_STYLES: [TextStyle; 17] = [
     NUM_HERO,
     NUM_MEDIUM,
     NUM_HERO_BANDED,
@@ -333,6 +339,8 @@ pub const TEXT_STYLES: [TextStyle; 15] = [
     NUM_COMPACT,
     NUM_COMPACT_TIGHT,
     NUM_SECOND,
+    NUM_SECOND_TIGHT,
+    NUM_SECOND_SMALL,
     TITLE_BIG,
     UNIT_HERO,
     OK_LABEL,
@@ -417,6 +425,9 @@ pub const MEDIA_KEYS_MIN: u32 = 400;
 pub const MEDIA_SCENE_MIN: u32 = 560;
 /// Transport keys in the media scene.
 pub const SCENE_KEY_W: f32 = 50.0;
+/// The play/pause key drawn on a medium media card (the whole card is the
+/// hit zone; this is what says so).
+pub const MEDIA_KEY_W: f32 = 36.0;
 /// Artwork: a rounded square.
 pub const ART: f32 = 33.0;
 pub const ART_SCENE: f32 = 35.0;

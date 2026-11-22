@@ -363,3 +363,35 @@ README clip (now of the new strip), release verification.
   Also P2: the second reading's icon still goes beside three-digit
   firsts with a two-digit second (DESIGN.md open question 14), and lost
   and no-data states use drifting words and cannot be acted on.
+- 2026-11-22 — **U3 polish 2** (`feat/strip-polish-2`), each decision
+  **provisional, Matt to overturn**:
+  1. *A card's layout never changes with its value* (closes DESIGN.md
+     open question 14). A medium value card with a second reading is
+     laid out for both at their widest (three digits, from the units
+     alone, before any reading), and its sizes step down until the
+     second's icon fits: 32 / 20 px in the System page's 204 px zones,
+     28 / 20 in a 200 px zone. The bars split at a fixed column.
+  2. *The medium media card did not look tappable.* A raised 36 px
+     play/pause key, accent-filled, at its right replaces the 14 px
+     badge on the artwork; the whole card is still the hit zone.
+  3. *The idle media slot was a dead end.* With nothing playing, a media
+     widget whose layout says how to open the player (its own `tap`, or
+     a Music key that runs or opens something) is a key: "Nothing
+     playing" / "Tap to open music". The default Music key shows a page,
+     which opens no player, so on the default layout the slot stays quiet
+     (DESIGN.md open question 15).
+  Not done: faint page markers and edge flags need the real panel (U0).
+
+  **Rescored by a fresh isolated reviewer: 25/36** (recognition and
+  error recovery 2, the rest 3). Top findings: System never names CPU or
+  GPU (icons alone); "lost" barely registers at medium and compact, and
+  a lost card's second reading stays cream; the Home media title is cut
+  to "Weird Fis"; and the new medium media key ends 4 px from the card's
+  edge, so a red edge flag at 636–639 reads as stuck to it (a regression
+  here: the key should keep the full `PAD`).
+
+  Then, without a rescore: the medium media key keeps the full `PAD`; no
+  text ends in a letter cut through (a title at rest ends in an ellipsis
+  after a whole word, or between letters; it fades only while moving);
+  a lost card's second reading is drawn lost too. "System does not name
+  CPU and GPU" is DESIGN.md open question 16.
