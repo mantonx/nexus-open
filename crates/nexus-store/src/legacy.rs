@@ -339,6 +339,7 @@ pub fn convert(legacy: &Legacy) -> Result<Conversion, String> {
         settings,
         pages,
         weather,
+        news: None,
         takeovers: Vec::new(),
         sources: Vec::new(),
     };

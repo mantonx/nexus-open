@@ -18,7 +18,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use nexus_core::config::{
-    Config, ConfigError, Page, Settings, Source, Takeover, Weather, Widget, colour_text,
+    Config, ConfigError, NewsConfig, Page, Settings, Source, Takeover, Weather, Widget, colour_text,
 };
 use rusqlite::{Connection, Transaction, params};
 use serde_json::{Map, Value as Json, json};
@@ -315,6 +315,7 @@ impl Store {
 /// the check that a write left every layout valid.
 pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes), StoreError> {
     let (settings, weather, settings_note) = read_settings(conn)?;
+    let news = read_news(conn)?;
     let mut notes = Notes {
         settings: settings_note,
         ..Notes::default()
@@ -393,6 +394,7 @@ pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes
         settings,
         pages,
         weather,
+        news,
         takeovers,
         sources,
     };
@@ -438,6 +440,42 @@ fn read_settings(conn: &Connection) -> Result<(Settings, Option<Weather>, String
     let settings = serde_json::from_value(settings).map_err(corrupt)?;
     let any = weather.location.is_some() || weather.latitude.is_some();
     Ok((settings, any.then_some(weather), note))
+}
+
+/// The `[news]` section, if the settings row has one.
+fn read_news(conn: &Connection) -> Result<Option<NewsConfig>, StoreError> {
+    let (feeds, rotate, max_age): (Option<String>, Option<f64>, Option<f64>) = conn.query_row(
+        "SELECT news_feeds, news_rotate, news_max_age FROM settings",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    let Some(feeds) = feeds else {
+        return Ok(None);
+    };
+    let seconds = |s: Option<f64>, default| {
+        s.map_or(Ok(default), |s| {
+            Duration::try_from_secs_f64(s).map_err(|e| corrupt(format!("news: {e}")))
+        })
+    };
+    let defaults = NewsConfig::default();
+    Ok(Some(NewsConfig {
+        feeds: serde_json::from_str(&feeds).map_err(corrupt)?,
+        rotate: seconds(rotate, defaults.rotate)?,
+        max_age: seconds(max_age, defaults.max_age)?,
+    }))
+}
+
+/// Writes the `[news]` section into the settings row; `None` clears it.
+pub(crate) fn write_news(conn: &Connection, news: Option<&NewsConfig>) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE settings SET news_feeds = ?1, news_rotate = ?2, news_max_age = ?3",
+        params![
+            news.map(|n| json!(n.feeds).to_string()),
+            news.map(|n| n.rotate.as_secs_f64()),
+            news.map(|n| n.max_age.as_secs_f64()),
+        ],
+    )?;
+    Ok(())
 }
 
 fn read_widgets(
@@ -626,7 +664,7 @@ pub(crate) fn write_settings(
             config.settings.idle_dim,
         ],
     )?;
-    Ok(())
+    write_news(conn, config.news.as_ref())
 }
 
 fn write_sources(conn: &Connection, sources: &[Source], notes: &Notes) -> Result<(), StoreError> {
@@ -950,13 +988,22 @@ mod tests {
         );
     }
 
-    /// A snapshot as schema 1 had it: without the columns migration 2 adds.
+    /// A snapshot as schema 1 had it: without the columns migrations 2 to
+    /// 4 add.
     fn as_schema_1(snapshot: &str) -> String {
         let mut state: Map<String, Json> = serde_json::from_str(snapshot).unwrap();
         for (table, columns) in [
             (
                 "settings",
-                &["accent", "night_from", "night_to", "idle_dim"][..],
+                &[
+                    "accent",
+                    "night_from",
+                    "night_to",
+                    "idle_dim",
+                    "news_feeds",
+                    "news_rotate",
+                    "news_max_age",
+                ][..],
             ),
             ("takeover", &["align", "width"]),
         ] {
@@ -1440,6 +1487,163 @@ mod tests {
         let copy = Store::open(&path).unwrap();
         assert_eq!(copy.load(layout).unwrap(), store.load(layout).unwrap());
         drop(copy);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+    }
+
+    /// A layout with the `[news]` section, a news widget and both news
+    /// actions.
+    const NEWS_KEYS: &str = r##"
+        [news]
+        feeds = ["https://news.example/rss.xml", "https://other.example/atom"]
+        rotate = "20s"
+        max_age = "36h"
+        [[page]]
+        name = "A"
+        [[page.widget]]
+        type = "news"
+        width = 400
+        tap = { news = "next" }
+        hold = { news = "open" }
+        [[page.widget]]
+        type = "news"
+        width = 200
+    "##;
+
+    #[test]
+    fn news_round_trips_through_rows_and_text() {
+        let config = Config::parse(NEWS_KEYS).unwrap();
+        let news = config.news.clone().unwrap();
+        assert_eq!(news.rotate, Duration::from_secs(20));
+        let mut store = Store::open_in_memory().unwrap();
+        let id = store
+            .import("News", &config, &Notes::default(), true)
+            .unwrap();
+        let (back, notes) = store.load(id).unwrap();
+        assert_eq!(back, config);
+        let text = text::write(&back, &notes);
+        for key in [
+            "[news]",
+            "rotate = \"20s\"",
+            "max_age = \"36h\"",
+            "type = \"news\"",
+            "news = \"open\"",
+        ] {
+            assert!(text.contains(key), "{key} in\n{text}");
+        }
+        assert_eq!(text::parse(&text).unwrap().0, config);
+        // A layout without news writes no section, and stores none.
+        let (store, layout) = with_default();
+        assert_eq!(store.load(layout).unwrap().0.news, None);
+        assert!(!text::write(&fixture(), &Notes::default()).contains("[news]"));
+        // No feeds is still a section: it says news is wanted, not set up.
+        let mut empty = fixture();
+        empty.news = Some(NewsConfig::default());
+        let mut store = Store::open_in_memory().unwrap();
+        let id = store.import("E", &empty, &Notes::default(), true).unwrap();
+        assert_eq!(store.load(id).unwrap().0.news, Some(NewsConfig::default()));
+    }
+
+    #[test]
+    fn news_is_its_own_edit_and_undoes() {
+        let (mut store, layout) = with_default();
+        let news = NewsConfig {
+            feeds: vec!["https://news.example/rss.xml".into()],
+            ..NewsConfig::default()
+        };
+        store
+            .edit(&Edit::SetNews {
+                news: Some(news.clone()),
+            })
+            .unwrap();
+        assert_eq!(store.load(layout).unwrap().0.news.as_ref(), Some(&news));
+        // A settings form that knows nothing of news leaves it alone.
+        let mut settings = fixture().settings;
+        settings.clock = nexus_core::config::ClockFormat::H12;
+        store
+            .edit(&Edit::SetSettings {
+                settings,
+                weather: None,
+            })
+            .unwrap();
+        assert_eq!(store.load(layout).unwrap().0.news.as_ref(), Some(&news));
+        store.undo().unwrap();
+        assert_eq!(store.undo().unwrap().as_deref(), Some("Change news feeds"));
+        assert_eq!(store.load(layout).unwrap().0.news, None);
+        store.redo().unwrap();
+        assert_eq!(store.load(layout).unwrap().0.news, Some(news));
+        let edit: Edit = serde_json::from_str(
+            r#"{"op": "set-news", "news": {"feeds": ["https://a.example/"], "rotate": 30}}"#,
+        )
+        .unwrap();
+        let Edit::SetNews { news: Some(n) } = edit else {
+            panic!("{edit:?}")
+        };
+        assert_eq!(
+            (n.rotate, n.max_age),
+            (Duration::from_secs(30), NewsConfig::default().max_age)
+        );
+    }
+
+    #[test]
+    fn a_schema_3_database_upgrades_and_takes_news() {
+        let path = std::env::temp_dir().join(format!("nexus-store-v3-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let layout;
+        {
+            // What the last release wrote: schema 3, the fixture stored.
+            let mut conn = Connection::open(&path).unwrap();
+            for sql in &schema::MIGRATIONS[..3] {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 3).unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            let tx = conn.transaction().unwrap();
+            tx.execute("INSERT INTO layout (name) VALUES ('Default')", [])
+                .unwrap();
+            layout = tx.last_insert_rowid();
+            write_layout(&tx, layout, &fixture(), &Notes::default()).unwrap();
+            tx.execute(
+                "INSERT INTO settings (id, active_layout) VALUES (1, ?1)",
+                [layout],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let mut store = Store::open(&path).unwrap();
+        let actions = id(&store, "SELECT count(*) FROM action");
+        let (config, _) = store.load(layout).unwrap();
+        assert_eq!(config.pages, fixture().pages, "loads identically");
+        assert_eq!(config.news, None);
+        assert!(actions > 0, "actions kept through the rebuild");
+        assert_eq!(
+            id(&store, "SELECT count(*) FROM pragma_foreign_key_check"),
+            0
+        );
+        let ids = store.ids(layout).unwrap();
+        let widget = ids.pages[0].widgets[0];
+        let width = store.load(layout).unwrap().0.pages[0].widgets[0].width();
+        store
+            .edit(&Edit::SetWidget {
+                widget,
+                value: Widget::News {
+                    width,
+                    icon: None,
+                    tap: Some(Action::News(nexus_core::config::NewsCommand::Next)),
+                    hold: None,
+                },
+            })
+            .unwrap();
+        let (config, _) = store.load(layout).unwrap();
+        assert!(matches!(
+            config.pages[0].widgets[0],
+            Widget::News {
+                tap: Some(Action::News(_)),
+                ..
+            }
+        ));
+        drop(store);
         for suffix in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
         }

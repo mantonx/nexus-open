@@ -104,6 +104,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         origin: Instant::now(),
         last_frame: Instant::now(),
         weather: None,
+        news: None,
         effects: crate::actions::Effects::new(),
         sources,
         notifier: Notifier::from_env(),
@@ -121,9 +122,14 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         nexus_sources::spawn_machine(publisher(tx.clone()));
         nexus_sources::spawn_media(publisher(tx.clone()));
         nexus_sources::spawn_volume(publisher(tx.clone()));
-        let weather = nexus_sources::spawn_weather(publisher(tx));
+        let weather = nexus_sources::spawn_weather(publisher(tx.clone()));
         let _ = weather.send(daemon.engine.config().weather.clone());
         daemon.weather = Some(weather);
+        // Fetches nothing until the layout names a feed.
+        let news = nexus_sources::spawn_news(publisher(tx));
+        news.configure(daemon.engine.config().news.clone());
+        daemon.effects.set_news(news.clone());
+        daemon.news = Some(news);
     }
     daemon.notifier.ready();
     daemon.run(&rx)
@@ -159,6 +165,8 @@ struct Daemon {
     effects: crate::actions::Effects,
     /// Tells the weather source where to look; `None` in demo mode.
     weather: Option<Sender<Option<config::Weather>>>,
+    /// Tells the news source which feeds to read; `None` in demo mode.
+    news: Option<nexus_sources::news::News>,
     /// The config's external source programs.
     sources: crate::sources::Sources,
     /// systemd's readiness and watchdog. Pinged from this thread, since it
@@ -546,8 +554,8 @@ impl Daemon {
         self.next_attempt = Instant::now();
     }
 
-    /// Shows the store's layout on the strip: the engine, the weather
-    /// source and the external sources all follow it.
+    /// Shows the store's layout on the strip: the engine, the weather and
+    /// news sources and the external sources all follow it.
     fn reload(&mut self) -> Result<(), String> {
         let (config, _) = self
             .store
@@ -558,6 +566,11 @@ impl Daemon {
             && let Some(weather) = &self.weather
         {
             let _ = weather.send(config.weather.clone());
+        }
+        if config.news != self.engine.config().news
+            && let Some(news) = &self.news
+        {
+            news.configure(config.news.clone());
         }
         self.sources.apply(&config.sources);
         if &config != self.engine.config() {

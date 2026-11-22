@@ -37,13 +37,15 @@ use std::time::Duration;
 use jiff::Zoned;
 
 use crate::canvas::Canvas;
-use crate::config::{Action, Align, Config, MediaCommand, SLIDER_VALUE, SliderControl, Widget};
+use crate::config::{
+    Action, Align, Config, MediaCommand, NewsCommand, SLIDER_VALUE, SliderControl, Widget,
+};
 use crate::fonts::FontChoice;
 use crate::gesture::{Gesture, LONG_PRESS, MIN_TAP, Recognizer, should_commit};
 use crate::icons;
 use crate::layout::{
-    Bind, WEATHER_STALE, bind_page, format_number, judge, media, reading_text, shows_clock,
-    signals_used, slider, thresholds,
+    Bind, WEATHER_STALE, bind_page, format_number, judge, media, news_live, reading_text,
+    shows_clock, signals_used, slider, thresholds,
 };
 use crate::signal::{Signals, Unit, Value};
 use crate::theme::{self, Theme};
@@ -131,6 +133,11 @@ pub enum Effect {
     Seek(f64),
     /// Run a slider's command, `{value}` already filled in.
     Run(Vec<String>),
+    /// Open a web address a source gave (the news article), in the
+    /// default browser. It comes from a feed, so it is untrusted: the
+    /// caller opens it only if it is a plain `http(s)` address, and never
+    /// through a shell.
+    OpenLink(String),
 }
 
 /// The critical alarm, as the renderer needs it.
@@ -376,6 +383,9 @@ pub struct Engine {
     drawn_dim: f32,
     /// The last frame was drawn with the weather stale.
     drawn_stale: bool,
+    /// The news article showing when the finger on the strip landed: what
+    /// a `news = "open"` action opens.
+    landing_link: Option<String>,
 }
 
 impl Engine {
@@ -411,6 +421,7 @@ impl Engine {
             active_at: None,
             drawn_dim: 1.0,
             drawn_stale: false,
+            landing_link: None,
         }
     }
 
@@ -504,7 +515,7 @@ impl Engine {
         if self.part_at(row, zone, x).is_some_and(|(_, key)| key) {
             return None;
         }
-        self.widgets(row)[zone].hold()?;
+        self.hold_of(&self.widgets(row)[zone])?;
         Some(Hold {
             zone: self.zone_span(row, zone),
             progress: ((self.now - start) / LONG_PRESS).clamp(0.0, 1.0) as f32,
@@ -853,6 +864,14 @@ impl Engine {
             return;
         }
         let landing = down && !self.gestures.pressed();
+        if landing {
+            // The article a tap opens is the one showing as the finger
+            // lands: a headline that turns mid-tap must not open another.
+            self.landing_link = match self.signals.live("news.link") {
+                Some(Value::Text(t)) if news_live(&self.signals) => Some(t.clone()),
+                _ => None,
+            };
+        }
         let gesture = self.gestures.update(down, x, at);
         // Light the zone as soon as the finger lands, so the strip
         // answers before the gesture is known; a swipe turns it off.
@@ -949,7 +968,7 @@ impl Engine {
                 // play/pause keeps the widget's own long press.
                 let action = match self.media_key_at(x) {
                     Some((true, key)) => Some(Action::Media(key)),
-                    _ => self.widget_at(x).and_then(Widget::hold).cloned(),
+                    _ => self.widget_at(x).and_then(|w| self.hold_of(w)).cloned(),
                 };
                 if let Some(action) = action {
                     // It has fired: the zone goes dark, and lifting or
@@ -1074,6 +1093,7 @@ impl Engine {
             signals: &self.signals,
             settings: &self.config.settings,
             weather: self.config.weather.is_some(),
+            news: self.config.news.as_ref().is_some_and(|n| n.has_feeds()),
             now,
             mono: self.now,
             marquee,
@@ -1120,9 +1140,21 @@ impl Engine {
     /// What a tap on `widget` does: its own `tap`, or, on a media widget
     /// with nothing playing, what opens the music player.
     fn tap_of<'a>(&'a self, widget: &'a Widget) -> Option<&'a Action> {
+        const OPEN: Action = Action::News(NewsCommand::Open);
         match widget {
             Widget::Media { tap: None, .. } => self.config.music_action(),
+            Widget::News { tap: None, .. } => news_live(&self.signals).then_some(&OPEN),
             w => w.tap(),
+        }
+    }
+
+    /// What a long press on `widget` does: its own `hold`, or, on a news
+    /// widget showing a headline, the next headline.
+    fn hold_of<'a>(&'a self, widget: &'a Widget) -> Option<&'a Action> {
+        const NEXT: Action = Action::News(NewsCommand::Next);
+        match widget {
+            Widget::News { hold: None, .. } => news_live(&self.signals).then_some(&NEXT),
+            w => w.hold(),
         }
     }
 
@@ -1464,7 +1496,8 @@ impl Engine {
             return Some(Lit::Zone(row, zone, Some(part)));
         }
         let w = &self.widgets(row)[zone];
-        (self.tap_of(w).is_some() || w.hold().is_some()).then_some(Lit::Zone(row, zone, None))
+        (self.tap_of(w).is_some() || self.hold_of(w).is_some())
+            .then_some(Lit::Zone(row, zone, None))
     }
 
     fn act(&mut self, action: Action) {
@@ -1484,6 +1517,11 @@ impl Engine {
                     Err(_) => Value::Text(value),
                 };
                 self.handle(Input::Signal(signal, value));
+            }
+            Action::News(NewsCommand::Open) => {
+                if let Some(link) = self.landing_link.clone() {
+                    self.effects.push(Effect::OpenLink(link));
+                }
             }
             other => self.effects.push(Effect::Act(other)),
         }
@@ -3236,5 +3274,140 @@ mod tests {
         e.handle(Input::Config(Box::new(c)));
         assert_eq!(e.theme().accent, Some(crate::theme::Rgb::hex(0xff8800)));
         assert_eq!(e.renderer.theme().accent, e.theme().accent, "drawn with it");
+    }
+
+    /// A page with a news card on the left (0–319) and one whose tap and
+    /// hold are the layout's own on the right.
+    fn newsy() -> Engine {
+        let config = Config::parse(
+            r#"
+            [news]
+            feeds = ["https://news.example/rss.xml"]
+            [[page]]
+            name = "A"
+            [[page.widget]]
+            type = "news"
+            width = 320
+            [[page.widget]]
+            type = "news"
+            width = 320
+            tap = { page = "B" }
+            hold = { news = "open" }
+            [[page]]
+            name = "B"
+            [[page.widget]]
+            type = "clock"
+            width = 640
+            "#,
+        )
+        .unwrap();
+        Engine::new(config)
+    }
+
+    fn headline(e: &mut Engine, title: &str, link: &str) {
+        for (name, value) in [
+            ("news.title", Value::Text(title.into())),
+            ("news.source", Value::Text("Gazette".into())),
+            ("news.link", Value::Text(link.into())),
+            ("news.age", Value::Number(60.0, Unit::None)),
+            ("news.lost", Value::Number(0.0, Unit::None)),
+        ] {
+            e.handle(Input::Signal(name.into(), value));
+        }
+    }
+
+    #[test]
+    fn a_tap_opens_the_headline_showing_when_the_finger_landed() {
+        let mut e = newsy();
+        headline(&mut e, "First", "https://news.example/1");
+        e.handle(Input::Touch {
+            down: true,
+            x: 100.0,
+            at: 10.0,
+        });
+        // The source turns to the next story under the finger.
+        headline(&mut e, "Second", "https://news.example/2");
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: 10.08,
+        });
+        assert_eq!(
+            e.take_effects(),
+            [Effect::OpenLink("https://news.example/1".into())]
+        );
+    }
+
+    #[test]
+    fn a_hold_on_a_headline_shows_the_next() {
+        let mut e = newsy();
+        headline(&mut e, "First", "https://news.example/1");
+        press(&mut e, 100.0, 0.6);
+        assert_eq!(
+            e.take_effects(),
+            [Effect::Act(Action::News(NewsCommand::Next))]
+        );
+    }
+
+    #[test]
+    fn a_news_card_with_nothing_to_open_does_nothing() {
+        let mut e = newsy();
+        let now = at("16:17:05");
+        // No headline yet: neither a tap nor a hold acts, nor lights it.
+        press(&mut e, 100.0, 0.08);
+        press(&mut e, 100.0, 0.6);
+        assert!(e.take_effects().is_empty());
+        e.handle(Input::Touch {
+            down: true,
+            x: 100.0,
+            at: 20.0,
+        });
+        assert_eq!(e.touch_on(Row::Page(0)), None, "not lit");
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: 20.05,
+        });
+        // Lost: every feed failing, the headline kept too old to open.
+        headline(&mut e, "Old", "https://news.example/old");
+        e.handle(Input::Signal(
+            "news.lost".into(),
+            Value::Number(1.0, Unit::None),
+        ));
+        press(&mut e, 100.0, 0.08);
+        assert!(e.take_effects().is_empty());
+        assert!(e.frame(&now, 30.0).is_some());
+    }
+
+    #[test]
+    fn a_news_cards_own_tap_and_hold_win() {
+        let mut e = newsy();
+        headline(&mut e, "First", "https://news.example/1");
+        press(&mut e, 400.0, 0.6);
+        assert_eq!(
+            e.take_effects(),
+            [Effect::OpenLink("https://news.example/1".into())],
+            "its hold opens the article"
+        );
+        press(&mut e, 400.0, 0.08);
+        assert_eq!(e.page(), 1, "its tap shows page B");
+    }
+
+    #[test]
+    fn a_new_headline_redraws_but_never_takes_over() {
+        let mut e = newsy();
+        let now = at("16:17:05");
+        headline(&mut e, "First", "https://news.example/1");
+        e.frame(&now, 1.0);
+        headline(&mut e, "Second", "https://news.example/2");
+        assert!(e.frame(&now, 2.0).is_some(), "the card shows it");
+        assert!(!e.animating(), "at once: no scroll, no fade");
+        assert_eq!(e.takeover(), None);
+        let e = Config::parse(
+            "[[page]]\nname = \"A\"\n[[takeover]]\nname = \"N\"\non_change = [\"news.title\"]\n\
+             seconds = 3\n[[takeover.widget]]\ntype = \"news\"\nwidth = 640\n",
+        )
+        .unwrap_err();
+        assert!(e.0.contains("news never takes over"), "{e}");
     }
 }

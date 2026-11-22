@@ -38,6 +38,7 @@ pub fn system_page() -> Vec<Zone> {
         signals: &signals,
         settings: &config.settings,
         weather: true,
+        news: true,
         now: &now,
         mono: 0.0,
         marquee: None,

@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use nexus_core::config::{
-    Action, Align, Config, ConfigError, Settings, Source, Takeover, Weather, Widget,
+    Action, Align, Config, ConfigError, NewsConfig, Settings, Source, Takeover, Weather, Widget,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -113,6 +113,13 @@ pub enum Edit {
         #[serde(default)]
         weather: Option<Weather>,
     },
+    /// The `[news]` section: the feeds and how headlines show. `None`
+    /// takes it out, and no news is fetched. Separate from `set-settings`,
+    /// so a settings form that knows nothing of news cannot clear it.
+    SetNews {
+        #[serde(default)]
+        news: Option<NewsConfig>,
+    },
     SetNote {
         item: Item,
         note: String,
@@ -169,6 +176,7 @@ impl Edit {
             Edit::SetSource { value, .. } => format!("Change source {}", value.name),
             Edit::DeleteSource { .. } => "Delete source".into(),
             Edit::SetSettings { .. } => "Change settings".into(),
+            Edit::SetNews { .. } => "Change news feeds".into(),
             Edit::SetNote { .. } => "Change note".into(),
             Edit::AddLayout { name, .. } => format!("Add layout {name}"),
             Edit::RenameLayout { name, .. } => format!("Rename layout to {name}"),
@@ -331,6 +339,7 @@ pub(crate) fn apply(conn: &Connection, edit: &Edit) -> Result<(), StoreError> {
                 ],
             )?;
         }
+        Edit::SetNews { news } => crate::write_news(conn, news.as_ref())?,
         Edit::SetNote { item, note } => {
             let (table, id) = match item {
                 Item::Settings => ("settings", 1),
@@ -604,6 +613,7 @@ pub(crate) fn put_widget(
             Action::Open(_) => ("open", None, json!(action)),
             Action::Media(_) => ("media", None, json!(action)),
             Action::Publish { .. } => ("publish", None, json!(action)),
+            Action::News(_) => ("news", None, json!(action)),
         };
         conn.execute(
             "INSERT INTO action (widget_id, gesture, kind, target_page, args) VALUES (?1, ?2, ?3, ?4, ?5)",

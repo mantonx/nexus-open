@@ -34,9 +34,10 @@ pub const ARROW_DOWN: char = '\u{e03e}';
 pub const ARROW_UP: char = '\u{e08e}';
 pub const WARNING: char = '\u{e4e0}';
 pub const ARROWS: char = '\u{e0a0}';
+pub const NEWSPAPER: char = '\u{e344}';
 
 /// Every icon a layout can name, with its code point.
-pub const NAMES: [(&str, char); 66] = [
+pub const NAMES: [(&str, char); 67] = [
     ("activity", '\u{e000}'),
     ("arrow-down", '\u{e03e}'),
     ("arrow-up", '\u{e08e}'),
@@ -70,6 +71,7 @@ pub const NAMES: [(&str, char); 66] = [
     ("moon", '\u{e330}'),
     ("music-note", '\u{e33c}'),
     ("music-notes", '\u{e340}'),
+    ("newspaper", '\u{e344}'),
     ("pause", '\u{e39e}'),
     ("play", '\u{e3d0}'),
     ("plus", '\u{e3d4}'),
@@ -125,6 +127,7 @@ pub fn for_signal(signal: &str) -> char {
         ("weather", _) => CLOUD,
         ("volume", _) => SPEAKER_HIGH,
         ("media", _) => MUSIC,
+        ("news", _) => NEWSPAPER,
         (_, "temp") => THERMOMETER,
         (_, "load") => GAUGE,
         _ => ACTIVITY,
