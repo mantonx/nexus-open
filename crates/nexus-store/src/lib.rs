@@ -18,7 +18,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use nexus_core::config::{
-    Config, ConfigError, NewsConfig, Page, Settings, Source, Takeover, Weather, Widget, colour_text,
+    AlbumArt, Config, ConfigError, MediaConfig, NewsConfig, Page, Settings, Source, Takeover,
+    Weather, Widget, colour_text,
 };
 use rusqlite::{Connection, Transaction, params};
 use serde_json::{Map, Value as Json, json};
@@ -316,6 +317,7 @@ impl Store {
 pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes), StoreError> {
     let (settings, weather, settings_note) = read_settings(conn)?;
     let news = read_news(conn)?;
+    let media = read_media(conn)?;
     let mut notes = Notes {
         settings: settings_note,
         ..Notes::default()
@@ -395,6 +397,7 @@ pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes
         pages,
         weather,
         news,
+        media,
         takeovers,
         sources,
     };
@@ -463,6 +466,23 @@ fn read_news(conn: &Connection) -> Result<Option<NewsConfig>, StoreError> {
         rotate: seconds(rotate, defaults.rotate)?,
         max_age: seconds(max_age, defaults.max_age)?,
     }))
+}
+
+fn read_media(conn: &Connection) -> Result<MediaConfig, StoreError> {
+    let album_art: String = conn.query_row("SELECT album_art FROM settings", [], |r| r.get(0))?;
+    Ok(MediaConfig {
+        album_art: AlbumArt::from_name(&album_art)
+            .ok_or_else(|| corrupt(format!("album_art \"{album_art}\"")))?,
+    })
+}
+
+/// Writes the `[media]` section into the settings row.
+pub(crate) fn write_media(conn: &Connection, media: &MediaConfig) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE settings SET album_art = ?1",
+        [media.album_art.name()],
+    )?;
+    Ok(())
 }
 
 /// Writes the `[news]` section into the settings row; `None` clears it.
@@ -664,7 +684,8 @@ pub(crate) fn write_settings(
             config.settings.idle_dim,
         ],
     )?;
-    write_news(conn, config.news.as_ref())
+    write_news(conn, config.news.as_ref())?;
+    write_media(conn, &config.media)
 }
 
 fn write_sources(conn: &Connection, sources: &[Source], notes: &Notes) -> Result<(), StoreError> {
@@ -989,7 +1010,7 @@ mod tests {
     }
 
     /// A snapshot as schema 1 had it: without the columns migrations 2 to
-    /// 4 add.
+    /// 5 add.
     fn as_schema_1(snapshot: &str) -> String {
         let mut state: Map<String, Json> = serde_json::from_str(snapshot).unwrap();
         for (table, columns) in [
@@ -1003,6 +1024,7 @@ mod tests {
                     "news_feeds",
                     "news_rotate",
                     "news_max_age",
+                    "album_art",
                 ][..],
             ),
             ("takeover", &["align", "width"]),
@@ -1126,6 +1148,8 @@ mod tests {
         accent = "teal"
         night = { from = "22:30", to = "07:00" }
         idle_dim = false
+        [media]
+        album_art = "local"
         [[page]]
         name = "A"
         [[page.widget]]
@@ -1163,6 +1187,7 @@ mod tests {
         for key in [
             "accent = \"teal\"",
             "idle_dim = false",
+            "album_art = \"local\"",
             "from = \"22:30\"",
             "scale = [",
             "second_label = \"duty\"",
@@ -1183,6 +1208,21 @@ mod tests {
             })
             .unwrap();
         assert_eq!(store.load(id).unwrap().0.settings.night, None);
+        // Settings saved by a form that knows nothing of `[media]` keep it.
+        assert_eq!(
+            store.load(id).unwrap().0.media.album_art,
+            nexus_core::config::AlbumArt::Local
+        );
+        store.undo().unwrap();
+        assert_eq!(store.load(id).unwrap().0, config);
+        store
+            .edit(&Edit::SetMedia {
+                media: MediaConfig {
+                    album_art: AlbumArt::Off,
+                },
+            })
+            .unwrap();
+        assert_eq!(store.load(id).unwrap().0.media.album_art, AlbumArt::Off);
         store.undo().unwrap();
         assert_eq!(store.load(id).unwrap().0, config);
     }

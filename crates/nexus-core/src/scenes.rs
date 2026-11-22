@@ -677,6 +677,7 @@ fn specimen(
         mono,
         marquee: None,
         music: config.music_action(),
+        art: &[],
     };
     let zones = bind_page(&config.pages[0].widgets, &ctx);
     let mut frame = Canvas::new(WIDTH, HEIGHT, GROUND);

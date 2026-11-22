@@ -7,8 +7,11 @@
 //! data (config, signals, the current time), so every decision is
 //! unit-tested without a clock or a device.
 
+use std::sync::Arc;
+
 use jiff::{SignedDuration, Zoned};
 
+use crate::art::Art;
 use crate::config::{Action, ClockFormat, Settings, SliderControl, Temperature, Widget};
 use crate::icons;
 use crate::signal::{Signals, Unit, Value};
@@ -24,13 +27,16 @@ pub const VOLUME_SIGNALS: [&str; 2] = ["volume.level", "volume.muted"];
 
 /// The signals a media source publishes and the media widget reads.
 /// `media.status` is "playing", "paused" or "stopped"; position and length
-/// are in seconds, length 0 when unknown (a live stream).
-pub const MEDIA_SIGNALS: [&str; 5] = [
+/// are in seconds, length 0 when unknown (a live stream). `media.art`
+/// names the track's artwork once it is ready (the engine is handed the
+/// pixels with `Input::Art`); empty while there is none.
+pub const MEDIA_SIGNALS: [&str; 6] = [
     "media.title",
     "media.artist",
     "media.status",
     "media.position",
     "media.length",
+    "media.art",
 ];
 
 /// The signals the weather source publishes. A value widget showing
@@ -81,6 +87,9 @@ pub struct Bind<'a> {
     /// What opens the music player (`Config::music_action`): an idle
     /// media widget with it, or a `tap` of its own, is drawn as a key.
     pub music: Option<&'a Action>,
+    /// Artwork the engine has been given; the one `media.art` names is
+    /// drawn.
+    pub art: &'a [Arc<Art>],
 }
 
 /// Builds the zones for a row of widgets: a page, or a takeover.
@@ -368,7 +377,7 @@ fn icon_of(widget: &Widget, fallback: char) -> char {
 fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
     match widget {
         Widget::Clock { .. } => clock(ctx.settings.clock, ctx.now),
-        Widget::Media { tap, .. } => match media(ctx.signals, ctx.marquee) {
+        Widget::Media { tap, .. } => match media(ctx.signals, ctx.art, ctx.marquee) {
             WidgetView::Media(None) if tap.is_some() || ctx.music.is_some() => {
                 WidgetView::OpenMusic
             }
@@ -633,7 +642,8 @@ fn track_time(seconds: f64) -> String {
 }
 
 /// What is playing, or `None`: no title, stopped, or the player gone.
-pub fn media(signals: &Signals, marquee: Option<f32>) -> WidgetView {
+/// With the artwork among `art` that `media.art` names, if any.
+pub fn media(signals: &Signals, art: &[Arc<Art>], marquee: Option<f32>) -> WidgetView {
     let text = |name| match signals.live(name) {
         Some(Value::Text(t)) => t.trim().to_string(),
         _ => String::new(),
@@ -654,6 +664,12 @@ pub fn media(signals: &Signals, marquee: Option<f32>) -> WidgetView {
         length: number("media.length").filter(|l| *l > 0.0),
         playing: status == "playing",
         marquee,
+        art: {
+            let key = text("media.art");
+            art.iter()
+                .find(|a| !key.is_empty() && a.key() == key)
+                .cloned()
+        },
     }))
 }
 
@@ -704,6 +720,7 @@ mod tests {
             mono: 0.0,
             marquee: None,
             music: None,
+            art: &[],
         }
     }
 
@@ -744,13 +761,17 @@ mod tests {
     #[test]
     fn media_shows_track_times_and_pause() {
         let mut s = Signals::new();
-        assert_eq!(media(&s, None), WidgetView::Media(None), "no player yet");
+        assert_eq!(
+            media(&s, &[], None),
+            WidgetView::Media(None),
+            "no player yet"
+        );
         s.set("media.title", Value::Text("Teardrop".into()));
         s.set("media.artist", Value::Text("Massive Attack".into()));
         s.set("media.status", Value::Text("playing".into()));
         s.set("media.position", Value::Number(75.0, Unit::None));
         s.set("media.length", Value::Number(300.0, Unit::None));
-        let WidgetView::Media(Some(t)) = media(&s, None) else {
+        let WidgetView::Media(Some(t)) = media(&s, &[], None) else {
             unreachable!()
         };
         assert_eq!((t.progress(), t.playing), (Some(0.25), true));
@@ -758,12 +779,12 @@ mod tests {
         // A live stream has no length: no bar, rather than a wrong one.
         s.set("media.status", Value::Text("paused".into()));
         s.set("media.length", Value::Number(0.0, Unit::None));
-        let WidgetView::Media(Some(t)) = media(&s, None) else {
+        let WidgetView::Media(Some(t)) = media(&s, &[], None) else {
             unreachable!()
         };
         assert_eq!((t.progress(), t.playing), (None, false));
         s.set("media.status", Value::Text("stopped".into()));
-        assert_eq!(media(&s, None), WidgetView::Media(None));
+        assert_eq!(media(&s, &[], None), WidgetView::Media(None));
     }
 
     #[test]

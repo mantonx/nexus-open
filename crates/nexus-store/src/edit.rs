@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 
 use nexus_core::config::{
-    Action, Align, Config, ConfigError, NewsConfig, Settings, Source, Takeover, Weather, Widget,
+    Action, Align, Config, ConfigError, MediaConfig, NewsConfig, Settings, Source, Takeover,
+    Weather, Widget,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -120,6 +121,12 @@ pub enum Edit {
         #[serde(default)]
         news: Option<NewsConfig>,
     },
+    /// The `[media]` section: where artwork may come from. Separate from
+    /// `set-settings` for the same reason as `set-news`.
+    SetMedia {
+        #[serde(default)]
+        media: MediaConfig,
+    },
     SetNote {
         item: Item,
         note: String,
@@ -177,6 +184,7 @@ impl Edit {
             Edit::DeleteSource { .. } => "Delete source".into(),
             Edit::SetSettings { .. } => "Change settings".into(),
             Edit::SetNews { .. } => "Change news feeds".into(),
+            Edit::SetMedia { .. } => "Change album art".into(),
             Edit::SetNote { .. } => "Change note".into(),
             Edit::AddLayout { name, .. } => format!("Add layout {name}"),
             Edit::RenameLayout { name, .. } => format!("Rename layout to {name}"),
@@ -340,6 +348,7 @@ pub(crate) fn apply(conn: &Connection, edit: &Edit) -> Result<(), StoreError> {
             )?;
         }
         Edit::SetNews { news } => crate::write_news(conn, news.as_ref())?,
+        Edit::SetMedia { media } => crate::write_media(conn, media)?,
         Edit::SetNote { item, note } => {
             let (table, id) = match item {
                 Item::Settings => ("settings", 1),

@@ -4,6 +4,7 @@
 //! theme and the data to show, it produces a 640×48 frame. That keeps the
 //! whole visual layer testable on the simulator without hardware.
 
+pub mod art;
 pub mod canvas;
 pub mod card;
 pub mod config;

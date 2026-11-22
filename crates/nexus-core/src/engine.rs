@@ -32,10 +32,12 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Zoned;
 
+use crate::art::Art;
 use crate::canvas::Canvas;
 use crate::config::{
     Action, Align, Config, MediaCommand, NewsCommand, SLIDER_VALUE, SliderControl, Widget,
@@ -98,6 +100,10 @@ pub enum Input {
     /// A signal's source is gone: its widgets show "—" until it is
     /// published again, which then counts as a first reading.
     Forget(String),
+    /// A track's artwork, prepared. Drawn while the `media.art` signal
+    /// holds its key; signals carry only numbers and text, so the pixels
+    /// come this way, once per track, and are never decoded here.
+    Art(Arc<Art>),
     /// A touch sample: finger down or not, panel x (0–639), and monotonic
     /// time in seconds.
     Touch { down: bool, x: f32, at: f64 },
@@ -386,7 +392,14 @@ pub struct Engine {
     /// The news article showing when the finger on the strip landed: what
     /// a `news = "open"` action opens.
     landing_link: Option<String>,
+    /// Artwork handed over with `Input::Art`, newest last: the track's
+    /// and at most a few before it, so a key that arrives just after its
+    /// pixels, or a track skipped back to, still finds them.
+    art: Vec<Arc<Art>>,
 }
+
+/// Artwork kept by the engine: what `media.art` names, and a few more.
+const ART_KEPT: usize = 3;
 
 impl Engine {
     pub fn new(config: Config) -> Self {
@@ -422,6 +435,7 @@ impl Engine {
             drawn_dim: 1.0,
             drawn_stale: false,
             landing_link: None,
+            art: Vec::new(),
         }
     }
 
@@ -437,6 +451,15 @@ impl Engine {
 
     pub fn signals(&self) -> &Signals {
         &self.signals
+    }
+
+    /// The artwork the `media.art` signal names, if the engine has it:
+    /// what the media widget draws for the track.
+    pub fn art(&self) -> Option<&Arc<Art>> {
+        let Some(Value::Text(key)) = self.signals.live("media.art") else {
+            return None;
+        };
+        self.art.iter().find(|a| !key.is_empty() && a.key() == key)
     }
 
     /// The theme frames are drawn with: the default one with the user's
@@ -617,6 +640,24 @@ impl Engine {
                 if self.alarm.contains(&name) {
                     self.alarm.retain(|s| *s != name);
                     self.alarm_changed();
+                }
+            }
+            Input::Art(art) => {
+                self.art.retain(|a| a.key() != art.key());
+                self.art.push(art);
+                if self.art.len() > ART_KEPT {
+                    // The oldest goes, unless it is the one on show.
+                    let shown = self.art().map(|a| a.key().to_string());
+                    if let Some(i) = self
+                        .art
+                        .iter()
+                        .position(|a| Some(a.key()) != shown.as_deref())
+                    {
+                        self.art.remove(i);
+                    }
+                }
+                if self.art().is_some() {
+                    self.dirty |= self.visible("media.art");
                 }
             }
             Input::Touch { down, x, at } => self.touch(down, x, at),
@@ -1101,6 +1142,7 @@ impl Engine {
             mono: self.now,
             marquee,
             music: self.config.music_action(),
+            art: &self.art,
         };
         let mut zones = bind_page(self.widgets(row), &ctx);
         for (zone, w) in zones.iter_mut().zip(self.widths(row)) {
@@ -1128,7 +1170,7 @@ impl Engine {
     fn part_at(&self, row: Row, zone: usize, x: f32) -> Option<(usize, bool)> {
         let widget = &self.widgets(row)[zone];
         if !matches!(widget, Widget::Media { .. })
-            || media(&self.signals, None) == WidgetView::Media(None)
+            || media(&self.signals, &[], None) == WidgetView::Media(None)
         {
             return None;
         }
