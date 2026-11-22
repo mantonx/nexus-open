@@ -228,3 +228,20 @@ README clip (now of the new strip), release verification.
   off; the current page's marker is hard to see. All three needed Plex's
   width axis and tabular figures, which `TextEngine` does not set yet.
   **GATE open:** Matt picks.
+- 2026-11-22 — **U1 GATE passed.** Matt chose, agreeing with the review:
+  C "better cards" as the structure (pages the user arranges; existing
+  layouts keep working), with three things from B (the full-strip critical
+  alarm, the media scene as the now-playing takeover with transport keys
+  and the full title, and B's scale for hero-size widgets) and A's
+  fixed-scale bar with its limits marked for system widgets. B as a whole
+  was not chosen because it depends on knowing a game is running, which
+  the daemon cannot tell, and it hides the machine at idle; A as a whole
+  was the densest and says little at idle.
+- 2026-11-22 — **U0 step 3 done: `PRODUCT.md`.** Matt's answers: the strip
+  is a glance display and a control surface equally; the character is warm
+  and friendly (the mockups' cool, technical look was the agents' choice
+  and is not kept); the accent colour is the user's choice with a good
+  default; the first release is for anyone with the strip, no terminal.
+  Still open in U0: the legibility card has not been read (the strip needs
+  a replug first), so U2's sizes stay provisional.
+
