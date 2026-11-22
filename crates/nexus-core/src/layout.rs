@@ -318,7 +318,14 @@ fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
                 *scale,
                 expected_unit(signal),
             );
-            let limit = warn.or(*crit).filter(|_| first.bar.is_some()).map(|l| {
+            // The limit that matters now: the critical one on a critical
+            // reading, as the alarm names it; otherwise the first to come.
+            let near = if first.severity == Severity::Crit {
+                crit.or(*warn)
+            } else {
+                warn.or(*crit)
+            };
+            let limit = near.filter(|_| first.bar.is_some()).map(|l| {
                 let unit = match ctx.signals.get(signal) {
                     Some(Value::Number(_, u)) => *u,
                     _ => expected_unit(signal),

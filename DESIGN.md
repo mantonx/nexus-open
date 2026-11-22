@@ -291,7 +291,7 @@ card beside it (content centres in its room when it has spare width).
 | Widget | Compact (≤149) | Medium (150–299) | Hero (≥300) |
 |---|---|---|---|
 | Clock | 10:53 at 32, centred | 10:53 at 40 + "Sun" / "Nov 22" | 10:53 at 50 + "Sunday" / "November 22" |
-| Value (temperature) | icon + 115° at 32; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 50; name and "limit 167°" over a 6 px bar |
+| Value (temperature) | icon + 115° at 32; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 50; name and the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it) over a 6 px bar |
 | Value + second reading | as compact (second hidden) | icon + 115° at 36, second "6%" at 26 right; two bars in the band, each under its number | icon + 115° at 50; name, second "6%" at 26; two bars |
 | Load, memory | icon + 62% at 32; bar | icon + 62% at 36, name; bar | icon + 62% at 50, name, "limit 85%"; bar |
 | Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
@@ -400,8 +400,8 @@ What can be touched looks like it; what cannot does not.
 | State | How it looks | Frame |
 |---|---|---|
 | Normal | CARD, cream numeral, FILL bar | `specimen-value-normal` |
-| Warning | Whole card WARN_SURFACE; numeral, icon and bar WARN; page marker WARN and longer | `specimen-value-warning`, `3-hot` |
-| Critical | Whole card CRIT; everything white; track CRIT_DEEP; page marker CRIT and longer; plus the alarm | `specimen-value-critical`, `takeover-after-ok-system` |
+| Warning | Whole card WARN_SURFACE; the warning reading's numeral, icon and bar WARN, a second reading that is fine stays cream (so an amber numeral always means warning); page marker WARN and longer | `specimen-value-warning`, `specimen-value2-warning`, `3-hot` |
+| Critical | Whole card CRIT; everything white; track CRIT_DEEP, and limit notches under the white fill CRIT_DEEP so they stay visible; a hero card names the critical limit, as the alarm does; page marker CRIT and longer; plus the alarm | `specimen-value-critical`, `takeover-after-ok-system` |
 | No data (source works, no reading yet) | Normal card; the numeral is two TEXT3 dashes; "No reading" (medium) / "No reading yet" (hero); empty bar | `specimen-value-no-data`, `specimen-weather-no-data` |
 | Source lost / stale | The last value kept in TEXT3, icon replaced by a broken link (or cloud-slash); "Lost at 10:41" / "From 9:30" | `specimen-value-lost`, `specimen-weather-stale` |
 | Not set up | No fill; dashed accent outline; plus or pin icon; "Weather / Set up" (compact), "Weather / Add your town" | `specimen-*-not-set-up`, `6-first-run` |

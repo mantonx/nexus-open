@@ -314,6 +314,23 @@ struct Ink {
     track: Rgb,
 }
 
+/// The ink for one reading on a card of `card` severity. On a warning card
+/// a reading that is itself fine keeps the calm colours, so only the one at
+/// fault is amber: an amber numeral always means a warning. A critical card
+/// is white throughout.
+fn reading_ink(card: Severity, own: Severity) -> Ink {
+    let k = ink(card);
+    if card == Severity::Warn && own == Severity::Ok {
+        Ink {
+            surface: k.surface,
+            track: k.track,
+            ..ink(Severity::Ok)
+        }
+    } else {
+        k
+    }
+}
+
 fn ink(sev: Severity) -> Ink {
     match sev {
         Severity::Ok => Ink {
@@ -855,7 +872,11 @@ impl Pen<'_> {
         for (lim, c) in [(bar.warn, WARN), (bar.crit, CRIT)] {
             let Some(lv) = lim else { continue };
             let nx = (x + w * lv - NOTCH_W / 2.0).round();
-            let col = if crit_card {
+            let under_fill = bar.value.is_some_and(|v| v > lv);
+            let col = if crit_card && under_fill {
+                // White on the white fill would vanish just when it counts.
+                CRIT_DEEP
+            } else if crit_card {
                 CRIT_INK
             } else if k.surface == WARN_SURFACE && c == WARN {
                 TEXT
@@ -1053,7 +1074,11 @@ impl Pen<'_> {
         let sev = second.map_or(r.severity, |s| s.severity.max(r.severity));
         let k = ink(sev);
         let lost = matches!(r.avail, Avail::Lost(_));
-        let kr = if lost { lost_ink() } else { k };
+        let kr = if lost {
+            lost_ink()
+        } else {
+            reading_ink(sev, r.severity)
+        };
         self.card(x, w, k.surface, press);
         let shown = |rd: &Reading| -> (String, Option<Bar>) {
             match rd.avail {
@@ -1125,14 +1150,15 @@ impl Pen<'_> {
                 let txt = self.fit(Face::Num, &NUM_BANDED, &txt, right - nx);
                 let nw = self.num_unit(&NUM_BANDED, &txt, unit, &UNIT, nx, base, num_c, kr.label);
                 if let Some(s) = second {
+                    let ks = reading_ink(sev, s.severity);
                     let (stxt, sbar) = shown(s);
                     let live = s.avail == Avail::Live;
                     let su = if live { s.unit.as_str() } else { "" };
-                    let sc = if live { k.num } else { TEXT3 };
+                    let sc = if live { ks.num } else { TEXT3 };
                     let sw = self.num_unit_w(&NUM_SECOND, &stxt, su, &UNIT);
                     let sx = right - sw;
                     if sx > nx + nw + 6.0 {
-                        self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, k.label);
+                        self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, ks.label);
                     }
                     let split = (sx - 10.0).max(nx + nw + 6.0);
                     if let Some(b) = bar {
@@ -1140,7 +1166,7 @@ impl Pen<'_> {
                         self.bar(x + PAD, BAR_Y_COMPACT, bw, BAR_H_BANDED, &b, &kr);
                     }
                     if let Some(b) = sbar {
-                        self.bar(split, BAR_Y_COMPACT, right - split, BAR_H_BANDED, &b, &k);
+                        self.bar(split, BAR_Y_COMPACT, right - split, BAR_H_BANDED, &b, &ks);
                     }
                 } else {
                     // The name, or why there is no number, top right.
@@ -1186,10 +1212,11 @@ impl Pen<'_> {
                 if let Some(s) = second {
                     // Two columns: the first reading's name and bar, then
                     // the second reading's number and bar.
+                    let ks = reading_ink(sev, s.severity);
                     let (stxt, sbar) = shown(s);
                     let live = s.avail == Avail::Live;
                     let su = if live { s.unit.as_str() } else { "" };
-                    let sc = if live { k.num } else { TEXT3 };
+                    let sc = if live { ks.num } else { TEXT3 };
                     let sw = self.num_unit_w(&NUM_SECOND, &stxt, su, &UNIT);
                     let col2 = right - sw.max(56.0);
                     let name = self.fit(Face::Word, &LABEL, &r.name, col2 - 12.0 - cx);
@@ -1197,9 +1224,18 @@ impl Pen<'_> {
                     if let Some(b) = bar {
                         self.bar(cx, BAR_Y_HERO, col2 - 12.0 - cx, BAR_H, &b, &kr);
                     }
-                    self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, right - sw, 27.0, sc, k.label);
+                    self.num_unit(
+                        &NUM_SECOND,
+                        &stxt,
+                        su,
+                        &UNIT,
+                        right - sw,
+                        27.0,
+                        sc,
+                        ks.label,
+                    );
                     if let Some(b) = sbar {
-                        self.bar(col2, BAR_Y_HERO, right - col2, BAR_H, &b, &k);
+                        self.bar(col2, BAR_Y_HERO, right - col2, BAR_H, &b, &ks);
                     }
                 } else {
                     let words = match &r.avail {
