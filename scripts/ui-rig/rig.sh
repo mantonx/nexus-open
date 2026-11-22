@@ -3,6 +3,8 @@
 # access, its own store and runtime folder) and the window inside a headless KWin session,
 # so nothing touches the real strip, the user's daemon, layout, window or desktop.
 #
+# Set NEXUS_RIG_NAME (e.g. u3) and NEXUS_RIG_DIR when more than one rig may run at a time.
+#
 #   rig.sh up <repo-or-worktree-dir>   build must exist: <dir>/target/release/{nexusd,nexusctl}
 #   rig.sh shot <name>                 PNG of the window -> $RIG/shots/<name>.png  (RIG defaults to ~/.cache/nexus-ui-rig)
 #   rig.sh click <x> <y>               click at window coordinates (hover first; Slint needs it)
@@ -21,13 +23,17 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # Shots and state go here, outside the repo. Override with NEXUS_RIG_DIR.
 RIG="${NEXUS_RIG_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/nexus-ui-rig}"
 mkdir -p "$RIG"
-R="$XDG_RUNTIME_DIR/nxrig"
+# Two rigs can run at once if each has its own name (letters and digits) and NEXUS_RIG_DIR.
+NAME="${NEXUS_RIG_NAME:-rig}"
+case "$NAME" in *[!a-z0-9]*|"") echo "NEXUS_RIG_NAME must be lowercase letters and digits"; exit 2;; esac
+UNIT="nexus-rig-$NAME"
+R="$XDG_RUNTIME_DIR/nx$NAME"
 ST="$RIG/state"
 env_ui() { echo "XDG_RUNTIME_DIR=$R XDG_STATE_HOME=$ST/state XDG_CONFIG_HOME=$ST/config XDG_DATA_HOME=$ST/data"; }
 disp() { cat "$ST/display" 2>/dev/null; }
 win() { DISPLAY=:$(disp) xdotool search --onlyvisible --name '^Nexus Open' 2>/dev/null | head -1; }
 start_daemon() {
-  systemd-run --user --quiet --unit nexus-rig --collect -p DevicePolicy=closed \
+  systemd-run --user --quiet --unit "$UNIT" --collect -p DevicePolicy=closed \
     -p DeviceAllow='char-nvidiactl rw' -p DeviceAllow='char-nvidia rw' \
     -E XDG_RUNTIME_DIR="$R" -E XDG_STATE_HOME="$ST/state" -E XDG_CONFIG_HOME="$ST/config" \
     -E DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus" \
@@ -37,7 +43,7 @@ start_daemon() {
   # Safety: the throwaway daemon must never hold the real strip. (A user unit's
   # DevicePolicy is not enforced, so --no-device is what keeps it off.)
   if XDG_RUNTIME_DIR="$R" "$(cat "$ST/bin")/nexusctl" status | grep -q '^device *connected'; then
-    systemctl --user stop nexus-rig; echo "REFUSED: this build's daemon opened the real strip despite --no-device; rig stopped"; return 1
+    systemctl --user stop "$UNIT"; echo "REFUSED: this build's daemon opened the real strip despite --no-device; rig stopped"; return 1
   fi
 }
 start_ui() {
@@ -59,7 +65,7 @@ case "${1:-}" in
     echo "$2/target/release" > "$ST/bin"
     for n in pipewire-0 pulse; do [ -e "$XDG_RUNTIME_DIR/$n" ] && ln -sfn "$XDG_RUNTIME_DIR/$n" "$R/$n"; done
     before=$(pgrep -a Xwayland | grep -oE 'Xwayland :[0-9]+' | sort -u)
-    ( kwin_wayland --virtual --xwayland --width 1600 --height 1000 --socket nexus-rig >"$ST/kwin.log" 2>&1 & )
+    ( kwin_wayland --virtual --xwayland --width 1600 --height 1000 --socket "$UNIT" >"$ST/kwin.log" 2>&1 & )
     d=""; for i in $(seq 40); do after=$(pgrep -a Xwayland | grep -oE 'Xwayland :[0-9]+' | sort -u)
       d=$(comm -13 <(echo "$before") <(echo "$after") | grep -oE '[0-9]+$' | head -1); [ -n "$d" ] && break
       # Xwayland starts on demand: poke the candidate displays KWin opened.
@@ -81,12 +87,12 @@ case "${1:-}" in
   ctl) shift; XDG_RUNTIME_DIR="$R" "$(cat "$ST/bin")/nexusctl" "$@" ;;
   frame) XDG_RUNTIME_DIR="$R" python3 "$HERE/grab.py" "$RIG/shots/$2.png" 0.8 && echo "$RIG/shots/$2.png" ;;
   restart-ui) shift; stop_ui; start_ui "$@" ;;
-  stop-daemon) systemctl --user stop nexus-rig; sleep 1 ;;
+  stop-daemon) systemctl --user stop "$UNIT"; sleep 1 ;;
   start-daemon) start_daemon ;;
   down)
     [ -f "$ST/bin" ] && stop_ui
-    kill_matching kwin_wayland "--socket nexus-rig"
-    systemctl --user stop nexus-rig 2>/dev/null
+    kill_matching kwin_wayland "--socket $UNIT"
+    systemctl --user stop "$UNIT" 2>/dev/null
     sleep 0.5
     for p in $(pgrep -x xdg-document-po; pgrep -x xdg-permission-; pgrep -x xdg-desktop-por); do
       tr '\0' '\n' < /proc/$p/environ 2>/dev/null | grep -q "^XDG_RUNTIME_DIR=$R$" && kill $p 2>/dev/null; done
