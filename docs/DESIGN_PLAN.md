@@ -510,3 +510,10 @@ README clip (now of the new strip), release verification.
   px rate running "12 kB/s" off its card, and weather running "104°" off
   at every compact width. Cost: default System network 32 to 20 px,
   Home weather 40 to 32. Frames `live-p1-rate`, `overflow-sweep-*`.
+- 2026-11-22 — **Open, for the panel check:** on Matt's page 1 the
+  106 px network card now stacks "↓ kB/s" above a 20 px number, so the
+  unit outweighs the reading. Cause: `rate_plan` lays the card out for
+  "888 MB/s", which fits on one line at no compact size at that width.
+  The choices are: let the unit go under a larger number at under 18 px;
+  widen the card (his layout has six 106 px cards); or accept the stack.
+  Decide by looking at the strip.
