@@ -283,6 +283,15 @@ pub struct MediaKey {
 /// the keys it draws, or the whole card at medium width, which is the
 /// play/pause key. Shared by drawing and the engine's hit test, so what is
 /// drawn is what is hit.
+/// "Harbour Gazette · 12 min", or whichever of the two there is.
+fn news_from_text(source: &str, age: &str) -> String {
+    match (source.is_empty(), age.is_empty()) {
+        (false, false) => format!("{source} · {age}"),
+        (false, true) => source.to_string(),
+        _ => age.to_string(),
+    }
+}
+
 pub fn media_keys(width: u32) -> Vec<MediaKey> {
     let x = CARD_INSET;
     let w = width as f32 - 2.0 * CARD_INSET;
@@ -2415,10 +2424,10 @@ impl Pen<'_> {
     /// A news headline. Live, the whole card is a key, as a launch key is:
     /// raised face, lit top edge, and the newspaper in the accent, since a
     /// tap opens the article; the headline and its source stay in the text
-    /// ramp. The headline gets the card's whole width on the first line,
-    /// cut after a whole word with an ellipsis, and never scrolls. A
-    /// compact card has no room for a headline that can be read, so it
-    /// shows the newspaper and the headline's age.
+    /// ramp. From medium up the headline runs over two lines
+    /// (`news_lines`) and never scrolls. A compact card has no room for a
+    /// headline that can be read, so it shows the newspaper and the
+    /// headline's age.
     #[allow(clippy::too_many_arguments)]
     fn news(
         &mut self,
@@ -2479,7 +2488,7 @@ impl Pen<'_> {
             self.card(x, w, CARD, Press::default());
         }
         let glyph_c = if pressed { TEXT } else { self.a.text };
-        let (head_c, line2_c) = if live { (TEXT, TEXT2) } else { (TEXT3, TEXT3) };
+        let head_c = if live { TEXT } else { TEXT3 };
         if cls == Class::Compact {
             let tw = self.measure(Face::Word, &TITLE, age);
             let total = ICON_KEY + ICON_GAP + tw;
@@ -2491,32 +2500,112 @@ impl Pen<'_> {
             self.text(Face::Word, &TITLE, &age, tx, cy + 7.0, head_c);
             return;
         }
-        let (tx, right) = (x + PAD, x + w - PAD);
-        let line1 = self.fit(Face::Word, &TITLE, headline, right - tx);
-        self.text(Face::Word, &TITLE, &line1, tx, BASE_LINE1 + dy, head_c);
-        // The second line: the newspaper, then "BBC News · 12 min". The age
-        // stays whole; the source is cut first, and left out before it
-        // would be cut to nothing.
-        let base2 = BASE_LINE2 - 1.0 + dy;
-        let icy = base2 - LABEL.size * 0.35;
-        let ix = tx + ICON_SMALL / 2.0;
-        self.news_glyph(live, icon, ICON_SMALL, ix, icy, glyph_c);
-        let lx = tx + ICON_SMALL + ICON_GAP;
-        let room = right - lx;
-        let sep = " · ";
-        let tail = self.measure(Face::Word, &LABEL, &format!("{sep}{age}"));
-        let words = if source.is_empty() || age.is_empty() {
-            let one = if source.is_empty() { age } else { source };
-            self.fit(Face::Word, &LABEL, one, room)
+        let (left, right) = (x + PAD, x + w - PAD);
+        if live {
+            let hero = cls == Class::Hero;
+            self.news_lines(left, right, dy, hero, icon, headline, source, age, glyph_c);
         } else {
+            // Lost: the headline's start, and under it the broken link
+            // with where it was from and how old it is, always shown.
+            let line1 = self.fit(Face::Word, &LABEL, headline, right - left);
+            self.text(Face::Word, &LABEL, &line1, left, NEWS_BASE1, TEXT3);
+            self.news_from(left, right, NEWS_BASE2, false, icon, source, age, TEXT3);
+        }
+    }
+
+    /// A live headline from medium up: over two lines at `LABEL` size, as
+    /// many whole words as fit on the first, the rest on the second, cut
+    /// there with an ellipsis by the shared rule. On a hero card the
+    /// newspaper and "Source · 12 min" follow the headline's end on the
+    /// second line when they fit there, and are left out when they do not:
+    /// the headline matters more. A headline on one line with nothing under
+    /// it is centred on the card.
+    #[allow(clippy::too_many_arguments)]
+    fn news_lines(
+        &mut self,
+        left: f32,
+        right: f32,
+        dy: f32,
+        hero: bool,
+        icon: char,
+        headline: &str,
+        source: &str,
+        age: &str,
+        glyph_c: Rgb,
+    ) {
+        let room = right - left;
+        let words: Vec<&str> = headline.split_whitespace().collect();
+        let mut n = 0;
+        while n < words.len() && self.measure(Face::Word, &LABEL, &words[..=n].join(" ")) <= room {
+            n += 1;
+        }
+        let (line1, rest) = if n == 0 {
+            // One word longer than the card: cut it, and stop there.
+            (self.fit(Face::Word, &LABEL, headline, room), String::new())
+        } else {
+            (words[..n].join(" "), words[n..].join(" "))
+        };
+        let rest = self.fit(Face::Word, &LABEL, &rest, room);
+        let from = news_from_text(source, age);
+        let after = if rest.is_empty() {
+            left
+        } else {
+            left + self.measure(Face::Word, &LABEL, &rest) + NEWS_FROM_GAP
+        };
+        let from_w = ICON_SMALL + ICON_GAP + self.measure(Face::Word, &LABEL, &from);
+        let show_from = hero && !from.is_empty() && after + from_w <= right;
+        if rest.is_empty() && !show_from {
+            self.text(Face::Word, &LABEL, &line1, left, NEWS_BASE_ONE + dy, TEXT);
+            return;
+        }
+        self.text(Face::Word, &LABEL, &line1, left, NEWS_BASE1 + dy, TEXT);
+        self.text(Face::Word, &LABEL, &rest, left, NEWS_BASE2 + dy, TEXT);
+        if show_from {
+            self.news_from(
+                after,
+                right,
+                NEWS_BASE2 + dy,
+                true,
+                icon,
+                source,
+                age,
+                glyph_c,
+            );
+        }
+    }
+
+    /// The newspaper, then "Harbour Gazette · 12 min" on the baseline
+    /// `base`, from `x`. The age stays whole: the source is cut first, and
+    /// left out before it would be cut to fewer than four letters.
+    #[allow(clippy::too_many_arguments)]
+    fn news_from(
+        &mut self,
+        x: f32,
+        right: f32,
+        base: f32,
+        live: bool,
+        icon: char,
+        source: &str,
+        age: &str,
+        glyph_c: Rgb,
+    ) {
+        let icy = base - LABEL.size * 0.35;
+        self.news_glyph(live, icon, ICON_SMALL, x + ICON_SMALL / 2.0, icy, glyph_c);
+        let lx = x + ICON_SMALL + ICON_GAP;
+        let room = right - lx;
+        let words = if source.is_empty() || age.is_empty() {
+            self.fit(Face::Word, &LABEL, &news_from_text(source, age), room)
+        } else {
+            let tail = self.measure(Face::Word, &LABEL, &format!(" · {age}"));
             let fitted = self.fit(Face::Word, &LABEL, source, room - tail);
             if fitted.chars().count() < 4 {
                 self.fit(Face::Word, &LABEL, age, room)
             } else {
-                format!("{fitted}{sep}{age}")
+                format!("{fitted} · {age}")
             }
         };
-        self.text(Face::Word, &LABEL, &words, lx, base2, line2_c);
+        let c = if live { TEXT2 } else { TEXT3 };
+        self.text(Face::Word, &LABEL, &words, lx, base, c);
     }
 
     /// The newspaper on a news card: in outline, as on a key; in the

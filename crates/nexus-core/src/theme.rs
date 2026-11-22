@@ -394,6 +394,14 @@ pub const BASE_MEDIUM: f32 = 41.0;
 pub const BASE_COMPACT: f32 = 36.0;
 pub const BASE_LINE1: f32 = 24.0;
 pub const BASE_LINE2: f32 = 42.0;
+/// A news headline over two lines at `LABEL` size: an 18 px pitch, the
+/// pair centred on the card.
+pub const NEWS_BASE1: f32 = 23.5;
+pub const NEWS_BASE2: f32 = 41.5;
+/// A headline on one line with nothing under it, centred on the card.
+pub const NEWS_BASE_ONE: f32 = 33.0;
+/// Between a headline's end and the newspaper and "Source · 12 min".
+pub const NEWS_FROM_GAP: f32 = 12.0;
 /// A hero reading's name line (its limit sits on the numeral's baseline).
 pub const BASE_HERO_NAME: f32 = 20.0;
 

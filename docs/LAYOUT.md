@@ -227,7 +227,7 @@ the name of an icon (below) to draw instead of the one it would choose.
 | `media`  | none                                                                     | Title, artist and progress from the `media.*` signals, with transport keys |
 | `slider` | `label`, `controls`; optional `signal`                                   | A bar to drag                                                |
 | `key`    | optional `icon`, `label`, `sub`                                          | A control to press; nothing live. `sub` is a second line under the label on a key 300 px or wider |
-| `news`   | none                                                                     | The headline showing, and from medium up where it is from and how old it is (`Harbour Gazette · 12 min`) |
+| `news`   | none                                                                     | The headline showing, over two lines; on a hero card where it is from and how old it is (`Harbour Gazette · 12 min`) after it, when there is room |
 
 How much a widget shows depends on its width: up to 149 px it is
 compact (the reading alone), up to 299 px medium (with its label, or a
@@ -261,8 +261,8 @@ at the right end, or previous, play/pause and next from 400 px. A long
 press on a key is a slow tap. Elsewhere on the widget its own `tap` and
 `hold` apply. With nothing playing there are no keys.
 
-A news widget shows one headline at a time, cut short with an ellipsis
-when it is too long; it never scrolls. A compact one has room for the
+A news widget shows one headline at a time, over two lines, the second
+cut short with an ellipsis when it is too long; it never scrolls. A compact one has room for the
 newspaper icon and the headline's age only. A tap opens the headline in
 the default browser (the one showing when the finger landed, even if
 the next arrives before it lifts), and a hold shows the next one; its
