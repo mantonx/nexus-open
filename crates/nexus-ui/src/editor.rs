@@ -12,20 +12,31 @@ use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
+use std::sync::mpsc::Sender;
+
 use nexus_control::{Client, EditRequest, ImportRequest, Layout, LayoutEntry, SignalEntry, Status};
-use nexus_core::config::{MIN_WIDGET_WIDTH, Takeover, Temperature, Widget};
+use nexus_core::config::{Config, STARTERS, Takeover, Temperature, Widget};
 use nexus_store::{Edit, Item, Row};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel, Weak};
+use slint::{
+    ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer,
+    TimerMode, VecModel, Weak,
+};
 
 use crate::files;
+use crate::gallery;
 use crate::geometry::{self, STRIP};
 use crate::inspector::{self, Context, Field, Kind, Missing, Outcome, Reading, Values};
 use crate::layouts;
+use crate::names;
 use crate::settings;
 use crate::signals;
 use crate::simulate;
 use crate::takeovers;
-use crate::{AppWindow, Field as FieldRow, LayoutRow, SignalRow, Zone};
+use crate::thumbs::{self, Done, Job};
+use crate::{
+    AppWindow, Field as FieldRow, LayoutRow, PickRow, SignalRow, Starter, StripRow, Tile, Trigger,
+    Zone,
+};
 
 /// A takeover being edited is shown on the strip for this long, and asked
 /// for again every `LEASE_RENEW`. If the window goes away, it ends soon.
@@ -39,13 +50,12 @@ enum Shown {
     Takeover(usize),
 }
 
-/// What the settings area's fields belong to.
+/// What the settings under the strip belong to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Form {
     Widget(i64),
     Takeover(i64),
     NewTakeover,
-    Settings,
 }
 
 /// How far a press must move before it is a drag rather than a click, in
@@ -112,8 +122,12 @@ pub struct Editor {
     adding: Option<Values>,
     /// After adding a takeover: its name, to start editing it.
     edit_after: Option<String>,
-    /// The strip's settings are open in the settings area.
-    settings_open: bool,
+    /// A click on a strip not being edited: once it is on the strip, the
+    /// widget at this x (strip pixels) is selected. Keyed by "page:Name"
+    /// or "takeover:Name".
+    select_at: Option<(String, f32)>,
+    /// Whether nexusd answers; editing waits while it does not.
+    connected: bool,
     /// What the last file action did, shown as the caption until the
     /// next change.
     notice: String,
@@ -141,12 +155,29 @@ pub struct Editor {
     committed: HashMap<String, String>,
     signals: HashMap<String, Reading>,
 
-    /// The signal browser's rows, updated in place so the list keeps its
-    /// scroll position as values change.
+    /// The Signals drawer's rows, updated in place.
     signal_rows: Rc<VecModel<SignalRow>>,
-    signal_filter: String,
-    /// The field a signal is being chosen for, from its "Choose…" button.
+    /// The picker: the field it was opened for, what is typed, its rows.
     picking: Option<String>,
+    pick_filter: String,
+    picks: Rc<VecModel<PickRow>>,
+    triggers: Rc<VecModel<Trigger>>,
+
+    /// The storyboard's rows, updated in place so the settings under the
+    /// strip being edited keep their focus.
+    rows: Rc<VecModel<StripRow>>,
+    /// Pictures of every page and takeover, drawn by `thumbs`.
+    page_pictures: Vec<Image>,
+    takeover_pictures: Vec<Image>,
+    thumbs: Option<Sender<Job>>,
+    epoch: u64,
+    /// The gallery's tiles and starters' pictures.
+    tiles: Rc<VecModel<Tile>>,
+    starters: Rc<VecModel<Starter>>,
+    /// While a resize is dragged: the x it snapped to.
+    snap_x: Option<u32>,
+    /// Whether the first-run choice was offered already.
+    first_run_seen: bool,
 }
 
 pub type Shared = Rc<RefCell<Editor>>;
@@ -174,7 +205,8 @@ impl Editor {
             lease: Timer::default(),
             adding: None,
             edit_after: None,
-            settings_open: false,
+            select_at: None,
+            connected: false,
             notice: String::new(),
             unsent: None,
             waiting: VecDeque::new(),
@@ -188,21 +220,37 @@ impl Editor {
             committed: HashMap::new(),
             signals: HashMap::new(),
             signal_rows: Rc::new(VecModel::default()),
-            signal_filter: String::new(),
             picking: None,
+            pick_filter: String::new(),
+            picks: Rc::new(VecModel::default()),
+            triggers: Rc::new(VecModel::default()),
+            rows: Rc::new(VecModel::default()),
+            page_pictures: Vec::new(),
+            takeover_pictures: Vec::new(),
+            thumbs: None,
+            epoch: 0,
+            tiles: Rc::new(VecModel::default()),
+            starters: Rc::new(VecModel::default()),
+            snap_x: None,
+            first_run_seen: crate::first_run::seen(),
         }))
     }
 
     /// Wires the window's callbacks to the editor.
     pub fn connect(editor: &Shared, app: &AppWindow) {
-        let e = editor.clone();
-        app.on_pressed(move |x, reach| e.borrow_mut().pressed(x, reach));
-        let e = editor.clone();
-        app.on_dragged(move |x| e.borrow_mut().dragged(x));
-        let e = editor.clone();
-        app.on_released(move |x| e.borrow_mut().released(x));
-        let e = editor.clone();
-        app.on_cancelled(move || e.borrow_mut().cancel());
+        macro_rules! on {
+            ($setter:ident, |$e:ident $(, $arg:ident)*| $body:expr) => {{
+                let shared = editor.clone();
+                app.$setter(move |$($arg),*| {
+                    let mut $e = shared.borrow_mut();
+                    $body
+                });
+            }};
+        }
+        on!(on_pressed, |e, x, reach| e.pressed(x, reach));
+        on!(on_dragged, |e, x| e.dragged(x));
+        on!(on_released, |e, x| e.released(x));
+        on!(on_cancelled, |e| e.cancel());
         let e = editor.clone();
         app.on_edge_at(move |x, reach| {
             // Called while drawing; a drag in progress already holds the
@@ -212,109 +260,94 @@ impl Editor {
                 .and_then(|e| e.edge_at(x, reach))
                 .map_or(-1, |i| i as i32)
         });
-        let e = editor.clone();
-        app.on_select_step(move |step| e.borrow_mut().select_step(step));
-        let e = editor.clone();
-        app.on_move_step(move |step| e.borrow_mut().move_step(step));
+        on!(on_select_step, |e, step| e.select_step(step));
+        on!(on_move_step, |e, step| e.move_step(step));
         let e = editor.clone();
         app.on_resize_step(move |px| Editor::resize_step(&e, px));
-        let e = editor.clone();
-        app.on_deselect(move || {
-            let mut e = e.borrow_mut();
+        on!(on_deselect, |e| {
             e.selected = None;
             e.show();
         });
         app.set_fields(ModelRc::from(editor.borrow().fields.clone()));
-        let e = editor.clone();
-        app.on_field_changed(move |key, value| {
-            e.borrow_mut().field_changed(key.as_str(), value.as_str());
-        });
-        let e = editor.clone();
-        app.on_field_chosen(move |key, index| e.borrow_mut().field_chosen(key.as_str(), index));
-        let e = editor.clone();
-        app.on_add_widget(move || e.borrow_mut().add_widget());
-        let e = editor.clone();
-        app.on_delete_widget(move || e.borrow_mut().delete_widget());
+        app.set_rows(ModelRc::from(editor.borrow().rows.clone()));
+        app.set_picks(ModelRc::from(editor.borrow().picks.clone()));
+        app.set_triggers(ModelRc::from(editor.borrow().triggers.clone()));
         app.set_signal_rows(ModelRc::from(editor.borrow().signal_rows.clone()));
-        let e = editor.clone();
-        app.on_choose_signal(move |key| e.borrow_mut().choose_signal(Some(key.into())));
-        let e = editor.clone();
-        app.on_cancel_choose(move || e.borrow_mut().choose_signal(None));
-        let e = editor.clone();
-        app.on_signal_picked(move |name| e.borrow_mut().signal_picked(name.as_str()));
-        let e = editor.clone();
-        app.on_signal_filter(move |text| {
-            let mut e = e.borrow_mut();
-            e.signal_filter = text.into();
-            e.show_signals();
-        });
-        let e = editor.clone();
-        app.on_pick_first(move || {
-            let mut e = e.borrow_mut();
-            let first = e.signal_rows.row_data(0).map(|r| r.name.to_string());
-            if let Some(name) = first {
-                e.signal_picked(&name);
-            }
-        });
-        let choices: Vec<SharedString> = layouts::choices()
+        app.set_tiles(ModelRc::from(editor.borrow().tiles.clone()));
+        app.set_starters(ModelRc::from(editor.borrow().starters.clone()));
+        let groups: Vec<SharedString> = gallery::GROUPS
             .iter()
-            .map(|c| crate::i18n::shown(c).into())
+            .map(|g| crate::i18n::shown(g).into())
             .collect();
-        app.set_layout_choices(ModelRc::new(VecModel::from(choices)));
-        let e = editor.clone();
-        app.on_use_layout(move |i| e.borrow_mut().use_layout(i as usize));
-        let e = editor.clone();
-        app.on_delete_layout(move |i| e.borrow_mut().delete_layout(i as usize));
-        let e = editor.clone();
-        app.on_rename_layout(move |name| e.borrow_mut().rename_layout(name.as_str()));
-        let e = editor.clone();
-        app.on_add_layout(move |index| {
-            let choice = usize::try_from(index)
-                .ok()
-                .and_then(|i| layouts::choices().into_iter().nth(i));
-            if let Some(choice) = choice {
-                e.borrow_mut().add_layout(&choice);
-            }
+        app.set_groups(ModelRc::new(VecModel::from(groups)));
+        on!(on_field_changed, |e, key, value| e
+            .field_changed(key.as_str(), value.as_str()));
+        on!(on_field_chosen, |e, key, index| e
+            .field_chosen(key.as_str(), index));
+        on!(on_open_picker, |e, key| e.open_picker(key.as_str()));
+        on!(on_picker_filter, |e, text| {
+            e.pick_filter = text.into();
+            e.show_picks();
         });
+        on!(on_picked, |e, key, id| e.picked(key.as_str(), id.as_str()));
+        on!(on_remove_trigger, |e, id| e.remove_trigger(id.as_str()));
+        on!(on_open_gallery, |e| e.open_gallery());
+        on!(on_add_tile, |e, i| e.add_tile(i as usize));
+        on!(on_delete_widget, |e| e.delete_widget());
+        on!(on_equal_widths, |e| e.equal_widths());
+        on!(on_strip_clicked, |e, kind, index, x| e.strip_clicked(
+            kind.as_str(),
+            index as usize,
+            x
+        ));
+        on!(on_add_page, |e| e.add_page());
+        on!(on_rename_page, |e, name| e.rename_page(name.as_str()));
+        on!(on_move_page, |e, from, to| e
+            .move_page(from as usize, to as usize));
+        on!(on_delete_page, |e| e.delete_page());
+        on!(on_add_takeover, |e| e.add_takeover());
+        on!(on_create_takeover, |e| e.create_takeover());
+        on!(on_delete_takeover, |e| e.delete_takeover());
+        on!(on_use_layout, |e, i| e.use_layout(i as usize));
+        on!(on_delete_layout, |e, i| e.delete_layout(i as usize));
+        on!(on_rename_layout, |e, name| e.rename_layout(name.as_str()));
+        on!(on_duplicate_layout, |e| e.add_layout(layouts::COPY));
+        on!(on_new_layout, |e, i| e.new_layout(i));
+        on!(on_open_starters, |e| e.open_starters());
+        on!(on_choose_starter, |e, i| {
+            e.first_run_done();
+            e.new_layout(i);
+        });
+        on!(on_dismiss_first_run, |e| e.first_run_done());
+        on!(on_set_pref, |e, key, value| e
+            .set_pref(key.as_str(), value.as_str()));
         app.on_import_layout(import_layout);
         app.on_export_layout(export_layout);
-        let e = editor.clone();
-        app.on_show_page(move |i| e.borrow_mut().show_page(i as usize));
-        let e = editor.clone();
-        app.on_add_page(move || e.borrow_mut().add_page());
-        let e = editor.clone();
-        app.on_rename_page(move |name| e.borrow_mut().rename_page(name.as_str()));
-        let e = editor.clone();
-        app.on_move_page(move |step| e.borrow_mut().move_page(step));
-        let e = editor.clone();
-        app.on_delete_page(move || e.borrow_mut().delete_page());
-        let e = editor.clone();
-        app.on_edit_takeover(move |i| e.borrow_mut().edit_takeover(i as usize));
-        let e = editor.clone();
-        app.on_add_takeover(move || e.borrow_mut().add_takeover());
-        let e = editor.clone();
-        app.on_delete_takeover(move || e.borrow_mut().delete_takeover());
-        let e = editor.clone();
-        app.on_open_settings(move || {
-            let mut e = e.borrow_mut();
-            e.stop_editing();
-            e.adding = None;
-            e.selected = None;
-            e.settings_open = true;
-            e.show();
-        });
-        let e = editor.clone();
-        app.on_set_trying(move |on| e.borrow_mut().set_trying(on));
-        let e = editor.clone();
-        app.on_try_press(move |x| e.borrow_mut().touch = Some((x, std::time::Instant::now())));
-        let e = editor.clone();
-        app.on_try_release(move |x| e.borrow_mut().try_release(x));
-        let e = editor.clone();
-        app.on_try_cancel(move || e.borrow_mut().touch = None);
-        let e = editor.clone();
-        app.on_undo(move || e.borrow_mut().step("undo"));
-        let e = editor.clone();
-        app.on_redo(move || e.borrow_mut().step("redo"));
+        on!(on_set_trying, |e, on| e.set_trying(on));
+        on!(on_try_press, |e, x| e.touch =
+            Some((x, std::time::Instant::now())));
+        on!(on_try_release, |e, x| e.try_release(x));
+        on!(on_try_cancel, |e| e.touch = None);
+        on!(on_undo, |e| e.step("undo"));
+        on!(on_redo, |e| e.step("redo"));
+    }
+
+    /// Where pictures of strips are drawn (see `thumbs`).
+    pub fn set_thumbs(&mut self, jobs: Sender<Job>) {
+        self.thumbs = Some(jobs);
+        self.draw_layout();
+    }
+
+    /// nexusd answers, or stopped answering.
+    pub fn set_connected(&mut self, connected: bool) {
+        if self.connected != connected {
+            self.connected = connected;
+            if !connected {
+                self.drag = Drag::None;
+                self.preview = None;
+            }
+            self.show();
+        }
     }
 
     /// A new status from the poll. Fetches the layout when it changed.
@@ -342,6 +375,7 @@ impl Editor {
             // no longer shown.
             e.drag = Drag::None;
             e.preview = None;
+            e.arrived();
             e.show();
         }
         if stale {
@@ -356,9 +390,13 @@ impl Editor {
         {
             self.page = new;
         }
+        crate::set_accent(layout.config.settings.accent);
         self.layout = Some(layout);
+        self.show_prefs();
         // The units may have changed, or this is the first layout.
         self.show_signals();
+        self.draw_layout();
+        self.offer_first_run();
         self.preview = None;
         if !matches!(self.drag, Drag::Pressed { .. }) {
             self.drag = Drag::None;
@@ -395,81 +433,117 @@ impl Editor {
                 (e.name, reading)
             })
             .collect();
-        if self.selected.is_some() {
+        if self.selected.is_some() || self.editing.is_some() {
             self.show_fields();
         }
         self.show_signals();
+        self.show_picks();
+        self.draw_layout();
     }
 
-    /// Puts the signal browser's rows in the window. Rows are updated in
-    /// place while the names stay the same, which is every second.
+    /// Puts the Signals drawer's rows in the window, in place while the
+    /// names stay the same, which is every second.
     fn show_signals(&mut self) {
         // Values are shown in the layout's units; readings arrive before
         // the layout does, and would show in °C for a moment.
         if self.layout.is_none() {
             return;
         }
-        let rows: Vec<SignalRow> =
-            signals::rows(&self.signals, &self.signal_filter, &self.context())
-                .into_iter()
-                .map(|r| SignalRow {
-                    name: r.name.into(),
+        let rows: Vec<SignalRow> = signals::rows(&self.signals, "", &self.context())
+            .into_iter()
+            .map(|r| {
+                let named = names::named(&r.name);
+                SignalRow {
+                    id: r.name.into(),
+                    name: named.name.into(),
+                    icon: named.icon.to_string().into(),
                     value: r.value.into(),
-                })
-                .collect();
-        let same_names = rows.len() == self.signal_rows.row_count()
-            && rows
-                .iter()
-                .zip(self.signal_rows.iter())
-                .all(|(a, b)| a.name == b.name);
-        if same_names {
-            for (i, row) in rows.into_iter().enumerate() {
-                if self.signal_rows.row_data(i).as_ref() != Some(&row) {
-                    self.signal_rows.set_row_data(i, row);
                 }
-            }
-        } else {
-            self.signal_rows.set_vec(rows);
-        }
-        if let Some(app) = self.app.upgrade() {
-            app.set_signal_count(self.signals.len() as i32);
-        }
+            })
+            .collect();
+        update_in_place(&self.signal_rows, rows, |a, b| a.id == b.id);
     }
 
-    /// Starts or stops choosing a signal for field `key`.
-    fn choose_signal(&mut self, key: Option<String>) {
-        let label = key
-            .as_ref()
-            .and_then(|k| self.shown.iter().find(|f| &f.key == k))
-            .map(|f| f.label.clone());
-        self.picking = key.filter(|_| label.is_some());
-        if let Some(app) = self.app.upgrade() {
-            app.set_choosing_for(label.unwrap_or_default().into());
-        }
+    /// The picker opened on field `key`.
+    fn open_picker(&mut self, key: &str) {
+        self.picking = Some(key.to_string());
+        self.pick_filter.clear();
+        self.show_picks();
     }
 
-    /// A signal in the browser was clicked: while choosing, it goes into
-    /// the field being chosen for.
-    fn signal_picked(&mut self, name: &str) {
+    /// The picker's rows: every signal published, and the known ones even
+    /// before they are, matching what is typed; known ones first.
+    fn show_picks(&mut self) {
         let Some(key) = self.picking.clone() else {
             return;
         };
-        self.choose_signal(None);
-        let value = if key == takeovers::ON_CHANGE {
-            let list = self
-                .shown
+        let ctx = self.context();
+        let chosen: Vec<String> = if key == takeovers::ON_CHANGE {
+            self.takeover_values()
+                .map(|v| takeovers::triggers(&v))
+                .unwrap_or_default()
+        } else {
+            self.shown
                 .iter()
                 .find(|f| f.key == key)
-                .map(|f| f.value.clone())
-                .unwrap_or_default();
-            takeovers::add_signal(&list, name)
-        } else {
-            name.to_string()
+                .map(|f| vec![f.value.clone()])
+                .unwrap_or_default()
         };
-        self.field_changed(&key, &value);
+        let mut ids: Vec<String> = self.signals.keys().cloned().collect();
+        for known in names::known() {
+            if !ids.iter().any(|i| i == known) {
+                ids.push(known.into());
+            }
+        }
+        ids.retain(|id| names::matches(id, &self.pick_filter));
+        ids.sort_by_key(|id| names::order(id));
+        let rows: Vec<PickRow> = ids
+            .into_iter()
+            .map(|id| {
+                let named = names::named(&id);
+                let value = self
+                    .signals
+                    .get(&id)
+                    .map(|r| inspector::show_reading(r, &ctx))
+                    .unwrap_or_else(|| "no reading yet".into());
+                PickRow {
+                    chosen: chosen.contains(&id),
+                    id: id.into(),
+                    name: named.name.into(),
+                    icon: named.icon.to_string().into(),
+                    value: value.into(),
+                }
+            })
+            .collect();
+        update_in_place(&self.picks, rows, |a, b| a.id == b.id);
+    }
+
+    /// A signal picked for field `key`.
+    fn picked(&mut self, key: &str, id: &str) {
+        self.picking = None;
+        let value = if key == takeovers::ON_CHANGE {
+            let list = self
+                .takeover_values()
+                .and_then(|v| v.get(key).cloned())
+                .unwrap_or_default();
+            takeovers::add_signal(&list, id)
+        } else {
+            id.to_string()
+        };
+        self.field_changed(key, &value);
         // Not typed in the row, so the row must show the new name when the
         // daemon confirms it (see `committed`).
-        self.committed.remove(&key);
+        self.committed.remove(key);
+    }
+
+    /// A trigger chip's cross.
+    fn remove_trigger(&mut self, id: &str) {
+        let list = self
+            .takeover_values()
+            .and_then(|v| v.get(takeovers::ON_CHANGE).cloned())
+            .unwrap_or_default();
+        self.field_changed(takeovers::ON_CHANGE, &takeovers::remove_signal(&list, id));
+        self.committed.remove(takeovers::ON_CHANGE);
     }
 
     fn set_problem(&mut self, problem: String) {
@@ -538,7 +612,7 @@ impl Editor {
     }
 
     fn editable(&self) -> bool {
-        !self.trying && !self.store_error && self.shown_row().is_some()
+        self.connected && !self.trying && !self.store_error && self.shown_row().is_some()
     }
 
     fn selected_index(&self) -> Option<usize> {
@@ -572,7 +646,6 @@ impl Editor {
             return;
         }
         self.problem.clear();
-        self.settings_open = false;
         self.flush();
         self.drag = if let Some(edge) = self.edge_at(x, reach) {
             self.selected = self.widget_ids().get(edge).copied();
@@ -598,8 +671,11 @@ impl Editor {
                 self.drag = Drag::Moving { index, from, to };
             }
             Drag::Resizing { edge, from } => {
-                let delta = (x - from).round() as i32;
-                self.preview = Some(geometry::resize(&self.layout_widths(), edge, delta));
+                let widths = self.layout_widths();
+                let (delta, snapped) = geometry::snap(&widths, edge, (x - from).round() as i32);
+                let preview = geometry::resize(&widths, edge, delta);
+                self.snap_x = snapped.then(|| geometry::lefts(&preview)[edge] + preview[edge]);
+                self.preview = Some(preview);
             }
             _ => return,
         }
@@ -613,6 +689,7 @@ impl Editor {
     }
 
     fn released(&mut self, x: f32) {
+        self.snap_x = None;
         let drag = std::mem::replace(&mut self.drag, Drag::None);
         match drag {
             Drag::Moving { index, from, .. } => {
@@ -626,6 +703,7 @@ impl Editor {
     }
 
     fn cancel(&mut self) {
+        self.snap_x = None;
         self.drag = Drag::None;
         self.preview = None;
         self.show();
@@ -829,32 +907,7 @@ impl Editor {
             })
             .collect();
         app.set_zones(ModelRc::new(VecModel::from(zones)));
-        let pages: Vec<SharedString> = self
-            .layout
-            .iter()
-            .flat_map(|l| &l.config.pages)
-            .map(|p| p.name.as_str().into())
-            .collect();
-        app.set_pages(ModelRc::new(VecModel::from(pages)));
-        let editing = self.editing.as_ref().and_then(|name| {
-            self.layout
-                .as_ref()?
-                .config
-                .takeovers
-                .iter()
-                .position(|t| &t.name == name)
-        });
-        let current = self
-            .page_index()
-            .filter(|_| editing.is_none() && self.adding.is_none());
-        app.set_current_page(current.map_or(-1, |i| i as i32));
-        let names: Vec<SharedString> = self
-            .layout
-            .iter()
-            .flat_map(|l| &l.config.takeovers)
-            .map(|t| t.name.as_str().into())
-            .collect();
-        app.set_takeovers(ModelRc::new(VecModel::from(names)));
+        self.show_rows(&app);
         let rows: Vec<LayoutRow> = self
             .layout
             .iter()
@@ -873,8 +926,7 @@ impl Editor {
                 .unwrap_or_default()
                 .into(),
         );
-        app.set_current_takeover(editing.map_or(-1, |i| i as i32));
-
+        app.set_page_name(self.page.as_str().into());
         app.set_editable(self.editable());
         let selected = self.selected_index();
         app.set_selected(selected.map_or(-1, |i| i as i32));
@@ -884,8 +936,84 @@ impl Editor {
         if !matches!(self.drag, Drag::Moving { .. }) {
             app.set_ghost_width(0);
         }
+        app.set_snap_x(self.snap_x.map_or(-1, |x| x as i32));
+        let room = geometry::has_room(&self.layout_widths());
+        app.set_can_add(room);
+        app.set_add_reason(if room {
+            SharedString::new()
+        } else {
+            "Every widget here is as narrow as it can be, so nothing more fits. Remove one, or add a page.".into()
+        });
         app.set_caption(self.caption(&widths, selected).into());
         self.show_fields();
+    }
+
+    /// The storyboard: every page, then every takeover, each with its
+    /// picture, and which one is on the strip and which is being edited.
+    fn show_rows(&mut self, app: &AppWindow) {
+        let Some(l) = &self.layout else {
+            self.rows.set_vec(Vec::new());
+            return;
+        };
+        let page_now = self.page_index();
+        let picture = |list: &[Image], i: usize| list.get(i).cloned().unwrap_or_default();
+        let pages = &l.config.pages;
+        let takeovers = &l.config.takeovers;
+        let mut rows: Vec<StripRow> = pages
+            .iter()
+            .enumerate()
+            .map(|(i, p)| StripRow {
+                kind: "page".into(),
+                index: i as i32,
+                name: p.name.as_str().into(),
+                frame: picture(&self.page_pictures, i),
+                summary: match p.widgets.len() {
+                    0 => "Empty".into(),
+                    1 => "1 widget".into(),
+                    n => format!("{n} widgets").into(),
+                },
+                live: self.takeover.is_none() && page_now == Some(i),
+                active: self.editing.is_none() && self.adding.is_none() && page_now == Some(i),
+                empty: p.widgets.is_empty(),
+                first_takeover: false,
+                last_page: i + 1 == pages.len(),
+            })
+            .collect();
+        for (i, t) in takeovers.iter().enumerate() {
+            rows.push(StripRow {
+                kind: "takeover".into(),
+                index: i as i32,
+                name: t.name.as_str().into(),
+                frame: picture(&self.takeover_pictures, i),
+                summary: takeover_summary(t).into(),
+                live: self.takeover.as_ref() == Some(&t.name),
+                active: self.editing.as_ref() == Some(&t.name),
+                empty: t.widgets.is_empty(),
+                first_takeover: i == 0,
+                last_page: false,
+            });
+        }
+        if let Some(v) = &self.adding {
+            rows.push(StripRow {
+                kind: "new-takeover".into(),
+                index: takeovers.len() as i32,
+                name: v
+                    .get(takeovers::NAME)
+                    .map(String::as_str)
+                    .unwrap_or("New takeover")
+                    .into(),
+                frame: Image::default(),
+                summary: "New: not added yet".into(),
+                live: false,
+                active: true,
+                empty: true,
+                first_takeover: takeovers.is_empty(),
+                last_page: false,
+            });
+        }
+        app.set_page_count(pages.len() as i32);
+        app.set_takeover_count((takeovers.len() + usize::from(self.adding.is_some())) as i32);
+        update_in_place(&self.rows, rows, |_, _| true);
     }
 
     /// While moving: the dragged widget follows the pointer and the gap it
@@ -904,39 +1032,51 @@ impl Editor {
 
     fn caption(&self, widths: &[u32], selected: Option<usize>) -> String {
         if self.trying {
-            return "Trying it: a tap, long press or swipe here is a touch on the strip, and really does what it does.".into();
+            return "Trying it: click, hold or drag on the strip above and each is sent to the real strip as a touch. Switch to Edit to change things.".into();
+        }
+        if !self.connected {
+            return "Editing waits until the service answers again.".into();
         }
         if !self.notice.is_empty() {
             return self.notice.clone();
         }
+        if self.adding.is_some() {
+            return "Choose the reading whose change shows it, then add it. It starts with a clock across it, to change like any page.".into();
+        }
         if let Some(name) = &self.editing
             && self.takeover.as_ref() != Some(name)
         {
-            return format!("Showing “{name}” on the strip…");
+            return format!("Putting “{name}” on the strip…");
         }
         if let (None, Some(t)) = (&self.editing, &self.takeover) {
             return format!(
-                "“{t}” is showing over the page; edit again once it ends, or click its tab to edit it."
+                "“{t}” is covering the page for a moment. Editing goes on when it ends."
             );
         }
         if self.store_error {
-            return "The store cannot be written, so the layout cannot be changed. Run nexusctl doctor.".into();
+            return "Changes cannot be saved right now; the status in the header says why.".into();
         }
         if self.layout.is_some() && self.shown_row().is_none() {
             return String::new();
         }
         let widgets = self.widgets();
         if widgets.is_empty() {
-            return "This page is empty. Add widget puts one on it.".into();
+            return "Nothing here yet.".into();
         }
-        if self.editing.is_some() && self.selected.is_none() && self.drag == Drag::None {
-            return "Editing the takeover: the strip shows it while this tab is chosen. Click a widget to select it.".into();
-        }
+        let sized = |i: usize| {
+            format!(
+                "{} {} px, {}",
+                describe(&widgets[i]),
+                widths[i],
+                geometry::class(widths[i]).to_lowercase()
+            )
+        };
         match (self.drag, selected) {
             (Drag::Resizing { edge, .. }, _) | (_, Some(edge)) if self.preview.is_some() => {
                 let mut parts: Vec<String> = [edge, edge + 1]
                     .into_iter()
-                    .filter_map(|i| Some(format!("{} {} px", describe(widgets.get(i)?), widths[i])))
+                    .filter(|&i| i < widgets.len())
+                    .map(sized)
                     .collect();
                 if edge + 1 == widgets.len() {
                     let free = STRIP - widths.iter().sum::<u32>();
@@ -951,14 +1091,58 @@ impl Editor {
                 widgets.len()
             ),
             (_, Some(i)) => format!(
-                "{}, {} px wide, {} of {}. Drag to move it, drag its right edge to resize.",
-                describe(&widgets[i]),
-                widths[i],
+                "{}, {} of {}. Drag it to move it; drag the grip on its right edge to resize.",
+                sized(i),
                 i + 1,
                 widgets.len()
             ),
-            _ if widgets.is_empty() => String::new(),
-            _ => "Click a widget to select it.".into(),
+            _ => "Click a widget to change it.".into(),
+        }
+    }
+}
+
+/// "When the track changes · 5 s · right end".
+fn takeover_summary(t: &Takeover) -> String {
+    let what: Vec<String> = t
+        .on_change
+        .iter()
+        .map(|s| names::named(s).name.to_lowercase())
+        .collect();
+    let when = match what.as_slice() {
+        [] => "Never shown: no reading chosen".to_string(),
+        [one] => format!("When the {one} changes"),
+        [rest @ .., last] => format!("When the {} or {last} changes", rest.join(", ")),
+    };
+    let secs = if t.seconds.fract() == 0.0 {
+        format!("{:.0} s", t.seconds)
+    } else {
+        format!("{} s", t.seconds)
+    };
+    let side = match t.align {
+        nexus_core::config::Align::Full => String::new(),
+        nexus_core::config::Align::Left => "  ·  left end".into(),
+        nexus_core::config::Align::Right => "  ·  right end".into(),
+    };
+    format!("{when}  ·  {secs}{side}")
+}
+
+/// Replaces a model's rows, in place when there are as many and each is
+/// `same` as before, so the views made from them are kept (with their
+/// focus and scroll position); only rows that differ are set.
+fn update_in_place<T: Clone + PartialEq + 'static>(
+    model: &VecModel<T>,
+    rows: Vec<T>,
+    same: impl Fn(&T, &T) -> bool,
+) {
+    let keep =
+        rows.len() == model.row_count() && rows.iter().zip(model.iter()).all(|(a, b)| same(a, &b));
+    if !keep {
+        model.set_vec(rows);
+        return;
+    }
+    for (i, row) in rows.into_iter().enumerate() {
+        if model.row_data(i).as_ref() != Some(&row) {
+            model.set_row_data(i, row);
         }
     }
 }
@@ -1004,15 +1188,15 @@ impl Editor {
         Some(v)
     }
 
-    /// Puts the selected widget's fields in the window. Rows whose value
-    /// changed are rebuilt so their controls show it, except a row whose
-    /// new value is the one just sent from it.
+    /// Puts the settings of what is selected under the strip: the widget,
+    /// else the takeover being edited or added, else the page. Rows whose
+    /// value changed are rebuilt so their controls show it, except a row
+    /// whose new value is the one just sent from it.
     fn show_fields(&mut self) {
         let selected = self.selected_index().filter(|_| self.editable());
         let form = match selected {
             Some(i) => self.widget_ids().get(i).copied().map(Form::Widget),
             None if self.adding.is_some() => Some(Form::NewTakeover),
-            None if self.settings_open => Some(Form::Settings),
             None => self.editing_takeover().map(|(_, id)| Form::Takeover(id)),
         };
         if form != self.fields_for {
@@ -1022,7 +1206,7 @@ impl Editor {
             self.committed.clear();
             self.shown.clear();
             self.fields.set_vec(Vec::new());
-            self.choose_signal(None);
+            self.picking = None;
         }
         // A new takeover is a draft until it has its signals.
         if let Some(v) = &self.adding {
@@ -1031,9 +1215,9 @@ impl Editor {
                 _ => String::new(),
             };
         }
+        let ctx = self.context();
         let fields = match selected {
             Some(i) => {
-                let ctx = self.context();
                 let mut values = inspector::flatten(&self.widgets()[i], &ctx);
                 values.extend(self.drafts.clone());
                 let mut fields = inspector::fields(&values, &ctx);
@@ -1042,16 +1226,11 @@ impl Editor {
                     label: "Note".into(),
                     kind: Kind::Note,
                     value: self.note(i),
-                    help: "For you: kept with the widget, and shown as a comment in nexusctl edit."
+                    help: "For you: kept with the widget, and shown as a comment in an exported layout."
                         .into(),
                 });
                 fields
             }
-            None if self.settings_open => self
-                .layout
-                .as_ref()
-                .map(|l| settings::fields(&settings::flatten(&l.config)))
-                .unwrap_or_default(),
             None => self
                 .takeover_values()
                 .map(|v| takeovers::fields(&v))
@@ -1061,36 +1240,76 @@ impl Editor {
             && fields.iter().zip(&self.shown).all(|(a, b)| a.key == b.key);
         if !same_keys {
             self.fields
-                .set_vec(fields.iter().map(row).collect::<Vec<_>>());
+                .set_vec(fields.iter().map(|f| row(f, &ctx)).collect::<Vec<_>>());
         } else {
             for (i, (new, old)) in fields.iter().zip(&self.shown).enumerate() {
-                if new == old {
+                let fresh = row(new, &ctx);
+                if self.fields.row_data(i).as_ref() == Some(&fresh) {
                     continue;
                 }
                 let just_sent = self.committed.get(&new.key) == Some(&new.value);
                 if new.value != old.value && !just_sent {
                     self.fields.remove(i);
-                    self.fields.insert(i, row(new));
+                    self.fields.insert(i, fresh);
                 } else {
-                    self.fields.set_row_data(i, row(new));
+                    self.fields.set_row_data(i, fresh);
                 }
             }
         }
         self.shown = fields;
-        if let Some(key) = &self.picking
-            && !self.shown.iter().any(|f| &f.key == key)
-        {
-            self.choose_signal(None);
-        }
+        let triggers: Vec<Trigger> = self
+            .takeover_values()
+            .map(|v| takeovers::triggers(&v))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| {
+                let named = names::named(&id);
+                Trigger {
+                    id: id.into(),
+                    name: named.name.into(),
+                    icon: named.icon.to_string().into(),
+                }
+            })
+            .collect();
+        update_in_place(&self.triggers, triggers, |a, b| a.id == b.id);
+        let (kind, title, icon, note) = match (self.fields_for, selected) {
+            (Some(Form::Widget(_)), Some(i)) => {
+                let w = &self.widgets()[i];
+                let width = self.widths().get(i).copied().unwrap_or_default();
+                (
+                    "widget",
+                    describe(w),
+                    widget_icon(w).to_string(),
+                    format!("{}, {width} px", geometry::class(width)),
+                )
+            }
+            (Some(Form::NewTakeover), _) => (
+                "new-takeover",
+                "New takeover".to_string(),
+                String::new(),
+                String::new(),
+            ),
+            (Some(Form::Takeover(_)), _) => (
+                "takeover",
+                self.editing.clone().unwrap_or_default(),
+                String::new(),
+                "Takeover".to_string(),
+            ),
+            _ => (
+                "page",
+                self.page.clone(),
+                String::new(),
+                self.page_index()
+                    .map(|i| format!("Page {} of {}", i + 1, self.page_names().len()))
+                    .unwrap_or_default(),
+            ),
+        };
         if let Some(app) = self.app.upgrade() {
             app.set_draft_hint(self.draft_hint.as_str().into());
-            // Set here, once the form is known; `show` runs before this.
-            app.set_form(match self.fields_for {
-                Some(Form::NewTakeover) => "new-takeover".into(),
-                Some(Form::Takeover(_)) => "takeover".into(),
-                Some(Form::Settings) => "settings".into(),
-                _ => SharedString::new(),
-            });
+            app.set_panel_kind(kind.into());
+            app.set_panel_title(title.into());
+            app.set_panel_icon(icon.into());
+            app.set_panel_note(note.into());
         }
     }
 
@@ -1176,49 +1395,110 @@ impl Editor {
         self.show();
     }
 
-    /// Adds a clock after the selected widget (or at the end) in the
-    /// empty strip; with none left, splits the selected widget in two.
-    fn add_widget(&mut self) {
+    /// The gallery is opening: draw its pictures with the latest readings.
+    fn open_gallery(&mut self) {
+        let presets = gallery::presets();
+        let mut slots = [0i32; gallery::GROUPS.len()];
+        let tiles: Vec<Tile> = presets
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let slot = slots[p.group];
+                slots[p.group] += 1;
+                Tile {
+                    name: crate::i18n::shown(p.name).into(),
+                    about: crate::i18n::shown(p.about).into(),
+                    image: self.tiles.row_data(i).map(|t| t.image).unwrap_or_default(),
+                    width: p.widget.width() as i32,
+                    group: p.group as i32,
+                    slot,
+                }
+            })
+            .collect();
+        update_in_place(&self.tiles, tiles, |a, b| a.name == b.name);
+        if let Some(app) = self.app.upgrade() {
+            app.set_group_sizes(ModelRc::new(VecModel::from(slots.to_vec())));
+            let at = self.selected_index().map_or_else(
+                || "It goes at the end".to_string(),
+                |i| format!("It goes after {}", describe(&self.widgets()[i])),
+            );
+            app.set_gallery_note(
+                format!(
+                    "{at}; the widgets already there make room for it. Pictures use your readings."
+                )
+                .into(),
+            );
+        }
+        if let (Some(jobs), Some(l)) = (&self.thumbs, &self.layout) {
+            let _ = jobs.send(Job::Widgets {
+                widgets: presets.into_iter().map(|p| p.widget).collect(),
+                config: Box::new(l.config.clone()),
+                readings: thumbs::with_demo(self.readings()),
+            });
+        }
+    }
+
+    /// Adds gallery item `index` after the selection (or at the end),
+    /// taking the room from empty strip first and then from the others in
+    /// proportion. Add is offered only when something fits, so this does
+    /// not fail on a full page.
+    fn add_tile(&mut self, index: usize) {
+        let Some(preset) = gallery::presets().into_iter().nth(index) else {
+            return;
+        };
         let Some(on) = self.row_id() else {
             return;
         };
         let widths = self.layout_widths();
-        let free = STRIP - widths.iter().sum::<u32>();
-        let selected = self.selected_index();
-        let at = selected.map_or(widths.len(), |i| i + 1);
-        let clock = |width| Widget::Clock {
-            width,
-            tap: None,
-            hold: None,
-        };
-        let mut edits = Vec::new();
-        let width = if free >= MIN_WIDGET_WIDTH {
-            free
-        } else if let Some(i) = selected.filter(|&i| widths[i] >= 2 * MIN_WIDGET_WIDTH) {
-            let half = widths[i] / 2;
-            edits.push(Edit::SetWidget {
-                widget: self.widget_ids()[i],
-                value: self.widgets()[i].clone().with_width(widths[i] - half),
-            });
-            half
-        } else {
-            self.problem = format!(
-                "There is no room on this page. Narrow a widget to leave {MIN_WIDGET_WIDTH} px free, or select one at least {} px wide to split it.",
-                2 * MIN_WIDGET_WIDTH
-            );
-            self.show();
+        let Some((others, width)) = geometry::make_room(&widths, preset.widget.width()) else {
+            self.set_problem("Nothing more fits here. Remove a widget, or add a page.".into());
             return;
         };
+        let at = self.selected_index().map_or(widths.len(), |i| i + 1);
+        let mut edits: Vec<Edit> = self
+            .widgets()
+            .iter()
+            .zip(self.widget_ids())
+            .zip(&others)
+            .filter(|((w, _), new)| w.width() != **new)
+            .map(|((w, &id), &new)| Edit::SetWidget {
+                widget: id,
+                value: w.clone().with_width(new),
+            })
+            .collect();
         edits.push(Edit::AddWidget {
             on,
             at: Some(at),
-            widget: clock(width),
+            widget: preset.widget.with_width(width),
         });
         self.select_after = Some(at);
         self.send(Edit::Batch {
-            label: "Add widget".into(),
+            label: format!("Add {}", preset.name),
             edits,
         });
+    }
+
+    /// Every widget on the row the same width, sharing the whole strip.
+    fn equal_widths(&mut self) {
+        self.flush();
+        let equal = geometry::equal(self.widgets().len());
+        let edits: Vec<Edit> = self
+            .widgets()
+            .iter()
+            .zip(self.widget_ids())
+            .zip(&equal)
+            .filter(|((w, _), new)| w.width() != **new)
+            .map(|((w, &id), &new)| Edit::SetWidget {
+                widget: id,
+                value: w.clone().with_width(new),
+            })
+            .collect();
+        if !edits.is_empty() {
+            self.send(Edit::Batch {
+                label: "Equal widths".into(),
+                edits,
+            });
+        }
     }
 
     fn delete_widget(&mut self) {
@@ -1254,7 +1534,6 @@ impl Editor {
     }
 
     fn show_page(&mut self, index: usize) {
-        self.settings_open = false;
         self.stop_editing();
         self.adding = None;
         self.selected = None;
@@ -1262,17 +1541,16 @@ impl Editor {
         request_page(index);
     }
 
-    /// Adds an empty page after the one on the strip and shows it.
+    /// Adds an empty page at the end, named after its place, and shows it.
     fn add_page(&mut self) {
-        if self.editing.is_some() || self.adding.is_some() {
-            return;
-        }
+        self.stop_editing();
+        self.adding = None;
         let names = self.page_names();
         let name = (names.len() + 1..)
             .map(|n| format!("Page {n}"))
             .find(|n| !names.contains(&n.as_str()))
             .expect("some page number is free");
-        let at = self.page_index().map_or(names.len(), |i| i + 1);
+        let at = names.len();
         self.selected = None;
         self.show_after = Some(at);
         self.send(Edit::AddPage {
@@ -1300,7 +1578,7 @@ impl Editor {
         };
         if let Some(why) = refused {
             if let Some(app) = self.app.upgrade() {
-                app.set_page_name_resets(app.get_page_name_resets() + 1);
+                app.set_resets(app.get_resets() + 1);
             }
             self.set_problem(why);
             return;
@@ -1313,19 +1591,20 @@ impl Editor {
         });
     }
 
-    fn move_page(&mut self, step: i32) {
-        let Some((i, page)) = self.current_page() else {
+    /// Moves page `from` to place `to` (both from 0), as dragging its
+    /// handle in the storyboard does.
+    fn move_page(&mut self, from: usize, to: usize) {
+        let Some(l) = &self.layout else {
             return;
         };
-        let to = i as i32 + step;
-        if to < 0 || to as usize >= self.page_names().len() {
+        let Some(page) = l.ids.pages.get(from).map(|p| p.id) else {
+            return;
+        };
+        if from == to || to >= l.config.pages.len() {
             return;
         }
         self.problem.clear();
-        self.send(Edit::MovePage {
-            page,
-            to: to as usize,
-        });
+        self.send(Edit::MovePage { page, to });
     }
 
     fn delete_page(&mut self) {
@@ -1353,7 +1632,6 @@ impl Editor {
         };
         self.adding = None;
         self.selected = None;
-        self.settings_open = false;
         self.start_editing(name);
     }
 
@@ -1391,7 +1669,6 @@ impl Editor {
 
     fn add_takeover(&mut self) {
         self.stop_editing();
-        self.settings_open = false;
         self.selected = None;
         let names: Vec<&str> = self
             .layout
@@ -1401,6 +1678,45 @@ impl Editor {
             .collect();
         self.adding = Some(takeovers::new_values(&names));
         self.show();
+    }
+
+    /// "Add takeover" in a new takeover's settings.
+    fn create_takeover(&mut self) {
+        let Some(v) = self.adding.clone() else {
+            return;
+        };
+        let taken: Vec<&str> = self
+            .layout
+            .iter()
+            .flat_map(|l| &l.config.takeovers)
+            .map(|t| t.name.as_str())
+            .collect();
+        match takeovers::build(&v, &taken) {
+            Ok(s) => {
+                // It starts with a clock across it, to be changed like any
+                // widget.
+                let takeover = Takeover {
+                    name: s.name.clone(),
+                    on_change: s.on_change,
+                    seconds: s.seconds,
+                    align: s.align,
+                    width: s.width,
+                    widgets: vec![Widget::Clock {
+                        width: s.width.unwrap_or(STRIP),
+                        tap: None,
+                        hold: None,
+                    }],
+                };
+                self.adding = None;
+                self.draft_hint.clear();
+                self.edit_after = Some(s.name);
+                self.send(Edit::AddTakeover {
+                    layout: None,
+                    takeover,
+                });
+            }
+            Err(Missing::Incomplete(why) | Missing::Invalid(why)) => self.set_problem(why),
+        }
     }
 
     fn delete_takeover(&mut self) {
@@ -1422,6 +1738,13 @@ impl Editor {
             return;
         };
         v.insert(key.into(), value.into());
+        // Moved to one end: half the strip until another width is chosen.
+        if key == takeovers::ALIGN
+            && !matches!(value, "full" | "Whole strip")
+            && v.get(takeovers::WIDTH).is_none_or(|w| w.trim().is_empty())
+        {
+            v.insert(takeovers::WIDTH.into(), "Half".into());
+        }
         let editing = self.editing_takeover();
         let taken: Vec<&str> = self
             .layout
@@ -1434,28 +1757,10 @@ impl Editor {
         self.committed.insert(key.into(), value.into());
         self.problem.clear();
         match (built, editing) {
-            (Ok(s), None) => {
-                // A new one starts with a clock across it, to be changed
-                // like any widget.
-                let takeover = Takeover {
-                    name: s.name.clone(),
-                    on_change: s.on_change,
-                    seconds: s.seconds,
-                    align: s.align,
-                    width: s.width,
-                    widgets: vec![Widget::Clock {
-                        width: s.width.unwrap_or(STRIP),
-                        tap: None,
-                        hold: None,
-                    }],
-                };
-                self.adding = None;
+            (Ok(_), None) => {
+                // A new one is added by its own button, once it is whole.
+                self.adding = Some(v);
                 self.draft_hint.clear();
-                self.edit_after = Some(s.name);
-                self.send(Edit::AddTakeover {
-                    layout: None,
-                    takeover,
-                });
             }
             (Ok(s), Some((i, id))) => {
                 self.drafts.clear();
@@ -1584,7 +1889,7 @@ impl Editor {
         };
         if let Some(why) = refused {
             if let Some(app) = self.app.upgrade() {
-                app.set_layout_name_resets(app.get_layout_name_resets() + 1);
+                app.set_resets(app.get_resets() + 1);
             }
             self.set_problem(why);
             return;
@@ -1652,6 +1957,264 @@ impl Editor {
                 let _ = client.request(&line);
             }
         });
+    }
+}
+
+/// The storyboard: a strip not being edited was clicked.
+impl Editor {
+    /// Puts that page or takeover on the strip to edit it. With `x` (strip
+    /// pixels, negative for none) the widget there is selected once it is.
+    fn strip_clicked(&mut self, kind: &str, index: usize, x: f32) {
+        let Some(l) = &self.layout else {
+            return;
+        };
+        let name = match kind {
+            "page" => l.config.pages.get(index).map(|p| p.name.clone()),
+            _ => l.config.takeovers.get(index).map(|t| t.name.clone()),
+        };
+        let Some(name) = name else {
+            return;
+        };
+        self.select_at = (x >= 0.0 && !self.trying).then(|| (format!("{kind}:{name}"), x));
+        if kind == "page" {
+            self.show_page(index);
+        } else {
+            self.edit_takeover(index);
+        }
+        self.arrived();
+    }
+
+    /// The strip shows what was clicked: select the widget under the click.
+    fn arrived(&mut self) {
+        let Some((target, x)) = self.select_at.clone() else {
+            return;
+        };
+        let here = match (&self.editing, self.shown_row()) {
+            (Some(t), Some(Shown::Takeover(_))) => format!("takeover:{t}"),
+            (None, Some(Shown::Page(_))) => format!("page:{}", self.page),
+            _ => return,
+        };
+        if here == target {
+            self.select_at = None;
+            self.selected = self
+                .zone_at(x)
+                .and_then(|i| self.widget_ids().get(i).copied());
+        }
+    }
+}
+
+/// Pictures of the strips not on it.
+impl Editor {
+    /// The latest readings, as the engine takes them.
+    fn readings(&self) -> Vec<(String, nexus_core::signal::Value)> {
+        self.signals
+            .iter()
+            .map(|(name, r)| {
+                (
+                    name.clone(),
+                    thumbs::value(&r.text, r.number, r.unit.as_deref()),
+                )
+            })
+            .collect()
+    }
+
+    /// Asks for pictures of every page and takeover.
+    fn draw_layout(&mut self) {
+        let (Some(jobs), Some(l)) = (&self.thumbs, &self.layout) else {
+            return;
+        };
+        self.epoch += 1;
+        let _ = jobs.send(Job::Layout {
+            config: Box::new(l.config.clone()),
+            readings: self.readings(),
+            epoch: self.epoch,
+        });
+    }
+
+    /// Pictures arrived from `thumbs`.
+    pub fn pictures(&mut self, done: Done) {
+        let image = |px: &[u8], w: u32| {
+            Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(px, w, 48))
+        };
+        match done {
+            Done::Layout {
+                pages,
+                takeovers,
+                epoch,
+            } => {
+                // An older layout's pictures, overtaken by an edit: the
+                // newer ones are on their way.
+                if epoch < self.epoch {
+                    return;
+                }
+                self.page_pictures = pages.iter().map(|p| image(p, 640)).collect();
+                self.takeover_pictures = takeovers.iter().map(|p| image(p, 640)).collect();
+                if let Some(app) = self.app.upgrade() {
+                    self.show_rows(&app);
+                }
+            }
+            Done::Widgets(list) => {
+                let presets = gallery::presets();
+                for (i, (px, p)) in list.iter().zip(&presets).enumerate() {
+                    let (cropped, w) = thumbs::crop(px, p.widget.width());
+                    if let Some(mut tile) = self.tiles.row_data(i) {
+                        tile.image = image(&cropped, w);
+                        self.tiles.set_row_data(i, tile);
+                    }
+                }
+            }
+            Done::Starters(list) => {
+                for (i, px) in list.iter().enumerate() {
+                    if let Some(mut s) = self.starters.row_data(i) {
+                        s.image = image(px, 640);
+                        self.starters.set_row_data(i, s);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Starting layouts: on first run, and from "New layout…".
+impl Editor {
+    /// Lists the starters and asks for their pictures.
+    fn open_starters(&mut self) {
+        let mut list: Vec<Starter> = STARTERS
+            .iter()
+            .map(|(name, _)| Starter {
+                name: crate::i18n::shown(name).into(),
+                about: crate::i18n::shown(starter_about(name)).into(),
+                image: Image::default(),
+            })
+            .collect();
+        list.push(Starter {
+            name: crate::i18n::shown("Empty").into(),
+            about: crate::i18n::shown("One empty page, to build from nothing").into(),
+            image: Image::default(),
+        });
+        update_in_place(&self.starters, list, |a, b| a.name == b.name);
+        let mut configs: Vec<Config> = STARTERS
+            .iter()
+            .filter_map(|(_, text)| Config::parse(text).ok())
+            .collect();
+        let mut empty = Config::default_layout();
+        empty.pages.truncate(1);
+        if let Some(p) = empty.pages.first_mut() {
+            p.widgets.clear();
+        }
+        configs.push(empty);
+        if let Some(l) = &self.layout {
+            for c in &mut configs {
+                c.settings = l.config.settings.clone();
+            }
+        }
+        if let Some(jobs) = &self.thumbs {
+            let _ = jobs.send(Job::Starters {
+                configs,
+                readings: thumbs::with_demo(self.readings()),
+            });
+        }
+    }
+
+    /// Adds starter `i` (past the starters: an empty layout) and puts it
+    /// on the strip.
+    fn new_layout(&mut self, i: i32) {
+        let choice = match usize::try_from(i).ok().and_then(|i| STARTERS.get(i)) {
+            Some((name, _)) => format!("Starter: {name}"),
+            None => layouts::EMPTY.to_string(),
+        };
+        self.add_layout(&choice);
+    }
+
+    /// A fresh store: one layout, the default one, never changed. The
+    /// starters are offered once.
+    fn offer_first_run(&mut self) {
+        if self.first_run_seen {
+            return;
+        }
+        let Some(l) = &self.layout else {
+            return;
+        };
+        let fresh = l.layouts.len() <= 1
+            && l.undo.is_none()
+            && l.config.pages == Config::default_layout().pages;
+        if !fresh {
+            // Not a first run: never offered on this computer again.
+            self.first_run_done();
+            return;
+        }
+        self.first_run_seen = true;
+        self.open_starters();
+        if let Some(app) = self.app.upgrade() {
+            app.set_first_run(true);
+            app.invoke_show_sheet("starters".into());
+        }
+    }
+
+    fn first_run_done(&mut self) {
+        self.first_run_seen = true;
+        crate::first_run::mark_seen();
+        if let Some(app) = self.app.upgrade() {
+            app.set_first_run(false);
+        }
+    }
+}
+
+/// What a starter is for, in a line.
+fn starter_about(name: &str) -> &'static str {
+    match name {
+        "Everything" => "Time, music, your machine and launchers, over five pages",
+        "Monitor" => "Temperatures and load, for keeping an eye on the machine",
+        "Music" => "What is playing, with play, skip and volume",
+        "Minimal" => "Just the time and the weather",
+        _ => "",
+    }
+}
+
+/// Preferences.
+impl Editor {
+    fn set_pref(&mut self, key: &str, value: &str) {
+        let Some(l) = &self.layout else {
+            return;
+        };
+        let mut v = settings::flatten(&l.config);
+        if settings::set(&mut v, key, value).is_none() {
+            return;
+        }
+        let Some((k, val)) = v
+            .iter()
+            .find(|(k, val)| settings::flatten(&l.config).get(*k) != Some(*val))
+            .map(|(k, v)| (k.clone(), v.clone()))
+        else {
+            return;
+        };
+        self.settings_changed(&k, &val);
+    }
+
+    /// The Preferences sheet's values.
+    fn show_prefs(&self) {
+        let (Some(app), Some(l)) = (self.app.upgrade(), &self.layout) else {
+            return;
+        };
+        let p = settings::prefs(&l.config);
+        app.set_pref_temperature(i32::from(p.fahrenheit));
+        app.set_pref_clock(i32::from(p.twelve_hour));
+        app.set_pref_accent(p.accent.as_str().into());
+        app.set_accent_current(p.preset.map_or(-1, |i| i as i32));
+        let picked = l.config.settings.accent.unwrap_or(crate::accent::DEFAULT);
+        app.set_accent_note(if crate::accent::near_severity(picked) {
+            "This colour is close to the strip's warning amber or alarm red. Warnings stay clear by their size, but the strip may look busier.".into()
+        } else {
+            SharedString::new()
+        });
+        app.set_pref_weather(p.weather.as_str().into());
+        app.set_fonts(ModelRc::new(VecModel::from(
+            p.fonts
+                .iter()
+                .map(|f| SharedString::from(f.as_str()))
+                .collect::<Vec<_>>(),
+        )));
+        app.set_pref_font(p.font as i32);
     }
 }
 
@@ -1788,19 +2351,39 @@ fn request_page(index: usize) {
     });
 }
 
-/// A field as the window takes it.
-fn row(f: &Field) -> FieldRow {
+/// A field as the window takes it; a signal field also carries the
+/// signal's human name, icon and live value.
+fn row(f: &Field, ctx: &Context) -> FieldRow {
     let (kind, choices) = match &f.kind {
         Kind::Text => ("text", Vec::new()),
         Kind::Signal => ("signal", Vec::new()),
         Kind::Number => ("number", Vec::new()),
         Kind::Note => ("note", Vec::new()),
+        Kind::Triggers => ("triggers", Vec::new()),
         Kind::Choice(options) => ("choice", options.clone()),
+        Kind::Segmented(options) => ("segmented", options.clone()),
     };
     let index = choices
         .iter()
         .position(|c| c == &f.value)
         .map_or(-1, |i| i as i32);
+    let (shown, icon, reading) = if matches!(f.kind, Kind::Signal) {
+        let named = names::named(&f.value);
+        let reading = ctx
+            .signals
+            .get(f.value.trim())
+            .map(|r| inspector::show_reading(r, ctx))
+            .unwrap_or_else(|| {
+                if f.value.trim().is_empty() {
+                    String::new()
+                } else {
+                    "no reading yet".into()
+                }
+            });
+        (named.name, named.icon.to_string(), reading)
+    } else {
+        Default::default()
+    };
     FieldRow {
         key: f.key.as_str().into(),
         label: crate::i18n::shown(&f.label).into(),
@@ -1814,6 +2397,9 @@ fn row(f: &Field) -> FieldRow {
         )),
         index,
         help: crate::i18n::shown(&f.help).into(),
+        shown: shown.into(),
+        icon: icon.into(),
+        reading: reading.into(),
     }
 }
 
@@ -1840,17 +2426,25 @@ pub fn describe(w: &Widget) -> String {
             .find(|s| !s.trim().is_empty())
             .cloned()
             .unwrap_or_else(|| "Key".into()),
+        Widget::Value { label, signal, .. } if label.trim().is_empty() => names::named(signal).name,
+        Widget::Rate { label, .. } if label.trim().is_empty() => "Network".into(),
+        Widget::Slider { label, .. } if label.trim().is_empty() => "Slider".into(),
         Widget::Value { label, .. } | Widget::Rate { label, .. } | Widget::Slider { label, .. } => {
-            if label.trim().is_empty() {
-                match w {
-                    Widget::Value { signal, .. } => signal.clone(),
-                    Widget::Rate { .. } => "Network".into(),
-                    _ => "Slider".into(),
-                }
-            } else {
-                label.clone()
-            }
+            label.clone()
         }
+    }
+}
+
+/// The icon a widget is shown with in the window: its reading's, or its
+/// kind's.
+fn widget_icon(w: &Widget) -> char {
+    match w {
+        Widget::Clock { .. } => names::icon::CLOCK,
+        Widget::Media { .. } => names::icon::MUSIC,
+        Widget::Key { .. } => names::icon::KEY,
+        Widget::Value { signal, .. } => names::named(signal).icon,
+        Widget::Rate { .. } => names::icon::DOWN,
+        Widget::Slider { .. } => names::icon::SLIDERS,
     }
 }
 
@@ -1880,6 +2474,21 @@ pub fn status(status: &Status) {
     if let Some(editor) = editor {
         Editor::status(&editor, status);
     }
+}
+
+/// nexusd answers again, or stopped answering.
+pub fn connected(up: bool) {
+    with_editor(|e| e.set_connected(up));
+}
+
+/// Pictures from `thumbs`, for the installed editor.
+pub fn pictures(done: Done) {
+    with_editor(|e| e.pictures(done));
+}
+
+/// Something went wrong outside the editor, said where its problems are.
+pub fn problem(why: String) {
+    with_editor(|e| e.set_problem(why));
 }
 
 pub fn install(editor: &Shared) {

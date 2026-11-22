@@ -1,296 +1,211 @@
-// The settings window. The preview is the editor: the live strip, streamed
-// from the daemon, with the page's widgets outlined over it. Click one to
-// select it, drag it to move it, drag an edge to resize. Every change is an
-// edit sent to the daemon, so it shows on the strip (and in this preview)
-// at once, and undo covers it.
+// The settings window: a storyboard of the layout. Every page is a live
+// strip, stacked in order, each named, with the page on the strip marked;
+// takeovers follow as their own group. Click a strip to edit it (it goes on
+// the real strip), click a widget on it to select it, and its settings open
+// right under it. Drag a widget to move it, drag its grip to resize it.
+// Every change is an edit sent to the daemon, so it shows on the strip at
+// once, and undo covers it.
 //
 // The window keeps no rules of its own. Pointer and key events go to Rust
-// in strip pixels; Rust works out what they mean and sends back the zones
-// to draw.
+// in strip pixels; Rust works out what they mean and sends back what to
+// draw. Pictures of the strip are either the daemon's live frame (the page
+// on the strip) or drawn by Rust with the strip's own renderer (thumbs.rs).
 
-import { AboutSlint, Button, VerticalBox, HorizontalBox, Palette, LineEdit, ComboBox, TextEdit, ScrollView, ListView } from "std-widgets.slint";
+import { AboutSlint, ScrollView, Palette, ListView } from "std-widgets.slint";
+import { Theme, Icon, Glyph } from "theme.slint";
+import { Button, IconButton, Segmented, Chip, TextField, Select, MenuRow, MenuDivider, KeyCap, Shortcut, Label, Hint, Heading, FocusRing } from "controls.slint";
+import { Field, FieldRow, PickRow, Trigger, Grid } from "form.slint";
 
-/// One widget on the page, in strip pixels.
-/// Colors with a meaning, chosen for each color scheme: on a light
-/// background the bright ones are too faint to read.
-global Tones {
-    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
-    /// Something went wrong (about 5:1 on either background).
-    out property <color> error: dark ? #ec6464 : #b3261e;
-    /// Not done yet.
-    out property <color> pending: dark ? #e0a000 : #8a5a00;
-}
+export { Theme, Field, PickRow, Trigger }
 
+/// One widget on the strip being edited, in strip pixels.
 export struct Zone {
     x: int,
     width: int,
     name: string,
 }
 
-/// One signal in the signal browser.
+/// A page or takeover in the storyboard.
+export struct StripRow {
+    /// "page", "takeover" or "new-takeover".
+    kind: string,
+    /// Its place among the pages, or among the takeovers.
+    index: int,
+    name: string,
+    /// Drawn by the window; the live strip's frame replaces it while this
+    /// is on the strip.
+    frame: image,
+    /// Under the name: "4 widgets", "When the track changes · 5 s".
+    summary: string,
+    /// On the strip right now.
+    live: bool,
+    /// The one being edited (or tried).
+    active: bool,
+    empty: bool,
+    /// The first takeover: the group's heading goes above it.
+    first-takeover: bool,
+    /// The last page: "Add page" goes after it.
+    last-page: bool,
+}
+
 /// A layout, and whether it is the one on the strip.
 export struct LayoutRow {
     name: string,
     active: bool,
 }
 
-/// A check that failed, from the same checks as `nexusctl doctor`.
-export struct Problem {
-    what: string,
-    detail: string,
-    fix: string,
-}
-
+/// One signal in the drawer.
 export struct SignalRow {
     name: string,
-    /// Its latest value, in the display units.
+    id: string,
+    icon: string,
     value: string,
 }
 
-/// One setting of the selected widget, as the inspector lists it.
-export struct Field {
-    key: string,
-    label: string,
-    /// "text", "number", "choice", "note" or "signal".
-    kind: string,
-    value: string,
-    /// For a choice: the options, and which one is `value` (-1 if none).
-    choices: [string],
-    index: int,
-    help: string,
+/// Something to add, in the gallery.
+export struct Tile {
+    name: string,
+    about: string,
+    image: image,
+    /// Its width on the strip, in strip pixels.
+    width: int,
+    group: int,
+    /// Its place within its group.
+    slot: int,
 }
 
-// A field: its label, the control for its kind, and help under it. Text is
-// sent when Enter is pressed or focus leaves, not on every key.
-component FieldRow inherits HorizontalLayout {
-    in property <Field> field;
-    /// The label of the field a signal is being chosen for, or empty.
-    in property <string> choosing-for;
-    callback changed(string, string);
-    /// A choice was picked: its position in `field.choices`.
-    callback chose(string, int);
-    callback choose(string);
-    spacing: 12px;
+/// A starting layout, with a picture of its first page.
+export struct Starter {
+    name: string,
+    about: string,
+    image: image,
+}
 
-    Text {
-        text: root.field.label;
-        width: 150px;
-        y: 6px;
-        vertical-alignment: top;
-        horizontal-alignment: right;
-        color: Palette.foreground.transparentize(0.2);
+/// The header's status: see status.rs.
+export struct StatusView {
+    tone: string,
+    chip: string,
+    headline: string,
+    body: string,
+    start: bool,
+    retry: bool,
+    log: bool,
+    detail: string,
+}
+
+/// A modal sheet over the window: a title, a close button, and whatever
+/// it holds. Escape or a click outside closes it.
+component Sheet inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <length> sheet-width: 720px;
+    callback close();
+    background: Theme.scrim;
+    TouchArea {
+        clicked => {
+            root.close();
+        }
     }
-
-    VerticalLayout {
-        spacing: 2px;
-        horizontal-stretch: 1;
-
-        if root.field.kind == "signal": HorizontalLayout {
-            spacing: 6px;
-            LineEdit {
-                text: root.field.value;
-                accessible-label: root.field.label;
-                accepted(text) => {
-                    root.changed(root.field.key, text);
+    card := Rectangle {
+        width: min(root.sheet-width, root.width - 32px);
+        height: min(inner.preferred-height + 64px, root.height - 48px);
+        x: (root.width - self.width) / 2;
+        y: max(24px, (root.height - self.height) / 2);
+        background: Theme.surface;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: Theme.line;
+        drop-shadow-blur: 30px;
+        drop-shadow-color: #00000070;
+        clip: true;
+        TouchArea { }
+        FocusScope {
+            init => {
+                self.focus();
+            }
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.close();
+                    return accept;
                 }
-                changed has-focus => {
-                    if !self.has-focus && self.text != root.field.value {
-                        root.changed(root.field.key, self.text);
+                reject
+            }
+        }
+        VerticalLayout {
+            HorizontalLayout {
+                height: 60px;
+                padding-left: 24px;
+                padding-right: 12px;
+                spacing: 12px;
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.title;
+                        font-family: Theme.font;
+                        font-size: Theme.size-heading;
+                        font-weight: 600;
+                        color: Theme.text;
+                        accessible-role: text;
+                    }
+                    if root.subtitle != "": Text {
+                        text: root.subtitle;
+                        font-family: Theme.font;
+                        font-size: Theme.size-label;
+                        color: Theme.text-3;
+                        overflow: elide;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: Glyph.close;
+                        label: @tr("Close");
+                        clicked => {
+                            root.close();
+                        }
                     }
                 }
             }
-            Button {
-                text: root.choosing-for == root.field.label ? @tr("Choosing…") : @tr("Choose…");
-                accessible-label: @tr("Choose the {} from the signal list", root.field.label);
-                clicked => {
-                    root.choose(root.field.key);
+            body := ScrollView {
+                vertical-stretch: 1;
+                inner := VerticalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    padding-bottom: 24px;
+                    padding-top: 4px;
+                    @children
                 }
             }
-        }
-        if root.field.kind == "text" || root.field.kind == "number": LineEdit {
-            text: root.field.value;
-            input-type: root.field.kind == "number" ? InputType.decimal : InputType.text;
-            accessible-label: root.field.label;
-            accepted(text) => {
-                root.changed(root.field.key, text);
-            }
-            changed has-focus => {
-                if !self.has-focus && self.text != root.field.value {
-                    root.changed(root.field.key, self.text);
-                }
-            }
-        }
-        if root.field.kind == "choice": ComboBox {
-            model: root.field.choices;
-            current-index: root.field.index;
-            accessible-label: root.field.label;
-            // By position: the shown text may be a translation.
-            selected => {
-                root.chose(root.field.key, self.current-index);
-            }
-        }
-        if root.field.kind == "note": TextEdit {
-            text: root.field.value;
-            height: 64px;
-            wrap: word-wrap;
-            accessible-label: root.field.label;
-            changed has-focus => {
-                if !self.has-focus && self.text != root.field.value {
-                    root.changed(root.field.key, self.text);
-                }
-            }
-        }
-        if root.field.help != "": Text {
-            text: root.field.help;
-            font-size: 12px;
-            wrap: word-wrap;
-            color: Palette.foreground.transparentize(0.4);
         }
     }
 }
 
-/// The layouts in Strip settings: each with Show and Delete, the name of
-/// the one on the strip, and Add layout from a copy, empty or a starter.
-component LayoutsSection inherits VerticalLayout {
-    in property <[LayoutRow]> layouts;
-    in property <string> layout-name;
-    in property <[string]> choices;
-    in property <int> resets;
-    in property <bool> enabled;
-    callback use(int);
-    callback delete(int);
-    callback rename(string);
-    callback add(int);
-    callback import();
-    callback export();
-
-    spacing: 8px;
-    padding-top: 16px;
-
-    Text {
-        text: @tr("Layouts");
-        font-size: 15px;
-        font-weight: 600;
-        accessible-role: text;
+/// The product's mark: a strip with one lit key, as a small rounded pill.
+component Mark inherits Rectangle {
+    in property <length> size: 28px;
+    width: size;
+    height: size;
+    border-radius: size * 0.3;
+    background: #241e1a;
+    border-width: 1px;
+    border-color: #4a3e35;
+    accessible-role: none;
+    Rectangle {
+        x: parent.width * 0.16;
+        y: parent.height * 0.36;
+        width: parent.width * 0.42;
+        height: parent.height * 0.28;
+        border-radius: self.height / 2;
+        background: #e6d6c0;
     }
-    Text {
-        text: @tr("A layout is a set of pages and takeovers. The settings above apply to every layout.");
-        font-size: 12px;
-        wrap: word-wrap;
-        color: Palette.foreground.transparentize(0.4);
-    }
-    for l[i] in root.layouts: HorizontalLayout {
-        spacing: 8px;
-        Text {
-            text: l.active ? @tr("{}  ·  on the strip", l.name) : l.name;
-            font-weight: l.active ? 600 : 400;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-            accessible-role: text;
-        }
-        Button {
-            text: @tr("Show");
-            enabled: root.enabled && !l.active;
-            accessible-label: @tr("Show layout {} on the strip", l.name);
-            clicked => {
-                root.use(i);
-            }
-        }
-        Button {
-            text: @tr("Delete");
-            enabled: root.enabled && !l.active;
-            accessible-label: @tr("Delete layout {}", l.name);
-            clicked => {
-                root.delete(i);
-            }
-        }
-    }
-    HorizontalLayout {
-        spacing: 12px;
-        Text {
-            text: @tr("Name");
-            width: 150px;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            color: Palette.foreground.transparentize(0.2);
-        }
-        // Made anew after a refused name, so it starts from the real one.
-        for item in [{ name: root.layout-name, epoch: root.resets }]: LineEdit {
-            property <string> name: item.name;
-            text: item.name;
-            enabled: root.enabled;
-            accessible-label: @tr("Name of the layout on the strip");
-            accepted(text) => {
-                root.rename(text);
-            }
-            changed has-focus => {
-                if !self.has-focus && self.text != self.name {
-                    root.rename(self.text);
-                }
-            }
-        }
-    }
-    HorizontalLayout {
-        spacing: 12px;
-        Text {
-            text: @tr("Add layout");
-            width: 150px;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            color: Palette.foreground.transparentize(0.2);
-        }
-        from-choice := ComboBox {
-            model: root.choices;
-            enabled: root.enabled;
-            horizontal-stretch: 1;
-            accessible-label: @tr("What the new layout starts from");
-        }
-        Button {
-            text: @tr("Add");
-            enabled: root.enabled;
-            accessible-label: @tr("Add a layout from {} and show it", from-choice.current-value);
-            clicked => {
-                root.add(from-choice.current-index);
-            }
-        }
-    }
-    HorizontalLayout {
-        spacing: 12px;
-        Text {
-            text: @tr("Files");
-            width: 150px;
-            vertical-alignment: center;
-            horizontal-alignment: right;
-            color: Palette.foreground.transparentize(0.2);
-        }
-        HorizontalLayout {
-            spacing: 8px;
-            alignment: start;
-            Button {
-                text: @tr("Import from file…");
-                enabled: root.enabled;
-                clicked => {
-                    root.import();
-                }
-            }
-            Button {
-                text: @tr("Export this layout…");
-                enabled: root.enabled;
-                clicked => {
-                    root.export();
-                }
-            }
-        }
-    }
-    HorizontalLayout {
-        padding-left: 162px;
-        Text {
-            text: @tr("A new or imported layout goes on the strip; undo takes it back. An exported file holds the pages, takeovers and settings, but not where the weather is for or the sources.");
-            font-size: 12px;
-            wrap: word-wrap;
-            color: Palette.foreground.transparentize(0.4);
-        }
+    Rectangle {
+        x: parent.width * 0.64;
+        y: parent.height * 0.3;
+        width: parent.height * 0.4;
+        height: parent.height * 0.4;
+        border-radius: self.height / 2;
+        background: Theme.act;
     }
 }
 
@@ -299,61 +214,186 @@ export component AppWindow inherits Window {
     icon: @image-url("../assets/icon.png");
     preferred-width: 1340px;
     preferred-height: 820px;
-    background: Palette.background;
+    min-width: 1024px;
+    min-height: 640px;
+    background: Theme.ground;
+    default-font-family: Theme.font;
+    default-font-size: Theme.size-body;
+
+    // ---- From Rust ------------------------------------------------------
 
     /// The frame on the strip, 640×48, exactly as the daemon sent it.
     in property <image> frame;
     /// False while the daemon cannot be reached.
     in property <bool> connected;
-    /// The checks that failed, each with its fix; empty when all is well.
-    in property <[Problem]> problems;
+    in property <StatusView> status;
     /// Every check and the system, to paste into a bug report.
     in property <string> diagnostics;
-    /// Run the checks again now.
-    callback check-again();
-    /// This window's version; the daemon's, once it has answered; where
-    /// the project lives. For the About dialog.
     in property <string> version;
     in property <string> daemon-version;
     in property <string> homepage;
-    /// Try mode: the preview acts as the strip, and a press on it is sent
-    /// as a touch (strip pixels at press and release).
+    /// Try mode: the strip being edited acts as the strip.
     in property <bool> trying;
+    /// The storyboard.
+    in property <[StripRow]> rows;
+    in property <int> takeover-count;
+    in property <int> page-count;
+    /// Layouts: every one, and the one on the strip.
+    in property <[LayoutRow]> layouts;
+    in property <string> layout-name;
+    /// The widgets on the strip being edited.
+    in property <[Zone]> zones;
+    in property <int> selected: -1;
+    /// While a resize is dragged: it landed on a snap point here (x), or -1.
+    in property <int> snap-x: -1;
+    /// False while there is nothing to edit (disconnected, a store that
+    /// cannot be written, a takeover covering the page).
+    in property <bool> editable;
+    in property <string> caption;
+    in property <string> problem;
+    in property <float> ghost-x;
+    in property <int> ghost-width;
+    in property <int> drop-x;
+    /// The settings under the strip being edited: what they are for
+    /// ("widget", "page", "takeover", "new-takeover"), its title and icon.
+    in property <string> panel-kind;
+    in property <string> panel-title;
+    in property <string> panel-icon;
+    in property <string> panel-note;
+    in property <[Field]> fields;
+    in property <string> draft-hint;
+    /// Undo and redo: what they would do; empty when nothing.
+    in property <string> undo-label;
+    in property <string> redo-label;
+    /// The picker's rows (for whichever field opened it) and the drawer's.
+    in property <[PickRow]> picks;
+    in property <[Trigger]> triggers;
+    in property <[SignalRow]> signal-rows;
+    /// Add: whether anything fits, and why not.
+    in property <bool> can-add;
+    in property <string> add-reason;
+    in property <[Tile]> tiles;
+    in property <[string]> groups;
+    in property <[int]> group-sizes;
+    in property <string> gallery-note;
+    in property <[Starter]> starters;
+    /// A fresh store: offer the starters.
+    in property <bool> first-run;
+    /// Preferences.
+    in property <int> pref-temperature;
+    in property <int> pref-clock;
+    in property <string> pref-accent;
+    in property <[color]> accent-swatches;
+    in property <[string]> accent-names;
+    in property <int> accent-current: -1;
+    in property <string> accent-note;
+    in property <string> pref-weather;
+    in property <[string]> fonts;
+    in property <int> pref-font;
+    in property <string> log-text;
+    /// Bumped to put typed names back after a refusal.
+    in property <int> resets;
+    in property <string> page-name;
+
+    // ---- To Rust --------------------------------------------------------
+
+    callback check-again();
     callback set-trying(bool);
     callback try-press(float);
     callback try-release(float);
     callback try-cancel();
-    /// Every layout; the name of the one on the strip; what a new one can
-    /// start from. Bumped when a typed layout name is refused.
-    in property <[LayoutRow]> layouts;
-    in property <string> layout-name;
-    in property <[string]> layout-choices;
-    in property <int> layout-name-resets;
-    /// Put layout `i` on the strip; delete it; rename the one on the
-    /// strip; add one from a choice and put it on the strip.
+    /// A strip that is not being edited was clicked at x (strip pixels).
+    callback strip-clicked(string, int, float);
+    callback pressed(float, float);
+    callback dragged(float);
+    callback released(float);
+    callback cancelled();
+    pure callback edge-at(float, float) -> int;
+    callback select-step(int);
+    callback move-step(int);
+    callback resize-step(int);
+    callback deselect();
+    callback undo();
+    callback redo();
+    callback field-changed(string, string);
+    callback field-chosen(string, int);
+    callback open-picker(string);
+    callback picker-filter(string);
+    callback picked(string, string);
+    callback remove-trigger(string);
+    callback open-gallery();
+    callback add-tile(int);
+    callback delete-widget();
+    callback equal-widths();
+    callback add-page();
+    callback rename-page(string);
+    callback move-page(int, int);
+    callback delete-page();
+    callback add-takeover();
+    callback create-takeover();
+    callback delete-takeover();
     callback use-layout(int);
-    callback delete-layout(int);
     callback rename-layout(string);
-    callback add-layout(int);
-    /// Add a layout from a file; save the one on the strip as a file.
+    callback duplicate-layout();
+    callback new-layout(int);
+    callback delete-layout(int);
     callback import-layout();
     callback export-layout();
-    property <bool> copied;
+    callback open-starters();
+    callback choose-starter(int);
+    callback dismiss-first-run();
+    callback set-pref(string, string);
+    callback start-service();
+    callback open-log();
 
-    // Copies through a text input's own clipboard support, which works on
-    // every platform Slint runs on. Never shown.
+    // ---- Window state ---------------------------------------------------
+
+    /// The open sheet: "", "gallery", "prefs", "about", "starters",
+    /// "rename", "log", "status".
+    in-out property <string> sheet;
+    property <bool> copied;
+    /// Pages being reordered by their grip: from and to, or -1.
+    property <int> reorder-from: -1;
+    property <int> reorder-to: -1;
+    property <bool> keys-shown: true;
+
+    /// Strip pixels shown at 2× when the window has room for 1,280 of
+    /// them, else at exactly 1×: never a blurry in-between. In physical
+    /// pixels, so desktop scaling never puts a strip pixel between two.
+    property <length> board-pad: 16px;
+    property <length> bezel: 6px;
+    property <int> zoom: board.visible-width >= 1280phx + 2 * (board-pad + bezel) ? 2 : 1;
+    property <length> unit: 1phx * zoom;
+    property <length> strip-w: 640 * unit;
+    property <length> strip-h: 48 * unit;
+    property <length> column-w: strip-w + 2 * bezel;
+
+    public function show-sheet(name: string) {
+        root.sheet = name;
+    }
+
+    // The desktop's scheme, for Theme, and Slint's own widgets (scroll
+    // bars, the About badge) set to match.
+    /// After Theme.forced is set: Slint's own widgets (scroll bars, the
+    /// About badge) follow it too. Without it they follow the desktop, as
+    /// Theme does.
+    public function apply-scheme() {
+        if Theme.forced != 0 {
+            Palette.color-scheme = Theme.forced == 2 ? ColorScheme.dark : ColorScheme.light;
+        }
+    }
+
+    // Copies through a text input's own clipboard support. Never shown.
     clip := TextInput {
         visible: false;
         text: root.diagnostics;
     }
-
     function copy-diagnostics() {
         clip.select-all();
         clip.copy();
         clip.clear-selection();
         root.copied = true;
     }
-
     Timer {
         interval: 2s;
         running: root.copied;
@@ -361,831 +401,1992 @@ export component AppWindow inherits Window {
             root.copied = false;
         }
     }
-    /// The page on the strip, and its position ("2 of 4").
-    in property <string> page-name;
-    in property <string> page-position;
-    /// Every page's name, in order, and which one is on the strip (-1
-    /// while unknown).
-    in property <[string]> pages;
-    in property <int> current-page: -1;
-    /// Every takeover's name, and which one is being edited (-1 if none).
-    in property <[string]> takeovers;
-    in property <int> current-takeover: -1;
-    /// What the settings area holds besides a widget or the page:
-    /// "new-takeover", "takeover", "settings", or empty.
-    in property <string> form;
-    /// Bumped when a typed page name is refused, to put the real one back.
-    in property <int> page-name-resets;
 
-    /// The widgets of the page on the strip.
-    in property <[Zone]> zones;
-    /// Index into `zones`, or -1.
-    in property <int> selected: -1;
-    /// False while there is nothing to edit: no layout yet, a takeover
-    /// covering the page, or a store that cannot be written.
-    in property <bool> editable;
-    /// Under the preview: the selection, a drag in progress, or why the
-    /// page cannot be edited right now.
-    in property <string> caption;
-    /// What went wrong with the last change, until the next one.
-    in property <string> problem;
-    /// While a widget is dragged: where it is drawn and the gap it would
-    /// drop into, in strip pixels; `ghost-width` 0 when not dragging.
-    in property <float> ghost-x;
-    in property <int> ghost-width;
-    in property <int> drop-x;
-    /// The selected widget's settings; empty when none is selected.
-    in property <[Field]> fields;
-    /// What is still missing before a half-made change can be saved.
-    in property <string> draft-hint;
-    /// What undo and redo would do; empty when there is nothing.
-    in property <string> undo-label;
-    in property <string> redo-label;
-    /// The signal browser: the signals matching the filter, and how many
-    /// there are in all.
-    in property <[SignalRow]> signal-rows;
-    in property <int> signal-count;
-    /// The label of the field a signal is being chosen for, or empty.
-    in property <string> choosing-for;
-
-    /// Pages: show page `i` on the strip; add one after it; rename it;
-    /// move it earlier (-1) or later (1); delete it.
-    callback show-page(int);
-    callback add-page();
-    callback rename-page(string);
-    callback move-page(int);
-    callback delete-page();
-    /// Takeovers: show takeover `i` on the strip to edit it; start a new
-    /// one; delete the one being edited (or drop the new one).
-    callback edit-takeover(int);
-    callback add-takeover();
-    /// Show the strip's own settings: units, clock, font, weather.
-    callback open-settings();
-    callback delete-takeover();
-    /// Pointer on the strip, in strip pixels; a press also says how near
-    /// an edge counts as on it.
-    callback pressed(float, float);
-    callback dragged(float);
-    callback released(float);
-    callback cancelled();
-    /// The widget whose right edge is within `reach` of x, or -1.
-    pure callback edge-at(float, float) -> int;
-    /// Keyboard: select the widget `step` along; move the selected one;
-    /// widen (positive) or narrow it by pixels; drop the selection.
-    callback select-step(int);
-    callback move-step(int);
-    callback resize-step(int);
-    callback deselect();
-    callback undo();
-    callback redo();
-    /// A field of the selected widget changed: its key and new value.
-    callback field-changed(string, string);
-    /// A choice field's option picked, by position.
-    callback field-chosen(string, int);
-    /// After the selection, or at the end with nothing selected.
-    callback add-widget();
-    callback delete-widget();
-    /// Signal browser: choose a signal for the field with this key, stop
-    /// choosing, a signal clicked, the filter typed, Enter in the filter.
-    callback choose-signal(string);
-    callback cancel-choose();
-    callback signal-picked(string);
-    callback signal-filter(string);
-    callback pick-first();
-
-    // Undo and redo work wherever focus is: this scope holds everything,
-    // so it sees every key first.
+    // Undo and redo wherever focus is: this scope holds everything, so it
+    // sees every key first.
     FocusScope {
         width: parent.width;
         height: parent.height;
-            capture-key-pressed(event) => {
-                if !event.modifiers.control || (event.text.to-lowercase() != "z" && event.text.to-lowercase() != "y") {
-                    return reject;
-                }
-                if event.text.to-lowercase() == "y" || event.modifiers.shift {
-                    root.redo();
-                } else {
-                    root.undo();
-                }
-                accept
+        capture-key-pressed(event) => {
+            if !event.modifiers.control || (event.text.to-lowercase() != "z" && event.text.to-lowercase() != "y") {
+                return reject;
             }
-
-        VerticalBox {
-            HorizontalBox {
-                padding: 0;
-                Text {
-                    text: @tr("Strip preview");
-                    font-size: 18px;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: !root.connected ? ""
-                        : root.layouts.length > 1 && root.current-takeover < 0 && root.page-name != ""
-                            ? @tr("{}  ·  {}  ·  page {}", root.layout-name, root.page-name, root.page-position)
-                        : root.current-takeover >= 0 ? @tr("{}  ·  takeover", root.takeovers[root.current-takeover])
-                        : root.page-name != "" ? @tr("{}  ·  page {}", root.page-name, root.page-position) : "";
-                    color: Palette.foreground.transparentize(0.35);
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-
-                // Edit, or try the strip out in the preview.
-                Button {
-                    text: @tr("Edit");
-                    primary: !root.trying;
-                    // Which mode is on, for a screen reader too, not only by
-                    // color. `checked` and not `checkable`: a checkable Button
-                    // flips `checked` itself on a click, undoing this binding.
-                    checked: !root.trying;
-                    accessible-checkable: true;
-                    enabled: root.connected;
-                    accessible-label: @tr("Edit mode: clicks on the preview select widgets");
-                    clicked => {
-                        root.set-trying(false);
-                    }
-                }
-                Button {
-                    text: @tr("Try it");
-                    primary: root.trying;
-                    checked: root.trying;
-                    accessible-checkable: true;
-                    enabled: root.connected;
-                    accessible-label: @tr("Try mode: clicks on the preview act as touches on the strip");
-                    clicked => {
-                        root.set-trying(true);
-                    }
-                }
-
-                Button {
-                    text: @tr("Settings");
-                    enabled: root.connected;
-                    primary: root.form == "settings";
-                    checked: root.form == "settings";
-                    accessible-checkable: true;
-                    clicked => {
-                        root.open-settings();
-                    }
-                }
-
-                Button {
-                    text: root.undo-label == "" ? @tr("Undo") : @tr("Undo: {}", root.undo-label);
-                    enabled: root.connected && root.undo-label != "";
-                    clicked => {
-                        root.undo();
-                    }
-                }
-
-                Button {
-                    text: root.redo-label == "" ? @tr("Redo") : @tr("Redo: {}", root.redo-label);
-                    enabled: root.connected && root.redo-label != "";
-                    clicked => {
-                        root.redo();
-                    }
-                }
-
-                // In the toolbar, the window's top level, and never disabled:
-                // Slint's royalty-free license asks for its AboutSlint widget in
-                // an About screen reached from there.
-                Button {
-                    text: @tr("About");
-                    clicked => {
-                        about.show();
-                    }
-                }
-
+            if event.text.to-lowercase() == "y" || event.modifiers.shift {
+                root.redo();
+            } else {
+                root.undo();
             }
+            accept
+        }
 
-            // Onboarding: shown only when something is wrong, naming each
-            // problem and its fix. The fixes can be selected and copied.
-            if !root.connected || root.problems.length > 0: Rectangle {
-                background: #e0a00030;
-                border-radius: 6px;
-                VerticalLayout {
-                    padding: 10px;
-                    spacing: 6px;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: !root.connected
-                                ? @tr("Not connected to nexusd. This window reconnects by itself once it runs.")
-                                : @tr("Something needs fixing before the strip works fully.");
-                            font-weight: 600;
-                            wrap: word-wrap;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                            accessible-role: text;
-                        }
-                        Button {
-                            text: @tr("Check again");
-                            clicked => {
-                                root.check-again();
-                            }
-                        }
-                        Button {
-                            text: root.copied ? @tr("Copied") : @tr("Copy diagnostics");
-                            enabled: root.diagnostics != "";
-                            clicked => {
-                                root.copy-diagnostics();
-                            }
-                        }
-                    }
-                    for p in root.problems: VerticalLayout {
-                        spacing: 2px;
-                        Text {
-                            text: p.what + ": " + p.detail;
-                            wrap: word-wrap;
-                            accessible-role: text;
-                        }
-                        if p.fix != "": TextInput {
-                            text: p.fix;
-                            read-only: true;
-                            single-line: false;
-                            wrap: word-wrap;
-                            font-family: "monospace";
-                            color: Palette.foreground.transparentize(0.15);
-                            accessible-label: @tr("How to fix {}", p.what);
-                        }
-                    }
-                }
-            }
-
-            preview-area := Rectangle {
-                vertical-stretch: 0;
-                min-height: 48phx;
-                preferred-height: 48phx * 2 + 24px;
-
-                // Largest whole-number scale that fits, counted in physical
-                // pixels (phx), not logical ones (px). With fractional desktop
-                // scaling a logical-pixel scale would land between device
-                // pixels and blur the strip's hinted text.
-                property <int> scale: max(1, min(
-                    floor(self.width / 640phx),
-                    floor(self.height / 48phx)));
-                // One strip pixel on screen.
-                property <length> unit: 1phx * self.scale;
-
-                strip := Image {
-                    source: root.frame;
-                    image-rendering: pixelated;
-                    width: 640 * preview-area.unit;
-                    height: 48 * preview-area.unit;
-                    // Rounded to whole physical pixels for the same reason.
-                    x: round((parent.width - self.width) / 2 / 1phx) * 1phx;
-                    y: round((parent.height - self.height) / 2 / 1phx) * 1phx;
-                    opacity: root.connected ? 1 : 0.4;
-                    accessible-role: image;
-                    accessible-label: @tr("Strip preview, showing page {}", root.page-name);
-                }
-
-                // The list of widgets for keyboards and screen readers, laid
-                // exactly over the strip so the outlines are its items.
-                keys := FocusScope {
-                    x: strip.x;
-                    y: strip.y;
-                    width: strip.width;
-                    height: strip.height;
-                    accessible-role: list;
-                    accessible-label: @tr("Widgets on page {}. Left and right arrows select; with Control they move the widget, with Shift they resize it.", root.page-name);
-                    key-pressed(event) => {
-                        if !root.editable {
-                            return reject;
-                        }
-                        if event.text == Key.LeftArrow || event.text == Key.RightArrow {
-                            let step = event.text == Key.LeftArrow ? -1 : 1;
-                            if event.modifiers.control {
-                                root.move-step(step);
-                            } else if event.modifiers.shift {
-                                root.resize-step(step * 4);
-                            } else {
-                                root.select-step(step);
-                            }
-                            return accept;
-                        }
-                        if event.text == Key.Delete && root.selected >= 0 {
-                            root.delete-widget();
-                            return accept;
-                        }
-                        if event.text == Key.Escape {
-                            root.cancelled();
-                            root.deselect();
-                            return accept;
-                        }
-                        reject
-                    }
-
-                    if root.trying: TouchArea {
-                        property <float> at: self.mouse-x / preview-area.unit;
-                        mouse-cursor: MouseCursor.pointer;
-                        accessible-role: button;
-                        accessible-label: @tr("The strip, to try: a tap or swipe here acts on it");
-                        pointer-event(event) => {
-                            if event.button != PointerEventButton.left {
-                                return;
-                            }
-                            if event.kind == PointerEventKind.down {
-                                root.try-press(self.at);
-                            } else if event.kind == PointerEventKind.up {
-                                root.try-release(self.at);
-                            } else if event.kind == PointerEventKind.cancel {
-                                root.try-cancel();
-                            }
-                        }
-                    }
-
-                    if root.editable: Rectangle {
-                        width: parent.width;
-                        height: parent.height;
-
-                        for zone[i] in root.zones: Rectangle {
-                            x: zone.x * preview-area.unit;
-                            width: zone.width * preview-area.unit;
-                            border-width: i == root.selected ? 2px : 1px;
-                            border-color: i == root.selected ? Palette.accent-background : #ffffff38;
-                            background: i == root.selected ? Palette.accent-background.transparentize(0.85) : transparent;
-                            accessible-role: list-item;
-                            accessible-label: @tr("{}, {} pixels wide", zone.name, zone.width);
-                            accessible-item-selectable: true;
-                            accessible-item-selected: i == root.selected;
-                            accessible-item-index: i;
-                        }
-
-                        if root.ghost-width > 0: Rectangle {
-                            x: root.ghost-x * preview-area.unit;
-                            width: root.ghost-width * preview-area.unit;
-                            border-width: 2px;
-                            border-color: Palette.accent-background;
-                            background: Palette.accent-background.transparentize(0.6);
-                        }
-                        if root.ghost-width > 0: Rectangle {
-                            x: root.drop-x * preview-area.unit - 2px;
-                            width: 4px;
-                            background: Palette.accent-background;
-                        }
-
-                        touch := TouchArea {
-                            property <float> at: self.mouse-x / preview-area.unit;
-                            property <float> reach: 4px / preview-area.unit;
-                            property <int> edge: root.edge-at(self.at, self.reach);
-                            mouse-cursor: self.edge >= 0 ? MouseCursor.ew-resize
-                                : self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
-                            pointer-event(event) => {
-                                if event.button != PointerEventButton.left {
-                                    return;
-                                }
-                                if event.kind == PointerEventKind.down {
-                                    keys.focus();
-                                    root.pressed(self.at, self.reach);
-                                } else if event.kind == PointerEventKind.up {
-                                    root.released(self.at);
-                                } else if event.kind == PointerEventKind.cancel {
-                                    root.cancelled();
-                                }
-                            }
-                            moved => {
-                                root.dragged(self.at);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // The caption, or what went wrong with the last change. In the
-            // same place, so a problem appearing moves nothing under the
-            // pointer.
-            Text {
-                text: root.problem != "" ? root.problem : root.caption;
-                color: root.problem != "" ? Tones.error : Palette.foreground.transparentize(0.25);
-                horizontal-alignment: center;
-                wrap: word-wrap;
-                accessible-role: text;
-            }
-
-            // Scrolls sideways when the tabs are wider than the window: a
-            // plain row would make every tab part of the window's minimum
-            // width, and with many pages push the panels off screen.
-            tabs := ScrollView {
-                height: tab-row.preferred-height + 10px;
-                content-width: max(self.visible-width, tab-row.preferred-width);
-                content-height: tab-row.preferred-height;
-            tab-row := HorizontalBox {
-                padding: 0;
-                width: tabs.content-width;
-
-                // The pages, in order: a click shows that page on the strip.
-                for name[i] in root.pages: Button {
-                    text: name;
-                    primary: i == root.current-page;
-                    enabled: root.connected;
-                    accessible-label: i == root.current-page
-                        ? @tr("{}, page {} of {}, on the strip", name, i + 1, root.pages.length)
-                        : @tr("{}, page {} of {}", name, i + 1, root.pages.length);
-                    clicked => {
-                        root.show-page(i);
-                    }
-                }
-
-                Button {
-                    text: @tr("Add page");
-                    enabled: root.connected && root.editable;
-                    clicked => {
-                        root.add-page();
-                    }
-                }
-
-                if root.takeovers.length > 0: Text {
-                    text: @tr("Takeovers");
-                    vertical-alignment: center;
-                    color: Palette.foreground.transparentize(0.4);
-                }
-
-                // Takeovers: a click shows one on the strip to edit it.
-                for name[i] in root.takeovers: Button {
-                    text: name;
-                    primary: i == root.current-takeover;
-                    enabled: root.connected;
-                    accessible-label: i == root.current-takeover ? @tr("{}, takeover, being edited", name) : @tr("{}, takeover", name);
-                    clicked => {
-                        root.edit-takeover(i);
-                    }
-                }
-
-                Button {
-                    text: @tr("Add takeover");
-                    enabled: root.connected;
-                    clicked => {
-                        root.add-takeover();
-                    }
-                }
-
+        VerticalLayout {
+            // ---- Header ----------------------------------------------
+            header := Rectangle {
+                height: 60px;
+                background: Theme.surface;
                 Rectangle {
-                    horizontal-stretch: 1;
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.line;
                 }
-            }
-            }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 12px;
+                    spacing: 10px;
+                    alignment: stretch;
 
-            // The inspector: the selected widget's settings.
-            Rectangle {
-                height: 1px;
-                background: Palette.border;
-            }
-
-            HorizontalLayout {
-                spacing: 12px;
-                vertical-stretch: 1;
-
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 6px;
-                HorizontalBox {
-                    padding: 0;
-                    Text {
-                        text: root.selected >= 0 ? @tr("Widget settings")
-                            : root.form == "new-takeover" ? @tr("New takeover")
-                            : root.form == "takeover" ? @tr("Takeover settings")
-                            : root.form == "settings" ? @tr("Strip settings") : @tr("Page settings");
-                        font-size: 16px;
-                        font-weight: 600;
-                        vertical-alignment: center;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            Mark { }
+                        }
+                        Text {
+                            text: @tr("Nexus Open");
+                            font-family: Theme.font;
+                            font-size: 17px;
+                            font-weight: 600;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                        }
+                    }
+                    Rectangle {
+                        width: 1px;
+                        Rectangle {
+                            y: 18px;
+                            height: 24px;
+                            background: Theme.line;
+                        }
+                    }
+                    // The layout switcher.
+                    VerticalLayout {
+                        alignment: center;
+                        layout-button := Button {
+                            tier: "quiet";
+                            icon: Glyph.stack;
+                            text: root.layout-name == "" ? @tr("Layouts") : root.layout-name;
+                            label: @tr("Layout {}: switch, rename, duplicate, add, import, export or delete", root.layout-name);
+                            enabled: root.connected;
+                            clicked => {
+                                layout-menu.show();
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Segmented {
+                            options: [@tr("Edit"), @tr("Try it")];
+                            icons: [Glyph.cursor, Glyph.tap];
+                            current: root.trying ? 1 : 0;
+                            enabled: root.connected;
+                            label: @tr("Mode: Edit selects and changes widgets; Try it sends clicks on the strip as touches");
+                            chose(i) => {
+                                root.set-trying(i == 1);
+                            }
+                        }
+                    }
+                    Rectangle {
                         horizontal-stretch: 1;
                     }
-                    if root.form != "new-takeover" && root.form != "settings": Button {
-                        text: root.selected >= 0 ? @tr("Add widget after") : @tr("Add widget");
-                        enabled: root.connected && root.editable;
-                        clicked => {
-                            root.add-widget();
-                        }
-                    }
-                    if root.form == "settings": Button {
-                        text: root.copied ? @tr("Copied") : @tr("Copy diagnostics");
-                        enabled: root.diagnostics != "";
-                        clicked => {
-                            root.copy-diagnostics();
-                        }
-                    }
-                    if root.selected < 0 && (root.form == "new-takeover" || root.form == "takeover"): Button {
-                        text: root.form == "new-takeover" ? @tr("Cancel") : @tr("Delete takeover");
-                        enabled: root.connected;
-                        clicked => {
-                            root.delete-takeover();
-                        }
-                    }
-                    if root.selected >= 0: Button {
-                        text: @tr("Delete widget");
-                        enabled: root.connected && root.editable;
-                        clicked => {
-                            root.delete-widget();
-                        }
-                    }
-                }
-
-                // With no widget selected: the page on the strip.
-                // The spacer takes the room past 760 px; without it the cap
-                // would become the whole window's maximum width.
-                if root.selected < 0 && root.editable && root.form == "": HorizontalLayout {
-                    vertical-stretch: 1;
-                VerticalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    max-width: 760px;
-
-                    HorizontalLayout {
-                        spacing: 12px;
-                        Text {
-                            text: @tr("Name");
-                            width: 150px;
-                            y: 6px;
-                            vertical-alignment: top;
-                            horizontal-alignment: right;
-                            color: Palette.foreground.transparentize(0.2);
-                        }
-                        // Made anew for each page, and after a name is
-                        // refused, so it always starts from the real name.
-                        for item in [{ name: root.page-name, epoch: root.page-name-resets }]: LineEdit {
-                            property <string> name: item.name;
-                            text: item.name;
-                            accessible-label: @tr("Page name");
-                            accepted(text) => {
-                                root.rename-page(text);
-                            }
-                            changed has-focus => {
-                                if !self.has-focus && self.text != self.name {
-                                    root.rename-page(self.text);
-                                }
-                            }
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        padding-left: 162px;
-                        alignment: start;
-                        Button {
-                            text: @tr("Move earlier");
-                            enabled: root.connected && root.current-page > 0;
-                            clicked => {
-                                root.move-page(-1);
-                            }
-                        }
-                        Button {
-                            text: @tr("Move later");
-                            enabled: root.connected && root.current-page < root.pages.length - 1;
-                            clicked => {
-                                root.move-page(1);
-                            }
-                        }
-                        Button {
-                            text: @tr("Delete page");
-                            enabled: root.connected && root.pages.length > 1;
-                            clicked => {
-                                root.delete-page();
-                            }
-                        }
-                    }
-                    HorizontalLayout {
-                        padding-left: 162px;
-                        Text {
-                            text: @tr("Taps that open this page follow a new name. Select a widget on the strip to change it instead.");
-                            font-size: 12px;
-                            wrap: word-wrap;
-                            color: Palette.foreground.transparentize(0.4);
-                        }
-                    }
-                }
-                Rectangle {
-                    horizontal-stretch: 1;
-                }
-                }
-
-                // Always one line tall, so the hint appearing moves no field
-                // from under the pointer.
-                Text {
-                    height: 20px;
-                    text: root.draft-hint == "" ? "" : @tr("Not saved yet: {}", root.draft-hint);
-                    color: Tones.pending;
-                    overflow: elide;
-                    vertical-alignment: center;
-                    accessible-role: text;
-                }
-
-                scroll := ScrollView {
-                    vertical-stretch: 1;
-                    min-height: 120px;
-                    visible: root.fields.length > 0;
-
+                    // The status chip.
                     VerticalLayout {
-                        width: min(scroll.visible-width, 760px);
-                        alignment: start;
-                        spacing: 8px;
-                        padding-right: 12px;
-                        for field in root.fields: FieldRow {
-                            field: field;
-                            choosing-for: root.choosing-for;
-                            changed(key, value) => {
-                                root.field-changed(key, value);
+                        alignment: center;
+                        status-chip := Rectangle {
+                            height: 32px;
+                            min-width: chip-row.preferred-width;
+                            border-radius: 16px;
+                            property <bool> trouble: root.status.tone == "warn" || root.status.tone == "stopped";
+                            background: trouble ? Theme.warn-surface : chip-touch.has-hover ? Theme.surface-2 : transparent;
+                            border-width: 1px;
+                            border-color: trouble ? Theme.warn.transparentize(0.5) : Theme.line;
+                            accessible-role: button;
+                            accessible-label: @tr("Status: {}. Opens the details and fixes.", root.status.chip);
+                            accessible-action-default => {
+                                status-menu.show();
                             }
-                            chose(key, index) => {
-                                root.field-chosen(key, index);
+                            chip-row := HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 12px;
+                                spacing: 7px;
+                                Icon {
+                                    glyph: status-chip.trouble ? Glyph.warning : root.status.tone == "note" ? Glyph.info : Glyph.ok;
+                                    fill: true;
+                                    color: status-chip.trouble ? Theme.warn : Theme.text-3;
+                                }
+                                Text {
+                                    text: root.status.chip == "" ? @tr("Checking…") : root.status.chip;
+                                    font-family: Theme.font;
+                                    font-size: Theme.size-label;
+                                    font-weight: status-chip.trouble ? 600 : 500;
+                                    color: status-chip.trouble ? Theme.warn : Theme.text-2;
+                                    vertical-alignment: center;
+                                }
                             }
-                            choose(key) => {
-                                root.choose-signal(key);
-                                filter.focus();
+                            chip-touch := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => {
+                                    chip-focus.focus();
+                                    status-menu.show();
+                                }
+                            }
+                            chip-focus := FocusScope {
+                                // Its TouchArea focuses it; taking the press here would
+                                // swallow the first click.
+                                focus-on-click: false;
+                                key-pressed(event) => {
+                                    if event.text == " " || event.text == Key.Return {
+                                        status-menu.show();
+                                        return accept;
+                                    }
+                                    reject
+                                }
+                            }
+                            FocusRing {
+                                width: parent.width + 6px;
+                                height: parent.height + 6px;
+                                shown: chip-focus.has-focus;
+                                radius: 16px;
                             }
                         }
-                        if root.form == "settings": LayoutsSection {
-                            layouts: root.layouts;
-                            layout-name: root.layout-name;
-                            choices: root.layout-choices;
-                            resets: root.layout-name-resets;
-                            enabled: root.connected;
-                            use(i) => {
-                                root.use-layout(i);
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Button {
+                            tier: "quiet";
+                            icon: Glyph.undo;
+                            text: root.undo-label == "" ? @tr("Undo") : root.undo-label;
+                            label: root.undo-label == "" ? @tr("Undo: nothing to undo") : @tr("Undo: {}", root.undo-label);
+                            enabled: root.connected && root.undo-label != "";
+                            clicked => {
+                                root.undo();
                             }
-                            delete(i) => {
-                                root.delete-layout(i);
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: Glyph.redo;
+                            label: root.redo-label == "" ? @tr("Redo: nothing to redo") : @tr("Redo: {}", root.redo-label);
+                            enabled: root.connected && root.redo-label != "";
+                            clicked => {
+                                root.redo();
                             }
-                            rename(name) => {
-                                root.rename-layout(name);
-                            }
-                            add(choice) => {
-                                root.add-layout(choice);
-                            }
-                            import => {
-                                root.import-layout();
-                            }
-                            export => {
-                                root.export-layout();
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        more-button := IconButton {
+                            icon: Glyph.dots;
+                            label: @tr("More: preferences, copy diagnostics, about");
+                            clicked => {
+                                more-menu.show();
                             }
                         }
                     }
                 }
-                }
+            }
 
-                Rectangle {
-                    width: 1px;
-                    background: Palette.border;
-                }
-
-                // The signal browser: every signal and its live value. While
-                // a field's "Choose…" is active, a click puts the signal in
-                // that field.
-                VerticalLayout {
-                    min-width: 240px;
-                    preferred-width: 360px;
-                    max-width: 360px;
-                    horizontal-stretch: 0;
-                    spacing: 6px;
+            // ---- The storyboard --------------------------------------
+            board := ScrollView {
+                vertical-stretch: 1;
+                content := VerticalLayout {
+                    padding-left: root.board-pad;
+                    padding-right: root.board-pad;
+                    padding-top: 12px;
+                    padding-bottom: 40px;
+                    alignment: start;
 
                     HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: @tr("Signals");
-                            font-size: 16px;
-                            font-weight: 600;
-                        }
-                        Text {
-                            text: root.signal-count == 0 ? @tr("none yet") : @tr("{} live", root.signal-count);
-                            color: Palette.foreground.transparentize(0.4);
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                    }
+                        alignment: center;
+                        column := VerticalLayout {
+                            width: root.column-w;
+                            spacing: 0px;
 
-                    filter := LineEdit {
-                        placeholder-text: @tr("Filter by name");
-                        accessible-label: @tr("Filter signals by name");
-                        edited(text) => {
-                            root.signal-filter(text);
-                        }
-                        accepted => {
-                            if root.choosing-for != "" {
-                                root.pick-first();
-                                self.text = "";
-                                root.signal-filter("");
-                            }
-                        }
-                        key-pressed(event) => {
-                            if event.text == Key.Escape && root.choosing-for != "" {
-                                root.cancel-choose();
-                                return accept;
-                            }
-                            reject
-                        }
-                    }
-
-                    ListView {
-                        vertical-stretch: 1;
-                        min-height: 120px;
-                        for signal in root.signal-rows: Rectangle {
-                            height: 36px;
-                            background: pick.has-hover && root.choosing-for != "" ? Palette.accent-background.transparentize(0.8) : transparent;
-                            border-radius: 4px;
-                            accessible-role: list-item;
-                            accessible-label: signal.name + ", " + signal.value;
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                spacing: 8px;
-                                Text {
-                                    text: signal.name;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                    horizontal-stretch: 1;
-                                }
-                                Text {
-                                    text: signal.value;
-                                    vertical-alignment: center;
-                                    horizontal-alignment: right;
-                                    overflow: elide;
-                                    max-width: 160px;
-                                    color: Palette.foreground.transparentize(0.3);
-                                }
-                            }
-                            pick := TouchArea {
-                                mouse-cursor: root.choosing-for != "" ? MouseCursor.pointer : MouseCursor.default;
-                                clicked => {
-                                    if root.choosing-for != "" {
-                                        root.signal-picked(signal.name);
-                                        filter.text = "";
-                                        root.signal-filter("");
+                            // Not connected: nothing here is live.
+                            if !root.connected: Rectangle {
+                                height: offline-row.preferred-height + 20px;
+                                border-radius: Theme.r-surface;
+                                background: Theme.warn-surface;
+                                offline-row := HorizontalLayout {
+                                    padding: 10px;
+                                    padding-left: 14px;
+                                    spacing: 12px;
+                                    Icon {
+                                        glyph: Glyph.plug;
+                                        color: Theme.warn;
+                                        font-size: 18px;
+                                    }
+                                    Text {
+                                        text: @tr("Not connected to the strip's service, so editing is paused and these pictures are not live. Nothing is lost: a change waiting to be sent goes out when it is back.");
+                                        font-family: Theme.font;
+                                        font-size: Theme.size-body;
+                                        color: Theme.text;
+                                        wrap: word-wrap;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        accessible-role: text;
+                                    }
+                                    if root.status.start: VerticalLayout {
+                                        alignment: center;
+                                        Button {
+                                            tier: "primary";
+                                            icon: Glyph.power;
+                                            text: @tr("Start the service");
+                                            clicked => {
+                                                root.start-service();
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    if root.choosing-for != "": HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: @tr("Click a signal for {}, or type part of its name and press Enter.", root.choosing-for);
-                            color: Palette.accent-background;
-                            wrap: word-wrap;
-                            horizontal-stretch: 1;
-                            accessible-role: text;
-                        }
-                        Button {
-                            text: @tr("Cancel");
-                            clicked => {
-                                root.cancel-choose();
+                            // Section heading: pages.
+                            HorizontalLayout {
+                                padding-top: 12px;
+                                padding-bottom: 8px;
+                                spacing: 10px;
+                                Heading {
+                                    text: @tr("Pages");
+                                    accessible-role: text;
+                                }
+                                Hint {
+                                    text: @tr("Swipe the strip to move between them. Drag a page by its handle to reorder.");
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    wrap: no-wrap;
+                                    overflow: elide;
+                                }
+                            }
+
+                            for row[ri] in root.rows: block := VerticalLayout {
+                                property <bool> active: row.active;
+                                property <bool> is-page: row.kind == "page";
+                                changed active => {
+                                    if self.active {
+                                        reveal.running = true;
+                                    }
+                                }
+                                // Brings the strip being edited to the top of the
+                                // storyboard once its block has its final size.
+                                reveal := Timer {
+                                    interval: 60ms;
+                                    running: false;
+                                    triggered => {
+                                        self.running = false;
+                                        board.content-y =max(board.visible-height - content.preferred-height, min(0px, -(block.y - 8px)));
+                                    }
+                                }
+
+                                // The takeovers' heading, above the first.
+                                if row.first-takeover: VerticalLayout {
+                                    padding-top: 28px;
+                                    padding-bottom: 8px;
+                                    spacing: 2px;
+                                    Heading {
+                                        text: @tr("Takeovers");
+                                        accessible-role: text;
+                                    }
+                                    Hint {
+                                        text: @tr("A takeover covers the page for a few seconds when a reading changes: the track, the volume. Here it is shown as it would cover your first page.");
+                                    }
+                                }
+
+                                // The drop line while pages are reordered.
+                                if root.reorder-from >= 0 && is-page && root.reorder-to == row.index && root.reorder-to < root.reorder-from: Rectangle {
+                                    height: 4px;
+                                    border-radius: 2px;
+                                    background: Theme.act-line;
+                                }
+
+                                // Name line.
+                                HorizontalLayout {
+                                    height: 34px;
+                                    spacing: 8px;
+                                    if is-page: Rectangle {
+                                        width: 20px;
+                                        accessible-role: none;
+                                        Icon {
+                                            glyph: Glyph.grip;
+                                            color: grip.has-hover || grip.pressed ? Theme.text : Theme.text-3;
+                                            font-size: 16px;
+                                        }
+                                        grip := TouchArea {
+                                            enabled: root.connected && !root.trying;
+                                            mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
+                                            // Rows here are about one strip and its
+                                            // name apart.
+                                            property <length> pitch: root.strip-h + 2 * root.bezel + 34px + 10px;
+                                            pointer-event(event) => {
+                                                if event.button != PointerEventButton.left {
+                                                    return;
+                                                }
+                                                if event.kind == PointerEventKind.down {
+                                                    root.reorder-from = row.index;
+                                                    root.reorder-to = row.index;
+                                                } else if event.kind == PointerEventKind.up {
+                                                    if root.reorder-from >= 0 && root.reorder-to != root.reorder-from {
+                                                        root.move-page(root.reorder-from, root.reorder-to);
+                                                    }
+                                                    root.reorder-from = -1;
+                                                    root.reorder-to = -1;
+                                                } else if event.kind == PointerEventKind.cancel {
+                                                    root.reorder-from = -1;
+                                                    root.reorder-to = -1;
+                                                }
+                                            }
+                                            moved => {
+                                                if root.reorder-from >= 0 {
+                                                    root.reorder-to = max(0, min(root.page-count - 1,
+                                                        row.index + round((self.mouse-y - self.pressed-y) / self.pitch)));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if !is-page: Rectangle {
+                                        width: 20px;
+                                        Icon {
+                                            glyph: Glyph.cards;
+                                            color: Theme.text-3;
+                                            font-size: 16px;
+                                        }
+                                    }
+                                    Text {
+                                        text: row.name;
+                                        font-family: Theme.font;
+                                        font-size: Theme.size-body + 1px;
+                                        font-weight: row.active ? 600 : 500;
+                                        color: Theme.text;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        accessible-role: none;
+                                    }
+                                    if row.live && root.connected: VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 0;
+                                        Rectangle {
+                                            height: 22px;
+                                            width: live-row.preferred-width;
+                                            border-radius: 11px;
+                                            background: Theme.surface-2;
+                                            live-row := HorizontalLayout {
+                                                padding-left: 8px;
+                                                padding-right: 9px;
+                                                spacing: 5px;
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    Rectangle {
+                                                        width: 7px;
+                                                        height: 7px;
+                                                        border-radius: 3.5px;
+                                                        background: Theme.text;
+                                                    }
+                                                }
+                                                Text {
+                                                    text: @tr("On the strip");
+                                                    font-family: Theme.font;
+                                                    font-size: Theme.size-small;
+                                                    font-weight: 500;
+                                                    color: Theme.text;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: row.summary;
+                                        font-family: Theme.font;
+                                        font-size: Theme.size-label;
+                                        color: Theme.text-3;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+
+                                // The strip, in its bezel.
+                                strip-frame := Rectangle {
+                                    height: root.strip-h + 2 * root.bezel;
+                                    border-radius: 12px;
+                                    background: Theme.bezel;
+                                    border-width: row.active ? 2px : 1px;
+                                    border-color: row.active && !root.trying ? Theme.act-line.transparentize(0.3) : row.active ? Theme.line-strong : Theme.dark ? Theme.line : Theme.bezel;
+                                    opacity: root.connected ? 1 : 0.5;
+                                    accessible-role: button;
+                                    accessible-label: row.live
+                                        ? @tr("{}, on the strip. {}", row.name, row.summary)
+                                        : row.kind == "page" ? @tr("{}, page {}. Shows it on the strip to edit it.", row.name, row.index + 1)
+                                        : @tr("{}, takeover. Shows it on the strip to edit it.", row.name);
+                                    accessible-action-default => {
+                                        root.strip-clicked(row.kind, row.index, -1);
+                                    }
+
+                                    strip-image := Image {
+                                        x: root.bezel;
+                                        y: root.bezel;
+                                        width: root.strip-w;
+                                        height: root.strip-h;
+                                        source: row.live && root.connected ? root.frame : row.frame;
+                                        image-rendering: pixelated;
+                                        accessible-role: none;
+                                    }
+
+                                    // A new takeover has no picture yet.
+                                    if row.kind == "new-takeover": Rectangle {
+                                        x: root.bezel;
+                                        y: root.bezel;
+                                        width: root.strip-w;
+                                        height: root.strip-h;
+                                        Text {
+                                            text: @tr("Choose what shows it, then add its widgets here");
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-body;
+                                            color: #9c8c7c;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    // Not being edited: a click makes it the one.
+                                    if !row.active && row.kind != "new-takeover": Rectangle {
+                                        border-radius: 12px;
+                                        border-width: pick-strip.has-hover && root.connected ? 2px : 0px;
+                                        border-color: Theme.line-strong;
+                                        pick-strip := TouchArea {
+                                            enabled: root.connected;
+                                            mouse-cursor: root.connected ? MouseCursor.pointer : MouseCursor.default;
+                                            clicked => {
+                                                root.strip-clicked(row.kind, row.index, (self.mouse-x - root.bezel) / root.unit);
+                                            }
+                                        }
+                                    }
+
+                                    // Being edited: the widgets as a list, laid over
+                                    // the strip so the outlines are its items.
+                                    if row.active: keys := FocusScope {
+                                        // Its TouchArea focuses it; taking the press here would
+                                        // swallow the first click.
+                                        focus-on-click: false;
+                                        x: root.bezel;
+                                        y: root.bezel;
+                                        width: root.strip-w;
+                                        height: root.strip-h;
+                                        accessible-role: list;
+                                        accessible-label: @tr("Widgets on {}. Left and right arrows select; with Control they move the widget, with Shift they resize it; Delete removes it.", row.name);
+                                        key-pressed(event) => {
+                                            if !root.editable {
+                                                return reject;
+                                            }
+                                            if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                                                let step = event.text == Key.LeftArrow ? -1 : 1;
+                                                if event.modifiers.control {
+                                                    root.move-step(step);
+                                                } else if event.modifiers.shift {
+                                                    root.resize-step(step * 4);
+                                                } else {
+                                                    root.select-step(step);
+                                                }
+                                                return accept;
+                                            }
+                                            if event.text == Key.Delete && root.selected >= 0 {
+                                                root.delete-widget();
+                                                return accept;
+                                            }
+                                            if event.text == Key.Escape {
+                                                root.cancelled();
+                                                root.deselect();
+                                                return accept;
+                                            }
+                                            reject
+                                        }
+
+                                        if root.trying: TouchArea {
+                                            property <float> at: self.mouse-x / root.unit;
+                                            mouse-cursor: MouseCursor.pointer;
+                                            accessible-role: button;
+                                            accessible-label: @tr("The strip, to try: a tap or swipe here acts on it");
+                                            pointer-event(event) => {
+                                                if event.button != PointerEventButton.left {
+                                                    return;
+                                                }
+                                                if event.kind == PointerEventKind.down {
+                                                    root.try-press(self.at);
+                                                } else if event.kind == PointerEventKind.up {
+                                                    root.try-release(self.at);
+                                                } else if event.kind == PointerEventKind.cancel {
+                                                    root.try-cancel();
+                                                }
+                                            }
+                                        }
+
+                                        if root.editable && !root.trying: Rectangle {
+                                            for zone[i] in root.zones: Rectangle {
+                                                x: zone.x * root.unit;
+                                                width: zone.width * root.unit;
+                                                border-radius: 4px * root.zoom;
+                                                border-width: i == root.selected ? 2px : 1px;
+                                                border-color: i == root.selected ? Theme.accent-base : #fbf1e333;
+                                                accessible-role: list-item;
+                                                accessible-label: @tr("{}, {} pixels wide", zone.name, zone.width);
+                                                accessible-item-selectable: true;
+                                                accessible-item-selected: i == root.selected;
+                                                accessible-item-index: i;
+                                            }
+                                            if root.snap-x >= 0: Rectangle {
+                                                x: root.snap-x * root.unit - 1px;
+                                                y: -root.bezel;
+                                                width: 2px;
+                                                height: parent.height + 2 * root.bezel;
+                                                background: Theme.accent-text;
+                                            }
+                                            if root.ghost-width > 0: Rectangle {
+                                                x: root.ghost-x * root.unit;
+                                                width: root.ghost-width * root.unit;
+                                                border-radius: 4px * root.zoom;
+                                                border-width: 2px;
+                                                border-color: Theme.accent-base;
+                                                background: Theme.accent-base.transparentize(0.7);
+                                            }
+                                            if root.ghost-width > 0: Rectangle {
+                                                x: root.drop-x * root.unit - 2px;
+                                                width: 4px;
+                                                border-radius: 2px;
+                                                background: Theme.accent-base;
+                                            }
+                                            touch := TouchArea {
+                                                property <float> at: self.mouse-x / root.unit;
+                                                property <float> reach: 5px / root.unit;
+                                                property <int> edge: root.edge-at(self.at, self.reach);
+                                                mouse-cursor: self.edge >= 0 ? MouseCursor.ew-resize
+                                                    : self.pressed ? MouseCursor.grabbing : MouseCursor.pointer;
+                                                pointer-event(event) => {
+                                                    if event.button != PointerEventButton.left {
+                                                        return;
+                                                    }
+                                                    if event.kind == PointerEventKind.down {
+                                                        keys.focus();
+                                                        root.pressed(self.at, self.reach);
+                                                    } else if event.kind == PointerEventKind.up {
+                                                        root.released(self.at);
+                                                    } else if event.kind == PointerEventKind.cancel {
+                                                        root.cancelled();
+                                                    }
+                                                }
+                                                moved => {
+                                                    root.dragged(self.at);
+                                                }
+                                            }
+                                            // The grip on the selected widget's right edge:
+                                            // drag it to resize.
+                                            if root.selected >= 0 && root.ghost-width == 0: Rectangle {
+                                                property <Zone> zn: root.zones[root.selected];
+                                                x: (zn.x + zn.width) * root.unit - self.width / 2;
+                                                y: (parent.height - self.height) / 2;
+                                                width: 10px;
+                                                height: min(30px, parent.height - 6px);
+                                                border-radius: 5px;
+                                                background: Theme.accent-base;
+                                                border-width: 2px;
+                                                border-color: #14110f;
+                                                accessible-role: none;
+                                                Rectangle {
+                                                    width: 2px;
+                                                    height: parent.height - 12px;
+                                                    border-radius: 1px;
+                                                    background: #14110f80;
+                                                }
+                                            }
+                                        }
+                                        // An empty page: the way to fill it, on it.
+                                        if row.empty && root.editable && !root.trying: Rectangle {
+                                            x: 4px;
+                                            y: 4px;
+                                            width: parent.width - 8px;
+                                            height: parent.height - 8px;
+                                            border-radius: 8px;
+                                            border-width: 1.5px;
+                                            border-color: Theme.accent-base;
+                                            background: empty-touch.has-hover ? #ffffff10 : transparent;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 8px;
+                                                Icon {
+                                                    glyph: Glyph.plus;
+                                                    color: Theme.accent-text;
+                                                }
+                                                Text {
+                                                    text: @tr("Add a widget to this page");
+                                                    font-family: Theme.font;
+                                                    font-size: Theme.size-body;
+                                                    font-weight: 500;
+                                                    color: Theme.accent-text;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            empty-touch := TouchArea {
+                                                mouse-cursor: MouseCursor.pointer;
+                                                clicked => {
+                                                    root.open-gallery();
+                                                    root.show-sheet("gallery");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if root.reorder-from >= 0 && is-page && root.reorder-to == row.index && root.reorder-to > root.reorder-from: Rectangle {
+                                    height: 4px;
+                                    border-radius: 2px;
+                                    background: Theme.act-line;
+                                }
+
+                                // Under the strip being edited: what is happening,
+                                // and what can be done to it.
+                                if row.active: HorizontalLayout {
+                                    padding-top: 8px;
+                                    padding-bottom: 8px;
+                                    spacing: 8px;
+                                    min-height: 50px;
+                                    Text {
+                                        text: root.problem != "" ? root.problem : root.caption;
+                                        font-family: Theme.font;
+                                        font-size: Theme.size-label;
+                                        color: root.problem != "" ? Theme.crit : Theme.text-2;
+                                        font-weight: root.problem != "" ? 500 : 400;
+                                        wrap: word-wrap;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        accessible-role: text;
+                                    }
+                                    if !root.trying && row.kind != "new-takeover": HorizontalLayout {
+                                        spacing: 6px;
+                                        alignment: end;
+                                        Button {
+                                            tier: "quiet";
+                                            icon: Glyph.widths;
+                                            text: @tr("Equal widths");
+                                            enabled: root.editable && root.zones.length > 1;
+                                            label: @tr("Give every widget on {} the same width", row.name);
+                                            clicked => {
+                                                root.equal-widths();
+                                            }
+                                        }
+                                        Button {
+                                            tier: "primary";
+                                            icon: Glyph.plus;
+                                            text: root.selected >= 0 ? @tr("Add after") : @tr("Add");
+                                            enabled: root.editable && root.can-add;
+                                            label: root.can-add ? @tr("Add a widget to {}", row.name) : root.add-reason;
+                                            clicked => {
+                                                root.open-gallery();
+                                                root.show-sheet("gallery");
+                                            }
+                                        }
+                                    }
+                                }
+                                if row.active && !root.can-add && !root.trying && root.editable: Hint {
+                                    text: root.add-reason;
+                                    horizontal-alignment: right;
+                                }
+
+                                // The settings, attached to the strip.
+                                if row.active && !root.trying: panel := Rectangle {
+                                    property <length> most: max(220px, board.visible-height - root.strip-h - 2 * root.bezel - 34px - 50px - 32px);
+                                    height: min(panel-body.preferred-height, self.most);
+                                    border-radius: Theme.r-surface;
+                                    background: Theme.surface;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    clip: true;
+                                    panel-scroll := ScrollView {
+                                        panel-body := VerticalLayout {
+                                            padding: 18px;
+                                            padding-top: 14px;
+                                            spacing: 12px;
+                                            // The title of what the settings are for.
+                                            HorizontalLayout {
+                                                spacing: 10px;
+                                                height: 34px;
+                                                if root.panel-icon != "": VerticalLayout {
+                                                    alignment: center;
+                                                    Rectangle {
+                                                        width: 30px;
+                                                        height: 30px;
+                                                        border-radius: 8px;
+                                                        background: Theme.surface-2;
+                                                        Icon {
+                                                            glyph: root.panel-icon;
+                                                            fill: true;
+                                                            font-size: 17px;
+                                                        }
+                                                    }
+                                                }
+                                                Text {
+                                                    text: root.panel-title;
+                                                    font-family: Theme.font;
+                                                    font-size: Theme.size-title;
+                                                    font-weight: 600;
+                                                    color: Theme.text;
+                                                    vertical-alignment: center;
+                                                    overflow: elide;
+                                                    accessible-role: text;
+                                                }
+                                                Text {
+                                                    text: root.panel-note;
+                                                    font-family: Theme.font;
+                                                    font-size: Theme.size-label;
+                                                    color: Theme.text-3;
+                                                    vertical-alignment: center;
+                                                    horizontal-stretch: 1;
+                                                    overflow: elide;
+                                                }
+                                                if root.panel-kind == "widget": Button {
+                                                    tier: "quiet";
+                                                    destructive: true;
+                                                    icon: Glyph.trash;
+                                                    text: @tr("Remove");
+                                                    label: @tr("Remove {} from the page (undo brings it back)", root.panel-title);
+                                                    enabled: root.editable;
+                                                    clicked => {
+                                                        root.delete-widget();
+                                                    }
+                                                }
+                                                if root.panel-kind == "page": Button {
+                                                    tier: "quiet";
+                                                    destructive: true;
+                                                    icon: Glyph.trash;
+                                                    text: @tr("Delete page");
+                                                    enabled: root.editable && root.page-count > 1;
+                                                    label: @tr("Delete the page {} (undo brings it back)", root.panel-title);
+                                                    clicked => {
+                                                        root.delete-page();
+                                                    }
+                                                }
+                                                if root.panel-kind == "takeover" || root.panel-kind == "new-takeover": Button {
+                                                    tier: "quiet";
+                                                    destructive: root.panel-kind == "takeover";
+                                                    icon: root.panel-kind == "takeover" ? Glyph.trash : Glyph.close;
+                                                    text: root.panel-kind == "takeover" ? @tr("Delete takeover") : @tr("Cancel");
+                                                    enabled: root.connected;
+                                                    clicked => {
+                                                        root.delete-takeover();
+                                                    }
+                                                }
+                                            }
+                                            // The page's own setting: its name.
+                                            if root.panel-kind == "page": HorizontalLayout {
+                                                spacing: 16px;
+                                                Text {
+                                                    text: @tr("Name");
+                                                    width: Grid.label;
+                                                    y: 9px;
+                                                    vertical-alignment: top;
+                                                    font-family: Theme.font;
+                                                    font-weight: 500;
+                                                    color: Theme.text-2;
+                                                    accessible-role: none;
+                                                }
+                                                VerticalLayout {
+                                                    spacing: 4px;
+                                                    max-width: Grid.control-max;
+                                                    for item in [{ name: root.page-name, epoch: root.resets }]: TextField {
+                                                        text: item.name;
+                                                        committed-value: item.name;
+                                                        label: @tr("Page name");
+                                                        enabled: root.editable;
+                                                        accepted(text) => {
+                                                            root.rename-page(text);
+                                                        }
+                                                        committed(text) => {
+                                                            root.rename-page(text);
+                                                        }
+                                                    }
+                                                    Hint {
+                                                        text: @tr("Click a widget on the strip above to change it, or Add to put a new one on this page.");
+                                                    }
+                                                }
+                                            }
+                                            for field in root.fields: FieldRow {
+                                                field: field;
+                                                enabled: root.editable || root.panel-kind == "new-takeover";
+                                                picks: root.picks;
+                                                triggers: root.triggers;
+                                                changed(key, value) => {
+                                                    root.field-changed(key, value);
+                                                }
+                                                chose(key, index) => {
+                                                    root.field-chosen(key, index);
+                                                }
+                                                open-picker(key) => {
+                                                    root.open-picker(key);
+                                                }
+                                                picker-filter(text) => {
+                                                    root.picker-filter(text);
+                                                }
+                                                picked(key, id) => {
+                                                    root.picked(key, id);
+                                                }
+                                                remove-trigger(id) => {
+                                                    root.remove-trigger(id);
+                                                }
+                                            }
+                                            if root.draft-hint != "": HorizontalLayout {
+                                                padding-left: Grid.label + 16px;
+                                                Text {
+                                                    text: root.draft-hint;
+                                                    font-family: Theme.font;
+                                                    font-size: Theme.size-label;
+                                                    color: Theme.text-2;
+                                                    wrap: word-wrap;
+                                                    accessible-role: text;
+                                                }
+                                            }
+                                            if root.panel-kind == "new-takeover": HorizontalLayout {
+                                                padding-left: Grid.label + 16px;
+                                                alignment: start;
+                                                Button {
+                                                    tier: "primary";
+                                                    icon: Glyph.plus;
+                                                    text: @tr("Add takeover");
+                                                    enabled: root.connected && root.draft-hint == "";
+                                                    label: root.draft-hint == "" ? @tr("Add this takeover") : root.draft-hint;
+                                                    clicked => {
+                                                        root.create-takeover();
+                                                    }
+                                                }
+                                            }
+                                            // The keyboard, shown where it is used.
+                                            if root.panel-kind != "new-takeover": HorizontalLayout {
+                                                padding-top: 6px;
+                                                spacing: 16px;
+                                                Icon {
+                                                    glyph: Glyph.keyboard;
+                                                    color: Theme.text-3;
+                                                }
+                                                Shortcut {
+                                                    keys: ["←", "→"];
+                                                    does: @tr("select");
+                                                }
+                                                Shortcut {
+                                                    keys: ["Ctrl", "← →"];
+                                                    does: @tr("move");
+                                                }
+                                                Shortcut {
+                                                    keys: ["Shift", "← →"];
+                                                    does: @tr("resize");
+                                                }
+                                                Shortcut {
+                                                    keys: ["Delete"];
+                                                    does: @tr("remove");
+                                                }
+                                                Shortcut {
+                                                    keys: ["Ctrl", "Z"];
+                                                    does: @tr("undo");
+                                                }
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if row.last-page: HorizontalLayout {
+                                    padding-top: 12px;
+                                    alignment: start;
+                                    Button {
+                                        tier: "default";
+                                        icon: Glyph.plus;
+                                        text: @tr("Add page");
+                                        enabled: root.connected && !root.trying;
+                                        clicked => {
+                                            root.add-page();
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    height: 10px;
+                                }
+                            }
+
+                            // Takeovers: the heading when there are none yet, and
+                            // the way to add one.
+                            if root.takeover-count == 0: VerticalLayout {
+                                padding-top: 28px;
+                                padding-bottom: 8px;
+                                spacing: 2px;
+                                Heading {
+                                    text: @tr("Takeovers");
+                                }
+                                Hint {
+                                    text: @tr("A takeover covers the page for a few seconds when a reading changes: the track, the volume. None yet.");
+                                }
+                            }
+                            HorizontalLayout {
+                                padding-top: 4px;
+                                alignment: start;
+                                Button {
+                                    icon: Glyph.plus;
+                                    text: @tr("Add takeover");
+                                    enabled: root.connected && !root.trying;
+                                    clicked => {
+                                        root.add-takeover();
+                                    }
+                                }
+                            }
+
+                            // For tinkerers: every reading, live.
+                            VerticalLayout {
+                                padding-top: 36px;
+                                spacing: 8px;
+                                drawer-head := Rectangle {
+                                    height: 36px;
+                                    border-radius: Theme.r-control;
+                                    background: drawer-touch.has-hover ? Theme.surface-2 : transparent;
+                                    property <bool> open: false;
+                                    accessible-role: button;
+                                    accessible-label: self.open ? @tr("Signals, expanded") : @tr("Signals, collapsed");
+                                    accessible-expandable: true;
+                                    accessible-expanded: self.open;
+                                    accessible-action-default => {
+                                        self.open = !self.open;
+                                    }
+                                    HorizontalLayout {
+                                        padding-left: 6px;
+                                        spacing: 8px;
+                                        Icon {
+                                            glyph: drawer-head.open ? Glyph.caret-down : Glyph.caret-right;
+                                            font-size: 14px;
+                                        }
+                                        Text {
+                                            text: @tr("Signals");
+                                            font-family: Theme.font;
+                                            font-weight: 600;
+                                            color: Theme.text-2;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: !root.connected ? @tr("not live while disconnected")
+                                                : @tr("every reading the strip can show, by its raw name ({})", root.signal-rows.length);
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-label;
+                                            color: Theme.text-3;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                        }
+                                    }
+                                    drawer-touch := TouchArea {
+                                        mouse-cursor: MouseCursor.pointer;
+                                        clicked => {
+                                            drawer-focus.focus();
+                                            drawer-head.open = !drawer-head.open;
+                                        }
+                                    }
+                                    drawer-focus := FocusScope {
+                                        // Its TouchArea focuses it; taking the press here would
+                                        // swallow the first click.
+                                        focus-on-click: false;
+                                        key-pressed(event) => {
+                                            if event.text == " " || event.text == Key.Return {
+                                                drawer-head.open = !drawer-head.open;
+                                                return accept;
+                                            }
+                                            reject
+                                        }
+                                    }
+                                    FocusRing {
+                                        width: parent.width + 6px;
+                                        height: parent.height + 6px;
+                                        shown: drawer-focus.has-focus;
+                                    }
+                                }
+                                if drawer-head.open: Rectangle {
+                                    border-radius: Theme.r-surface;
+                                    background: Theme.surface;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        for s in root.signal-rows: HorizontalLayout {
+                                            height: 30px;
+                                            spacing: 10px;
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            accessible-role: list-item;
+                                            accessible-label: s.id + ", " + s.name + ", " + s.value;
+                                            Icon {
+                                                glyph: s.icon;
+                                                fill: true;
+                                                width: 18px;
+                                            }
+                                            Text {
+                                                text: s.id;
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-label;
+                                                color: Theme.text;
+                                                vertical-alignment: center;
+                                                width: 160px;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: s.name;
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-label;
+                                                color: Theme.text-3;
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                text: root.connected ? s.value : "—";
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-label;
+                                                color: Theme.text-2;
+                                                vertical-alignment: center;
+                                                horizontal-alignment: right;
+                                                overflow: elide;
+                                                max-width: 200px;
+                                            }
+                                        }
+                                        if root.signal-rows.length == 0: Hint {
+                                            text: @tr("No readings yet.");
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
-
     }
 
-    about := PopupWindow {
-        width: min(440px, root.width - 32px);
-        x: (root.width - self.width) / 2;
-        y: 72px;
-        close-policy: close-on-click-outside;
+    // ---- Menus ----------------------------------------------------------
 
+    layout-menu := PopupWindow {
+        // Closed by its rows: the default policy would also close it on
+        // the release of the click that opened it.
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        x: layout-button.absolute-position.x - root.absolute-position.x;
+        y: header.height - 6px;
+        width: 300px;
         Rectangle {
-            background: Palette.background;
-            border-color: Palette.border;
+            background: Theme.surface;
+            border-radius: Theme.r-surface;
             border-width: 1px;
-            border-radius: 8px;
-            drop-shadow-blur: 24px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 20px;
             drop-shadow-color: #00000060;
-
             VerticalLayout {
-                padding: 20px;
-                spacing: 10px;
-
+                padding: 6px;
                 Text {
-                    text: @tr("Nexus Open");
-                    font-size: 18px;
+                    text: @tr("Layouts");
+                    font-family: Theme.font;
+                    font-size: Theme.size-small;
                     font-weight: 600;
+                    color: Theme.text-3;
+                    height: 26px;
+                    vertical-alignment: center;
+                    x: 10px;
                 }
-                Text {
-                    text: root.daemon-version == "" || root.daemon-version == root.version
-                        ? @tr("Version {}", root.version)
-                        : @tr("Version {} (nexusd {})", root.version, root.daemon-version);
-                    color: Palette.foreground.transparentize(0.35);
-                }
-                Text {
-                    text: @tr("Drives the Corsair iCUE Nexus touch strip. Not made or endorsed by Corsair.");
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: @tr("Free software under the MIT license: {}", root.homepage);
-                    wrap: word-wrap;
-                }
-                AboutSlint { }
-                HorizontalLayout {
-                    alignment: end;
-                    Button {
-                        text: @tr("Close");
-                        // Built afresh each time the dialog opens, so this
-                        // puts the keyboard here every time.
-                        init => {
-                            self.focus();
-                        }
+                for l[i] in root.layouts: HorizontalLayout {
+                    MenuRow {
+                        text: l.name;
+                        checked: l.active;
+                        note: l.active ? @tr("on the strip") : "";
                         clicked => {
-                            about.close();
+                            layout-menu.close();
+                            root.use-layout(i);
                         }
                     }
+                    if !l.active: IconButton {
+                        icon: Glyph.trash;
+                        label: @tr("Delete layout {} (undo brings it back)", l.name);
+                        clicked => {
+                            layout-menu.close();
+                            root.delete-layout(i);
+                        }
+                    }
+                }
+                MenuDivider { }
+                MenuRow {
+                    icon: Glyph.plus;
+                    text: @tr("New layout…");
+                    clicked => {
+                        layout-menu.close();
+                        root.open-starters();
+                        root.show-sheet("starters");
+                    }
+                }
+                MenuRow {
+                    icon: Glyph.copy;
+                    text: @tr("Duplicate");
+                    clicked => {
+                        layout-menu.close();
+                        root.duplicate-layout();
+                    }
+                }
+                MenuRow {
+                    icon: Glyph.pencil;
+                    text: @tr("Rename…");
+                    clicked => {
+                        layout-menu.close();
+                        root.show-sheet("rename");
+                    }
+                }
+                MenuDivider { }
+                MenuRow {
+                    icon: Glyph.import;
+                    text: @tr("Import from a file…");
+                    clicked => {
+                        layout-menu.close();
+                        root.import-layout();
+                    }
+                }
+                MenuRow {
+                    icon: Glyph.export;
+                    text: @tr("Export to a file…");
+                    clicked => {
+                        layout-menu.close();
+                        root.export-layout();
+                    }
+                }
+            }
+        }
+    }
+
+    more-menu := PopupWindow {
+        // Closed by its rows: the default policy would also close it on
+        // the release of the click that opened it.
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        x: root.width - 250px;
+        y: header.height - 6px;
+        width: 240px;
+        Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.r-surface;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 20px;
+            drop-shadow-color: #00000060;
+            VerticalLayout {
+                padding: 6px;
+                MenuRow {
+                    icon: Glyph.gear;
+                    text: @tr("Preferences…");
+                    enabled: root.connected;
+                    clicked => {
+                        more-menu.close();
+                        root.show-sheet("prefs");
+                    }
+                }
+                MenuRow {
+                    icon: Glyph.copy;
+                    text: root.copied ? @tr("Copied") : @tr("Copy diagnostics");
+                    enabled: root.diagnostics != "";
+                    clicked => {
+                        more-menu.close();
+                        root.copy-diagnostics();
+                    }
+                }
+                MenuDivider { }
+                // At the window's top level and never disabled: Slint's
+                // royalty-free licence asks for its AboutSlint widget in an
+                // About screen reached from there.
+                MenuRow {
+                    icon: Glyph.info;
+                    text: @tr("About Nexus Open");
+                    clicked => {
+                        more-menu.close();
+                        root.show-sheet("about");
+                    }
+                }
+            }
+        }
+    }
+
+    status-menu := PopupWindow {
+        x: max(8px, status-chip.absolute-position.x - root.absolute-position.x + status-chip.width - self.width);
+        y: header.height - 6px;
+        width: 400px;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.r-surface;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 20px;
+            drop-shadow-color: #00000060;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                Text {
+                    text: root.status.headline;
+                    font-family: Theme.font;
+                    font-size: Theme.size-title;
+                    font-weight: 600;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+                Text {
+                    text: root.status.body;
+                    font-family: Theme.font;
+                    color: Theme.text-2;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    if root.status.start: Button {
+                        tier: "primary";
+                        icon: Glyph.power;
+                        text: @tr("Start the service");
+                        clicked => {
+                            root.start-service();
+                        }
+                    }
+                    if root.status.retry: Button {
+                        tier: root.status.start ? "default" : "primary";
+                        icon: Glyph.retry;
+                        text: @tr("Try again");
+                        clicked => {
+                            root.check-again();
+                        }
+                    }
+                    if root.status.log: Button {
+                        icon: Glyph.log;
+                        text: @tr("Open the log");
+                        clicked => {
+                            root.open-log();
+                            root.show-sheet("log");
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        tier: "quiet";
+                        compact: true;
+                        icon: Glyph.copy;
+                        text: root.copied ? @tr("Copied") : @tr("Copy diagnostics");
+                        enabled: root.diagnostics != "";
+                        clicked => {
+                            root.copy-diagnostics();
+                        }
+                    }
+                }
+                if root.status.detail != "": VerticalLayout {
+                    spacing: 4px;
+                    Hint {
+                        text: @tr("For those who use a terminal:");
+                    }
+                    Rectangle {
+                        border-radius: 8px;
+                        background: Theme.surface-2;
+                        TextInput {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            text: root.status.detail;
+                            read-only: true;
+                            single-line: false;
+                            wrap: word-wrap;
+                            font-family: "monospace";
+                            font-size: 12px;
+                            color: Theme.text-2;
+                            accessible-label: @tr("The fix as commands");
+                        }
+                        min-height: 30px;
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Sheets ---------------------------------------------------------
+
+    if root.sheet == "gallery": Sheet {
+        title: @tr("Add to the strip");
+        subtitle: root.gallery-note;
+        // As many whole columns of tiles as fit, up to three, and the
+        // sheet exactly as wide as they are.
+        property <length> tile-w: 240 * root.unit + 32px;
+        property <int> cols: max(1, min(3, floor((root.width - 64px - 64px + 12px) / (tile-w + 12px))));
+        sheet-width: cols * (tile-w + 12px) - 12px + 48px + 16px;
+        close => {
+            root.sheet = "";
+        }
+        for g[gi] in root.groups: VerticalLayout {
+            padding-bottom: 16px;
+            spacing: 10px;
+            Text {
+                text: g;
+                font-family: Theme.font;
+                font-size: Theme.size-title;
+                font-weight: 600;
+                color: Theme.text;
+                accessible-role: text;
+            }
+            Rectangle {
+                property <int> cols: max(1, floor((self.width + 12px) / (tile-w + 12px)));
+                height: ceil(root.group-sizes[gi] / self.cols) * (48 * root.unit + 96px) - 12px;
+                for t[ti] in root.tiles: Rectangle {
+                    visible: t.group == gi;
+                    x: mod(t.slot, parent.cols) * (tile-w + 12px);
+                    y: floor(t.slot / parent.cols) * (48 * root.unit + 96px);
+                    width: tile-w;
+                    height: 48 * root.unit + 84px;
+                    border-radius: Theme.r-surface;
+                    background: tile-touch.has-hover && root.can-add ? Theme.surface-2 : Theme.surface;
+                    border-width: tile-focus.has-focus ? 2px : 1px;
+                    border-color: tile-focus.has-focus ? Theme.act-line : Theme.line;
+                    opacity: root.can-add ? 1 : 0.5;
+                    accessible-role: button;
+                    accessible-label: @tr("{}: {}", t.name, t.about);
+                    accessible-enabled: root.can-add;
+                    accessible-action-default => {
+                        if root.can-add {
+                            root.add-tile(ti);
+                            root.sheet = "";
+                        }
+                    }
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 8px;
+                        // The widget in a bezel its own width, as wide
+                        // as it would be on the strip.
+                        HorizontalLayout {
+                            alignment: start;
+                            Rectangle {
+                            width: t.width * root.unit + 8px;
+                            height: 48 * root.unit + 8px;
+                            border-radius: 8px;
+                            background: Theme.bezel;
+                            Image {
+                                x: 4px;
+                                y: 4px;
+                                width: t.width * root.unit;
+                                height: 48 * root.unit;
+                                source: t.image;
+                                image-rendering: pixelated;
+                            }
+                            }
+                        }
+                        Text {
+                            text: t.name;
+                            font-family: Theme.font;
+                            font-weight: 600;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: t.about;
+                            font-family: Theme.font;
+                            font-size: Theme.size-label;
+                            color: Theme.text-3;
+                            overflow: elide;
+                        }
+                    }
+                    tile-touch := TouchArea {
+                        enabled: root.can-add;
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            root.add-tile(ti);
+                            root.sheet = "";
+                        }
+                    }
+                    tile-focus := FocusScope {
+                        // Its TouchArea focuses it; taking the press here would
+                        // swallow the first click.
+                        focus-on-click: false;
+                        enabled: t.group == gi && root.can-add;
+                        key-pressed(event) => {
+                            if event.text == " " || event.text == Key.Return {
+                                root.add-tile(ti);
+                                root.sheet = "";
+                                return accept;
+                            }
+                            reject
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.sheet == "starters": Sheet {
+        title: root.first-run ? @tr("Welcome. How should your strip start?") : @tr("New layout");
+        subtitle: root.first-run
+            ? @tr("Pick one to put it on the strip now. Everything in it can be changed afterwards, and undo takes it back.")
+            : @tr("It goes on the strip at once. Undo takes it back.");
+        // Previews at exactly 1x: the sheet is a chooser, not the editor.
+        sheet-width: 640px + 8px + 28px + 48px + 16px;
+        close => {
+            if root.first-run {
+                root.dismiss-first-run();
+            }
+            root.sheet = "";
+        }
+        VerticalLayout {
+            spacing: 12px;
+            for s[i] in root.starters: Rectangle {
+                height: 48px + 82px;
+                border-radius: Theme.r-surface;
+                background: st-touch.has-hover ? Theme.surface-2 : Theme.surface;
+                border-width: st-focus.has-focus ? 2px : 1px;
+                border-color: st-focus.has-focus ? Theme.act-line : Theme.line;
+                accessible-role: button;
+                accessible-label: @tr("{}: {}", s.name, s.about);
+                accessible-action-default => {
+                    root.choose-starter(i);
+                    root.sheet = "";
+                }
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: s.name;
+                            font-family: Theme.font;
+                            font-weight: 600;
+                            font-size: Theme.size-title;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: s.about;
+                            font-family: Theme.font;
+                            font-size: Theme.size-label;
+                            color: Theme.text-3;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                    }
+                    Rectangle {
+                        height: 48px + 8px;
+                        width: 640px + 8px;
+                        border-radius: 8px;
+                        background: Theme.bezel;
+                        Image {
+                            x: 4px;
+                            y: 4px;
+                            width: 640px;
+                            height: 48px;
+                            source: s.image;
+                            image-rendering: pixelated;
+                        }
+                    }
+                }
+                st-touch := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => {
+                        root.choose-starter(i);
+                        root.sheet = "";
+                    }
+                }
+                st-focus := FocusScope {
+                    // Its TouchArea focuses it; taking the press here would
+                    // swallow the first click.
+                    focus-on-click: false;
+                    key-pressed(event) => {
+                        if event.text == " " || event.text == Key.Return {
+                            root.choose-starter(i);
+                            root.sheet = "";
+                            return accept;
+                        }
+                        reject
+                    }
+                }
+            }
+            if root.first-run: HorizontalLayout {
+                alignment: end;
+                Button {
+                    tier: "quiet";
+                    text: @tr("Keep the one on the strip");
+                    clicked => {
+                        root.dismiss-first-run();
+                        root.sheet = "";
+                    }
+                }
+            }
+        }
+    }
+
+    if root.sheet == "rename": Sheet {
+        title: @tr("Rename the layout");
+        sheet-width: 460px;
+        close => {
+            root.sheet = "";
+        }
+        VerticalLayout {
+            spacing: 14px;
+            name-field := TextField {
+                text: root.layout-name;
+                label: @tr("Layout name");
+                init => {
+                    self.focus-input();
+                    self.select-all();
+                }
+                accepted(text) => {
+                    root.rename-layout(text);
+                    root.sheet = "";
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                Button {
+                    tier: "quiet";
+                    text: @tr("Cancel");
+                    clicked => {
+                        root.sheet = "";
+                    }
+                }
+                Button {
+                    tier: "primary";
+                    text: @tr("Rename");
+                    clicked => {
+                        root.rename-layout(name-field.text);
+                        root.sheet = "";
+                    }
+                }
+            }
+        }
+    }
+
+    if root.sheet == "prefs": Sheet {
+        title: @tr("Preferences");
+        subtitle: @tr("For every layout. Changes show on the strip at once, and undo takes them back.");
+        sheet-width: 680px;
+        close => {
+            root.sheet = "";
+        }
+        VerticalLayout {
+            spacing: 18px;
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Temperatures");
+                    width: Grid.label;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Segmented {
+                        options: ["°C", "°F"];
+                        current: root.pref-temperature;
+                        label: @tr("Temperatures in");
+                        chose(i) => {
+                            root.set-pref("temperature", i == 1 ? "f" : "c");
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Clock");
+                    width: Grid.label;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Segmented {
+                        options: [@tr("24-hour"), @tr("12-hour")];
+                        current: root.pref-clock;
+                        label: @tr("Clock");
+                        chose(i) => {
+                            root.set-pref("clock", i == 1 ? "12" : "24");
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Accent");
+                    width: Grid.label;
+                    y: 6px;
+                    vertical-alignment: top;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                VerticalLayout {
+                    spacing: 10px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        for c[i] in root.accent-swatches: Rectangle {
+                            width: 34px;
+                            height: 34px;
+                            border-radius: 17px;
+                            background: c;
+                            border-width: i == root.accent-current ? 3px : 0px;
+                            border-color: Theme.text;
+                            accessible-role: button;
+                            accessible-label: root.accent-names[i];
+                            accessible-item-selectable: true;
+                            accessible-item-selected: i == root.accent-current;
+                            accessible-action-default => {
+                                root.set-pref("accent-preset", i);
+                            }
+                            if i == root.accent-current: Icon {
+                                glyph: Glyph.check;
+                                color: #14110f;
+                            }
+                            sw-touch := TouchArea {
+                                mouse-cursor: MouseCursor.pointer;
+                                clicked => {
+                                    sw-focus.focus();
+                                    root.set-pref("accent-preset", i);
+                                }
+                            }
+                            sw-focus := FocusScope {
+                                // Its TouchArea focuses it; taking the press here would
+                                // swallow the first click.
+                                focus-on-click: false;
+                                key-pressed(event) => {
+                                    if event.text == " " || event.text == Key.Return {
+                                        root.set-pref("accent-preset", i);
+                                        return accept;
+                                    }
+                                    reject
+                                }
+                            }
+                            FocusRing {
+                                width: parent.width + 6px;
+                                height: parent.height + 6px;
+                                shown: sw-focus.has-focus;
+                                radius: 17px;
+                            }
+                        }
+                        for item in [{ v: root.pref-accent, epoch: root.resets }]: TextField {
+                            width: 130px;
+                            text: item.v;
+                            committed-value: item.v;
+                            placeholder: "#b6a2ff";
+                            label: @tr("Your own colour, written #rrggbb");
+                            accepted(text) => {
+                                root.set-pref("accent", text);
+                            }
+                            committed(text) => {
+                                root.set-pref("accent", text);
+                            }
+                        }
+                    }
+                    // What the accent marks, as the strip draws it: things a
+                    // finger can act on, never readings or warnings.
+                    Rectangle {
+                        height: 92px;
+                        border-radius: Theme.r-surface;
+                        background: #14110f;
+                        HorizontalLayout {
+                            padding: 12px;
+                            spacing: 18px;
+                            VerticalLayout {
+                                spacing: 6px;
+                                alignment: center;
+                                Rectangle {
+                                    width: 44px;
+                                    height: 33px;
+                                    border-radius: 9px;
+                                    background: Theme.accent-base;
+                                    Icon {
+                                        glyph: "\u{e3d0}";
+                                        fill: true;
+                                        color: Theme.accent-ink;
+                                        font-size: 20px;
+                                    }
+                                }
+                                Text {
+                                    text: @tr("Main key");
+                                    font-family: Theme.font;
+                                    font-size: 11px;
+                                    color: #9c8c7c;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 6px;
+                                alignment: center;
+                                Rectangle {
+                                    width: 44px;
+                                    height: 33px;
+                                    border-radius: 9px;
+                                    background: #4a3e35;
+                                    Rectangle {
+                                        y: 0;
+                                        height: 1px;
+                                        width: parent.width - 16px;
+                                        background: #65564a;
+                                    }
+                                    Icon {
+                                        glyph: "\u{e28e}";
+                                        color: Theme.accent-text;
+                                        font-size: 20px;
+                                    }
+                                }
+                                Text {
+                                    text: @tr("Key");
+                                    font-family: Theme.font;
+                                    font-size: 11px;
+                                    color: #9c8c7c;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 6px;
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Rectangle {
+                                    height: 33px;
+                                    Rectangle {
+                                        y: 14px;
+                                        height: 5px;
+                                        border-radius: 2.5px;
+                                        background: #3d342d;
+                                    }
+                                    Rectangle {
+                                        x: 0;
+                                        y: 14px;
+                                        width: parent.width * 0.6;
+                                        height: 5px;
+                                        border-radius: 2.5px;
+                                        background: Theme.accent-fill;
+                                    }
+                                    Rectangle {
+                                        x: parent.width * 0.6 - 8px;
+                                        y: 8.5px;
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 8px;
+                                        background: #e6d6c0;
+                                        border-width: 2px;
+                                        border-color: Theme.accent-base;
+                                    }
+                                }
+                                Text {
+                                    text: @tr("Slider");
+                                    font-family: Theme.font;
+                                    font-size: 11px;
+                                    color: #9c8c7c;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 6px;
+                                alignment: center;
+                                Rectangle {
+                                    width: 96px;
+                                    height: 33px;
+                                    border-radius: 9px;
+                                    border-width: 1.5px;
+                                    border-color: Theme.accent-base;
+                                    Text {
+                                        text: @tr("Set up");
+                                        font-family: Theme.font;
+                                        font-weight: 600;
+                                        color: Theme.accent-text;
+                                    }
+                                }
+                                Text {
+                                    text: @tr("Not set up");
+                                    font-family: Theme.font;
+                                    font-size: 11px;
+                                    color: #9c8c7c;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 6px;
+                                alignment: center;
+                                Rectangle {
+                                    width: 60px;
+                                    height: 33px;
+                                    border-radius: 9px;
+                                    background: #241e1a;
+                                    Text {
+                                        text: "52°";
+                                        font-family: Theme.font;
+                                        font-weight: 600;
+                                        font-size: 18px;
+                                        color: #fbf1e3;
+                                    }
+                                }
+                                Text {
+                                    text: @tr("Readings stay cream");
+                                    font-family: Theme.font;
+                                    font-size: 11px;
+                                    color: #9c8c7c;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                    Hint {
+                        text: root.accent-note != "" ? root.accent-note
+                            : @tr("The accent marks what a finger can act on: keys, sliders, things to set up. Readings and warnings never take it.");
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Weather for");
+                    width: Grid.label;
+                    y: 8px;
+                    vertical-alignment: top;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    for item in [{ v: root.pref-weather, epoch: root.resets }]: TextField {
+                        text: item.v;
+                        committed-value: item.v;
+                        placeholder: @tr("Your town, as in: Lyon, France");
+                        label: @tr("Weather for");
+                        accepted(text) => {
+                            root.set-pref("weather", text);
+                        }
+                        committed(text) => {
+                            root.set-pref("weather", text);
+                        }
+                    }
+                    Hint {
+                        text: @tr("A town, or latitude and longitude. Empty: no weather. Looked up with Open-Meteo; it is never put in an exported layout.");
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Strip lettering");
+                    width: Grid.label;
+                    y: 8px;
+                    vertical-alignment: top;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    Select {
+                        options: root.fonts;
+                        current: root.pref-font;
+                        label: @tr("Strip lettering");
+                        chose(i) => {
+                            root.set-pref("font", i);
+                        }
+                    }
+                    Hint {
+                        text: @tr("The typeface of words and numbers on the strip.");
+                    }
+                }
+            }
+        }
+    }
+
+    if root.sheet == "log": Sheet {
+        title: @tr("The service's log");
+        subtitle: @tr("What nexusd wrote most recently, newest at the bottom.");
+        sheet-width: 820px;
+        close => {
+            root.sheet = "";
+        }
+        VerticalLayout {
+            spacing: 10px;
+            Rectangle {
+                border-radius: 8px;
+                background: Theme.surface-2;
+                min-height: 200px;
+                TextInput {
+                    x: 12px;
+                    y: 10px;
+                    width: parent.width - 24px;
+                    text: root.log-text == "" ? @tr("Reading the log…") : root.log-text;
+                    read-only: true;
+                    single-line: false;
+                    wrap: word-wrap;
+                    font-family: "monospace";
+                    font-size: 12px;
+                    color: Theme.text-2;
+                    accessible-label: @tr("The service's log");
+                }
+            }
+        }
+    }
+
+    if root.sheet == "about": Sheet {
+        title: @tr("About");
+        sheet-width: 480px;
+        close => {
+            root.sheet = "";
+        }
+        VerticalLayout {
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    alignment: center;
+                    Mark {
+                        size: 56px;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: @tr("Nexus Open");
+                        font-family: Theme.font;
+                        font-size: 26px;
+                        font-weight: 600;
+                        color: Theme.text;
+                        accessible-role: text;
+                    }
+                    Text {
+                        text: root.daemon-version == "" || root.daemon-version == root.version
+                            ? @tr("Version {}", root.version)
+                            : @tr("Version {} (service {})", root.version, root.daemon-version);
+                        font-family: Theme.font;
+                        color: Theme.text-3;
+                    }
+                }
+            }
+            Text {
+                text: @tr("Makes the Corsair iCUE Nexus touch strip useful on Linux: the time and your machine at a glance, and your music and apps under a finger. Not made or endorsed by Corsair.");
+                font-family: Theme.font;
+                color: Theme.text-2;
+                wrap: word-wrap;
+            }
+            Text {
+                text: @tr("Free software under the MIT licence: {}", root.homepage);
+                font-family: Theme.font;
+                font-size: Theme.size-label;
+                color: Theme.text-3;
+                wrap: word-wrap;
+            }
+            Rectangle {
+                height: 1px;
+                background: Theme.line;
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: @tr("Built with");
+                    font-family: Theme.font;
+                    font-size: Theme.size-label;
+                    color: Theme.text-3;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: 170px;
+                    height: 72px;
+                    AboutSlint { }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
                 }
             }
         }

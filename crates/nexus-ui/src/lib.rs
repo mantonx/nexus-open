@@ -1,21 +1,29 @@
 //! The Nexus Open settings window, built with Slint.
 //!
-//! The window draws nothing itself. It streams frames from the daemon over
-//! the control socket and shows them, so the preview is always exactly
-//! what the strip shows. The preview is also the editor (`editor`): its
-//! changes are edits sent over the same socket. If the daemon is not
-//! running the window says so and keeps retrying.
+//! The window is a storyboard of the layout: every page and takeover as a
+//! strip. The one on the strip is the daemon's own frame, streamed over the
+//! control socket, so it is always exactly what the strip shows; the others
+//! are drawn here with the strip's renderer (`thumbs`). The strip being
+//! edited is also the editor (`editor`): its changes are edits sent over
+//! the same socket. If the daemon is not running the window says so, offers
+//! to start it, and keeps retrying.
 
+mod accent;
 mod editor;
 mod files;
+mod first_run;
+mod gallery;
 mod geometry;
 mod i18n;
 mod inspector;
 mod layouts;
+mod names;
 mod settings;
 mod signals;
 mod simulate;
+mod status;
 mod takeovers;
+mod thumbs;
 mod tray;
 mod window_size;
 
@@ -27,8 +35,10 @@ use std::thread;
 use std::time::Duration;
 
 use nexus_control::{Client, SignalEntry, Status};
-use nexus_doctor::State;
-use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel, Weak};
+use nexus_doctor::Check;
+use slint::{
+    ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
+};
 
 slint::include_modules!();
 
@@ -77,6 +87,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     }
     // Creating the window also creates Slint's platform (the winit backend).
     let app = AppWindow::new()?;
+    APP.with(|a| *a.borrow_mut() = Some(app.as_weak()));
     app.set_version(env!("CARGO_PKG_VERSION").into());
     app.set_homepage(env!("CARGO_PKG_REPOSITORY").into());
     // On Wayland the app ID is how the desktop finds the window's icon and
@@ -84,13 +95,48 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // set before the window is shown by `run`.
     slint::set_xdg_app_id(APP_ID)?;
 
+    // Test-only, for captures: light or dark whatever the desktop says.
+    match std::env::var("NEXUS_UI_SCHEME").as_deref() {
+        Ok("light") => app.global::<Theme>().set_forced(1),
+        Ok("dark") => app.global::<Theme>().set_forced(2),
+        _ => {}
+    }
+    app.invoke_apply_scheme();
+    set_accent(None);
+    let swatches: Vec<slint::Color> = accent::PRESETS
+        .iter()
+        .map(|(_, c)| accent::slint(*c))
+        .collect();
+    app.set_accent_swatches(ModelRc::new(VecModel::from(swatches)));
+    let names: Vec<SharedString> = accent::PRESETS
+        .iter()
+        .map(|(n, _)| i18n::shown(n).into())
+        .collect();
+    app.set_accent_names(ModelRc::new(VecModel::from(names)));
+    show_status(&app);
+
     let editor = editor::Editor::new(&app);
     editor::Editor::connect(&editor, &app);
     editor::install(&editor);
+    editor.borrow_mut().set_thumbs(thumbs::start(|done| {
+        let _ = slint::invoke_from_event_loop(move || editor::pictures(done));
+    }));
 
     let (tx, rx) = mpsc::channel();
     let _ = RECHECK.set(tx);
     app.on_check_again(recheck);
+    app.on_start_service(start_service);
+    let weak = app.as_weak();
+    app.on_open_log(move || {
+        if let Some(app) = weak.upgrade() {
+            app.set_log_text(SharedString::new());
+        }
+        let weak = weak.clone();
+        let _ = thread::Builder::new().name("log".into()).spawn(move || {
+            let text = status::log();
+            let _ = weak.upgrade_in_event_loop(move |app| app.set_log_text(text.into()));
+        });
+    });
     let weak = app.as_weak();
     thread::Builder::new()
         .name("doctor".into())
@@ -107,7 +153,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
         }
         slint::CloseRequestResponse::HideWindow
     });
-    APP.with(|a| *a.borrow_mut() = Some(app.as_weak()));
     IN_TRAY.store(tray::start(tray_command), Ordering::Relaxed);
     listen_for_raise();
 
@@ -125,6 +170,55 @@ pub fn run() -> Result<(), slint::PlatformError> {
 
 thread_local! {
     static APP: std::cell::RefCell<Option<Weak<AppWindow>>> = const { std::cell::RefCell::new(None) };
+    /// The daemon's latest status (`None` while it cannot be reached) and
+    /// the doctor's latest checks, for the status chip.
+    static LAST: std::cell::RefCell<(Option<Status>, Vec<Check>)> =
+        const { std::cell::RefCell::new((None, Vec::new())) };
+}
+
+/// The user's accent, derived as the strip derives it, into the theme.
+pub(crate) fn set_accent(user: Option<nexus_core::theme::Rgb>) {
+    let roles = accent::roles(user.unwrap_or(accent::DEFAULT));
+    with_app(|app| {
+        let t = app.global::<Theme>();
+        t.set_accent_base(accent::slint(roles.base));
+        t.set_accent_ink(accent::slint(roles.ink));
+        t.set_accent_text(accent::slint(roles.text));
+        t.set_accent_fill(accent::slint(roles.fill));
+        t.set_accent_soft(accent::slint(roles.soft));
+        t.set_accent_deep(accent::slint(roles.deep));
+    });
+}
+
+/// Puts the status chip right, from the latest status and checks.
+fn show_status(app: &AppWindow) {
+    let view = LAST.with(|l| {
+        let l = l.borrow();
+        status::view(l.0.as_ref(), &l.1)
+    });
+    app.set_status(StatusView {
+        tone: view.tone.into(),
+        chip: view.chip.into(),
+        headline: view.headline.into(),
+        body: view.body.into(),
+        start: view.start,
+        retry: view.retry,
+        log: view.log,
+        detail: view.detail.into(),
+    });
+}
+
+/// "Start the service": runs it off the UI thread, then checks again.
+fn start_service() {
+    let _ = thread::Builder::new().name("start".into()).spawn(|| {
+        let result = status::start();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Err(why) = result {
+                editor::problem(why);
+            }
+        });
+        recheck();
+    });
 }
 
 /// Runs `f` with the window, on the UI thread.
@@ -208,22 +302,15 @@ fn run_checks(app: &Weak<AppWindow>, again: &Receiver<()>) {
         }
         let checks = nexus_doctor::run();
         let report = nexus_doctor::report(&checks);
-        let problems: Vec<Problem> = checks
-            .into_iter()
-            .filter(|c| c.state == State::Fail)
-            .map(|c| Problem {
-                what: c.what.into(),
-                detail: c.detail.into(),
-                fix: c.fix.into(),
-            })
-            .collect();
-        let wait = if problems.is_empty() {
-            CHECK_HEALTHY
-        } else {
+        let failing = checks.iter().any(|c| c.state == nexus_doctor::State::Fail);
+        let wait = if failing {
             CHECK_FAILING
+        } else {
+            CHECK_HEALTHY
         };
         let shown = app.upgrade_in_event_loop(move |app| {
-            app.set_problems(ModelRc::new(VecModel::from(problems)));
+            LAST.with(|l| l.borrow_mut().1 = checks);
+            show_status(&app);
             app.set_diagnostics(report.into());
         });
         if shown.is_err() {
@@ -256,10 +343,13 @@ fn stream_frames(app: &Weak<AppWindow>) {
             recheck();
         }
         // Fails only when the event loop has ended: the window is gone.
-        if app
-            .upgrade_in_event_loop(|app| app.set_connected(false))
-            .is_err()
-        {
+        let lost = app.upgrade_in_event_loop(|app| {
+            app.set_connected(false);
+            editor::connected(false);
+            LAST.with(|l| l.borrow_mut().0 = None);
+            show_status(&app);
+        });
+        if lost.is_err() {
             return;
         }
         thread::sleep(RETRY);
@@ -299,7 +389,10 @@ fn watch_frames(app: &Weak<AppWindow>) -> io::Error {
         let pixels = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba, WIDTH, HEIGHT);
         let shown = app.upgrade_in_event_loop(move |app| {
             app.set_frame(Image::from_rgba8(pixels));
-            app.set_connected(true);
+            if !app.get_connected() {
+                app.set_connected(true);
+                editor::connected(true);
+            }
         });
         if shown.is_err() {
             return io::Error::other("window closed");
@@ -332,17 +425,21 @@ fn poll_status(app: &Weak<AppWindow>) {
             .and_then(|mut c| c.request("status").ok()?.ok())
             .and_then(|data| serde_json::from_value::<Status>(data).ok());
         if let Some(status) = status {
-            let position = status
-                .pages
-                .iter()
-                .position(|p| p == &status.page)
-                .map_or(0, |i| i + 1);
-            let label = format!("{position} of {}", status.pages.len());
             let shown = app.upgrade_in_event_loop(move |app| {
                 app.set_daemon_version(status.version.as_str().into());
                 editor::status(&status);
-                app.set_page_name(status.page.into());
-                app.set_page_position(label.into());
+                let changed = LAST.with(|l| {
+                    let mut l = l.borrow_mut();
+                    let changed = l.0.as_ref().is_none_or(|old| {
+                        old.device_error != status.device_error
+                            || old.store_error != status.store_error
+                    });
+                    l.0 = Some(status);
+                    changed
+                });
+                if changed {
+                    show_status(&app);
+                }
             });
             if shown.is_err() {
                 return; // window closed

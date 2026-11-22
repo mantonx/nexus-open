@@ -3096,6 +3096,7 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "interprocess",
+ "jiff",
  "ksni",
  "nexus-control",
  "nexus-core",

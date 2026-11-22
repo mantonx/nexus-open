@@ -1,12 +1,13 @@
-//! The strip's own settings as fields: temperature unit, clock, font and
-//! where the weather is for.
+//! The strip's own settings, as the Preferences sheet sets them:
+//! temperature unit, clock, accent, where the weather is for, and the
+//! strip's lettering.
 
 use nexus_core::config::{
     ClockFormat, Config, Settings, Temperature, Weather, colour_text, parse_colour,
 };
 use nexus_core::fonts::FontChoice;
 
-use crate::inspector::{Field, Kind, Missing, Values};
+use crate::inspector::{Missing, Values};
 
 pub const TEMPERATURE: &str = "settings.temperature";
 pub const CLOCK: &str = "settings.clock";
@@ -112,47 +113,75 @@ fn weather(text: &str) -> Result<Option<Weather>, Missing> {
     }))
 }
 
-pub fn fields(v: &Values) -> Vec<Field> {
-    let get = |k: &str| v.get(k).cloned().unwrap_or_default();
-    let choice = |options: &[&str]| Kind::Choice(options.iter().map(|s| s.to_string()).collect());
-    let fonts: Vec<&str> = FontChoice::ALL.iter().map(|f| f.display_name()).collect();
-    vec![
-        Field {
-            key: TEMPERATURE.into(),
-            label: "Temperatures".into(),
-            kind: choice(&[FAHRENHEIT, CELSIUS]),
-            value: get(TEMPERATURE),
-            help: "On the strip and in this window, where thresholds are typed in it too.".into(),
-        },
-        Field {
-            key: CLOCK.into(),
-            label: "Clock".into(),
-            kind: choice(&[H24, H12]),
-            value: get(CLOCK),
-            help: String::new(),
-        },
-        Field {
-            key: FONT.into(),
-            label: "Font".into(),
-            kind: choice(&fonts),
-            value: get(FONT),
-            help: "Atkinson Hyperlegible is made to be easy to read.".into(),
-        },
-        Field {
-            key: WEATHER.into(),
-            label: "Weather for".into(),
-            kind: Kind::Text,
-            value: get(WEATHER),
-            help: "A place, as in: Paris, France; or latitude and longitude, as in: 48.85, 2.35. Empty: no weather. Looked up with Open-Meteo.".into(),
-        },
-        Field {
-            key: ACCENT.into(),
-            label: "Accent colour".into(),
-            kind: Kind::Text,
-            value: get(ACCENT),
-            help: "A colour written #rrggbb, as in #5aa0e0. Empty: the default.".into(),
-        },
-    ]
+/// The preferences as the Preferences sheet shows them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Prefs {
+    pub fahrenheit: bool,
+    pub twelve_hour: bool,
+    /// "#rrggbb", or empty for the default.
+    pub accent: String,
+    /// Which swatch in `accent::PRESETS` it is, if any.
+    pub preset: Option<usize>,
+    pub weather: String,
+    pub fonts: Vec<String>,
+    pub font: usize,
+}
+
+pub fn prefs(c: &Config) -> Prefs {
+    let v = flatten(c);
+    let accent = c.settings.accent.unwrap_or(crate::accent::DEFAULT);
+    Prefs {
+        fahrenheit: c.settings.temperature == Temperature::Fahrenheit,
+        twelve_hour: c.settings.clock == ClockFormat::H12,
+        accent: v[ACCENT].clone(),
+        preset: crate::accent::PRESETS
+            .iter()
+            .position(|(_, p)| *p == accent),
+        weather: v[WEATHER].clone(),
+        fonts: FontChoice::ALL
+            .iter()
+            .map(|f| f.display_name().to_string())
+            .collect(),
+        font: FontChoice::ALL
+            .iter()
+            .position(|f| *f == c.settings.font)
+            .unwrap_or(0),
+    }
+}
+
+/// One preference from the sheet into the form's values: `key` is
+/// "temperature" (c or f), "clock" (24 or 12), "accent" (#rrggbb),
+/// "accent-preset" (a swatch's place), "weather" or "font" (a place in
+/// the list). `None` for an unknown key or place.
+pub fn set(v: &mut Values, key: &str, value: &str) -> Option<()> {
+    let (k, val) = match key {
+        "temperature" => (
+            TEMPERATURE,
+            if value == "f" { FAHRENHEIT } else { CELSIUS }.to_string(),
+        ),
+        "clock" => (CLOCK, if value == "12" { H12 } else { H24 }.to_string()),
+        "accent" => (ACCENT, value.trim().to_string()),
+        "accent-preset" => {
+            let (_, c) = crate::accent::PRESETS.get(value.parse::<usize>().ok()?)?;
+            let text = if *c == crate::accent::DEFAULT {
+                String::new()
+            } else {
+                colour_text(*c)
+            };
+            (ACCENT, text)
+        }
+        "weather" => (WEATHER, value.trim().to_string()),
+        "font" => (
+            FONT,
+            FontChoice::ALL
+                .get(value.parse::<usize>().ok()?)?
+                .display_name()
+                .to_string(),
+        ),
+        _ => return None,
+    };
+    v.insert(k.into(), val);
+    Some(())
 }
 
 #[cfg(test)]
@@ -202,6 +231,29 @@ mod tests {
         assert_eq!(flatten(&c)[ACCENT], "#ff8800");
         v.insert(ACCENT.into(), "orange".into());
         assert!(matches!(build(&v), Err(Missing::Invalid(_))));
+    }
+
+    #[test]
+    fn the_preferences_sheet_sets_each_setting() {
+        let c = Config::default_layout();
+        let mut v = flatten(&c);
+        set(&mut v, "temperature", "f").unwrap();
+        set(&mut v, "clock", "12").unwrap();
+        set(&mut v, "accent-preset", "1").unwrap();
+        set(&mut v, "font", "0").unwrap();
+        let (s, _) = build(&v).unwrap();
+        assert_eq!(s.temperature, Temperature::Fahrenheit);
+        assert_eq!(s.clock, ClockFormat::H12);
+        assert_eq!(s.accent, Some(crate::accent::PRESETS[1].1));
+        assert_eq!(s.font, FontChoice::ALL[0]);
+        // The default swatch stores no colour at all.
+        set(&mut v, "accent-preset", "0").unwrap();
+        assert_eq!(build(&v).unwrap().0.accent, None);
+        assert_eq!(set(&mut v, "accent-preset", "99"), None);
+        assert_eq!(set(&mut v, "volume", "1"), None);
+        let p = prefs(&c);
+        assert_eq!(p.preset, Some(0));
+        assert!(!p.fahrenheit);
     }
 
     #[test]

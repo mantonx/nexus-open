@@ -40,8 +40,12 @@ pub enum Kind {
     Choice(Vec<String>),
     /// Several lines of free text.
     Note,
-    /// A signal's name: typed, or chosen from the signal browser.
+    /// A signal's name, chosen from the picker.
     Signal,
+    /// A few short options side by side.
+    Segmented(Vec<String>),
+    /// The signals that set off a takeover, as chips.
+    Triggers,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -81,7 +85,6 @@ const RATE: &str = "Network rate";
 const SLIDER: &str = "Slider";
 const MEDIA: &str = "Now playing";
 const KEY: &str = "Key";
-const TYPES: [&str; 6] = [CLOCK, READING, RATE, SLIDER, MEDIA, KEY];
 
 const NO_GRAPH: &str = "None";
 const AREA: &str = "Area";
@@ -102,8 +105,9 @@ const NEXT_TRACK: &str = "Next track";
 const PREV_TRACK: &str = "Previous track";
 const STOP: &str = "Stop playback";
 const PUBLISH: &str = "Set a signal";
+/// Grouped by what they act on: music, pages, the computer.
 const ACTIONS: [&str; 11] = [
-    NOTHING, SHOW_PAGE, NEXT_PAGE, PREV_PAGE, RUN, OPEN, PLAY_PAUSE, NEXT_TRACK, PREV_TRACK, STOP,
+    NOTHING, PLAY_PAUSE, NEXT_TRACK, PREV_TRACK, STOP, SHOW_PAGE, NEXT_PAGE, PREV_PAGE, OPEN, RUN,
     PUBLISH,
 ];
 
@@ -419,13 +423,16 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
     };
     let choice = |options: &[&str]| Kind::Choice(options.iter().map(|s| s.to_string()).collect());
 
+    let segmented =
+        |options: &[&str]| Kind::Segmented(options.iter().map(|s| s.to_string()).collect());
+    // What a widget is comes from the gallery it was added from; to have
+    // another kind, add that one. So there is no type field here.
     let ty = get("type");
-    add("type", "Shows", choice(&TYPES), String::new());
     add(
         "width",
         "Width",
         Kind::Number,
-        "Pixels. The widget on its right gives or takes the difference.".into(),
+        "In strip pixels; dragging the grip on the strip does the same. The widget on its right gives or takes the difference.".into(),
     );
     match ty.as_str() {
         READING => {
@@ -439,7 +446,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             add(
                 "graph",
                 "Graph",
-                choice(&[NO_GRAPH, AREA, LINE]),
+                segmented(&[NO_GRAPH, AREA, LINE]),
                 String::new(),
             );
             let unit = threshold_unit(&get("signal"), ctx);
@@ -510,7 +517,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             add(
                 "controls",
                 "Sets",
-                choice(&[VOLUME, SEEK, COMMAND]),
+                segmented(&[VOLUME, SEEK, COMMAND]),
                 String::new(),
             );
             if get("controls") == COMMAND {

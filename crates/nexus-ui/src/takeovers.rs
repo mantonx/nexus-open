@@ -43,11 +43,55 @@ pub fn flatten(t: &Takeover) -> Values {
         (ON_CHANGE.into(), t.on_change.join(", ")),
         (SECONDS.into(), format_seconds(t.seconds)),
         (ALIGN.into(), t.align.id().into()),
-        (
-            WIDTH.into(),
-            t.width.map(|w| w.to_string()).unwrap_or_default(),
-        ),
+        (WIDTH.into(), t.width.map(width_text).unwrap_or_default()),
     ])
+}
+
+/// Where a takeover can sit, in the form's words, by `Align::id`.
+const COVERS: [(&str, &str); 3] = [
+    ("full", "Whole strip"),
+    ("left", "Left end"),
+    ("right", "Right end"),
+];
+
+/// How much of the strip a partial takeover covers: in words, so no
+/// pixel number is needed, and every one lands on a card edge.
+const WIDTHS: [(&str, u32); 5] = [
+    ("A quarter", 160),
+    ("A third", 213),
+    ("Half", 320),
+    ("Two thirds", 427),
+    ("Three quarters", 480),
+];
+
+/// A width in words when it is one of the offered ones, else in pixels.
+fn width_text(w: u32) -> String {
+    WIDTHS
+        .iter()
+        .find(|(_, px)| *px == w)
+        .map_or_else(|| format!("{w} px"), |(name, _)| (*name).to_string())
+}
+
+/// A width from its words, "320 px" or "320".
+fn width_value(text: &str) -> Option<u32> {
+    if let Some((_, px)) = WIDTHS.iter().find(|(name, _)| *name == text) {
+        return Some(*px);
+    }
+    text.trim_end_matches("px").trim().parse().ok()
+}
+
+/// The takeover's signals, in order.
+pub fn triggers(v: &Values) -> Vec<String> {
+    signals(v.get(ON_CHANGE).map(String::as_str).unwrap_or_default())
+}
+
+/// The list without `signal`.
+pub fn remove_signal(list: &str, signal: &str) -> String {
+    signals(list)
+        .into_iter()
+        .filter(|s| s != signal)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn format_seconds(s: f64) -> String {
@@ -84,27 +128,28 @@ pub fn build(v: &Values, taken: &[&str]) -> Result<Settings, Missing> {
     let on_change = signals(get(ON_CHANGE));
     if on_change.is_empty() {
         return Err(Missing::Incomplete(
-            "Choose the signals whose change shows it.".into(),
+            "Choose a reading: when it changes, the takeover shows.".into(),
         ));
     }
     let align = match get(ALIGN) {
-        "" | "full" => Align::Full,
-        "left" => Align::Left,
-        "right" => Align::Right,
+        "" | "full" | "Whole strip" => Align::Full,
+        "left" | "Left end" => Align::Left,
+        "right" | "Right end" => Align::Right,
         _ => {
-            return Err(Missing::Invalid("Covers is full, left or right.".into()));
+            return Err(Missing::Invalid(
+                "It covers the whole strip, or its left or right end.".into(),
+            ));
         }
     };
     let width = match (align, get(WIDTH)) {
         (Align::Full, _) => None,
         (_, "") => {
             return Err(Missing::Incomplete(
-                "Give the width it covers, in pixels.".into(),
+                "Choose how much of the strip it covers.".into(),
             ));
         }
         (_, w) => Some(
-            w.parse::<u32>()
-                .ok()
+            width_value(w)
                 .filter(|w| (MIN_WIDGET_WIDTH..=nexus_core::WIDTH).contains(w))
                 .ok_or_else(|| {
                     Missing::Invalid(format!(
@@ -145,7 +190,12 @@ pub fn add_signal(list: &str, signal: &str) -> String {
 
 pub fn fields(v: &Values) -> Vec<Field> {
     let get = |k: &str| v.get(k).cloned().unwrap_or_default();
-    vec![
+    let align = get(ALIGN);
+    let covers = COVERS
+        .iter()
+        .find(|(id, name)| *id == align || *name == align)
+        .map_or("Whole strip", |(_, name)| name);
+    let mut out = vec![
         Field {
             key: NAME.into(),
             label: "Name".into(),
@@ -156,18 +206,17 @@ pub fn fields(v: &Values) -> Vec<Field> {
         Field {
             key: ON_CHANGE.into(),
             label: "Shows when".into(),
-            kind: Kind::Signal,
+            kind: Kind::Triggers,
             value: get(ON_CHANGE),
-            help: "Signals, separated by commas: it covers the page when one changes, unless the page already shows it. Choose… adds one."
-                .into(),
+            help: "It covers the page when one of these readings changes, unless the page already shows it.".into(),
         },
         Field {
             key: SECONDS.into(),
-            label: "Seconds".into(),
+            label: "Stays for".into(),
             kind: Kind::Number,
             value: get(SECONDS),
             help: format!(
-                "How long it stays after the change or the last touch: {} to {}.",
+                "Seconds after the change or the last touch on it: {} to {}.",
                 TAKEOVER_SECONDS.start(),
                 TAKEOVER_SECONDS.end()
             ),
@@ -175,19 +224,26 @@ pub fn fields(v: &Values) -> Vec<Field> {
         Field {
             key: ALIGN.into(),
             label: "Covers".into(),
-            kind: Kind::Text,
-            value: get(ALIGN),
-            help: "full, left or right: the whole strip, or one end of it with the page beside it."
-                .into(),
+            kind: Kind::Segmented(COVERS.iter().map(|(_, n)| n.to_string()).collect()),
+            value: covers.into(),
+            help: "One end leaves the rest of the page in view beside it.".into(),
         },
-        Field {
+    ];
+    if covers != "Whole strip" {
+        let current = get(WIDTH);
+        let mut options: Vec<String> = WIDTHS.iter().map(|(n, _)| n.to_string()).collect();
+        if !current.is_empty() && !options.contains(&current) {
+            options.push(current.clone());
+        }
+        out.push(Field {
             key: WIDTH.into(),
-            label: "Width".into(),
-            kind: Kind::Number,
-            value: get(WIDTH),
-            help: "Pixels, for left or right. Its widgets must fit in it.".into(),
-        },
-    ]
+            label: "How much".into(),
+            kind: Kind::Choice(options),
+            value: current,
+            help: "Its widgets share this much of the strip.".into(),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -225,6 +281,36 @@ mod tests {
         assert_eq!((s.align, s.width), (Align::Right, Some(200)));
         v.insert(ALIGN.into(), "middle".into());
         assert!(matches!(build(&v, &[]), Err(Missing::Invalid(_))));
+    }
+
+    #[test]
+    fn widths_and_ends_are_chosen_in_words() {
+        let mut v = new_values(&[]);
+        v.insert(ON_CHANGE.into(), "volume.level".into());
+        v.insert(ALIGN.into(), "Right end".into());
+        v.insert(WIDTH.into(), "Half".into());
+        let s = build(&v, &[]).unwrap();
+        assert_eq!((s.align, s.width), (Align::Right, Some(320)));
+        assert_eq!(width_text(213), "A third");
+        assert_eq!(width_text(250), "250 px");
+        assert_eq!(width_value("250 px"), Some(250));
+        // A width not offered is still shown, as itself.
+        v.insert(WIDTH.into(), "250 px".into());
+        let f = fields(&v);
+        let width = f.iter().find(|f| f.key == WIDTH).unwrap();
+        assert!(matches!(&width.kind, Kind::Choice(o) if o.contains(&"250 px".to_string())));
+        // A whole-strip takeover has no width to choose.
+        v.insert(ALIGN.into(), "full".into());
+        assert!(!fields(&v).iter().any(|f| f.key == WIDTH));
+    }
+
+    #[test]
+    fn triggers_are_added_and_removed_one_at_a_time() {
+        assert_eq!(remove_signal("a, b, c", "b"), "a, c");
+        assert_eq!(remove_signal("a", "a"), "");
+        let mut v = new_values(&[]);
+        v.insert(ON_CHANGE.into(), "media.title, volume.level".into());
+        assert_eq!(triggers(&v), ["media.title", "volume.level"]);
     }
 
     #[test]

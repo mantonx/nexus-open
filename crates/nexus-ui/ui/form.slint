@@ -1,0 +1,417 @@
+// The settings of what is selected: a widget, the page or a takeover, as
+// one left-aligned grid (labels in one column, controls in the next, help
+// under the control), the same everywhere. Fields come from Rust
+// (inspector.rs, takeovers.rs), so a new setting is added there only.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Icon, Glyph } from "theme.slint";
+import { Button, TextField, Select, Segmented, Chip, Hint, Label } from "controls.slint";
+
+/// One setting, as the form shows it.
+export struct Field {
+    key: string,
+    label: string,
+    /// "text", "number", "choice", "segmented", "note", "signal" or
+    /// "triggers".
+    kind: string,
+    value: string,
+    /// For a choice: the options, and which one is `value` (-1 if none).
+    choices: [string],
+    index: int,
+    help: string,
+    /// For a signal: its human name, icon and live value.
+    shown: string,
+    icon: string,
+    reading: string,
+}
+
+/// A signal in the picker.
+export struct PickRow {
+    id: string,
+    name: string,
+    icon: string,
+    value: string,
+    chosen: bool,
+}
+
+/// A signal that sets off a takeover, as a chip.
+export struct Trigger {
+    id: string,
+    name: string,
+    icon: string,
+}
+
+/// Width of the label column.
+export global Grid {
+    out property <length> label: 148px;
+    out property <length> control-max: 480px;
+}
+
+/// The searchable list of signals, opened from a signal field or "Add a
+/// reading". Human names first; the raw name as small text.
+export component Picker inherits Rectangle {
+    in property <[PickRow]> rows;
+    in property <string> title;
+    callback filter(string);
+    callback pick(string);
+    width: 0px;
+    height: 0px;
+
+    public function show() {
+        popup.show();
+    }
+
+    popup := PopupWindow {
+    close-policy: PopupClosePolicy.close-on-click-outside;
+    width: 380px;
+
+    Rectangle {
+        background: Theme.surface;
+        border-radius: Theme.r-surface;
+        border-width: 1px;
+        border-color: Theme.line-strong;
+        drop-shadow-blur: 20px;
+        drop-shadow-color: #00000060;
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+            search := TextField {
+                placeholder: @tr("Search readings");
+                leading-icon: Glyph.search;
+                label: root.title;
+                init => {
+                    self.focus-input();
+                }
+                edited(text) => {
+                    root.filter(text);
+                }
+                accepted => {
+                    if root.rows.length > 0 {
+                        root.pick(root.rows[0].id);
+                        popup.close();
+                    }
+                }
+                key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        popup.close();
+                        return accept;
+                    }
+                    reject
+                }
+            }
+            ListView {
+                height: min(300px, max(48px, root.rows.length * 48px));
+                for r in root.rows: Rectangle {
+                    height: 48px;
+                    border-radius: Theme.r-control - 2px;
+                    background: pick-touch.has-hover ? Theme.surface-2 : transparent;
+                    accessible-role: button;
+                    accessible-label: r.name + ", " + r.value + ", " + r.id;
+                    accessible-action-default => {
+                        root.pick(r.id);
+                        popup.close();
+                    }
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        Rectangle {
+                            width: 30px;
+                            Rectangle {
+                                width: 30px;
+                                height: 30px;
+                                border-radius: 8px;
+                                background: Theme.surface-2;
+                                Icon {
+                                    glyph: r.icon;
+                                    fill: true;
+                                    font-size: 17px;
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: r.name;
+                                font-family: Theme.font;
+                                font-size: Theme.size-body;
+                                font-weight: r.chosen ? 600 : 500;
+                                color: Theme.text;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: r.id;
+                                font-family: Theme.font;
+                                font-size: 11px;
+                                color: Theme.text-3;
+                                overflow: elide;
+                            }
+                        }
+                        Text {
+                            text: r.value;
+                            font-family: Theme.font;
+                            font-size: Theme.size-label;
+                            color: Theme.text-2;
+                            vertical-alignment: center;
+                            max-width: 120px;
+                            overflow: elide;
+                        }
+                        if r.chosen: Icon {
+                            glyph: Glyph.check;
+                            color: Theme.act-line;
+                        }
+                    }
+                    pick-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => {
+                            root.pick(r.id);
+                            popup.close();
+                        }
+                    }
+                }
+            }
+            if root.rows.length == 0: Hint {
+                text: @tr("Nothing matches. A reading appears here once a source publishes it.");
+                horizontal-alignment: center;
+            }
+        }
+    }
+    }
+}
+
+/// One setting: its label, the control for its kind, help under it.
+export component FieldRow inherits HorizontalLayout {
+    in property <Field> field;
+    in property <bool> enabled: true;
+    in property <[PickRow]> picks;
+    in property <[Trigger]> triggers;
+    callback changed(string, string);
+    callback chose(string, int);
+    callback open-picker(string);
+    callback picker-filter(string);
+    callback picked(string, string);
+    callback remove-trigger(string);
+
+    spacing: 16px;
+
+    Text {
+        text: root.field.label;
+        width: Grid.label;
+        y: 9px;
+        vertical-alignment: top;
+        font-family: Theme.font;
+        font-size: Theme.size-body;
+        font-weight: 500;
+        color: Theme.text-2;
+        wrap: word-wrap;
+        accessible-role: none;
+    }
+
+    VerticalLayout {
+        spacing: 4px;
+        horizontal-stretch: 1;
+        max-width: Grid.control-max;
+
+        if root.field.kind == "text" || root.field.kind == "number": TextField {
+            text: root.field.value;
+            committed-value: root.field.value;
+            enabled: root.enabled;
+            label: root.field.label;
+            input-type: root.field.kind == "number" ? InputType.decimal : InputType.text;
+            accepted(text) => {
+                root.changed(root.field.key, text);
+            }
+            committed(text) => {
+                root.changed(root.field.key, text);
+            }
+        }
+        if root.field.kind == "choice": Select {
+            options: root.field.choices;
+            current: root.field.index;
+            enabled: root.enabled;
+            label: root.field.label;
+            chose(i) => {
+                root.chose(root.field.key, i);
+            }
+        }
+        if root.field.kind == "segmented": HorizontalLayout {
+            alignment: start;
+            Segmented {
+                current: root.field.index;
+                enabled: root.enabled;
+                label: root.field.label;
+                options: root.field.choices;
+                chose(i) => {
+                    root.chose(root.field.key, i);
+                }
+            }
+        }
+        if root.field.kind == "signal": signal-button := Rectangle {
+            height: 44px;
+            border-radius: Theme.r-control;
+            background: sig-touch.has-hover && root.enabled ? Theme.raised.brighter(0.06) : Theme.raised;
+            border-width: 1px;
+            border-color: sig-focus.has-focus ? Theme.act-line : Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
+            opacity: root.enabled ? 1 : 0.55;
+            accessible-role: combobox;
+            accessible-label: root.field.label;
+            accessible-value: root.field.shown + (root.field.reading != "" ? ", " + root.field.reading : "");
+            accessible-action-default => {
+                root.open-picker(root.field.key);
+                picker.show();
+            }
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 10px;
+                spacing: 10px;
+                Rectangle {
+                    width: 28px;
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 7px;
+                        background: Theme.surface-2;
+                        Icon {
+                            glyph: root.field.icon;
+                            fill: true;
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.field.value == "" ? @tr("Choose a reading") : root.field.shown;
+                        font-family: Theme.font;
+                        font-size: Theme.size-body;
+                        font-weight: 500;
+                        color: root.field.value == "" ? Theme.text-3 : Theme.text;
+                        overflow: elide;
+                    }
+                    if root.field.value != "": Text {
+                        text: root.field.value;
+                        font-family: Theme.font;
+                        font-size: 11px;
+                        color: Theme.text-3;
+                        overflow: elide;
+                    }
+                }
+                Text {
+                    text: root.field.reading;
+                    font-family: Theme.font;
+                    font-size: Theme.size-label;
+                    color: Theme.text-2;
+                    vertical-alignment: center;
+                }
+                Icon {
+                    glyph: Glyph.caret-down;
+                    font-size: 14px;
+                }
+            }
+            sig-touch := TouchArea {
+                enabled: root.enabled;
+                mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+                clicked => {
+                    sig-focus.focus();
+                    root.open-picker(root.field.key);
+                    picker.show();
+                }
+            }
+            sig-focus := FocusScope {
+                // Its TouchArea focuses it; taking the press here would
+                // swallow the first click.
+                focus-on-click: false;
+                enabled: root.enabled;
+                key-pressed(event) => {
+                    if event.text == " " || event.text == Key.Return || event.text == Key.DownArrow {
+                        root.open-picker(root.field.key);
+                        picker.show();
+                        return accept;
+                    }
+                    reject
+                }
+            }
+            picker := Picker {
+                x: 0;
+                y: parent.height + 4px;
+                rows: root.picks;
+                title: @tr("Search readings for {}", root.field.label);
+                filter(text) => {
+                    root.picker-filter(text);
+                }
+                pick(id) => {
+                    root.picked(root.field.key, id);
+                }
+            }
+        }
+        if root.field.kind == "triggers": VerticalLayout {
+            spacing: 8px;
+            chips := HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for t in root.triggers: Chip {
+                    text: t.name;
+                    icon: t.icon;
+                    enabled: root.enabled;
+                    remove => {
+                        root.remove-trigger(t.id);
+                    }
+                }
+                add-trigger := Button {
+                    text: root.triggers.length == 0 ? @tr("Choose a reading") : @tr("Add");
+                    icon: Glyph.plus;
+                    tier: root.triggers.length == 0 ? "primary" : "quiet";
+                    compact: true;
+                    enabled: root.enabled;
+                    label: @tr("Add a reading whose change shows this takeover");
+                    clicked => {
+                        root.open-picker(root.field.key);
+                        trigger-picker.show();
+                    }
+                }
+            }
+            // Zero-sized, just under the chips: the list opens there.
+            trigger-picker := Picker {
+                rows: root.picks;
+                title: @tr("Search readings whose change shows it");
+                filter(text) => {
+                    root.picker-filter(text);
+                }
+                pick(id) => {
+                    root.picked(root.field.key, id);
+                }
+            }
+        }
+        if root.field.kind == "note": Rectangle {
+            height: 64px;
+            border-radius: Theme.r-control;
+            background: Theme.dark ? Theme.ground : Theme.surface;
+            border-width: 1px;
+            border-color: note.has-focus ? Theme.act-line : Theme.line-strong;
+            clip: true;
+            note := TextInput {
+                x: 10px;
+                y: 8px;
+                width: parent.width - 20px;
+                height: parent.height - 16px;
+                text: root.field.value;
+                wrap: word-wrap;
+                single-line: false;
+                font-family: Theme.font;
+                font-size: Theme.size-body;
+                color: Theme.text;
+                enabled: root.enabled;
+                accessible-label: root.field.label;
+                changed has-focus => {
+                    if !self.has-focus && self.text != root.field.value {
+                        root.changed(root.field.key, self.text);
+                    }
+                }
+            }
+        }
+        if root.field.help != "": Hint {
+            text: root.field.help;
+        }
+    }
+}

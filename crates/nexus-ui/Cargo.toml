@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 interprocess = "2.4.8"
+jiff = "0.2.43"
 dirs = "7.0.0"
 nexus-control = { path = "../nexus-control" }
 nexus-core = { path = "../nexus-core" }
