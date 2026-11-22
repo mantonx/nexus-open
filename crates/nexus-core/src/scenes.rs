@@ -102,6 +102,23 @@ fn track(playing: bool) -> Vec<(&'static str, Value)> {
     ]
 }
 
+/// A headline, as the news source publishes it.
+pub const HEADLINE: &str = "Harbour ferry returns to service after a two-week repair";
+
+fn news_signals(title: &str, age: f64, lost: bool) -> Vec<(&'static str, Value)> {
+    vec![
+        ("news.title", Value::Text(title.into())),
+        ("news.source", Value::Text("Harbour Gazette".into())),
+        (
+            "news.link",
+            Value::Text("https://news.example/ferry-returns".into()),
+        ),
+        ("news.age", Value::Number(age, Unit::None)),
+        ("news.count", Value::Number(14.0, Unit::None)),
+        ("news.lost", Value::Number(f64::from(lost), Unit::None)),
+    ]
+}
+
 fn weather_signals() -> Vec<(&'static str, Value)> {
     vec![
         ("weather.temp", Value::Number(f(58.0), Unit::Celsius)),
@@ -190,6 +207,7 @@ pub fn frames(accents: &[(&str, Rgb)]) -> Vec<Frame> {
     scenes(&mut out, None, "", "scenes", None);
     default_pages(&mut out);
     takeovers(&mut out);
+    news_page(&mut out);
     specimens(&mut out);
     for (name, rgb) in accents {
         scenes(
@@ -307,6 +325,37 @@ fn volume_up(config: Config) -> Engine {
     assert_eq!(e.takeover(), Some("Volume"));
     e
 }
+
+/// The optional News page of docs/LAYOUT.md, with a feed and a headline:
+/// a wide news card beside the clock.
+fn news_page(out: &mut Out) {
+    let now = demo::sample_time();
+    let mut c = layout(None, true);
+    let page = Config::parse(NEWS_PAGE).expect("the News page is valid");
+    c.pages.extend(page.pages);
+    c.news = page.news;
+    let mut e = engine(c, &idle(), "News");
+    for (name, value) in news_signals(HEADLINE, 12.0 * 60.0, false) {
+        e.handle(Input::Signal(name.into(), value));
+    }
+    out.save("news", "news-page", shot(&mut e, &now, 1.0));
+}
+
+/// The example News page in docs/LAYOUT.md.
+pub const NEWS_PAGE: &str = r#"[news]
+feeds = ["https://news.example/rss.xml"]
+
+[[page]]
+name = "News"
+
+[[page.widget]]
+type = "clock"
+width = 128
+
+[[page.widget]]
+type = "news"
+width = 512
+"#;
 
 fn default_pages(out: &mut Out) {
     let now = demo::sample_time();
@@ -470,7 +519,8 @@ enum Finger {
 }
 
 /// The same widget at the three specimen widths, side by side. `widget`
-/// is its TOML with `{w}` for the width.
+/// is its TOML with `{w}` for the width. `set_up` says whether the layout
+/// gives a weather location and a news feed.
 #[allow(clippy::too_many_arguments)]
 fn specimen(
     out: &mut Out,
@@ -478,7 +528,7 @@ fn specimen(
     name: &str,
     widget: &str,
     signals: &Signals,
-    weather: bool,
+    set_up: bool,
     mono: f64,
     finger: Finger,
     edit: impl Fn(&mut WidgetView),
@@ -493,7 +543,8 @@ fn specimen(
     let ctx = Bind {
         signals,
         settings: &config.settings,
-        weather,
+        weather: set_up,
+        news: set_up,
         now: &now,
         mono,
         marquee: None,
@@ -915,6 +966,8 @@ fn specimens(out: &mut Out) {
         Finger::Holding(0.6),
         same,
     );
+    news_specimens(out, r, &signals);
+
     let bare = format!(
         "[[page.widget]]\ntype = \"key\"\nwidth = {w}\nicon = \"globe-simple\"\nlabel = \"Browser\"\n"
     );
@@ -925,6 +978,72 @@ fn specimens(out: &mut Out) {
         &bare,
         &none,
         true,
+        1000.0,
+        Finger::None,
+        same,
+    );
+}
+
+/// Turns readings into the signals a specimen shows.
+type ToSignals = dyn Fn(Vec<(&str, Value)>) -> Signals;
+
+/// The news widget in each of its states, at the three widths.
+fn news_specimens(out: &mut Out, r: &mut Renderer, signals: &ToSignals) {
+    let same = |_: &mut WidgetView| {};
+    let news = "[[page.widget]]\ntype = \"news\"\nwidth = {w}\n";
+    let live = signals(news_signals(HEADLINE, 12.0 * 60.0, false));
+    for (name, finger) in [
+        ("news-live", Finger::None),
+        ("news-pressed", Finger::On),
+        ("news-holding", Finger::Holding(0.6)),
+    ] {
+        specimen(out, r, name, news, &live, true, 1000.0, finger, same);
+    }
+    // A short headline that fits, published under a minute ago.
+    let short = signals(news_signals("Ferry back in service", 20.0, false));
+    specimen(
+        out,
+        r,
+        "news-short",
+        news,
+        &short,
+        true,
+        1000.0,
+        Finger::None,
+        same,
+    );
+    let none = Signals::new();
+    specimen(
+        out,
+        r,
+        "news-no-data",
+        news,
+        &none,
+        true,
+        1000.0,
+        Finger::None,
+        same,
+    );
+    // Every feed failing, and the headline kept is two days old.
+    let lost = signals(news_signals(HEADLINE, 2.0 * 86_400.0 + 600.0, true));
+    specimen(
+        out,
+        r,
+        "news-lost",
+        news,
+        &lost,
+        true,
+        1000.0,
+        Finger::None,
+        same,
+    );
+    specimen(
+        out,
+        r,
+        "news-not-set-up",
+        news,
+        &none,
+        false,
         1000.0,
         Finger::None,
         same,

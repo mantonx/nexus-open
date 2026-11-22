@@ -2499,6 +2499,7 @@ pub fn describe(w: &Widget) -> String {
     match w {
         Widget::Clock { .. } => "Clock".into(),
         Widget::Media { .. } => "Now playing".into(),
+        Widget::News { .. } => "News".into(),
         Widget::Key { icon, label, .. } => label
             .iter()
             .chain(icon)
@@ -2524,6 +2525,7 @@ fn widget_icon(w: &Widget) -> char {
         Widget::Value { signal, .. } => names::named(signal).icon,
         Widget::Rate { .. } => names::icon::DOWN,
         Widget::Slider { .. } => names::icon::SLIDERS,
+        Widget::News { .. } => nexus_core::icons::NEWSPAPER,
     }
 }
 

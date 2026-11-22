@@ -151,4 +151,51 @@ ALTER TABLE settings ADD COLUMN night_to TEXT
 ALTER TABLE settings ADD COLUMN idle_dim INTEGER NOT NULL DEFAULT 1
   CHECK (idle_dim IN (0, 1));
 "#,
+    // 4: news. The `[news]` section sits beside the weather in the
+    // settings row: the feeds as a JSON array, and the two durations in
+    // seconds; no feeds column means no `[news]`. The news widget and the
+    // news action are new kinds, so the widget and action tables are
+    // rebuilt as in migration 2, with foreign keys off.
+    r#"
+ALTER TABLE settings ADD COLUMN news_feeds TEXT
+  CHECK (news_feeds IS NULL OR (json_valid(news_feeds) AND json_type(news_feeds) = 'array'));
+ALTER TABLE settings ADD COLUMN news_rotate REAL CHECK (news_rotate IS NULL OR news_rotate >= 0);
+ALTER TABLE settings ADD COLUMN news_max_age REAL CHECK (news_max_age IS NULL OR news_max_age >= 0);
+
+CREATE TABLE widget_4 (
+  id          INTEGER PRIMARY KEY,
+  page_id     INTEGER REFERENCES page(id) ON DELETE CASCADE,
+  takeover_id INTEGER REFERENCES takeover(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
+  type        TEXT NOT NULL
+              CHECK (type IN ('clock', 'value', 'rate', 'slider', 'media', 'key', 'news')),
+  width       INTEGER NOT NULL CHECK (width BETWEEN 40 AND 640),
+  props       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props)),
+  note        TEXT NOT NULL DEFAULT '',
+  CHECK ((page_id IS NULL) <> (takeover_id IS NULL))
+);
+INSERT INTO widget_4 (id, page_id, takeover_id, position, type, width, props, note)
+  SELECT id, page_id, takeover_id, position, type, width, props, note FROM widget;
+DROP TABLE widget;
+ALTER TABLE widget_4 RENAME TO widget;
+CREATE INDEX widget_on_page     ON widget(page_id, position);
+CREATE INDEX widget_on_takeover ON widget(takeover_id, position);
+
+CREATE TABLE action_4 (
+  widget_id   INTEGER NOT NULL REFERENCES widget(id) ON DELETE CASCADE,
+  gesture     TEXT NOT NULL CHECK (gesture IN ('tap', 'hold')),
+  kind        TEXT NOT NULL
+              CHECK (kind IN ('page', 'next-page', 'prev-page',
+                              'run', 'open', 'media', 'publish', 'news')),
+  target_page INTEGER REFERENCES page(id) ON DELETE RESTRICT,
+  args        TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(args)),
+  PRIMARY KEY (widget_id, gesture),
+  CHECK ((kind = 'page') = (target_page IS NOT NULL))
+) WITHOUT ROWID;
+INSERT INTO action_4 (widget_id, gesture, kind, target_page, args)
+  SELECT widget_id, gesture, kind, target_page, args FROM action;
+DROP TABLE action;
+ALTER TABLE action_4 RENAME TO action;
+CREATE INDEX action_target ON action(target_page);
+"#,
 ];

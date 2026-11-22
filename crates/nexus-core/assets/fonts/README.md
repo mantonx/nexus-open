@@ -11,7 +11,7 @@ Compiled into the binary so the strip looks the same on every system.
 | `NotoSans-Regular.ttf` | words choice | Arch `noto-fonts` | SIL OFL 1.1 |
 | `Lato-Regular.ttf` | words choice | google/fonts `ofl/lato` | SIL OFL 1.1 |
 | `DejaVuSans.ttf` | fallback for characters the chosen font lacks | Arch `ttf-dejavu` | Bitstream Vera / public domain |
-| `Phosphor-Fill.ttf`, `Phosphor-Bold.ttf` | every icon (`src/icons.rs`) | `@phosphor-icons/web` 2.1.2 on npm, subset to the 66 glyphs `DESIGN.md` lists (fontTools `pyftsubset`) | MIT |
+| `Phosphor-Fill.ttf`, `Phosphor-Bold.ttf` | every icon (`src/icons.rs`) | `@phosphor-icons/web` 2.1.2 on npm, subset to the 67 glyphs `DESIGN.md` lists (fontTools `pyftsubset`) | MIT |
 
 Licence texts are in `licenses/`.
 

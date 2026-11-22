@@ -148,13 +148,14 @@ pub fn make_room_above(
 
 /// The narrowest a widget of this kind still reads at: a key shows its
 /// icon at the minimum, a reading needs room for its number, music for
-/// its title. Add never takes a widget below this.
+/// its title, news its headline. Add never takes a widget below this.
 pub fn readable(w: &Widget) -> u32 {
     match w {
         Widget::Key { .. } => MIN_WIDGET_WIDTH,
         Widget::Value { .. } | Widget::Rate { .. } | Widget::Clock { .. } => 72,
         Widget::Slider { .. } => 80,
-        Widget::Media { .. } => 120,
+        // A headline, like a title, needs room for some of its words.
+        Widget::Media { .. } | Widget::News { .. } => 120,
     }
 }
 

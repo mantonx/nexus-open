@@ -10,12 +10,15 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
-use nexus_core::config::Action;
+use nexus_core::config::{Action, NewsCommand};
 use nexus_core::engine::Effect;
+use nexus_sources::news::News;
 
 pub struct Effects {
     volume: Latest<u8>,
     slider: Latest<Vec<String>>,
+    /// The news source, for "show the next headline"; `None` in demo mode.
+    news: Option<News>,
 }
 
 impl Effects {
@@ -23,14 +26,25 @@ impl Effects {
         Effects {
             volume: Latest::spawn("set-volume", nexus_sources::set_volume),
             slider: Latest::spawn("slider-command", |argv: Vec<String>| {
-                launch(&argv, true);
+                launch(&argv, true, false);
             }),
+            news: None,
         }
+    }
+
+    pub fn set_news(&mut self, news: News) {
+        self.news = Some(news);
     }
 
     pub fn carry_out(&self, effect: Effect) {
         match effect {
+            Effect::Act(Action::News(NewsCommand::Next)) => {
+                if let Some(news) = &self.news {
+                    news.next();
+                }
+            }
             Effect::Act(action) => act(action),
+            Effect::OpenLink(link) => open_link(&link),
             Effect::Volume(percent) => self.volume.set(percent),
             Effect::Seek(seconds) => {
                 let _ = thread::Builder::new()
@@ -73,8 +87,8 @@ impl<T: Send + 'static> Latest<T> {
 
 fn act(action: Action) {
     match action {
-        Action::Run(argv) => launch(&argv, false),
-        Action::Open(target) => launch(&opener(&target), false),
+        Action::Run(argv) => launch(&argv, false, false),
+        Action::Open(target) => launch(&opener(&target), false, false),
         Action::Media(command) => {
             // A D-Bus call can stall on a hung player; keep it off the
             // daemon thread.
@@ -82,8 +96,8 @@ fn act(action: Action) {
                 .name("media-command".into())
                 .spawn(move || nexus_sources::media_command(command));
         }
-        // Done by the engine before it gets here.
-        Action::Page(_) | Action::Publish { .. } => {}
+        // Done by the engine, or by `carry_out`, before it gets here.
+        Action::Page(_) | Action::Publish { .. } | Action::News(_) => {}
     }
 }
 
@@ -95,23 +109,17 @@ fn act(action: Action) {
 /// that, so a GUI app would fail. Under systemd it is started with
 /// `systemd-run --user` instead, which asks the user's service manager to
 /// run it as its own unit, outside this sandbox, as if from the launcher.
-fn launch(argv: &[String], wait: bool) {
+///
+/// With `literal`, the arguments are data from outside (a feed's link),
+/// never to be expanded: the service manager expands `${VAR}` in a
+/// command it runs, so under systemd each `$` is written `$$`.
+fn launch(argv: &[String], wait: bool, literal: bool) {
+    let argv = command_line(argv, wait, systemd_unit().is_some(), literal);
     let Some((program, args)) = argv.split_first() else {
         return;
     };
-    let mut command = if systemd_unit().is_some() {
-        let mut c = Command::new("systemd-run");
-        c.args(["--user", "--collect", "--quiet"]);
-        if wait {
-            c.arg("--wait");
-        }
-        c.arg("--").arg(program).args(args);
-        c
-    } else {
-        let mut c = Command::new(program);
-        c.args(args);
-        c
-    };
+    let mut command = Command::new(program);
+    command.args(args);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -131,6 +139,103 @@ fn launch(argv: &[String], wait: bool) {
         }
         Err(e) => eprintln!("nexusd: tap action: cannot start {program}: {e}"),
     }
+}
+
+/// The program and arguments `launch` runs: `argv` itself, or, under
+/// systemd, `systemd-run` asked to run it. No shell either way.
+fn command_line(argv: &[String], wait: bool, systemd: bool, literal: bool) -> Vec<String> {
+    if !systemd || argv.is_empty() {
+        return argv.to_vec();
+    }
+    let mut out: Vec<String> = ["systemd-run", "--user", "--collect", "--quiet"]
+        .map(String::from)
+        .to_vec();
+    if wait {
+        out.push("--wait".into());
+    }
+    out.push("--".into());
+    out.push(argv[0].clone());
+    out.extend(argv[1..].iter().map(|a| {
+        if literal {
+            a.replace('$', "$$")
+        } else {
+            a.clone()
+        }
+    }));
+    out
+}
+
+/// Opens a link a source gave (a news article) in the default browser,
+/// if it is safe to: see `checked_link`. A refused link is logged.
+fn open_link(link: &str) {
+    match checked_link(link) {
+        Ok(url) => launch(&link_opener(&url, std::env::consts::OS), false, true),
+        Err(why) => eprintln!("nexusd: news: not opening a link that {why}"),
+    }
+}
+
+/// A link from a feed, checked and made plain before it goes near another
+/// program. Feeds are written by strangers, so the link is untrusted:
+///
+/// - it must be an absolute `http://` or `https://` address with a host;
+/// - it may not hold whitespace, control characters or invisible
+///   formatting characters (which could hide where it really goes);
+/// - characters RFC 3986 does not allow in an address (`"`, `<`, `>`,
+///   `\`, `^`, `` ` ``, `{`, `|`, `}`) are percent-encoded, as a browser
+///   would, so no opener has anything to interpret.
+///
+/// Returns the address to open, or why it was refused.
+pub fn checked_link(link: &str) -> Result<String, &'static str> {
+    const MAX: usize = 4096;
+    if link.len() > MAX {
+        return Err("is too long");
+    }
+    let scheme = |s: &str| {
+        link.get(..s.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(s))
+            .then(|| &link[s.len()..])
+    };
+    let Some(rest) = scheme("https://").or_else(|| scheme("http://")) else {
+        return Err("is not an http or https address");
+    };
+    if rest.is_empty() || rest.starts_with(['/', '?', '#']) {
+        return Err("has no host");
+    }
+    let hidden = |c: char| {
+        matches!(c,
+            '\u{00ad}' | '\u{061c}' | '\u{180e}' | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}')
+    };
+    let mut out = String::with_capacity(link.len());
+    for c in link.chars() {
+        if c.is_control() || c.is_whitespace() || hidden(c) {
+            return Err("holds spaces, control or invisible characters");
+        }
+        match c {
+            '"' | '<' | '>' | '\\' | '^' | '`' | '{' | '|' | '}' => {
+                out.push_str(&format!("%{:02X}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    Ok(out)
+}
+
+/// The command that opens a checked web address in the default browser,
+/// on `os` (as `std::env::consts::OS` names it). The address is one
+/// argument, never read by a shell. On Windows `cmd /C start` would run
+/// `&`, `|` and `^` in it as commands, so it goes to the URL handler
+/// directly.
+fn link_opener(url: &str, os: &str) -> Vec<String> {
+    let argv: &[&str] = match os {
+        "macos" => &["open"],
+        "windows" => &["rundll32", "url.dll,FileProtocolHandler"],
+        _ => &["xdg-open"],
+    };
+    argv.iter()
+        .map(|s| s.to_string())
+        .chain([url.to_string()])
+        .collect()
 }
 
 /// The daemon's own systemd unit, when it runs as a service; `None` when
@@ -180,6 +285,99 @@ fn opener(target: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_links_pass_unchanged() {
+        for link in [
+            "https://news.example/story?id=7&src=rss#top",
+            "http://news.example:8080/a/b_(c)/d;e=f",
+            "HTTPS://news.example/%7Euser/caf%C3%A9",
+            "https://news.example/café",
+        ] {
+            assert_eq!(checked_link(link).as_deref(), Ok(link));
+        }
+    }
+
+    #[test]
+    fn hostile_links_are_refused_or_defused() {
+        for link in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ftp://news.example/x",
+            "-h",
+            "--help",
+            "https://",
+            "https:///etc",
+            "http:news.example",
+            " https://news.example/",
+            "https://news.example/a b",
+            "https://news.example/\nrm x",
+            "https://news.example/\r\n",
+            "https://news.example/\t",
+            "https://news.example/\u{0}",
+            "https://news.example/\u{1b}[2J",
+            "https://news.example/\u{85}",
+            "https://news.example/\u{a0}",
+            "https://news.example/\u{2028}",
+            "https://news.example/\u{202e}gpj.exe",
+            "https://news.example/\u{200b}",
+            "https://news.example/\u{feff}",
+            "httpś://news.example/",
+        ] {
+            assert!(checked_link(link).is_err(), "{link:?} was let through");
+        }
+        let long = format!("https://news.example/{}", "a".repeat(5000));
+        assert!(checked_link(&long).is_err());
+        // What a shell or cmd would act on is encoded away; what an
+        // address may hold (`&`, `;`, `$`, `'`, parentheses) stays, since
+        // nothing here reads it as a command.
+        assert_eq!(
+            checked_link("https://news.example/?a=1&b=2|calc^x\"y\"<z>`w`{v}\\").as_deref(),
+            Ok("https://news.example/?a=1&b=2%7Ccalc%5Ex%22y%22%3Cz%3E%60w%60%7Bv%7D%5C")
+        );
+        let kept = "https://news.example/$(touch_x);$HOME'q'&n=1";
+        assert_eq!(
+            checked_link(kept).as_deref(),
+            Ok(kept),
+            "kept, and only ever one argument"
+        );
+    }
+
+    #[test]
+    fn a_link_is_one_argument_on_every_system() {
+        let url = checked_link("https://news.example/?a=1&b=2|x^y").unwrap();
+        assert_eq!(link_opener(&url, "linux"), ["xdg-open", url.as_str()]);
+        assert_eq!(link_opener(&url, "macos"), ["open", url.as_str()]);
+        // Not `cmd /C start`: cmd would run what follows `&` or `|`.
+        assert_eq!(
+            link_opener(&url, "windows"),
+            ["rundll32", "url.dll,FileProtocolHandler", url.as_str()]
+        );
+    }
+
+    #[test]
+    fn under_systemd_a_link_cannot_expand_variables() {
+        let argv = link_opener("https://news.example/?k=${HOME}&$USER", "linux");
+        assert_eq!(command_line(&argv, false, false, true), argv, "no systemd");
+        assert_eq!(
+            command_line(&argv, false, true, true),
+            [
+                "systemd-run",
+                "--user",
+                "--collect",
+                "--quiet",
+                "--",
+                "xdg-open",
+                "https://news.example/?k=$${HOME}&$$USER",
+            ]
+        );
+        // A layout's own commands are the user's: unchanged, as before.
+        let run = vec!["notify-send".to_string(), "${HOME}".into()];
+        assert_eq!(
+            command_line(&run, true, true, false)[4..],
+            ["--wait", "--", "notify-send", "${HOME}"]
+        );
+    }
 
     #[test]
     fn a_leading_tilde_is_the_home_folder() {

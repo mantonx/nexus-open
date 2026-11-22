@@ -451,3 +451,11 @@ README clip (now of the new strip), release verification.
     3:1 or better on every surface in both modes.
   - Icons are chosen from a searchable list of the strip's icons (a list,
     not a grid); a bar's scale is two number fields in the shown unit.
+- 2026-11-22 — News widget, provisional: the headline wraps onto two
+  lines at `LABEL` 18 (variant B) rather than one line at `TITLE` 20 with
+  the source under it (variant A). Side by side at 200 to 512 px with
+  headlines of 40 to 110 characters, B shows about twice the headline
+  and still reads as one calm card; the source is shown only after the
+  headline's end on a hero card, when it fits. Costs the accent newspaper
+  on most cards (the raised card carries the tap). DESIGN.md, Long
+  titles. To be read on the panel.
