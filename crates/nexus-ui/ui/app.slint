@@ -844,7 +844,6 @@ export component AppWindow inherits Window {
                                     background: Theme.bezel;
                                     border-width: row.active ? 2px : 1px;
                                     border-color: row.active && !root.trying ? Theme.act-line.transparentize(0.3) : row.active ? Theme.line-strong : Theme.dark ? Theme.line : Theme.bezel;
-                                    opacity: root.connected ? 1 : 0.5;
                                     accessible-role: button;
                                     accessible-label: row.live
                                         ? @tr("{}, on the strip. {}", row.name, row.summary)
@@ -1072,6 +1071,13 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                         }
+                                    }
+                                    // Not live: the picture darkens as the strip
+                                    // dims, so the bezel stays a device on cream
+                                    // too (fading it into the page turned it taupe).
+                                    if !root.connected: Rectangle {
+                                        border-radius: parent.border-radius;
+                                        background: #14110fa0;
                                     }
                                 }
 
@@ -1686,7 +1692,7 @@ export component AppWindow inherits Window {
     status-menu := PopupWindow {
         x: max(8px, status-chip.absolute-position.x - root.absolute-position.x + status-chip.width - self.width);
         y: header.height - 6px;
-        width: 400px;
+        width: 440px;
         close-policy: PopupClosePolicy.close-on-click-outside;
         Rectangle {
             background: Theme.surface;
@@ -1739,6 +1745,8 @@ export component AppWindow inherits Window {
                         clicked => {
                             root.open-log();
                             root.show-sheet("log");
+                            // Last: closing first would end this handler.
+                            status-menu.close();
                         }
                     }
                 }
@@ -1763,19 +1771,23 @@ export component AppWindow inherits Window {
                     Rectangle {
                         border-radius: 8px;
                         background: Theme.surface-2;
-                        TextInput {
-                            x: 10px;
-                            width: parent.width - 20px;
-                            text: root.status.detail;
-                            read-only: true;
-                            single-line: false;
-                            wrap: word-wrap;
-                            font-family: "monospace";
-                            font-size: 12px;
-                            color: Theme.text-2;
-                            accessible-label: @tr("The fix as commands");
+                        // Sized by its words, so a long command wraps
+                        // inside rather than running out of the box.
+                        VerticalLayout {
+                            padding: 8px;
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            TextInput {
+                                text: root.status.detail;
+                                read-only: true;
+                                single-line: false;
+                                wrap: word-wrap;
+                                font-family: "monospace";
+                                font-size: 12px;
+                                color: Theme.text-2;
+                                accessible-label: @tr("The fix as commands");
+                            }
                         }
-                        min-height: 30px;
                     }
                 }
             }
