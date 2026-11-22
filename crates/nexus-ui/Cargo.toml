@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 interprocess = "2.4.8"
+jiff = "0.2.43"
 dirs = "7.0.0"
 nexus-control = { path = "../nexus-control" }
 nexus-core = { path = "../nexus-core" }
@@ -31,6 +32,10 @@ slint = { version = "1.18.1", default-features = false, features = [
     "raw-window-handle-06",
 ] }
 rfd = "0.18.0"
+
+[dev-dependencies]
+# The window's icon fonts are checked against the strip's icons.
+swash.workspace = true
 
 [build-dependencies]
 slint-build = "1.18.1"

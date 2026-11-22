@@ -292,6 +292,20 @@ README clip (now of the new strip), release verification.
   `DeviceAllow` lines do nothing as a user unit: the hardening claim in
   `REDESIGN_PLAN.md` (device access limited to hidraw and NVIDIA) is wrong
   and needs correcting in Phase 5.
+- 2026-11-22 — **The window's Appearance** (U5, at Matt's request): Match
+  the system (the default), Light or Dark, in Preferences under "This
+  window", applied live. It is kept in the window's own file,
+  `$XDG_CONFIG_HOME/nexus-open/window` (`appearance = "system"`), not in the
+  layout or the store's settings, because it changes only the window: the
+  strip stays dark whatever it says, it must not be exported with a
+  layout, and choosing it must not enter the layout's undo history (it does
+  not; checked in the capture rig). A config file rather than the state
+  folder beside the remembered window size, since it is a choice the user
+  makes, not something the window notices. "Match the system" follows a
+  desktop switch without a restart: Slint 1.18 watches the
+  `org.freedesktop.appearance color-scheme` portal setting, and the window
+  leaves Slint's palette on `unknown` so it keeps tracking it. Checked in
+  the rig's own session (its own bus, dconf and portal), both directions.
 
 - 2026-11-22 — **Matt: light and dark mode for the window.** The window
   follows the desktop's colour scheme by default, with a "Match the
@@ -414,6 +428,29 @@ README clip (now of the new strip), release verification.
   The last gate for U3 is the deployed build read on the real strip with
   the legibility card, and Matt's verdict on the frames. Whatever he
   finds there is fixed before release.
+- 2026-11-22 — **U5 window review fixes, provisional (Claude; Matt to
+  overturn).** After two isolated rescores at 28/40 in each mode:
+  - Selection is a 2 px neutral outline (the page being edited in the
+    window's text-2; the selected widget, on the always-dark strip, in the
+    strip's cream). The accent ring, 2 px clear of the control, is
+    keyboard focus only, shown when focus arrives by Tab or arrow keys, not
+    by a click. The strip's dashed "Set up" outline is unchanged.
+  - A button on a warning or problem banner is a neutral key, never the
+    accent, whatever the accent is.
+  - A failed "Start the service" is its own state: the chip reads "Did not
+    start", the banner turns to a problem with the reason in plain words.
+  - In Edit, the page being edited shows its own widgets, not the strip's
+    live frame, so an alarm or takeover never sits under the selection
+    outlines; Try it and the other rows show the live frame.
+  - Add takes room only down to where each kind still reads (key 40 px,
+    reading, rate and clock 72, slider 80, music 120) and is off, with the
+    reason, below that. At 40 px a not-set-up key shows its icon alone
+    (nexus-core, new reference frame `narrow-keys`).
+  - Dark mode's ground and surfaces moved a step above the strip's ground
+    (#1c1815, #251f1b, #2f2823); disabled words have their own token,
+    3:1 or better on every surface in both modes.
+  - Icons are chosen from a searchable list of the strip's icons (a list,
+    not a grid); a bar's scale is two number fields in the shown unit.
 - 2026-11-22 — News widget, provisional: the headline wraps onto two
   lines at `LABEL` 18 (variant B) rather than one line at `TITLE` 20 with
   the source under it (variant A). Side by side at 200 to 512 px with

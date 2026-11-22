@@ -1,0 +1,684 @@
+// The window's own controls, drawn from the tokens in theme.slint: three
+// button tiers (one primary per context, default, quiet), icon buttons, a
+// real segmented control, chips, text fields, a select, menu rows and the
+// key caps that show shortcuts. Every one can be reached and used from the
+// keyboard, shows a focus ring in the accent, and tells a screen reader
+// its name and state.
+
+import { Theme, Icon, Glyph } from "theme.slint";
+
+/// The accent ring a focused control wears.
+export component FocusRing inherits Rectangle {
+    in property <bool> shown;
+    in property <length> radius: Theme.r-control;
+    x: -4px;
+    y: -4px;
+    border-radius: radius + 4px;
+    border-width: shown ? 2px : 0px;
+    border-color: Theme.act-line;
+}
+
+/// A button. `tier` is "primary" (the one obvious action here: accent
+/// face, dark words), "default" (a raised face, like a key on the strip) or
+/// "quiet" (words only until hovered). `destructive` keeps it quiet and
+/// warms only on hover: undo, not a confirmation, is the safety net.
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> tier: "default";
+    in property <bool> enabled: true;
+    in property <bool> destructive: false;
+    in property <bool> compact: false;
+    /// False for a button given its own width: its words are then cut
+    /// short with an ellipsis instead of widening it.
+    in property <bool> fit: true;
+    /// Said for the button by a screen reader, when the text alone is not
+    /// enough; also shown as the reason when disabled, if given.
+    in property <string> label;
+    callback clicked();
+
+    property <bool> primary: tier == "primary";
+    property <bool> quiet: tier == "quiet";
+    min-height: compact ? 28px : Theme.control-h;
+    min-width: fit ? row.preferred-width + (compact ? 16px : 24px) : 0px;
+    horizontal-stretch: 0;
+    border-radius: Theme.r-control;
+    background: !root.enabled ? (quiet ? transparent : Theme.surface-2)
+        : primary ? (touch.pressed ? Theme.accent-fill : touch.has-hover ? Theme.accent-text : Theme.act)
+        : quiet ? (touch.pressed ? Theme.surface-2.darker(0.1) : touch.has-hover ? Theme.surface-2 : transparent)
+        : (touch.pressed ? Theme.surface-2 : touch.has-hover ? Theme.raised.brighter(0.08) : Theme.raised);
+    border-width: !quiet && !primary && root.enabled ? 1px : 0px;
+    border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
+
+    accessible-role: button;
+    accessible-label: root.label != "" ? root.label : root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+
+    property <color> ink: !root.enabled ? Theme.text-off
+        : primary ? Theme.act-ink
+        : destructive && touch.has-hover ? Theme.crit
+        : quiet ? Theme.text-2 : Theme.text;
+
+    row := HorizontalLayout {
+        padding-left: compact ? 8px : 12px;
+        padding-right: compact ? 8px : 12px;
+        spacing: 7px;
+        alignment: fit ? LayoutAlignment.center : LayoutAlignment.start;
+        if root.icon != "": Icon {
+            glyph: root.icon;
+            color: root.ink;
+            font-size: compact ? 14px : 16px;
+        }
+        if root.text != "": Text {
+            text: root.text;
+            color: root.ink;
+            font-family: Theme.font;
+            font-size: compact ? Theme.size-label : Theme.size-body;
+            font-weight: primary ? 600 : 500;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            focus.focus();
+            root.clicked();
+        }
+    }
+    focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
+        // Its TouchArea focuses it; taking the press here would
+        // swallow the first click.
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    FocusRing {
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        shown: focus.has-focus && focus.by-keys;
+    }
+}
+
+/// A button that is only an icon; `label` names it for a screen reader
+/// and is shown as a tooltip-like caption on hover.
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> fill: false;
+    in property <bool> on: false;
+    callback clicked();
+    width: 34px;
+    height: 34px;
+    border-radius: Theme.r-control;
+    background: root.on ? Theme.surface-2
+        : touch.pressed ? Theme.surface-2.darker(0.1) : touch.has-hover && root.enabled ? Theme.surface-2 : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+    Icon {
+        glyph: root.icon;
+        fill: root.fill;
+        font-size: 18px;
+        color: root.enabled ? Theme.text-2 : Theme.text-off;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            focus.focus();
+            root.clicked();
+        }
+    }
+    focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
+        // Its TouchArea focuses it; taking the press here would
+        // swallow the first click.
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    FocusRing {
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        shown: focus.has-focus && focus.by-keys;
+    }
+}
+
+/// Two to four exclusive choices on one track. The chosen one is raised
+/// like a key on the strip. Left and right arrows move the choice.
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    /// Optional, by position.
+    in property <[string]> icons;
+    in property <int> current;
+    in property <bool> enabled: true;
+    in property <string> label;
+    in property <bool> small: false;
+    callback chose(int);
+
+    height: small ? 30px : Theme.control-h;
+    border-radius: Theme.r-control;
+    background: Theme.surface-2;
+    min-width: row.preferred-width;
+    horizontal-stretch: 0;
+    accessible-role: tab-list;
+    accessible-label: root.label;
+
+    row := HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        for s[i] in root.options: Rectangle {
+            property <bool> chosen: i == root.current;
+            border-radius: Theme.r-control - 2px;
+            background: chosen ? (Theme.dark ? Theme.raised-top : Theme.raised) : seg-touch.has-hover && root.enabled ? Theme.surface-2.darker(0.06) : transparent;
+            border-width: chosen ? 1px : 0px;
+            border-color: Theme.dark ? Theme.text-3 : Theme.line-strong;
+            drop-shadow-blur: chosen && !Theme.dark ? 3px : 0px;
+            drop-shadow-color: #2a211b30;
+            min-width: seg-row.preferred-width + 20px;
+            accessible-role: tab;
+            accessible-label: s;
+            accessible-item-selected: chosen;
+            accessible-item-selectable: true;
+            accessible-action-default => {
+                if root.enabled {
+                    root.chose(i);
+                }
+            }
+            seg-row := HorizontalLayout {
+                alignment: center;
+                spacing: 6px;
+                if root.icons[i] != "": Icon {
+                    glyph: root.icons[i];
+                    font-size: 15px;
+                    color: chosen ? Theme.text : Theme.text-3;
+                }
+                Text {
+                    text: s;
+                    font-family: Theme.font;
+                    font-size: root.small ? Theme.size-label : Theme.size-body;
+                    font-weight: chosen ? 600 : 500;
+                    color: chosen ? Theme.text : Theme.text-2;
+                    vertical-alignment: center;
+                }
+            }
+            seg-touch := TouchArea {
+                enabled: root.enabled;
+                mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+                clicked => {
+                    focus.focus();
+                    root.chose(i);
+                }
+            }
+        }
+    }
+    focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
+        // Its TouchArea focuses it; taking the press here would
+        // swallow the first click.
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.LeftArrow && root.current > 0 {
+                root.chose(root.current - 1);
+                return accept;
+            }
+            if event.text == Key.RightArrow && root.current < root.options.length - 1 {
+                root.chose(root.current + 1);
+                return accept;
+            }
+            reject
+        }
+    }
+    FocusRing {
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        shown: focus.has-focus && focus.by-keys;
+    }
+}
+
+/// A pill: a chosen thing, with a cross to take it away when `removable`.
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> secondary;
+    in property <bool> removable: true;
+    in property <bool> enabled: true;
+    callback remove();
+    height: 30px;
+    border-radius: 15px;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: Theme.line;
+    min-width: chip-row.preferred-width;
+    horizontal-stretch: 0;
+    accessible-role: list-item;
+    accessible-label: root.secondary == "" ? root.text : root.text + ", " + root.secondary;
+    chip-row := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: root.removable ? 4px : 12px;
+        spacing: 6px;
+        if root.icon != "": Icon {
+            glyph: root.icon;
+            fill: true;
+            font-size: 15px;
+        }
+        Text {
+            text: root.text;
+            font-family: Theme.font;
+            font-size: Theme.size-label;
+            font-weight: 500;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
+        if root.secondary != "": Text {
+            text: root.secondary;
+            font-family: Theme.font;
+            font-size: Theme.size-small;
+            color: Theme.text-3;
+            vertical-alignment: center;
+        }
+        if root.removable: IconButton {
+            width: 24px;
+            height: 24px;
+            y: 3px;
+            icon: Glyph.close;
+            enabled: root.enabled;
+            label: @tr("Remove {}", root.text);
+            clicked => {
+                root.remove();
+            }
+        }
+    }
+}
+
+/// A one-line text field. Sends `accepted` on Enter and `committed` when
+/// focus leaves with a changed text, so typing is never sent key by key.
+export component TextField inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <bool> enabled: true;
+    in property <string> label;
+    in property <InputType> input-type: InputType.text;
+    in property <string> leading-icon;
+    /// The value it started from; a commit happens only if it changed.
+    in property <string> committed-value;
+    out property <bool> has-focus: input.has-focus;
+    callback accepted(string);
+    callback committed(string);
+    callback edited(string);
+    callback key-pressed(KeyEvent) -> EventResult;
+
+    public function focus-input() {
+        input.focus();
+    }
+    public function select-all() {
+        input.select-all();
+    }
+
+    height: Theme.control-h;
+    border-radius: Theme.r-control;
+    background: root.enabled ? (Theme.dark ? Theme.ground : Theme.surface) : Theme.surface-2;
+    border-width: 1px;
+    border-color: Theme.line-strong;
+    horizontal-stretch: 1;
+    min-width: 80px;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        if root.leading-icon != "": Icon {
+            glyph: root.leading-icon;
+            color: Theme.text-3;
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+            input := TextInput {
+                width: parent.width;
+                height: parent.height;
+                vertical-alignment: center;
+                font-family: Theme.font;
+                font-size: Theme.size-body;
+                color: Theme.text;
+                selection-background-color: Theme.act-wash;
+                selection-foreground-color: Theme.text;
+                enabled: root.enabled;
+                single-line: true;
+                input-type: root.input-type;
+                accessible-label: root.label;
+                accepted => {
+                    root.accepted(self.text);
+                }
+                edited => {
+                    root.edited(self.text);
+                }
+                changed has-focus => {
+                    if !self.has-focus && self.text != root.committed-value {
+                        root.committed(self.text);
+                    }
+                }
+                key-pressed(event) => {
+                    root.key-pressed(event)
+                }
+            }
+            if input.text == "": Text {
+                text: root.placeholder;
+                font-family: Theme.font;
+                font-size: Theme.size-body;
+                color: Theme.text-3;
+                vertical-alignment: center;
+                x: 0;
+                height: parent.height;
+                accessible-role: none;
+            }
+        }
+    }
+    FocusRing {
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        shown: input.has-focus;
+    }
+}
+
+/// A list to pick one from. Closed, the arrows step through it; Enter or
+/// Space (or a click) opens the list.
+export component Select inherits Rectangle {
+    in property <[string]> options;
+    in property <int> current;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback chose(int);
+
+    height: Theme.control-h;
+    border-radius: Theme.r-control;
+    background: touch.has-hover && root.enabled ? Theme.raised.brighter(0.06) : Theme.raised;
+    border-width: 1px;
+    border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
+    horizontal-stretch: 1;
+    min-width: 120px;
+    accessible-role: combobox;
+    accessible-label: root.label;
+    accessible-value: root.current >= 0 ? root.options[root.current] : "";
+    accessible-action-default => {
+        popup.show();
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text {
+            text: root.current >= 0 ? root.options[root.current] : @tr("Choose…");
+            font-family: Theme.font;
+            font-size: Theme.size-body;
+            color: root.current >= 0 ? Theme.text : Theme.text-3;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        Icon {
+            glyph: Glyph.caret-down;
+            font-size: 14px;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            focus.focus();
+            popup.show();
+        }
+    }
+    focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
+        // Its TouchArea focuses it; taking the press here would
+        // swallow the first click.
+        focus-on-click: false;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == " " || event.text == Key.Return {
+                popup.show();
+                return accept;
+            }
+            if event.text == Key.UpArrow && root.current > 0 {
+                root.chose(root.current - 1);
+                return accept;
+            }
+            if event.text == Key.DownArrow && root.current < root.options.length - 1 {
+                root.chose(root.current + 1);
+                return accept;
+            }
+            reject
+        }
+    }
+    FocusRing {
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        shown: focus.has-focus && focus.by-keys;
+    }
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width;
+        Rectangle {
+            background: Theme.surface;
+            border-radius: Theme.r-surface;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000050;
+            VerticalLayout {
+                padding: 4px;
+                for o[i] in root.options: Rectangle {
+                    height: 32px;
+                    border-radius: Theme.r-control - 2px;
+                    background: opt.has-hover ? Theme.surface-2 : transparent;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        Text {
+                            text: o;
+                            font-family: Theme.font;
+                            font-size: Theme.size-body;
+                            color: Theme.text;
+                            font-weight: i == root.current ? 600 : 400;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        if i == root.current: Icon {
+                            glyph: Glyph.check;
+                            font-size: 14px;
+                            color: Theme.act-line;
+                        }
+                    }
+                    opt := TouchArea {
+                        clicked => {
+                            root.chose(i);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A row in a menu: an icon, words, and an optional note on the right.
+export component MenuRow inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> note;
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    in property <bool> destructive: false;
+    callback clicked();
+    height: 34px;
+    border-radius: Theme.r-control - 2px;
+    background: touch.has-hover && root.enabled ? Theme.surface-2 : transparent;
+    accessible-role: button;
+    accessible-label: root.checked ? @tr("{}, on the strip", root.text) : root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        Rectangle {
+            width: 18px;
+            if root.checked || root.icon != "": Icon {
+                glyph: root.checked ? Glyph.check : root.icon;
+                font-size: 15px;
+                color: root.checked ? Theme.act-line : !root.enabled ? Theme.text-off : root.destructive && touch.has-hover ? Theme.crit : Theme.text-2;
+            }
+        }
+        Text {
+            text: root.text;
+            font-family: Theme.font;
+            font-size: Theme.size-body;
+            font-weight: root.checked ? 600 : 400;
+            color: !root.enabled ? Theme.text-off : root.destructive && touch.has-hover ? Theme.crit : Theme.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        if root.note != "": Text {
+            text: root.note;
+            font-family: Theme.font;
+            font-size: Theme.size-small;
+            color: Theme.text-3;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component MenuDivider inherits Rectangle {
+    height: 9px;
+    Rectangle {
+        y: 4px;
+        height: 1px;
+        background: Theme.line;
+    }
+}
+
+/// A keyboard key, for showing shortcuts.
+export component KeyCap inherits Rectangle {
+    in property <string> text;
+    height: 20px;
+    min-width: cap.preferred-width + 10px;
+    border-radius: 5px;
+    background: Theme.surface-2;
+    border-width: 1px;
+    border-color: Theme.line-strong;
+    accessible-role: none;
+    cap := Text {
+        text: root.text;
+        font-family: Theme.font;
+        font-size: 11px;
+        font-weight: 500;
+        color: Theme.text-2;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+/// A shortcut: keys and what they do.
+export component Shortcut inherits HorizontalLayout {
+    in property <[string]> keys;
+    in property <string> does;
+    spacing: 3px;
+    accessible-role: text;
+    for k in root.keys: KeyCap {
+        text: k;
+    }
+    Text {
+        text: " " + root.does;
+        font-family: Theme.font;
+        font-size: Theme.size-small;
+        color: Theme.text-3;
+        vertical-alignment: center;
+    }
+}
+
+/// A text in the window's face and colours.
+export component Label inherits Text {
+    font-family: Theme.font;
+    font-size: Theme.size-body;
+    color: Theme.text;
+    vertical-alignment: center;
+}
+
+export component Hint inherits Text {
+    font-family: Theme.font;
+    font-size: Theme.size-small;
+    color: Theme.text-3;
+    wrap: word-wrap;
+}
+
+export component Heading inherits Text {
+    font-family: Theme.font;
+    font-size: Theme.size-title;
+    font-weight: 600;
+    color: Theme.text;
+    vertical-alignment: center;
+}

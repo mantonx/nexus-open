@@ -10,7 +10,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use nexus_core::config::{Action, GraphStyle, MediaCommand, SLIDER_VALUE, SliderControl, Widget};
+use nexus_core::config::{
+    Action, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, NewsCommand, SLIDER_VALUE, SliderControl,
+    Widget,
+};
 
 /// A widget's values by key, in the window's words.
 pub type Values = BTreeMap<String, String>;
@@ -40,8 +43,14 @@ pub enum Kind {
     Choice(Vec<String>),
     /// Several lines of free text.
     Note,
-    /// A signal's name: typed, or chosen from the signal browser.
+    /// A signal's name, chosen from the picker.
     Signal,
+    /// A few short options side by side.
+    Segmented(Vec<String>),
+    /// The signals that set off a takeover, as chips.
+    Triggers,
+    /// An icon's name, chosen from the picker of the strip's icons.
+    Icon,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,7 +92,7 @@ const RATE: &str = "Network rate";
 const SLIDER: &str = "Slider";
 const MEDIA: &str = "Now playing";
 const KEY: &str = "Key";
-const TYPES: [&str; 6] = [CLOCK, READING, RATE, SLIDER, MEDIA, KEY];
+const NEWS: &str = "News";
 
 const NO_GRAPH: &str = "None";
 const AREA: &str = "Area";
@@ -104,8 +113,13 @@ const NEXT_TRACK: &str = "Next track";
 const PREV_TRACK: &str = "Previous track";
 const STOP: &str = "Stop playback";
 const PUBLISH: &str = "Set a signal";
+const OPEN_STORY: &str = "Open the story";
+const NEXT_HEADLINE: &str = "Next headline";
+/// What a news widget's tap and long press can do besides the others.
+const NEWS_ACTIONS: [&str; 2] = [OPEN_STORY, NEXT_HEADLINE];
+/// Grouped by what they act on: music, pages, the computer.
 const ACTIONS: [&str; 11] = [
-    NOTHING, SHOW_PAGE, NEXT_PAGE, PREV_PAGE, RUN, OPEN, PLAY_PAUSE, NEXT_TRACK, PREV_TRACK, STOP,
+    NOTHING, PLAY_PAUSE, NEXT_TRACK, PREV_TRACK, STOP, SHOW_PAGE, NEXT_PAGE, PREV_PAGE, OPEN, RUN,
     PUBLISH,
 ];
 
@@ -122,7 +136,7 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
     match widget {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
-        Widget::News { .. } => put("type", "news"),
+        Widget::News { .. } => put("type", NEWS),
         Widget::Key { label, sub, .. } => {
             put("type", KEY);
             put("label", label.as_deref().unwrap_or_default());
@@ -142,11 +156,13 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
             ..
         } => {
             put("type", READING);
-            // Carried, like the icon: "0 5000", or empty.
-            put(
-                "scale",
-                &scale.map_or(String::new(), |[lo, hi]| format!("{lo} {hi}")),
-            );
+            // The bar's ends, or empty; in the shown unit, like the
+            // thresholds.
+            let end = |i: usize| {
+                scale.map_or(String::new(), |s| number(threshold_out(s[i], signal, ctx)))
+            };
+            put("scale_from", &end(0));
+            put("scale_to", &end(1));
             put("second_label", second_label.as_deref().unwrap_or_default());
             put("label", label);
             put("signal", signal);
@@ -215,7 +231,9 @@ fn flatten_action(v: &mut Values, prefix: &str, action: Option<&Action>) {
         v.insert(key, s.to_string());
     };
     match action {
-        None | Some(Action::News(_)) => put("", NOTHING),
+        None => put("", NOTHING),
+        Some(Action::News(NewsCommand::Open)) => put("", OPEN_STORY),
+        Some(Action::News(NewsCommand::Next)) => put("", NEXT_HEADLINE),
         Some(Action::Page(p)) if p == "next" => put("", NEXT_PAGE),
         Some(Action::Page(p)) if p == "prev" => put("", PREV_PAGE),
         Some(Action::Page(p)) => {
@@ -279,6 +297,12 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
             tap,
             hold,
         },
+        NEWS => Widget::News {
+            width,
+            icon,
+            tap,
+            hold,
+        },
         KEY => Widget::Key {
             width,
             icon,
@@ -309,18 +333,24 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
                     "Choose the second signal its thresholds are for.".into(),
                 ));
             }
-            let scale = match get("scale")
-                .split_whitespace()
-                .map(str::parse::<f64>)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(v) if v.is_empty() => None,
-                Ok(v) if v.len() == 2 && v[0] < v[1] => Some([v[0], v[1]]),
-                _ => {
-                    return Err(Missing::Invalid(
-                        "The scale is two numbers, the lowest first.".into(),
-                    ));
-                }
+            let scale = match (get("scale_from"), get("scale_to")) {
+                ("", "") => None,
+                (from, to) => match (from.parse::<f64>(), to.parse::<f64>()) {
+                    (Ok(lo), Ok(hi)) if lo < hi => Some([
+                        threshold_in(lo, &signal, ctx),
+                        threshold_in(hi, &signal, ctx),
+                    ]),
+                    (Ok(_), Ok(_)) => {
+                        return Err(Missing::Invalid(
+                            "The bar's end must be above its start.".into(),
+                        ));
+                    }
+                    _ => {
+                        return Err(Missing::Incomplete(
+                            "Give the bar both ends, or leave both empty.".into(),
+                        ));
+                    }
+                },
             };
             Widget::Value {
                 second,
@@ -430,6 +460,8 @@ fn build_action(v: &Values, prefix: &str, ctx: &Context) -> Result<Option<Action
         NEXT_TRACK => Action::Media(MediaCommand::Next),
         PREV_TRACK => Action::Media(MediaCommand::Previous),
         STOP => Action::Media(MediaCommand::Stop),
+        OPEN_STORY => Action::News(NewsCommand::Open),
+        NEXT_HEADLINE => Action::News(NewsCommand::Next),
         PUBLISH => {
             let signal = get("signal");
             if signal.is_empty() {
@@ -461,13 +493,18 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
     };
     let choice = |options: &[&str]| Kind::Choice(options.iter().map(|s| s.to_string()).collect());
 
+    let segmented =
+        |options: &[&str]| Kind::Segmented(options.iter().map(|s| s.to_string()).collect());
+    // What a widget is comes from the gallery it was added from; to have
+    // another kind, add that one. So there is no type field here.
     let ty = get("type");
-    add("type", "Shows", choice(&TYPES), String::new());
     add(
         "width",
         "Width",
         Kind::Number,
-        "Pixels. The widget on its right gives or takes the difference.".into(),
+        format!(
+            "{MIN_WIDGET_WIDTH} to 640 strip pixels. Dragging the grip on the strip does the same, and the widget on its right gives or takes the difference."
+        ),
     );
     match ty.as_str() {
         READING => {
@@ -478,13 +515,19 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 Kind::Signal,
                 reading_help(&get("signal"), ctx),
             );
-            add(
-                "graph",
-                "Graph",
-                choice(&[NO_GRAPH, AREA, LINE]),
-                String::new(),
-            );
             let unit = threshold_unit(&get("signal"), ctx);
+            add(
+                "scale_from",
+                "Bar starts at",
+                Kind::Number,
+                format!("The empty bar's value{unit}. Both empty: the signal's usual scale."),
+            );
+            add(
+                "scale_to",
+                "Bar ends at",
+                Kind::Number,
+                format!("The full bar's value{unit}."),
+            );
             add(
                 "warn",
                 "Warn at",
@@ -521,16 +564,28 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                     Kind::Number,
                     format!("For the second reading{unit}. Empty: never."),
                 );
+                add(
+                    "second_label",
+                    "Second label",
+                    Kind::Text,
+                    "Its name where it is named, as in the alarm: \"load\" makes \"CPU load\". Empty: the signal's last word.".into(),
+                );
             }
         }
         KEY => {
             add(
                 "icon",
                 "Icon",
-                Kind::Text,
-                "The icon's name, as in: play.".into(),
+                Kind::Icon,
+                "Drawn on the key. Its name is how a layout file writes it.".into(),
             );
             add("label", "Label", Kind::Text, String::new());
+            add(
+                "sub",
+                "Second line",
+                Kind::Text,
+                "Under the label, on a key 300 px or wider.".into(),
+            );
         }
         RATE => {
             add("label", "Label", Kind::Text, String::new());
@@ -552,7 +607,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             add(
                 "controls",
                 "Sets",
-                choice(&[VOLUME, SEEK, COMMAND]),
+                segmented(&[VOLUME, SEEK, COMMAND]),
                 String::new(),
             );
             if get("controls") == COMMAND {
@@ -574,9 +629,28 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
         }
         _ => {}
     }
+    // Any widget may draw another icon than its own; a key's is above.
+    if ty != KEY {
+        add(
+            "icon",
+            "Icon",
+            Kind::Icon,
+            "Optional: another icon than the widget's own.".into(),
+        );
+    }
     for (prefix, label) in [("tap", "Tap"), ("hold", "Long press")] {
         let action = get(prefix);
-        add(prefix, label, choice(&ACTIONS), String::new());
+        // The headline's own actions on a news widget, after Nothing; and
+        // on any other widget that already has one, so it shows as set.
+        let options: Vec<&str> = if ty == NEWS || NEWS_ACTIONS.contains(&action.as_str()) {
+            let mut o = vec![NOTHING];
+            o.extend(NEWS_ACTIONS);
+            o.extend(&ACTIONS[1..]);
+            o
+        } else {
+            ACTIONS.to_vec()
+        };
+        add(prefix, label, choice(&options), String::new());
         let key = |k: &str| format!("{prefix}.{k}");
         match action.as_str() {
             SHOW_PAGE => {
@@ -883,6 +957,31 @@ mod tests {
         assert_eq!(sent.tap(), w.tap(), "actions survive a change of type");
     }
 
+    /// A news widget edits like any other: its width changes, and its
+    /// headline actions survive the edit rather than turning into nothing.
+    #[test]
+    fn a_news_widget_keeps_its_actions() {
+        let ctx = ctx();
+        let w = Widget::News {
+            width: 200,
+            icon: None,
+            tap: Some(Action::News(NewsCommand::Next)),
+            hold: Some(Action::News(NewsCommand::Open)),
+        };
+        let v = flatten(&w, &ctx);
+        let keys: Vec<String> = fields(&v, &ctx).into_iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["width", "icon", "tap", "hold"]);
+        let tap = fields(&v, &ctx)
+            .into_iter()
+            .find(|f| f.key == "tap")
+            .unwrap();
+        assert!(matches!(&tap.kind, Kind::Choice(o) if o.iter().any(|s| s == OPEN_STORY)));
+        let Outcome::Send(sent) = apply(&w, &Values::new(), "width", "240", &ctx) else {
+            panic!("a news widget's width is sent");
+        };
+        assert_eq!(sent, w.clone().with_width(240));
+    }
+
     #[test]
     fn bad_values_say_why() {
         let ctx = ctx();
@@ -929,6 +1028,25 @@ mod tests {
             .map(|f| f.key)
             .collect();
         assert!(keys.contains(&"icon".into()) && keys.contains(&"label".into()));
+        assert!(keys.contains(&"sub".into()));
+        let Outcome::Send(Widget::Key { sub, .. }) =
+            apply(&key, &Values::new(), "sub", "Spotify", &ctx)
+        else {
+            panic!("not sent");
+        };
+        assert_eq!(sub.as_deref(), Some("Spotify"));
+        // Every widget offers its icon; a reading its bar's scale.
+        let media = Widget::Media {
+            width: 120,
+            icon: None,
+            tap: None,
+            hold: None,
+        };
+        let media_keys: Vec<String> = fields(&flatten(&media, &ctx), &ctx)
+            .into_iter()
+            .map(|f| f.key)
+            .collect();
+        assert!(media_keys.contains(&"icon".into()));
         let Outcome::Send(Widget::Key { label, .. }) =
             apply(&key, &Values::new(), "label", "Play", &ctx)
         else {
@@ -961,6 +1079,34 @@ mod tests {
             (second.as_deref(), second_crit),
             (Some("cpu.temp"), Some(90.0))
         );
+        // A bar's scale is typed in the shown unit too, and named where
+        // the second reading is named.
+        // One end alone is a draft; the other end sends it.
+        let Outcome::Draft(draft, _) = apply(&with, &Values::new(), "scale_from", "86", &ctx)
+        else {
+            panic!("not a draft");
+        };
+        let Outcome::Send(scaled) = apply(&with, &draft, "scale_to", "212", &ctx) else {
+            panic!("not sent");
+        };
+        let Widget::Value { scale, .. } = &scaled else {
+            panic!("not a value");
+        };
+        assert_eq!(*scale, Some([30.0, 100.0]));
+        let v = flatten(&scaled, &ctx);
+        assert_eq!(
+            (v["scale_from"].as_str(), v["scale_to"].as_str()),
+            ("86", "212")
+        );
+        let shown: Vec<String> = fields(&flatten(&scaled, &ctx), &ctx)
+            .into_iter()
+            .map(|f| f.key)
+            .collect();
+        assert!(shown.contains(&"second_label".into()) && shown.contains(&"icon".into()));
+        assert!(matches!(
+            apply(&scaled, &Values::new(), "scale_to", "20", &ctx),
+            Outcome::Invalid(_)
+        ));
     }
 
     #[test]

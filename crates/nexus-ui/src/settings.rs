@@ -1,20 +1,20 @@
-//! The strip's own settings as fields: temperature unit, clock, font and
-//! where the weather is for.
+//! The strip's own settings, as the Preferences sheet sets them:
+//! temperature unit, clock, accent, where the weather is for, and the
+//! strip's lettering.
 
 use nexus_core::config::{
-    ClockFormat, Config, Night, Settings, Temperature, Weather, colour_text, parse_colour,
+    ClockFormat, Config, Night, Settings, Temperature, Weather, accent_text, parse_colour,
 };
 use nexus_core::fonts::FontChoice;
 
-use crate::inspector::{Field, Kind, Missing, Values};
+use crate::inspector::{Missing, Values};
 
 pub const TEMPERATURE: &str = "settings.temperature";
 pub const CLOCK: &str = "settings.clock";
 pub const FONT: &str = "settings.font";
 pub const WEATHER: &str = "settings.weather";
 pub const ACCENT: &str = "settings.accent";
-/// Not shown as fields yet; carried through the form so saving it keeps
-/// them. "22:30 07:00", or empty for no night hours.
+/// "22:30 07:00", or empty for no night hours.
 pub const NIGHT: &str = "settings.night";
 /// "on" or "off".
 pub const IDLE_DIM: &str = "settings.idle_dim";
@@ -55,7 +55,7 @@ pub fn flatten(c: &Config) -> Values {
         (WEATHER.into(), weather),
         (
             ACCENT.into(),
-            c.settings.accent.map(colour_text).unwrap_or_default(),
+            c.settings.accent.map(accent_text).unwrap_or_default(),
         ),
         (
             NIGHT.into(),
@@ -100,13 +100,33 @@ pub fn build(v: &Values) -> Result<(Settings, Option<Weather>), Missing> {
                 )
             })?),
         },
-        night: get(NIGHT).split_once(' ').map(|(from, to)| Night {
-            from: from.trim().into(),
-            to: to.trim().into(),
-        }),
+        night: match get(NIGHT).split_once(' ') {
+            None => None,
+            Some((from, to)) => {
+                let (from, to) = (from.trim(), to.trim());
+                if !is_time(from) || !is_time(to) {
+                    return Err(Missing::Invalid(
+                        "Night hours are two times written HH:MM, as in 22:30 and 07:00.".into(),
+                    ));
+                }
+                Some(Night {
+                    from: from.into(),
+                    to: to.into(),
+                })
+            }
+        },
         idle_dim: get(IDLE_DIM) != "off",
     };
     Ok((settings, weather(get(WEATHER))?))
+}
+
+/// "07:00": two-digit hours 00–23, minutes 00–59.
+fn is_time(t: &str) -> bool {
+    let Some((h, m)) = t.split_once(':') else {
+        return false;
+    };
+    let n = |p: &str, max: u8| p.len() == 2 && p.parse::<u8>().is_ok_and(|v| v <= max);
+    n(h, 23) && n(m, 59)
 }
 
 /// "Paris, France" is a place to look up; "48.85, 2.35" is coordinates.
@@ -134,47 +154,117 @@ fn weather(text: &str) -> Result<Option<Weather>, Missing> {
     }))
 }
 
-pub fn fields(v: &Values) -> Vec<Field> {
-    let get = |k: &str| v.get(k).cloned().unwrap_or_default();
-    let choice = |options: &[&str]| Kind::Choice(options.iter().map(|s| s.to_string()).collect());
-    let fonts: Vec<&str> = FontChoice::ALL.iter().map(|f| f.display_name()).collect();
-    vec![
-        Field {
-            key: TEMPERATURE.into(),
-            label: "Temperatures".into(),
-            kind: choice(&[FAHRENHEIT, CELSIUS]),
-            value: get(TEMPERATURE),
-            help: "On the strip and in this window, where thresholds are typed in it too.".into(),
-        },
-        Field {
-            key: CLOCK.into(),
-            label: "Clock".into(),
-            kind: choice(&[H24, H12]),
-            value: get(CLOCK),
-            help: String::new(),
-        },
-        Field {
-            key: FONT.into(),
-            label: "Font".into(),
-            kind: choice(&fonts),
-            value: get(FONT),
-            help: "Atkinson Hyperlegible is made to be easy to read.".into(),
-        },
-        Field {
-            key: WEATHER.into(),
-            label: "Weather for".into(),
-            kind: Kind::Text,
-            value: get(WEATHER),
-            help: "A place, as in: Paris, France; or latitude and longitude, as in: 48.85, 2.35. Empty: no weather. Looked up with Open-Meteo.".into(),
-        },
-        Field {
-            key: ACCENT.into(),
-            label: "Accent colour".into(),
-            kind: Kind::Text,
-            value: get(ACCENT),
-            help: "A colour written #rrggbb, as in #5aa0e0. Empty: the default.".into(),
-        },
-    ]
+/// The preferences as the Preferences sheet shows them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Prefs {
+    pub fahrenheit: bool,
+    pub twelve_hour: bool,
+    /// "#rrggbb", or empty for the default.
+    pub accent: String,
+    /// Which swatch in `accent::PRESETS` it is, if any.
+    pub preset: Option<usize>,
+    pub weather: String,
+    /// Night hours, "HH:MM" each; empty when there are none.
+    pub night_from: String,
+    pub night_to: String,
+    pub idle_dim: bool,
+    pub fonts: Vec<String>,
+    pub font: usize,
+}
+
+pub fn prefs(c: &Config) -> Prefs {
+    let v = flatten(c);
+    let accent = c.settings.accent.unwrap_or(crate::accent::DEFAULT);
+    Prefs {
+        fahrenheit: c.settings.temperature == Temperature::Fahrenheit,
+        twelve_hour: c.settings.clock == ClockFormat::H12,
+        accent: v[ACCENT].clone(),
+        preset: crate::accent::PRESETS
+            .iter()
+            .position(|(_, p)| *p == accent),
+        weather: v[WEATHER].clone(),
+        night_from: c
+            .settings
+            .night
+            .as_ref()
+            .map(|n| n.from.clone())
+            .unwrap_or_default(),
+        night_to: c
+            .settings
+            .night
+            .as_ref()
+            .map(|n| n.to.clone())
+            .unwrap_or_default(),
+        idle_dim: c.settings.idle_dim,
+        fonts: FontChoice::ALL
+            .iter()
+            .map(|f| f.display_name().to_string())
+            .collect(),
+        font: FontChoice::ALL
+            .iter()
+            .position(|f| *f == c.settings.font)
+            .unwrap_or(0),
+    }
+}
+
+/// One preference from the sheet into the form's values: `key` is
+/// "temperature" (c or f), "clock" (24 or 12), "accent" (#rrggbb),
+/// "accent-preset" (a swatch's place), "weather", "font" (a place in
+/// the list), "night" ("on" or "off"), "night-from" and "night-to"
+/// ("HH:MM"), or "idle-dim" ("on" or "off"). `None` for an unknown key or
+/// place.
+pub fn set(v: &mut Values, key: &str, value: &str) -> Option<()> {
+    let (k, val) = match key {
+        "temperature" => (
+            TEMPERATURE,
+            if value == "f" { FAHRENHEIT } else { CELSIUS }.to_string(),
+        ),
+        "clock" => (CLOCK, if value == "12" { H12 } else { H24 }.to_string()),
+        "accent" => (ACCENT, value.trim().to_string()),
+        "accent-preset" => {
+            let (_, c) = crate::accent::PRESETS.get(value.parse::<usize>().ok()?)?;
+            let text = if *c == crate::accent::DEFAULT {
+                String::new()
+            } else {
+                accent_text(*c)
+            };
+            (ACCENT, text)
+        }
+        "weather" => (WEATHER, value.trim().to_string()),
+        "night" => (
+            NIGHT,
+            if value == "on" {
+                "22:30 07:00".to_string()
+            } else {
+                String::new()
+            },
+        ),
+        "night-from" | "night-to" => {
+            let now = v.get(NIGHT).cloned().unwrap_or_default();
+            let (from, to) = now.split_once(' ').unwrap_or(("22:30", "07:00"));
+            let t = value.trim();
+            let text = if key == "night-from" {
+                format!("{t} {to}")
+            } else {
+                format!("{from} {t}")
+            };
+            (NIGHT, text)
+        }
+        "idle-dim" => (
+            IDLE_DIM,
+            if value == "off" { "off" } else { "on" }.to_string(),
+        ),
+        "font" => (
+            FONT,
+            FontChoice::ALL
+                .get(value.parse::<usize>().ok()?)?
+                .display_name()
+                .to_string(),
+        ),
+        _ => return None,
+    };
+    v.insert(k.into(), val);
+    Some(())
 }
 
 #[cfg(test)]
@@ -224,6 +314,69 @@ mod tests {
         assert_eq!(flatten(&c)[ACCENT], "#ff8800");
         v.insert(ACCENT.into(), "orange".into());
         assert!(matches!(build(&v), Err(Missing::Invalid(_))));
+    }
+
+    #[test]
+    fn the_preferences_sheet_sets_each_setting() {
+        let c = Config::default_layout();
+        let mut v = flatten(&c);
+        set(&mut v, "temperature", "f").unwrap();
+        set(&mut v, "clock", "12").unwrap();
+        set(&mut v, "accent-preset", "1").unwrap();
+        set(&mut v, "font", "0").unwrap();
+        let (s, _) = build(&v).unwrap();
+        assert_eq!(s.temperature, Temperature::Fahrenheit);
+        assert_eq!(s.clock, ClockFormat::H12);
+        assert_eq!(s.accent, Some(crate::accent::PRESETS[1].1));
+        assert_eq!(s.font, FontChoice::ALL[0]);
+        // The default swatch stores no colour at all.
+        set(&mut v, "accent-preset", "0").unwrap();
+        assert_eq!(build(&v).unwrap().0.accent, None);
+        assert_eq!(set(&mut v, "accent-preset", "99"), None);
+        assert_eq!(set(&mut v, "volume", "1"), None);
+        let p = prefs(&c);
+        assert_eq!(p.preset, Some(0));
+        assert!(!p.fahrenheit);
+    }
+
+    /// A swatch is saved as the preset's name, as a layout writes it.
+    #[test]
+    fn a_swatch_is_saved_by_name() {
+        let mut v = flatten(&Config::default_layout());
+        set(&mut v, "accent-preset", "3").unwrap();
+        assert_eq!(v[ACCENT], "mint");
+        let mut c = Config::default_layout();
+        c.settings = build(&v).unwrap().0;
+        assert_eq!(prefs(&c).preset, Some(3));
+    }
+
+    #[test]
+    fn night_hours_and_idle_dimming() {
+        let mut v = flatten(&Config::default_layout());
+        assert_eq!(build(&v).unwrap().0.night, None);
+        set(&mut v, "night", "on").unwrap();
+        set(&mut v, "night-to", "06:15").unwrap();
+        set(&mut v, "idle-dim", "off").unwrap();
+        let (s, _) = build(&v).unwrap();
+        assert_eq!(
+            s.night,
+            Some(Night {
+                from: "22:30".into(),
+                to: "06:15".into()
+            })
+        );
+        assert!(!s.idle_dim);
+        let mut c = Config::default_layout();
+        c.settings = s;
+        let p = prefs(&c);
+        assert_eq!(
+            (p.night_from.as_str(), p.night_to.as_str()),
+            ("22:30", "06:15")
+        );
+        set(&mut v, "night-from", "25:00").unwrap();
+        assert!(matches!(build(&v), Err(Missing::Invalid(_))));
+        set(&mut v, "night", "off").unwrap();
+        assert_eq!(build(&v).unwrap().0.night, None);
     }
 
     #[test]

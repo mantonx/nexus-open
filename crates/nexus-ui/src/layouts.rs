@@ -11,6 +11,7 @@ pub const COPY: &str = "A copy of this one";
 pub const EMPTY: &str = "Empty";
 
 /// What a new layout can start from, in the order offered.
+#[cfg(test)]
 pub fn choices() -> Vec<String> {
     let mut out = vec![COPY.to_string(), EMPTY.to_string()];
     out.extend(STARTERS.iter().map(|(name, _)| format!("Starter: {name}")));
