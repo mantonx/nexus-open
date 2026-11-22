@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for software centres (GNOME Software, Discover).
+     Installed to /usr/share/metainfo/. Check with:
+     appstreamcli validate packaging/desktop/io.nexus.open.metainfo.xml -->
+<component type="desktop-application">
+  <id>io.nexus.open</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Nexus Open</name>
+  <summary>Show the time, your computer and your music on the iCUE Nexus strip</summary>
+  <developer id="io.nexus">
+    <name>The Nexus Open contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      Nexus Open is an open source app for the Corsair iCUE Nexus; not made
+      or endorsed by Corsair. The Nexus is the small touch screen that sits
+      above a keyboard.
+    </p>
+    <p>
+      It shows the time, temperatures and load, the weather and what is
+      playing, and puts media, volume and launchers under your finger. Swipe
+      along the strip to change page.
+    </p>
+    <p>
+      A small service draws the strip as soon as you log in. The settings
+      window shows a live preview: arrange the pages and widgets there, and
+      every change appears on the strip at once.
+    </p>
+    <p>
+      There is no account and no cloud service, and it needs no root once
+      installed.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.nexus.open.desktop</launchable>
+  <icon type="stock">io.nexus.open</icon>
+
+  <url type="homepage">https://github.com/mantonx/nexus-open</url>
+  <url type="bugtracker">https://github.com/mantonx/nexus-open/issues</url>
+  <url type="vcs-browser">https://github.com/mantonx/nexus-open</url>
+
+  <categories>
+    <category>Settings</category>
+    <category>HardwareSettings</category>
+  </categories>
+  <keywords>
+    <keyword>corsair</keyword>
+    <keyword>icue</keyword>
+    <keyword>nexus</keyword>
+    <keyword>touch strip</keyword>
+  </keywords>
+
+  <provides>
+    <binary>nexusd</binary>
+    <binary>nexusctl</binary>
+    <!-- Lets a software centre suggest this app when the strip is plugged in. -->
+    <modalias>usb:v1B1Cp1B8E*</modalias>
+  </provides>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-11-22">
+      <description>
+        <p>The first release of the rebuilt app.</p>
+      </description>
+    </release>
+  </releases>
+</component>

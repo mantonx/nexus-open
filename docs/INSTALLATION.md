@@ -1,5 +1,8 @@
 # Installation
 
+This page is for the old Go and Flutter app. For the current app, see
+[INSTALL.md](INSTALL.md).
+
 ## Package install (recommended)
 
 Download the latest release from the [GitHub releases page](https://github.com/mantonx/nexus-open/releases/latest).

@@ -1,0 +1,16 @@
+#!/bin/sh
+# The work is in /usr/lib/nexus-open/package-hook, shared with the Arch and
+# rpm packages.
+set -e
+
+case "$1" in
+configure)
+    if [ -z "$2" ]; then
+        /usr/lib/nexus-open/package-hook install
+    else
+        /usr/lib/nexus-open/package-hook upgrade
+    fi
+    ;;
+esac
+
+exit 0
