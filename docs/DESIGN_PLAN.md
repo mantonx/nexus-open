@@ -363,3 +363,21 @@ README clip (now of the new strip), release verification.
   Also P2: the second reading's icon still goes beside three-digit
   firsts with a two-digit second (DESIGN.md open question 14), and lost
   and no-data states use drifting words and cannot be acted on.
+- 2026-11-22 — **U3 polish 2** (`feat/strip-polish-2`), each decision
+  **provisional, Matt to overturn**:
+  1. *A card's layout never changes with its value* (closes DESIGN.md
+     open question 14). A medium value card with a second reading is
+     laid out for both at their widest (three digits, from the units
+     alone, before any reading), and its sizes step down until the
+     second's icon fits: 32 / 20 px in the System page's 204 px zones,
+     28 / 20 in a 200 px zone. The bars split at a fixed column.
+  2. *The medium media card did not look tappable.* A raised 36 px
+     play/pause key, accent-filled, at its right replaces the 14 px
+     badge on the artwork; the whole card is still the hit zone.
+  3. *The idle media slot was a dead end.* With nothing playing, a media
+     widget whose layout says how to open the player (its own `tap`, or
+     a Music key that runs or opens something) is a key: "Nothing
+     playing" / "Tap to open music". The default Music key shows a page,
+     which opens no player, so on the default layout the slot stays quiet
+     (DESIGN.md open question 15).
+  Not done: faint page markers and edge flags need the real panel (U0).
