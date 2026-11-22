@@ -311,3 +311,55 @@ README clip (now of the new strip), release verification.
   and presets whose terms are checked) waits for U3 and U5. Before tap
   opens a link on Windows, the open-URL action must stop going through
   `cmd /C start`, which would run `&`, `|` and `^` in an untrusted link.
+- 2026-11-22 — **U3 polish, after the isolated review of the built strip
+  (25/36, target 28).** Five findings fixed on `feat/strip-polish`; each
+  decision is **provisional, Matt to overturn**:
+  1. *Hero bars were shorter than medium ones.* A hero reading's numeral
+     steps down to 40 px (`NUM_HERO_BANDED`) so its bar runs the whole
+     card (290 px at 312, against 178 at 200); a second reading is named
+     on the numeral's baseline at the right and has no bar of its own at
+     hero. Clock, weather and the alarm keep 50 px.
+  2. *Accent on information.* The volume change ("+15"), the now-playing
+     artist, the progress line and a dragged slider's number are now in
+     the text ramp; a partial takeover is rimmed in the accent only when
+     it holds a control. Every other accent use was checked and is on a
+     hit zone (keys, thumbs, set-up cards, the medium media badge, whose
+     whole card is the key).
+  3. *Trouble off the page showed only as a 2 px marker.* The alert
+     marker is now 16 px longer and 3 px tall, and an edge flag (a 4 × 28
+     px pill, amber or red) stands at the strip's end on that page's
+     side. A chip naming the reading does not fit: the marker margin is
+     four rows, and anywhere lower covers a card.
+  4. *Secondary text small.* LABEL, UNIT and BODY are 18 px (the floor);
+     provisional until the legibility card is read. DESIGN.md lists the
+     few places 18 does not fit and what gives.
+  5. *Night dim looked lost.* Dimming spares figures: surfaces keep the
+     level, cream text half the loss (night: 35 % and 68 %), so a live
+     number stays above a lost one; lost keeps its broken link and time.
+  Also: partial takeovers snap to the page's card edges (within 40 %),
+  and a medium rate card with down and up in different units shows both
+  in two rows.
+
+  **Rescored in isolation: 26/36, still under 28.** The reviewer's top
+  findings were an unnamed medium second reading ("6%" of what, with a
+  near-empty bar read as ".6%") and a 45 px slider after the snap. Fixed
+  in one more round (also provisional): the second reading carries its
+  own icon with its bar starting under it; a snap never leaves a partial
+  takeover under 320 px (`TAKEOVER_MIN`); a lost reading keeps its icon
+  with a broken-link badge; the current page's marker stays cream with
+  the alert as a segment after it; a medium name is laid out for two
+  digits and hero media times do not move on pause.
+
+  **Rescored once more, by a fresh reviewer: 26/36 again** (Good, bottom
+  of the band; recognition rather than recall 2, everything else 3). Its
+  top findings, not addressed (the brief allowed one fix round):
+  1. *P1, the medium media card does not look tappable*: its only sign
+     is a 14 px badge, while every other key has a raised face.
+  2. *P1, page markers and edge flags are faint at 60 cm*: 2 px
+     markers, and an amber edge flag beside an amber end card reads as
+     the card's lip.
+  3. *P1, the idle media slot is a dead end*: "Play something" with
+     nothing to tap (resume the last player, or open one).
+  Also P2: the second reading's icon still goes beside three-digit
+  firsts with a two-digit second (DESIGN.md open question 14), and lost
+  and no-data states use drifting words and cannot be acted on.

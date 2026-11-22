@@ -23,6 +23,7 @@ colors:
 typography:
   num-hero: { fontFamily: "Rubik", fontSize: "50px", fontWeight: 600, letterSpacing: "-0.5px", fontFeature: "tnum" }
   num-medium: { fontFamily: "Rubik", fontSize: "40px", fontWeight: 600, letterSpacing: "-0.4px", fontFeature: "tnum" }
+  num-hero-banded: { fontFamily: "Rubik", fontSize: "40px", fontWeight: 600, letterSpacing: "-0.4px", fontFeature: "tnum" }
   num-banded: { fontFamily: "Rubik", fontSize: "36px", fontWeight: 600, letterSpacing: "-0.4px", fontFeature: "tnum" }
   num-compact: { fontFamily: "Rubik", fontSize: "32px", fontWeight: 600, letterSpacing: "-0.3px", fontFeature: "tnum" }
   num-second: { fontFamily: "Rubik", fontSize: "26px", fontWeight: 600, letterSpacing: "-0.2px", fontFeature: "tnum" }
@@ -30,9 +31,9 @@ typography:
   unit-hero: { fontFamily: "Rubik", fontSize: "22px", fontWeight: 560 }
   title: { fontFamily: "Rubik", fontSize: "20px", fontWeight: 560 }
   key-label: { fontFamily: "Rubik", fontSize: "18px", fontWeight: 560 }
-  unit: { fontFamily: "Rubik", fontSize: "17px", fontWeight: 560 }
-  body: { fontFamily: "Rubik", fontSize: "17px", fontWeight: 480, letterSpacing: "0.1px" }
-  label: { fontFamily: "Rubik", fontSize: "15px", fontWeight: 560, letterSpacing: "0.3px" }
+  unit: { fontFamily: "Rubik", fontSize: "18px", fontWeight: 560 }
+  body: { fontFamily: "Rubik", fontSize: "18px", fontWeight: 480, letterSpacing: "0.1px" }
+  label: { fontFamily: "Rubik", fontSize: "18px", fontWeight: 560, letterSpacing: "0.2px" }
 rounded:
   card: "10px"
   key: "9px"
@@ -144,8 +145,14 @@ panel they may need to be lighter; that is a U0 measurement.
 The accent marks what a finger can act on: the primary key's face (play
 and pause, OK is the exception), slider thumbs and fills, glyphs on keys,
 the dashed "set up" outline and its words, the media widget's
-play/pause badge, the volume takeover's outline. **It never fills a card,
-never colours a reading, never colours a page marker.**
+play/pause badge (the whole medium card is the key it labels), the rim
+of a partial takeover that holds a control, and the rim of anything
+pressed. **It never fills a card, never colours a reading, never colours
+a page marker, and never colours information**: the volume change
+("+15"), the artist, the times, the progress line and a slider's number
+(even while dragged; the held thumb shows the finger) are all in the
+text ramp. A partial takeover that holds no control is rimmed in
+`KEY_TOP`, not the accent.
 
 The user picks any colour (a setting, `accent`). Only its **hue** is used,
 and its chroma is capped; every role's lightness is fixed, in OKLCH:
@@ -209,8 +216,11 @@ be mistaken for it:
 3. **What changes colour.** Readings (numerals, bars, their icons) change
    colour only for severity. The accent is never applied to a reading, so
    an amber numeral can only mean "warning".
-4. **Page markers** for a page in trouble get longer (`MARKER_W_ALERT`), not
-   only coloured.
+4. **Page markers** for a page in trouble get longer and taller
+   (`MARKER_W_ALERT`, `MARKER_H_ALERT`), not only coloured, and an edge
+   flag stands at the strip's end on that page's side (Page markers).
+   The current page's marker stays cream with its trouble as a separate
+   segment after it, so "you are here" is never told by length alone.
 
 Proof: `accent-marigold-severity.png` puts a marigold pick's play key and
 slider beside a warning card and a critical card. The key is a 44 px key
@@ -232,8 +242,9 @@ Every size is a constant in `theme.rs`. Cap height is 0.70 em; at about
 
 | Constant | Size | Weight | Tracking | Cap height | Role |
 |---|---|---|---|---|---|
-| `NUM_HERO` | 50 | 600 | −0.5 | 35 px, 6.9 mm | Hero numerals, the alarm's reading. B's scale. |
+| `NUM_HERO` | 50 | 600 | −0.5 | 35 px, 6.9 mm | Hero numerals with no bar below (clock, weather, slider), the alarm's reading. B's scale. |
 | `NUM_MEDIUM` | 40 | 600 | −0.4 | 28 px, 5.5 mm | Medium numerals with no bar below (clock, weather), weather at compact. |
+| `NUM_HERO_BANDED` | 40 | 600 | −0.4 | 28 px, 5.5 mm | Hero numerals with a bar band below (value, load, memory): a step under `NUM_HERO` so the bar can run the whole card. |
 | `NUM_BANDED` | 36 | 600 | −0.4 | 25 px, 5.0 mm | Medium numerals with a bar band below (values, network at hero). |
 | `NUM_COMPACT` | 32 | 600 | −0.3 | 22 px, 4.4 mm | Compact numerals; the medium slider's number. |
 | `NUM_SECOND` | 26 | 600 | −0.2 | 18 px | A second reading beside the first (load), upload rate. |
@@ -241,10 +252,30 @@ Every size is a constant in `theme.rs`. Cap height is 0.70 em; at about
 | `UNIT_HERO` | 22 | 560 | 0 | | "%" after a hero numeral. |
 | `TITLE` | 20 | 560 | 0 | | Track title, weekday, weather condition, alarm headline, compact slider number. |
 | `KEY_LABEL` | 18 | 560 | 0 | | Key labels; the short words on compact "set up" cards. |
-| `UNIT` | 17 | 560 | 0 | | "%", "kB/s" after a numeral, on its baseline. |
-| `BODY` | 17 | 480 | +0.1 | | Artist, date, second lines, hints. |
-| `LABEL` | 15 | 560 | +0.3 | | Reading names, times, "limit 167°", "Muted". The smallest text. |
-| `TEXT_FLOOR` | 14 | | | | Nothing is smaller (asserted by the example). |
+| `UNIT` | 18 | 560 | 0 | 12.6 px, 2.5 mm | "%", "kB/s" after a numeral, on its baseline. |
+| `BODY` | 18 | 480 | +0.1 | 12.6 px, 2.5 mm | Artist, date, second lines, hints, weather's range. |
+| `LABEL` | 18 | 560 | +0.2 | 12.6 px, 2.5 mm | Reading names, times ("1:37 / 5:18"), "limit 167°", "Muted", the change "+15". |
+| `TEXT_FLOOR` | 18 | | | | Nothing is smaller (asserted by `theme.rs`'s tests). |
+
+**Secondary text is 18 px, provisionally.** The U3 review found 15–17 px
+(2.1 mm caps) small for 60 cm, so every secondary style went to 18
+(2.5 mm caps). That is the reviewer's ask, not a measurement: U0's
+legibility card has not been read on the panel, and 18 may move. Where
+18 does not fit at its old place, and what gives:
+
+- A medium value card shows its name's first word ("CPU" of "CPU
+  load", the icon says load) when the whole name does not fit beside a
+  two-digit value. It is decided for two digits whatever the value, so
+  the name does not change as the reading climbs into its warning.
+- Medium weather closes its range up ("61°/49°"), and leaves it out
+  before it would be cut.
+- A hero media card shows only the elapsed time ("1:37") when the
+  artist would be cut by "1:37 / 5:18", measured against the artist
+  even while paused, so pausing does not change the times.
+- The empty music sleeve is 27 px at compact and medium (31 at hero),
+  and the hero hint is "Play some music".
+- A medium rate card whose down and up are in different units uses two
+  rows (see Size classes).
 
 The numeral is always the primary element; everything else backs it up.
 "°" is part of the numeral; the unit letter (F or C) is not shown: it is
@@ -285,16 +316,18 @@ By the widget's width: **compact** up to `COMPACT_MAX` 149 px, **medium**
 150 to `MEDIUM_MAX` 299, **hero** 300 and up. Two widgets add detail inside
 a class: a key shows its label from `KEY_LABEL_MIN` 96 px, and media shows
 prev and next beside play/pause from `MEDIA_KEYS_MIN` 400 px. More width
-always shows more or shows it bigger; nothing is drawn narrow with empty
+always shows more or shows it bigger, and a bar is never shorter in a
+wider card (a hero reading trades `NUM_HERO` for `NUM_HERO_BANDED` so
+its bar can run the card: 290 px at 312, against 178 at 200); nothing is drawn narrow with empty
 card beside it (content centres in its room when it has spare width).
 
 | Widget | Compact (≤149) | Medium (150–299) | Hero (≥300) |
 |---|---|---|---|
 | Clock | 10:53 at 32, centred | 10:53 at 40 + "Sun" / "Nov 22" | 10:53 at 50 + "Sunday" / "November 22" |
-| Value (temperature) | icon + 115° at 32; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 50; name and the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it) over a 6 px bar |
-| Value + second reading | as compact (second hidden) | icon + 115° at 36, second "6%" at 26 right; two bars in the band, each under its number | icon + 115° at 50; name, second "6%" at 26; two bars |
-| Load, memory | icon + 62% at 32; bar | icon + 62% at 36, name; bar | icon + 62% at 50, name, "limit 85%"; bar |
-| Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
+| Value (temperature) | icon + 115° at 32; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 40; the name over the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it); the bar band runs the **whole card** under them |
+| Value + second reading | as compact (second hidden) | icon + 115° at 36, the second's own 17 px icon (a gauge for load) + "6%" at 26 right; two bars in the band, the second's starting under its icon (a low fill sits under the icon, not beside the digit as a decimal point). A two-digit second beside a three-digit first ("172° 62%") leaves no room for the icon at 200 px: it goes, open question 14 | icon + 115° at 40, name; the second named on the numeral's baseline at the right ("load 6%" at 26); the first reading's bar runs the whole card, the second has none (a percent is its own scale) |
+| Load, memory | icon + 62% at 32; bar | icon + 62% at 36, name; bar | icon + 62% at 40, name over "limit 85%"; bar the whole card |
+| Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
 | Weather | icon + 58° at 40 | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
 | Media | play/pause key + elapsed + progress line | artwork with play/pause badge + title / artist (whole card is the key) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
@@ -344,8 +377,8 @@ except the soft accent halo around a held slider thumb.
 
 ### The bar (fixed scale)
 
-A pill track `BAR_H` 6 px (5 px in compact and medium bands, at
-`BAR_Y_COMPACT` row 40), its warning zone tinted WARN_ZONE and its
+A pill track `BAR_H_BANDED` 5 px at `BAR_Y_COMPACT` row 40 in every
+size class, its warning zone tinted WARN_ZONE and its
 critical zone CRIT_ZONE, with 2 px notches (`NOTCH_W`) at each limit
 sticking out `NOTCH_OUT` 2 px above and below. The fill grows from the
 left in FILL, or WARN on a warning card, or white on a critical card. The
@@ -392,8 +425,8 @@ What can be touched looks like it; what cannot does not.
 - **Sliders are relative**: landing changes nothing; dragging moves the
   value by the finger's travel (full track width = 0–100). At rest the
   thumb is `THUMB_R` 7.5 px; while held it grows to `THUMB_R_HELD` 10 px,
-  fills with the accent and gets a soft `THUMB_HALO` glow, and the number
-  turns `Accent::text`. `specimen-slider-dragging.png`.
+  fills with the accent and gets a soft `THUMB_HALO` glow; the number
+  stays cream (a value is information). `specimen-slider-dragging.png`.
 
 ### States
 
@@ -403,7 +436,7 @@ What can be touched looks like it; what cannot does not.
 | Warning | Whole card WARN_SURFACE; the warning reading's numeral, icon and bar WARN, a second reading that is fine stays cream (so an amber numeral always means warning); page marker WARN and longer | `specimen-value-warning`, `specimen-value2-warning`, `3-hot` |
 | Critical | Whole card CRIT; everything white; track CRIT_DEEP, and limit notches under the white fill CRIT_DEEP so they stay visible; a hero card names the critical limit, as the alarm does; page marker CRIT and longer; plus the alarm | `specimen-value-critical`, `takeover-after-ok-system` |
 | No data (source works, no reading yet) | Normal card; the numeral is two TEXT3 dashes; "No reading" (medium) / "No reading yet" (hero); empty bar | `specimen-value-no-data`, `specimen-weather-no-data` |
-| Source lost / stale | The last value kept in TEXT3, icon replaced by a broken link (or cloud-slash); "Lost at 10:41" / "From 9:30" | `specimen-value-lost`, `specimen-weather-stale` |
+| Source lost / stale | The last value kept in TEXT3; the reading's own icon kept (at compact and medium it is the card's name) in TEXT3 with a broken-link badge on its lower right, cut out by a ring of the card (weather: the icon becomes a cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
 | Not set up | No fill; dashed accent outline; plus or pin icon; "Weather / Set up" (compact), "Weather / Add your town" | `specimen-*-not-set-up`, `6-first-run` |
 | Pressed, holding, dragging | See Keys | |
 | Paused | Play glyph in the key, artwork dimmed, title in TEXT2, "Paused" in place of the artist, progress line TEXT3 | `specimen-media-paused` |
@@ -432,23 +465,52 @@ Small pills along the top edge, rows 2–3 (`MARKER_Y`, `MARKER_H` 2: at
 3 they crowded the margin over the cards, open question 11),
 centred, `MARKER_GAP` 6 apart: one per page, `MARKER_W` 14 px, the
 current one `MARKER_W_CURRENT` 26 px and TEXT; the others TEXT3 at 55 %.
+On the current page, trouble does not recolour the cream: it is a
+separate WARN or CRIT segment `MARKER_SPLIT` 2 px after it, filling the
+alert's extra length.
 A page holding a warning reading has a WARN marker and one holding a
-critical reading a CRIT marker, each `MARKER_W_ALERT` 8 px longer, so an
-alarm on another page shows from any page. Takeovers leave the markers
-visible; the alarm covers them.
+critical reading a CRIT marker, each `MARKER_W_ALERT` 16 px longer and
+`MARKER_H_ALERT` 3 px tall (rows 2–4, row 5 still clear), never dimmed.
+Takeovers leave the markers visible; the alarm covers them.
+
+**Trouble on another page** (the U3 review: a 2 px marker alone was too
+easy to miss). Critical already raises the alarm, and a warning may not
+take the strip over (Principle 2), so the signal stays quiet but gains
+shape: besides the bigger marker, an **edge flag** stands at the end of
+the strip on the side of the page in trouble, a pill `EDGE_FLAG_W` 4 ×
+`EDGE_FLAG_H` 28 px from row `EDGE_FLAG_Y` 13, WARN for a warning, CRIT
+for a critical reading after its alarm was acknowledged. It covers
+columns 0–3 (or 636–639): the strip's edge and the end card's outer
+padding, where no widget draws (content starts `PAD` 9 px in). No other
+state uses that shape, so it does not rely on hue, and it says which way
+to swipe. Frames: `3-hot` (Home, to the left, is warning too),
+`takeover-after-ok-home`, `severity`.
+
+*Not done, and why:* a chip naming the reading ("CPU 172°") does not fit.
+The marker margin is rows 2–5 (rows 0–1 are `SAFE`), four rows against
+13 px for 18 px text, and a chip anywhere lower covers a card's
+content.
 
 ### Takeovers
 
 - **Now playing** (`takeover-now-playing.png`): when the track changes,
   the whole card band (rows 6–46) becomes B's media scene: artwork 35 px,
-  artist in `Accent::text`, a progress line, "1:37 / 5:18", the full title
-  at 26 px, and prev / play-pause / next keys 50 px wide. Markers stay.
+  the artist, a progress line, "1:37 / 5:18", the full title at 26 px,
+  and prev / play-pause / next keys 50 px wide. The artist and times are
+  TEXT2 and the progress line cream (information, not touch). Markers
+  stay.
   Same timing as today's takeovers (`seconds`, kept up while touched).
 - **Volume** (`takeover-volume-right.png`, `takeover-volume-left-held.png`):
   a card over **part** of the page, aligned `right` (default) or `left`,
-  with a set `width` snapped to card edges, so the clock and weather stay
-  where the eye left them. Speaker, the new level at 40 px, the change in
-  accent ("+15"), and a slider whose part from the old level (a cream
+  with a set `width` snapped to the card edges of the page under it (the
+  nearest edge within 40 % of the width, `TAKEOVER_SNAP` in `engine.rs`,
+  but never narrower than `TAKEOVER_MIN` 320 px or the width given, so
+  its slider keeps a track of about 125 px or more;
+  `takeover-volume-snapped-system` shows 320 snapping out to 436 over
+  System, since 232 would leave a 45 px slider),
+  so the clock and weather stay where the eye left them and no card is
+  cut in two. Speaker, the new level at 40 px, the change in TEXT2
+  ("+15"), and a slider whose part from the old level (a cream
   ghost mark at 40) to the new is bright and the rest calm. It has an
   accent rim, because it can be dragged. Where the page already shows the
   slider, there is no takeover; the slider moves.
@@ -493,6 +555,16 @@ something settling), except where noted.
   `NIGHT_DIM` 35 % (`default-night-desk.png`); nothing is redrawn smaller.
   Warning and critical cards are not dimmed and the alarm is always full
   brightness.
+- **How it dims** (`theme::dimmed`): not evenly. The ground and cards keep
+  the dim level; the lightest pixels lose only `DIM_FIGURES` (half) of
+  what they do, eased by lightness so the order of tones never changes.
+  At night a cream numeral keeps about 68 % and a lost reading's TEXT3
+  about 59 %, so live figures stay brighter than a lost reading is even
+  by day, and at twice its contrast in the same frame. Before the U3
+  polish the whole frame scaled to 35 % and a live number at night
+  looked lost. Lost keeps its own marks besides contrast: the broken
+  link, and its time where there is room. Frames:
+  `default-night-system-lost` beside `default-day-system-lost`.
 - When nothing matters (idle, nothing playing), the strip shows the user's
   first page as it is; it never invents a screensaver.
 
@@ -550,7 +622,7 @@ All optional; existing layouts keep working unchanged.
 | `scale` | `value` widget | `[min, max]` in base units | Override the fixed scale (defaults per signal kind above) |
 | `icon` | any widget | a Phosphor name, e.g. `"fan"` | Override the default icon (which comes from the signal) |
 | `align` | `[[takeover]]` | `"full"` (default), `"left"`, `"right"` | A takeover narrower than the strip covers only that side |
-| `width` | `[[takeover]]` | px | Its width when `align` is `left` or `right`; give a width that ends where the page's cards do (not snapped) |
+| `width` | `[[takeover]]` | px | Its width when `align` is `left` or `right`; snapped to the nearest card edge of the page under it when that is within 40 % of it |
 | `type = "key"` | widget | with `icon`, optional `label`, `sub`, `tap`, `hold` | The new key widget: runs `tap` (any existing action: `run`, `open`, `page`, `media`, `publish`); `hold` fires at 0.5 s |
 | `critical` | `[[takeover]]`-like rule, built in | – | The alarm needs no key: any widget with `crit` arms it |
 
@@ -601,12 +673,25 @@ signal's base unit (°C).
    presets are all outside it. The settings window should still say so
    when a pick is moved.
 10. **Secondary text size.** The same review found 15–17 px labels (2.1 mm
-    caps), including "limit 167°", small for 60 cm. Raising LABEL to 17
-    costs the hero card's limit words at 300 px. Decide after U0.
+    caps), including "limit 167°", small for 60 cm. Raised to 18 in the
+    U3 polish (Typography lists what it costs); provisional until U0's
+    card is read on the panel.
 11. **Page markers** sat one row above the cards (rows 2–4, cards from 6)
     and read as crowded into the top margin. Settled in U3 by making them
     2 px tall (rows 2–3), leaving two clear rows; the cards stay put, so
     the hero numeral keeps its room.
+12. **The hero reading's scale.** A hero reading's numeral is 40 px, not
+    50, so its bar can run the card (the U3 review: a hero bar was
+    shorter than a medium one). Clock, weather and the alarm keep 50.
+    Provisional, Matt's to overturn; the other way is 50 px with no bar
+    at hero.
+13. **Edge flags** sit partly in columns 0–1, which the bezel may hide
+    (`SAFE`); 2 px of each is on the visible part even so. A U0 check.
+14. **The medium second reading's icon** goes when a two-digit second
+    sits beside a three-digit first (172° and 62% at 200 px: 8 px
+    short), so there it is a number with no name again. Celsius readings
+    (two digits) keep it. Smaller second numerals, or a wider card for
+    a value with a second reading, would keep it; Matt to choose.
 
 ## Shared identity
 

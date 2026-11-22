@@ -37,7 +37,7 @@ use std::time::Duration;
 use jiff::Zoned;
 
 use crate::canvas::Canvas;
-use crate::config::{Action, Config, MediaCommand, SLIDER_VALUE, SliderControl, Widget};
+use crate::config::{Action, Align, Config, MediaCommand, SLIDER_VALUE, SliderControl, Widget};
 use crate::fonts::FontChoice;
 use crate::gesture::{Gesture, LONG_PRESS, MIN_TAP, Recognizer, should_commit};
 use crate::icons;
@@ -61,6 +61,15 @@ const DAMPING: f32 = 36.0;
 /// How far a finger on a slider moves before the value follows it, in
 /// pixels: the jitter of a finger resting on it never sets anything.
 const SLIDER_SLOP: f32 = 4.0;
+
+/// A partial takeover's width moves to the nearest card edge of the page
+/// under it when that is within this share of its width.
+const TAKEOVER_SNAP: f32 = 0.4;
+
+/// A snap never leaves a partial takeover narrower than this (or than the
+/// width it was given, if that is less): a slider in it keeps a track
+/// long enough to set (about 125 px at "100%").
+const TAKEOVER_MIN: u32 = 320;
 
 /// The alarm ends by itself once its reading has been back under the
 /// threshold this many seconds.
@@ -974,12 +983,58 @@ impl Engine {
         }
     }
 
-    /// Where a row sits: its first pixel and its width.
+    /// Where a row sits: its first pixel and its width. A takeover over
+    /// one end of the strip is snapped to the card edge of the page under
+    /// it nearest its own width, so it never cuts a card in two.
     fn span(&self, row: Row) -> (u32, u32) {
         match row {
             Row::Page(_) => (0, crate::WIDTH),
-            Row::Takeover(i) => self.config.takeovers[i].span(),
+            Row::Takeover(i) => {
+                let t = &self.config.takeovers[i];
+                let (left, width) = t.span();
+                if width == crate::WIDTH {
+                    return (left, width);
+                }
+                let edges = snap_edges(&self.config.pages[self.page].widgets, t.align);
+                // Only so far: over a card much wider than the gap, the
+                // given width stands (the card is cut, as asked). Never
+                // narrower than the floor: a cramped slider is worse than
+                // a card covered whole.
+                let floor = width.min(TAKEOVER_MIN);
+                let snapped = edges
+                    .into_iter()
+                    .filter(|e| *e >= floor)
+                    .min_by_key(|e| e.abs_diff(width))
+                    .filter(|e| e.abs_diff(width) as f32 <= width as f32 * TAKEOVER_SNAP)
+                    .unwrap_or(width);
+                match t.align {
+                    Align::Left => (0, snapped),
+                    _ => (crate::WIDTH - snapped, snapped),
+                }
+            }
         }
+    }
+
+    /// The widths of a row's zones: the layout's, except on a snapped
+    /// takeover, whose zones are scaled to its width (the last takes what
+    /// rounding leaves).
+    fn widths(&self, row: Row) -> Vec<u32> {
+        let widgets = self.widgets(row);
+        let given: Vec<u32> = widgets.iter().map(Widget::width).collect();
+        let total: u32 = given.iter().sum();
+        let width = self.span(row).1;
+        if !matches!(row, Row::Takeover(_)) || total == width || total == 0 {
+            return given;
+        }
+        let mut out: Vec<u32> = given
+            .iter()
+            .map(|w| (u64::from(*w) * u64::from(width) / u64::from(total)) as u32)
+            .collect();
+        let used: u32 = out.iter().sum();
+        if let Some(last) = out.last_mut() {
+            *last += width - used;
+        }
+        out
     }
 
     /// Whether the touch on the strip landed on `row`'s part of it.
@@ -1022,7 +1077,11 @@ impl Engine {
             mono: self.now,
             marquee,
         };
-        bind_page(self.widgets(row), &ctx)
+        let mut zones = bind_page(self.widgets(row), &ctx);
+        for (zone, w) in zones.iter_mut().zip(self.widths(row)) {
+            zone.width = w;
+        }
+        zones
     }
 
     /// The finger on `row`, as drawn: the zone lit, the part of it, and how
@@ -1048,19 +1107,20 @@ impl Engine {
         {
             return None;
         }
-        let local = x - self.zone_span(row, zone).start as f32;
-        media_keys(widget.width())
-            .iter()
+        let span = self.zone_span(row, zone);
+        let local = x - span.start as f32;
+        let keys = media_keys(span.end - span.start);
+        keys.iter()
             .position(|k| k.span.contains(&local))
-            .map(|i| (i, media_keys(widget.width())[i].key))
+            .map(|i| (i, keys[i].key))
     }
 
     /// The transport command under x, and whether it is drawn as a key.
     fn media_key_at(&self, x: f32) -> Option<(bool, MediaCommand)> {
         let (row, zone) = self.hit(x)?;
         let (part, key) = self.part_at(row, zone, x)?;
-        let width = self.widgets(row)[zone].width();
-        Some((key, media_keys(width)[part].command))
+        let span = self.zone_span(row, zone);
+        Some((key, media_keys(span.end - span.start)[part].command))
     }
 
     /// Shows the takeover that `signal` sets off, if there is one. The same
@@ -1235,10 +1295,10 @@ impl Engine {
             x >= left as f32 && x < (left + width) as f32
         })?;
         let mut right = self.span(row).0 as f32;
-        self.widgets(row)
+        self.widths(row)
             .iter()
             .position(|w| {
-                right += w.width() as f32;
+                right += *w as f32;
                 x < right
             })
             .map(|zone| (row, zone))
@@ -1256,16 +1316,16 @@ impl Engine {
 
     /// A zone's pixels on the strip.
     fn zone_span(&self, row: Row, zone: usize) -> Range<u32> {
-        let widgets = self.widgets(row);
-        let left = self.span(row).0 + widgets[..zone].iter().map(Widget::width).sum::<u32>();
-        left..left + widgets[zone].width()
+        let widths = self.widths(row);
+        let left = self.span(row).0 + widths[..zone].iter().sum::<u32>();
+        left..left + widths[zone]
     }
 
     /// The length of a slider's bar in pixels: the zone less its padding,
     /// so a drag from one end of the bar to the other is the full range.
     fn bar_length(&self, row: Row, zone: usize) -> f32 {
         let pad = theme::CARD_INSET + theme::PAD;
-        (self.widgets(row)[zone].width() as f32 - 2.0 * pad).max(1.0)
+        (self.widths(row)[zone] as f32 - 2.0 * pad).max(1.0)
     }
 
     /// What a slider shows at rest, 0–1; 0 when it shows nothing.
@@ -1567,6 +1627,25 @@ impl Engine {
 /// signal, keeping the state of those in `old`. A signal on several
 /// widgets is watched at the lowest `crit`, named by that widget's label;
 /// a second reading by the label and its `second_label` ("GPU load").
+/// The widths a takeover at `align` may snap to over a page with these
+/// widgets: the distances from that end of the strip to each card edge,
+/// leaving out none and all.
+fn snap_edges(widgets: &[Widget], align: Align) -> Vec<u32> {
+    let mut edges = Vec::new();
+    let mut x = 0;
+    for w in widgets {
+        x += w.width();
+        let e = match align {
+            Align::Left => x,
+            _ => crate::WIDTH.saturating_sub(x - w.width()),
+        };
+        if e > 0 && e < crate::WIDTH {
+            edges.push(e);
+        }
+    }
+    edges
+}
+
 fn watches(config: &Config, old: &HashMap<String, Watch>) -> HashMap<String, Watch> {
     let mut out: HashMap<String, Watch> = HashMap::new();
     for page in &config.pages {
@@ -2176,6 +2255,35 @@ mod tests {
         let out = e.frame(&now, t + 0.15).expect("fading out").rgba().to_vec();
         assert!(out != page && out != full);
         assert_eq!(e.frame(&now, 16.0).expect("gone").rgba(), &page[..]);
+    }
+
+    #[test]
+    fn a_partial_takeover_snaps_to_the_card_edges_under_it() {
+        let text = "[[page]]\nname = \"A\"\n\
+            [[page.widget]]\ntype = \"clock\"\nwidth = 204\n\
+            [[page.widget]]\ntype = \"clock\"\nwidth = 204\n\
+            [[page.widget]]\ntype = \"clock\"\nwidth = 232\n\
+            [[takeover]]\nname = \"V\"\non_change = [\"volume.level\"]\nseconds = 2\n\
+            align = \"right\"\nwidth = 320\n\
+            [[takeover.widget]]\ntype = \"slider\"\nwidth = 320\nlabel = \"V\"\ncontrols = \"volume\"\n";
+        let mut e = Engine::new(Config::parse(text).expect("valid"));
+        e.handle(Input::Signal(
+            "volume.level".into(),
+            Value::Number(40.0, Unit::Percent),
+        ));
+        e.handle(Input::Signal(
+            "volume.level".into(),
+            Value::Number(55.0, Unit::Percent),
+        ));
+        assert_eq!(e.takeover(), Some("V"));
+        let row = Row::Takeover(0);
+        // 232 is nearer 320, but would cramp the slider under the floor:
+        // it ends at the next card edge out, covering that card whole.
+        assert_eq!(e.span(row), (204, 436));
+        assert_eq!(e.widths(row), [436]);
+        assert_eq!(e.zone_span(row, 0), 204..640);
+        assert_eq!(e.hit(300.0), Some((row, 0)));
+        assert_eq!(e.hit(150.0), Some((Row::Page(0), 0)));
     }
 
     #[test]

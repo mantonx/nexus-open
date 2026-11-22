@@ -310,8 +310,25 @@ fn default_pages(out: &mut Out) {
         from: "22:00".into(),
         to: "11:00".into(),
     });
-    let mut e = engine(night, &idle(), "Desk");
+    let mut e = engine(night.clone(), &idle(), "Desk");
     out.save("default", "default-night-desk", shot(&mut e, &now, 1.0));
+    // Dimmed is not lost: at night, the GPU's source gone beside live
+    // readings. The lost one keeps its broken link and its time; the live
+    // figures stay brighter than it.
+    let mut e = engine(night, &idle(), "System");
+    e.handle(Input::Forget("gpu.temp".into()));
+    out.save(
+        "default",
+        "default-night-system-lost",
+        shot(&mut e, &now, 1.0),
+    );
+    let mut e = engine(layout(None, true), &idle(), "System");
+    e.handle(Input::Forget("gpu.temp".into()));
+    out.save(
+        "default",
+        "default-day-system-lost",
+        shot(&mut e, &now, 1.0),
+    );
 }
 
 /// The x of the middle of a media widget's key with this command.
@@ -378,6 +395,20 @@ fn takeovers(out: &mut Out) {
         "takeover",
         "takeover-volume-left-held",
         shot(&mut e, &now, 1.2),
+    );
+
+    // The same 320 px takeover over System, whose cards meet at 204 and
+    // 408: 232 px would cramp its slider, so it snaps out to 204 (436 px)
+    // rather than cut the GPU card in two.
+    let mut e = engine(layout(None, true), &music(), "System");
+    e.handle(Input::Signal(
+        "volume.level".into(),
+        Value::Number(55.0, Unit::Percent),
+    ));
+    out.save(
+        "takeover",
+        "takeover-volume-snapped-system",
+        shot(&mut e, &now, 1.0),
     );
 
     // The alarm, and the OK key under a finger.
@@ -638,6 +669,25 @@ fn specimens(out: &mut Out) {
         "network-busy",
         &net,
         &busy,
+        true,
+        1000.0,
+        Finger::None,
+        same,
+    );
+    // Down and up in different units: each keeps its own.
+    let mixed = signals(vec![
+        (
+            "net.down",
+            Value::Number(48_200_000.0, Unit::BytesPerSecond),
+        ),
+        ("net.up", Value::Number(310_000.0, Unit::BytesPerSecond)),
+    ]);
+    specimen(
+        out,
+        r,
+        "network-mixed-units",
+        &net,
+        &mixed,
         true,
         1000.0,
         Finger::None,

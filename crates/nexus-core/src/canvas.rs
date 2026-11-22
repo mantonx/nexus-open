@@ -115,13 +115,13 @@ impl Canvas {
         }
     }
 
-    /// Scales every pixel's brightness by `k` (0–1), as a dimmer backlight
-    /// would, except in the columns `keep` lists.
+    /// Dims the frame to `k` (0–1), except in the columns `keep` lists: dark
+    /// surfaces keep `k` of their brightness, light figures more
+    /// (`theme::dimmed`), so a dimmed live number stays above a lost one.
     pub fn dim(&mut self, k: f32, keep: &[std::ops::Range<u32>]) {
         if k >= 1.0 {
             return;
         }
-        let k = (k.max(0.0) * 256.0).round() as u32;
         let w = self.width();
         let data = self.pixmap.data_mut();
         for (i, px) in data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
@@ -129,9 +129,16 @@ impl Canvas {
             if keep.iter().any(|r| r.contains(&x)) {
                 continue;
             }
-            for c in &mut px[..3] {
-                *c = ((u32::from(*c) * k + 128) >> 8) as u8;
-            }
+            // The pixmap is opaque, so its premultiplied bytes are colours.
+            let c = crate::theme::dimmed(
+                crate::theme::Rgb {
+                    r: px[0],
+                    g: px[1],
+                    b: px[2],
+                },
+                k,
+            );
+            px[..3].copy_from_slice(&[c.r, c.g, c.b]);
         }
     }
 
