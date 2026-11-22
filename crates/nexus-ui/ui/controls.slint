@@ -94,6 +94,12 @@ export component Button inherits Rectangle {
         }
     }
     focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
         // Its TouchArea focuses it; taking the press here would
         // swallow the first click.
         focus-on-click: false;
@@ -109,7 +115,7 @@ export component Button inherits Rectangle {
     FocusRing {
         width: parent.width + 8px;
         height: parent.height + 8px;
-        shown: focus.has-focus;
+        shown: focus.has-focus && focus.by-keys;
     }
 }
 
@@ -150,6 +156,12 @@ export component IconButton inherits Rectangle {
         }
     }
     focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
         // Its TouchArea focuses it; taking the press here would
         // swallow the first click.
         focus-on-click: false;
@@ -165,7 +177,7 @@ export component IconButton inherits Rectangle {
     FocusRing {
         width: parent.width + 8px;
         height: parent.height + 8px;
-        shown: focus.has-focus;
+        shown: focus.has-focus && focus.by-keys;
     }
 }
 
@@ -238,6 +250,12 @@ export component Segmented inherits Rectangle {
         }
     }
     focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
         // Its TouchArea focuses it; taking the press here would
         // swallow the first click.
         focus-on-click: false;
@@ -257,7 +275,7 @@ export component Segmented inherits Rectangle {
     FocusRing {
         width: parent.width + 8px;
         height: parent.height + 8px;
-        shown: focus.has-focus;
+        shown: focus.has-focus && focus.by-keys;
     }
 }
 
@@ -456,6 +474,12 @@ export component Select inherits Rectangle {
         }
     }
     focus := FocusScope {
+        // Its ring is for focus reached by the keyboard; a click
+        // focuses it too, and shows the press instead.
+        property <bool> by-keys;
+        focus-gained(reason) => {
+            self.by-keys = reason == FocusReason.tab-navigation;
+        }
         // Its TouchArea focuses it; taking the press here would
         // swallow the first click.
         focus-on-click: false;
@@ -479,7 +503,7 @@ export component Select inherits Rectangle {
     FocusRing {
         width: parent.width + 8px;
         height: parent.height + 8px;
-        shown: focus.has-focus;
+        shown: focus.has-focus && focus.by-keys;
     }
     popup := PopupWindow {
         x: 0;

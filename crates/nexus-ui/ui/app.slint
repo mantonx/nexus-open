@@ -546,6 +546,12 @@ export component AppWindow inherits Window {
                                 }
                             }
                             chip-focus := FocusScope {
+                                // Its ring is for focus reached by the keyboard; a click
+                                // focuses it too, and shows the press instead.
+                                property <bool> by-keys;
+                                focus-gained(reason) => {
+                                    self.by-keys = reason == FocusReason.tab-navigation;
+                                }
                                 // Its TouchArea focuses it; taking the press here would
                                 // swallow the first click.
                                 focus-on-click: false;
@@ -560,7 +566,7 @@ export component AppWindow inherits Window {
                             FocusRing {
                                 width: parent.width + 8px;
                                 height: parent.height + 8px;
-                                shown: chip-focus.has-focus;
+                                shown: chip-focus.has-focus && chip-focus.by-keys;
                                 radius: 16px;
                             }
                         }
@@ -1476,6 +1482,12 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     drawer-focus := FocusScope {
+                                        // Its ring is for focus reached by the keyboard; a click
+                                        // focuses it too, and shows the press instead.
+                                        property <bool> by-keys;
+                                        focus-gained(reason) => {
+                                            self.by-keys = reason == FocusReason.tab-navigation;
+                                        }
                                         // Its TouchArea focuses it; taking the press here would
                                         // swallow the first click.
                                         focus-on-click: false;
@@ -1490,7 +1502,7 @@ export component AppWindow inherits Window {
                                     FocusRing {
                                         width: parent.width + 8px;
                                         height: parent.height + 8px;
-                                        shown: drawer-focus.has-focus;
+                                        shown: drawer-focus.has-focus && drawer-focus.by-keys;
                                     }
                                 }
                                 if drawer-head.open: Rectangle {
@@ -1856,7 +1868,7 @@ export component AppWindow inherits Window {
                         width: parent.width + 8px;
                         height: parent.height + 8px;
                         radius: Theme.r-surface;
-                        shown: tile-focus.has-focus;
+                        shown: tile-focus.has-focus && tile-focus.by-keys;
                     }
                     accessible-role: button;
                     accessible-label: @tr("{}: {}", t.name, t.about);
@@ -1912,6 +1924,12 @@ export component AppWindow inherits Window {
                         }
                     }
                     tile-focus := FocusScope {
+                        // Its ring is for focus reached by the keyboard; a click
+                        // focuses it too, and shows the press instead.
+                        property <bool> by-keys;
+                        focus-gained(reason) => {
+                            self.by-keys = reason == FocusReason.tab-navigation;
+                        }
                         // Its TouchArea focuses it; taking the press here would
                         // swallow the first click.
                         focus-on-click: false;
@@ -1957,7 +1975,7 @@ export component AppWindow inherits Window {
                     width: parent.width + 8px;
                     height: parent.height + 8px;
                     radius: Theme.r-surface;
-                    shown: st-focus.has-focus;
+                    shown: st-focus.has-focus && st-focus.by-keys;
                 }
                 accessible-action-default => {
                     root.choose-starter(i);
@@ -2008,6 +2026,12 @@ export component AppWindow inherits Window {
                     }
                 }
                 st-focus := FocusScope {
+                    // Its ring is for focus reached by the keyboard; a click
+                    // focuses it too, and shows the press instead.
+                    property <bool> by-keys;
+                    focus-gained(reason) => {
+                        self.by-keys = reason == FocusReason.tab-navigation;
+                    }
                     // Its TouchArea focuses it; taking the press here would
                     // swallow the first click.
                     focus-on-click: false;
@@ -2167,6 +2191,12 @@ export component AppWindow inherits Window {
                                 }
                             }
                             sw-focus := FocusScope {
+                                // Its ring is for focus reached by the keyboard; a click
+                                // focuses it too, and shows the press instead.
+                                property <bool> by-keys;
+                                focus-gained(reason) => {
+                                    self.by-keys = reason == FocusReason.tab-navigation;
+                                }
                                 // Its TouchArea focuses it; taking the press here would
                                 // swallow the first click.
                                 focus-on-click: false;
@@ -2181,12 +2211,12 @@ export component AppWindow inherits Window {
                             FocusRing {
                                 width: parent.width + 8px;
                                 height: parent.height + 8px;
-                                shown: sw-focus.has-focus;
+                                shown: sw-focus.has-focus && sw-focus.by-keys;
                                 radius: 17px;
                             }
                             // Its name, as a tooltip: above, where nothing
                             // drawn later covers it.
-                            if sw-touch.has-hover || sw-focus.has-focus: Rectangle {
+                            if sw-touch.has-hover || (sw-focus.has-focus && sw-focus.by-keys): Rectangle {
                                 y: -30px;
                                 x: (parent.width - self.width) / 2;
                                 width: sw-name.preferred-width + 16px;

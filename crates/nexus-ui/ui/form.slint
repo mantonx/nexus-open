@@ -259,7 +259,7 @@ export component FieldRow inherits HorizontalLayout {
                 width: parent.width + 8px;
                 height: parent.height + 8px;
                 radius: Theme.r-control;
-                shown: sig-focus.has-focus;
+                shown: sig-focus.has-focus && sig-focus.by-keys;
             }
             opacity: root.enabled ? 1 : 0.55;
             accessible-role: combobox;
@@ -327,6 +327,12 @@ export component FieldRow inherits HorizontalLayout {
                 }
             }
             sig-focus := FocusScope {
+                // Its ring is for focus reached by the keyboard; a click
+                // focuses it too, and shows the press instead.
+                property <bool> by-keys;
+                focus-gained(reason) => {
+                    self.by-keys = reason == FocusReason.tab-navigation;
+                }
                 // Its TouchArea focuses it; taking the press here would
                 // swallow the first click.
                 focus-on-click: false;
