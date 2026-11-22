@@ -9,12 +9,14 @@ use nexus_store::Notes;
 const MAX_BYTES: u64 = 1 << 20;
 
 /// The text of a layout file: its pages and takeovers, and the strip
-/// settings. Not where the weather is for, nor the sources: a layout file
-/// is made to be shared, and those say where the user lives and what is
-/// in their home directory. Import ignores them anyway.
+/// settings. Not where the weather is for, the news feeds, nor the
+/// sources: a layout file is made to be shared, and those say where the
+/// user lives, what they read (a private feed's address can carry a key)
+/// and what is in their home directory. Import ignores them anyway.
 pub fn export_text(config: &Config, notes: &Notes) -> String {
     let mut shared = config.clone();
     shared.weather = None;
+    shared.news = None;
     shared.sources.clear();
     nexus_store::text::write(&shared, notes)
 }
@@ -58,7 +60,7 @@ pub fn read(path: &Path) -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_core::config::Weather;
+    use nexus_core::config::{NewsConfig, Weather};
 
     #[test]
     fn an_export_leaves_out_the_weather_place_and_sources() {
@@ -74,6 +76,19 @@ mod tests {
         assert_eq!(back.pages, config.pages);
         assert_eq!(back.takeovers, config.takeovers);
         assert_eq!(back.weather, None);
+    }
+
+    #[test]
+    fn an_export_leaves_out_the_news_feeds() {
+        let mut config = Config::default_layout();
+        config.news = Some(NewsConfig {
+            feeds: vec!["https://example.org/feed?key=secret-key".into()],
+            ..NewsConfig::default()
+        });
+        let text = export_text(&config, &Notes::default());
+        assert!(!text.contains("secret-key"), "{text}");
+        let (back, _) = nexus_store::text::parse(&text).unwrap();
+        assert_eq!(back.news, None);
     }
 
     #[test]
