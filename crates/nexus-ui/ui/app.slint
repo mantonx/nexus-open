@@ -89,8 +89,10 @@ export struct StatusView {
     headline: string,
     body: string,
     start: bool,
-    retry: bool,
     log: bool,
+    away: bool,
+    banner: string,
+    banner-body: string,
     detail: string,
 }
 
@@ -185,8 +187,15 @@ component Sheet inherits Rectangle {
                         }
                     }
                 }
+                // A layout measures wrapped words as one line (the second
+                // spills into the gap below it), so what it holds is taller
+                // than it reports: Settings' Strip section said 629 px and
+                // drew about 690, was cut at the bottom and could not scroll.
+                // The allowance covers those second lines; at worst a sheet
+                // ends with a little more room.
                 body := ScrollView {
                     vertical-stretch: 1;
+                    content-height: max(inner.preferred-height + 72px, self.visible-height);
                     inner := VerticalLayout {
                         alignment: start;
                         padding-left: 24px;
@@ -197,6 +206,15 @@ component Sheet inherits Rectangle {
                     }
                 }
             }
+        }
+        // More below: the last lines fade into the sheet rather than stop
+        // at its edge, beside the scrollbar, so it reads as more to see.
+        if -body.content-y < body.content-height - body.visible-height - 1px: Rectangle {
+            x: 0;
+            y: card.height - self.height;
+            width: card.width - 16px;
+            height: 44px;
+            background: @linear-gradient(180deg, Theme.surface.transparentize(1) 0%, Theme.surface 85%);
         }
     }
 }
@@ -335,7 +353,6 @@ export component AppWindow inherits Window {
 
     // ---- To Rust --------------------------------------------------------
 
-    callback check-again();
     callback set-trying(bool);
     callback try-press(float);
     callback try-release(float);
@@ -384,7 +401,19 @@ export component AppWindow inherits Window {
     callback dismiss-first-run();
     callback set-pref(string, string);
     /// Why the last try to start the service failed; empty if it did not.
-    in property <string> start-failure;
+    /// The status's icon as a glyph: the chip and the banner say it alike.
+    property <string> status-glyph: root.status.icon == "fail" ? Glyph.fail
+        : root.status.icon == "plug" ? Glyph.plug
+        : root.status.icon == "busy" ? Glyph.app
+        : root.status.icon == "lock" ? Glyph.lock
+        : root.status.icon == "save" ? Glyph.save
+        : root.status.icon == "power" ? Glyph.power
+        : root.status.icon == "wait" ? Glyph.wait
+        : root.status.icon == "info" ? Glyph.info
+        : Glyph.ok-circle;
+    /// The pictures are not what the strip shows: the service is down, or
+    /// the strip is away. Dimmed, under a banner that says why.
+    property <bool> not-live: !root.connected || root.status.away;
     callback start-service();
     callback open-log();
     callback open-help();
@@ -586,15 +615,7 @@ export component AppWindow inherits Window {
                                 padding-right: 12px;
                                 spacing: 7px;
                                 Icon {
-                                    glyph: root.status.icon == "fail" ? Glyph.fail
-                                        : root.status.icon == "plug" ? Glyph.plug
-                                        : root.status.icon == "busy" ? Glyph.app
-                                        : root.status.icon == "lock" ? Glyph.lock
-                                        : root.status.icon == "save" ? Glyph.save
-                                        : root.status.icon == "power" ? Glyph.power
-                                        : root.status.icon == "wait" ? Glyph.wait
-                                        : root.status.icon == "info" ? Glyph.info
-                                        : Glyph.ok-circle;
+                                    glyph: root.status-glyph;
                                     fill: true;
                                     color: status-chip.failed ? Theme.crit : status-chip.attention ? Theme.text-2 : Theme.text-3;
                                 }
@@ -699,12 +720,14 @@ export component AppWindow inherits Window {
                             width: root.column-w;
                             spacing: 0px;
 
-                            // Not connected: nothing here is live. A state, in
-                            // neutral; a start that failed is critical, with its
-                            // cause and the log as the next step.
-                            if !root.connected: offline := Rectangle {
+                            // The pictures are not on the strip: the service is
+                            // down or starting, or the strip is away (unplugged,
+                            // held by another program). A state, in neutral;
+                            // only a start that failed is critical. The words
+                            // come from status.rs, so the chip's popover and
+                            // this banner tell one story.
+                            if root.not-live && root.status.banner != "": offline := Rectangle {
                                 property <bool> failed: root.status.tone == "failed";
-                                property <bool> starting: root.status.tone == "starting";
                                 height: offline-row.preferred-height + 20px;
                                 border-radius: Theme.r-surface;
                                 background: failed ? Theme.crit-surface : Theme.surface;
@@ -715,7 +738,7 @@ export component AppWindow inherits Window {
                                     padding-left: 14px;
                                     spacing: 12px;
                                     Icon {
-                                        glyph: offline.failed ? Glyph.fail : offline.starting ? Glyph.wait : Glyph.power;
+                                        glyph: root.status-glyph;
                                         fill: true;
                                         color: offline.failed ? Theme.crit : Theme.text-2;
                                         font-size: 18px;
@@ -725,29 +748,25 @@ export component AppWindow inherits Window {
                                         spacing: 4px;
                                         horizontal-stretch: 1;
                                         Text {
-                                            text: root.status.tone == "failed" ? @tr("The service did not start, so editing is paused and these pictures are not live.")
-                                                : root.status.tone == "starting" ? @tr("Starting the service… The pictures come back to life when it answers.")
-                                                : @tr("Not connected to the strip's service, so editing is paused and these pictures are not live. Nothing is lost: a change waiting to be sent goes out when it is back.");
+                                            text: root.status.banner;
                                             font-family: Theme.font;
                                             font-size: Theme.size-body;
-                                            font-weight: root.status.tone == "failed" ? 600 : 400;
-                                            color: root.status.tone == "failed" ? Theme.crit : Theme.text;
+                                            font-weight: 600;
+                                            color: offline.failed ? Theme.crit : Theme.text;
                                             wrap: word-wrap;
                                             accessible-role: text;
                                         }
-                                        // Why, in plain words: here, as there may be
-                                        // no strip to say it under.
-                                        if root.status.tone == "failed": Text {
-                                            text: @tr("{} The log may say more.", root.start-failure);
+                                        Text {
+                                            text: root.status.banner-body;
                                             font-family: Theme.font;
                                             font-size: Theme.size-body;
-                                            color: Theme.text;
+                                            color: Theme.text-2;
                                             wrap: word-wrap;
                                             accessible-role: text;
                                         }
                                     }
                                     // Neutral keys, never the accent, on a banner.
-                                    if root.status.tone == "failed": VerticalLayout {
+                                    if root.status.log && !root.connected: VerticalLayout {
                                         alignment: center;
                                         Button {
                                             tier: "default";
@@ -1093,12 +1112,30 @@ export component AppWindow inherits Window {
                                             }
 
                                             if root.editable && !root.trying: Rectangle {
+                                                // Each widget's edge, faint. The selected one is
+                                                // marked unlike the page's frame (one line on the
+                                                // bezel): a cream outline with a filled corner tab,
+                                                // plus the accent grip where its edge can move.
+                                                // (A dark gap inside the outline was tried: on the
+                                                // strip's near-black it does not show.) Keyboard
+                                                // focus is the accent ring round the whole strip.
                                                 for zone[i] in root.zones: Rectangle {
                                                     x: zone.x * root.unit;
                                                     width: zone.width * root.unit;
                                                     border-radius: 4px * root.zoom;
                                                     border-width: i == root.selected ? 2px : 1px;
-                                                    border-color: i == root.selected ? #d2c2ad : #fbf1e333;
+                                                    border-color: i == root.selected ? #efe2cf : #fbf1e333;
+                                                    if i == root.selected: Path {
+                                                        x: 1px;
+                                                        y: 1px;
+                                                        width: 8px * root.zoom + 6px;
+                                                        height: self.width;
+                                                        viewbox-width: 10;
+                                                        viewbox-height: 10;
+                                                        commands: "M 0 0 L 10 0 L 0 10 Z";
+                                                        fill: #efe2cf;
+                                                        stroke-width: 0;
+                                                    }
                                                     accessible-role: list-item;
                                                     accessible-label: @tr("{}, {} pixels wide", zone.name, zone.width);
                                                     accessible-item-selectable: true;
@@ -1212,7 +1249,7 @@ export component AppWindow inherits Window {
                                         // Not live: the picture darkens as the strip
                                         // dims, so the bezel stays a device on cream
                                         // too (fading it into the page turned it taupe).
-                                        if !root.connected: Rectangle {
+                                        if root.not-live: Rectangle {
                                             border-radius: parent.border-radius;
                                             background: #14110fa0;
                                         }
@@ -1888,14 +1925,6 @@ export component AppWindow inherits Window {
                         text: root.status.tone == "failed" ? @tr("Try again") : @tr("Start the service");
                         clicked => {
                             root.start-service();
-                        }
-                    }
-                    if root.status.retry: Button {
-                        tier: root.status.start ? "default" : "primary";
-                        icon: Glyph.retry;
-                        text: @tr("Try again");
-                        clicked => {
-                            root.check-again();
                         }
                     }
                     if root.status.log: Button {

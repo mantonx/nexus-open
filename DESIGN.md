@@ -818,8 +818,8 @@ this system so the two surfaces belong together:
 
 - **Accent handling**: the same setting, the same OKLCH derivation
   (`Accent::from`), the same rule: accent means "you can act on this"
-  (primary buttons, toggles, sliders, focus rings, the selected item), never
-  data, never warnings. The window's colour picker previews the four roles.
+  (primary buttons, toggles, sliders, focus rings, the resize grip on the
+  selected widget), never data, never warnings. The window's colour picker previews the four roles.
 - **Neutrals**: the same warm browns and creams. In dark mode GROUND,
   CARD, KEY and TEXT map directly to window background, surface, raised
   control and text. A light mode inverts the lightness ladder at the same
@@ -836,8 +836,29 @@ this system so the two surfaces belong together:
   pills for small chips and tracks, discs for thumbs; no sharp corners, no
   one-sided borders.
 - **Tone of voice**: plain words that say what happened and what to do
-  next ("Add your town", "The strip is in use by another program. Close
-  it and press Retry"), never a shell command as the only fix.
+  next ("Add your town", "Quit Steam and Nexus Open takes the strip back
+  by itself"), never a shell command as the only fix. One state, one
+  story: a message never takes back its own first line, and a button is
+  offered only when pressing it does something the app is not already
+  doing by itself.
+- **Marks on the strip in the window** (Edit), each its own shape, so none
+  depends on where it sits:
+  - the page being edited: its bezel's edge, one 2 px neutral line
+    (`text-2`);
+  - the selected widget: a 2 px cream outline with a filled cream corner
+    tab at its top left, and the accent grip on its right edge when that
+    edge can move (none at the strip's right end, so a full-width widget
+    or takeover has none);
+  - keyboard focus: the accent ring, 2 px clear of the whole strip, shown
+    only when focus came by Tab or the arrow keys;
+  - a widget not yet set up: the strip's own dashed accent outline.
+- **When the strip is not showing the layout** (the service is down or
+  starting, or the strip is unplugged, held by another program, without
+  access, or needs a replug), the previews dim and a banner under the
+  header says why and what to do, in the same words as the status chip's
+  popover. The chip stays neutral: it is a state, not a reading. Only a
+  start that failed is critical. While the service runs, editing stays on
+  and says so.
 - **The strip itself**: wherever the window shows the strip, it shows these
   exact pixels (the preview is the live frame), so the window should frame
   it like an object on a walnut desk, not redraw it.

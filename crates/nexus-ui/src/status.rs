@@ -40,10 +40,18 @@ pub struct View {
     pub chip: String,
     pub headline: String,
     pub body: String,
-    /// Which fixes apply.
+    /// Which fixes apply. There is no "Try again" for the strip: the
+    /// service retries it by itself (every second at most) and the window
+    /// follows within a second, so such a button would do nothing.
     pub start: bool,
-    pub retry: bool,
     pub log: bool,
+    /// The strip is not showing this layout, though the service runs: the
+    /// pictures are dimmed and the banner says why. Editing still works.
+    pub away: bool,
+    /// The banner under the header, when there is one: its first line and
+    /// what follows it. Empty when all is well.
+    pub banner: String,
+    pub banner_body: String,
     /// The fix as commands, for those who want it; may be empty.
     pub detail: String,
 }
@@ -64,12 +72,14 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
             tone: "stopped",
             icon: "power",
             chip: "Not running".into(),
-            headline: "Nexus Open's service is not running".into(),
-            body: "The strip keeps its last picture until the service runs again. Your layouts are safe, and a change made here waits and is sent once it is back.".into(),
+            headline: "The service is not running".into(),
+            body: STOPPED.into(),
             start: true,
-            retry: false,
             log: true,
+            banner: "The service is not running, so nothing here can be changed and these pictures are not live.".into(),
+            banner_body: "Your layouts are safe. Start the service to carry on.".into(),
             detail: fix_of("daemon"),
+            ..View::default()
         };
     };
     if let Some(e) = &status.store_error {
@@ -79,12 +89,11 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
             chip: "Cannot save".into(),
             headline: "Changes cannot be saved".into(),
             body: format!(
-                "The strip shows the default layout, and nothing changed here is kept, because the file that holds your layouts cannot be used: {e}."
+                "The strip shows the default layout, and nothing changed here is kept, because the file that holds your layouts cannot be used: {e}. The log may say more."
             ),
-            start: false,
-            retry: true,
             log: true,
             detail: fix_of("store"),
+            ..View::default()
         };
     }
     let device_error = fake_device().or_else(|| status.device_error.clone());
@@ -100,7 +109,6 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
                 chip: "Strip connected".into(),
                 headline: "The strip is working".into(),
                 body: "It shows your layout and follows every change here. One check found something worth fixing; the details are below.".into(),
-                retry: true,
                 detail: others.join("\n"),
                 ..View::default()
             };
@@ -124,11 +132,12 @@ fn device_view(why: &str, fix: &str) -> View {
         icon,
         chip: chip.into(),
         headline: headline.into(),
+        banner: headline.into(),
+        banner_body: format!("{body}\n{STILL_EDITABLE}"),
         body,
-        start: false,
-        retry: true,
-        log: false,
+        away: true,
         detail: fix.to_string(),
+        ..View::default()
     };
     if why.contains("--no-device") {
         return View {
@@ -147,7 +156,7 @@ fn device_view(why: &str, fix: &str) -> View {
                 "busy",
                 "Strip in use",
                 "Another program is using the strip",
-                "While it does, Nexus Open cannot draw on it. Quit the other program (an older Nexus Open: from its tray icon), then press Try again. If the strip stays dark, unplug it and plug it back in.".into(),
+                "Quit it (an older Nexus Open: from its tray icon) and Nexus Open takes the strip back by itself. If the strip stays dark after that, unplug it and plug it back in.".into(),
             );
         }
         if who.contains("nexus-open") {
@@ -164,7 +173,7 @@ fn device_view(why: &str, fix: &str) -> View {
             "Strip in use",
             &format!("{name} is using the strip"),
             format!(
-                "While it does, Nexus Open cannot draw on it. Quit {name}, then press Try again. If the strip stays dark, unplug it and plug it back in."
+                "Quit {name} and Nexus Open takes the strip back by itself. If the strip stays dark after that, unplug it and plug it back in."
             ),
         );
     }
@@ -183,7 +192,6 @@ fn device_view(why: &str, fix: &str) -> View {
             chip: "Starting".into(),
             headline: "The strip is getting ready".into(),
             body: "It was just plugged in, or the computer just woke. It shows your layout in a few seconds.".into(),
-            retry: true,
             ..View::default()
         };
     }
@@ -200,19 +208,21 @@ fn device_view(why: &str, fix: &str) -> View {
             "plug",
             "No strip",
             "The strip is not plugged in",
-            "Plug in the iCUE Nexus. It shows your layout as soon as it is found; nothing else to do.".into(),
+            "Plug in the iCUE Nexus. Nexus Open finds it by itself and shows your layout.".into(),
         );
     }
     let mut body = why.to_string();
     if let Some(first) = body.get_mut(..1) {
         first.make_ascii_uppercase();
     }
-    warn(
+    let mut v = warn(
         "plug",
         "Strip problem",
         "The strip cannot be used",
-        format!("{body}."),
-    )
+        format!("{body}. Nexus Open keeps trying by itself; the log may say more."),
+    );
+    v.log = true;
+    v
 }
 
 /// "steam (pid 4242), obs (pid 7)" as "steam and obs".
@@ -222,10 +232,26 @@ fn program_name(holders: &str) -> String {
         .map(|h| h.split(" (pid").next().unwrap_or(h).trim())
         .filter(|n| !n.is_empty())
         .collect();
+    let names: Vec<String> = names.into_iter().map(known_name).collect();
     match names.as_slice() {
         [] => "Another program".into(),
-        [one] => (*one).into(),
+        [one] => one.clone(),
         [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// A process name as people know the program: "steam" is "Steam".
+fn known_name(process: &str) -> String {
+    match process.to_ascii_lowercase().as_str() {
+        "icue" | "icue.exe" => "iCUE".into(),
+        "obs" => "OBS".into(),
+        "openrgb" => "OpenRGB".into(),
+        "steamwebhelper" | "steam" => "Steam".into(),
+        _ => {
+            let mut c = process.chars();
+            c.next()
+                .map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+        }
     }
 }
 
@@ -365,9 +391,24 @@ pub fn did_not_start(mut v: View, why: &str) -> View {
     v.icon = "fail";
     v.chip = "Did not start".into();
     v.headline = "The service did not start".into();
-    v.body = format!(
-        "{why} The log may say more. Your layouts are safe; copy the diagnostics to ask for help."
-    );
+    v.body = format!("{why} The log may say more. Your layouts are safe.");
+    v.banner = "The service did not start, so nothing here can be changed.".into();
+    v.banner_body = v.body.clone();
+    v.log = true;
+    v.start = true;
+    v
+}
+
+/// A start that ran, but the service has not answered since: not the
+/// same story as one that did not start, so not the same words.
+pub fn not_answering(mut v: View) -> View {
+    v.tone = "failed";
+    v.icon = "fail";
+    v.chip = "Not answering".into();
+    v.headline = "The service is not answering".into();
+    v.body = "It was started ten seconds ago and has not answered. The log may say why. Your layouts are safe.".into();
+    v.banner = "The service is not answering, so nothing here can be changed.".into();
+    v.banner_body = v.body.clone();
     v.log = true;
     v.start = true;
     v
@@ -380,15 +421,25 @@ pub fn starting(mut v: View) -> View {
     v.icon = "wait";
     v.chip = "Starting…".into();
     v.headline = "Starting the service…".into();
-    v.body = "This takes a few seconds. The window picks the strip up again by itself.".into();
+    v.body = "This takes a few seconds. The pictures come back to life when it answers.".into();
+    v.banner = "Starting the service…".into();
+    v.banner_body = "The pictures come back to life when it answers.".into();
     v.start = false;
-    v.retry = false;
     v.log = false;
     v
 }
 
-/// Why a start that ran has still not answered.
-pub const NO_ANSWER: &str = "It was started, but it has not answered after ten seconds.";
+/// What a start that ran but has not answered is recorded as (shown by
+/// `not_answering`, never as a reason of its own).
+pub const NO_ANSWER: &str = "no answer";
+
+/// The stopped service, in the popover.
+const STOPPED: &str = "Until it runs, the strip keeps its last picture and nothing here can be changed. Your layouts are safe.";
+
+/// Said with every state where the strip is not showing the layout but the
+/// service runs.
+const STILL_EDITABLE: &str =
+    "You can keep editing: changes are saved, and the strip shows them when it is back.";
 
 #[cfg(test)]
 mod tests {
@@ -425,8 +476,9 @@ mod tests {
             &[],
         );
         assert_eq!(v.chip, "Strip in use");
-        assert_eq!(v.headline, "steam is using the strip");
-        assert!(v.retry && !v.start);
+        assert_eq!(v.headline, "Steam is using the strip");
+        assert!(v.away && !v.start, "dimmed, with nothing to press");
+        assert!(v.banner_body.contains("keep editing"), "{}", v.banner_body);
         let old = view(
             Some(&status(Some("the strip is in use by nexus-open (pid 9)"))),
             &[],
@@ -434,7 +486,7 @@ mod tests {
         assert!(old.body.contains("unplug the strip"), "{}", old.body);
         assert_eq!(
             program_name("a (pid 1), b (pid 2), c (pid 3)"),
-            "a, b and c"
+            "A, B and C"
         );
     }
 
@@ -482,7 +534,7 @@ mod tests {
         let v = view(Some(&status(None)), &[]);
         assert_eq!(v.tone, "ok");
         assert_eq!(v.chip, "Strip connected");
-        assert!(!v.start && !v.retry);
+        assert!(!v.start && !v.away && v.banner.is_empty());
     }
 
     #[test]

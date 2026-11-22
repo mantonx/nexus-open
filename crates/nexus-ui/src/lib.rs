@@ -145,7 +145,6 @@ pub fn run() -> Result<(), slint::PlatformError> {
 
     let (tx, rx) = mpsc::channel();
     let _ = RECHECK.set(tx);
-    app.on_check_again(recheck);
     app.on_start_service(start_service);
     app.on_open_help(open_help);
     let weak = app.as_weak();
@@ -238,17 +237,11 @@ fn show_status(app: &AppWindow) {
         // failed holds until then too.
         match (&l.0, START_FAILED.with(|f| f.borrow().clone())) {
             (None, _) if starting => status::starting(view),
+            (None, Some(why)) if why == status::NO_ANSWER => status::not_answering(view),
             (None, Some(why)) => status::did_not_start(view, &why),
             _ => view,
         }
     });
-    app.set_start_failure(
-        START_FAILED
-            .with(|f| f.borrow().clone())
-            .filter(|_| LAST.with(|l| l.borrow().0.is_none()))
-            .unwrap_or_default()
-            .into(),
-    );
     app.set_status(StatusView {
         tone: view.tone.into(),
         icon: view.icon.into(),
@@ -256,8 +249,10 @@ fn show_status(app: &AppWindow) {
         headline: view.headline.into(),
         body: view.body.into(),
         start: view.start,
-        retry: view.retry,
         log: view.log,
+        away: view.away,
+        banner: view.banner.into(),
+        banner_body: view.banner_body.into(),
         detail: view.detail.into(),
     });
 }
