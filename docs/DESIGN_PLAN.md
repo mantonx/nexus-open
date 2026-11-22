@@ -381,3 +381,11 @@ README clip (now of the new strip), release verification.
      which opens no player, so on the default layout the slot stays quiet
      (DESIGN.md open question 15).
   Not done: faint page markers and edge flags need the real panel (U0).
+
+  **Rescored by a fresh isolated reviewer: 25/36** (recognition and
+  error recovery 2, the rest 3). Top findings: System never names CPU or
+  GPU (icons alone); "lost" barely registers at medium and compact, and
+  a lost card's second reading stays cream; the Home media title is cut
+  to "Weird Fis"; and the new medium media key ends 4 px from the card's
+  edge, so a red edge flag at 636–639 reads as stuck to it (a regression
+  here: the key should keep the full `PAD`).
