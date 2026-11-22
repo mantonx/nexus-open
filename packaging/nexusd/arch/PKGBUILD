@@ -17,7 +17,7 @@ url='https://github.com/mantonx/nexus-open'
 # and Bitstream-Vera (DejaVu Sans).
 license=('MIT' 'OFL-1.1' 'Bitstream-Vera')
 depends=(
-    'gcc-libs' 'glibc'
+    'glibc' 'libgcc'
     'fontconfig' 'freetype2'
     # Loaded at run time by the settings window:
     'libxkbcommon'
