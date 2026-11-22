@@ -291,7 +291,7 @@ README clip (now of the new strip), release verification.
   connected. The same fact means `nexusd.service`'s `DevicePolicy` and
   `DeviceAllow` lines do nothing as a user unit: the hardening claim in
   `REDESIGN_PLAN.md` (device access limited to hidraw and NVIDIA) is wrong
-  and needs correcting in Phase 5.
+  and needs correcting in Phase 5 (corrected 2026-11-22, `feat/packaging`).
 - 2026-11-22 — **The window's Appearance** (U5, at Matt's request): Match
   the system (the default), Light or Dark, in Preferences under "This
   window", applied live. It is kept in the window's own file,
