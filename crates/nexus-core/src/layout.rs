@@ -9,7 +9,7 @@
 
 use jiff::{SignedDuration, Zoned};
 
-use crate::config::{ClockFormat, Settings, SliderControl, Temperature, Widget};
+use crate::config::{Action, ClockFormat, Settings, SliderControl, Temperature, Widget};
 use crate::icons;
 use crate::signal::{Signals, Unit, Value};
 use crate::theme::{NET_HI, NET_LO, TEMP_HI, TEMP_LO};
@@ -63,6 +63,9 @@ pub struct Bind<'a> {
     /// Seconds since the track's title last started scrolling, while it
     /// may still be.
     pub marquee: Option<f32>,
+    /// What opens the music player (`Config::music_action`): an idle
+    /// media widget with it, or a `tap` of its own, is drawn as a key.
+    pub music: Option<&'a Action>,
 }
 
 /// Builds the zones for a row of widgets: a page, or a takeover.
@@ -263,6 +266,9 @@ fn reading(
         warn: warn.map(|w| fraction(s, w)),
         crit: crit.map(|c| fraction(s, c)),
     });
+    // A hundred is three digits in every unit a value card shows (and
+    // 100 °C is 212 °F): the card is laid out for that many.
+    let widest = format_number(100.0, base_unit, ctx.settings.temperature);
     Reading {
         name: name.to_string(),
         value,
@@ -270,6 +276,7 @@ fn reading(
         severity: judge(ctx.signals, signal, warn, crit),
         avail,
         bar,
+        widest,
     }
 }
 
@@ -294,7 +301,12 @@ fn icon_of(widget: &Widget, fallback: char) -> char {
 fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
     match widget {
         Widget::Clock { .. } => clock(ctx.settings.clock, ctx.now),
-        Widget::Media { .. } => media(ctx.signals, ctx.marquee),
+        Widget::Media { tap, .. } => match media(ctx.signals, ctx.marquee) {
+            WidgetView::Media(None) if tap.is_some() || ctx.music.is_some() => {
+                WidgetView::OpenMusic
+            }
+            view => view,
+        },
         Widget::Slider { .. } => slider(widget, ctx.signals, None, None, None),
         Widget::Value { signal, .. } if signal == "weather.temp" => weather(widget, ctx),
         Widget::Value {
@@ -572,6 +584,7 @@ mod tests {
             now,
             mono: 0.0,
             marquee: None,
+            music: None,
         }
     }
 

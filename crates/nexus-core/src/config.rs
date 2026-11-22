@@ -564,6 +564,28 @@ impl Config {
         self.pages.iter().position(|p| p.name == name)
     }
 
+    /// What opens the user's music player: the tap of the layout's Music
+    /// key (a key with the `music-notes` icon or labelled "Music"), when
+    /// it starts a program or opens something. A media widget with
+    /// nothing playing and no `tap` of its own does this on a tap. A key
+    /// that only shows a page opens no player, so it does not count.
+    pub fn music_action(&self) -> Option<&Action> {
+        self.pages
+            .iter()
+            .flat_map(|p| &p.widgets)
+            .filter_map(|w| match w {
+                Widget::Key {
+                    icon, label, tap, ..
+                } if icon.as_deref() == Some("music-notes")
+                    || label.as_deref() == Some("Music") =>
+                {
+                    tap.as_ref()
+                }
+                _ => None,
+            })
+            .find(|a| matches!(a, Action::Run(_) | Action::Open(_)))
+    }
+
     /// Checks the rules the types cannot express. `parse` runs it; a
     /// config built another way (from the store) runs it itself.
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -810,6 +832,25 @@ impl Weather {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_music_player_is_what_a_music_key_runs_never_a_page() {
+        // The default Music key shows the Music page: that opens no player.
+        assert_eq!(Config::default_layout().music_action(), None);
+        let c = Config::parse(
+            "[[page]]\nname = \"A\"\n\
+             [[page.widget]]\ntype = \"media\"\nwidth = 320\n\
+             [[page.widget]]\ntype = \"key\"\nwidth = 160\nicon = \"music-notes\"\n\
+             tap = { page = \"A\" }\n\
+             [[page.widget]]\ntype = \"key\"\nwidth = 160\nlabel = \"Music\"\n\
+             tap = { run = [\"rhythmbox\"] }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            c.music_action(),
+            Some(&Action::Run(vec!["rhythmbox".into()]))
+        );
+    }
 
     #[test]
     fn every_starter_is_valid_and_fills_its_pages() {
