@@ -128,8 +128,10 @@ pub const ACCENT_SOFT_C_MAX: f32 = 0.07;
 pub const ACCENT_GREY_C: f32 = 0.02;
 /// Hues (OKLCH degrees) an accent may not take: from a little below CRIT's
 /// hue (30) to well past WARN's (73). A colour picked inside is moved to the
-/// nearer end, so no accent can be read as a warning or an alarm.
-pub const ACCENT_AVOID: (f32, f32) = (15.0, 98.0);
+/// nearer end, so no accent can be read as a warning or an alarm. The top
+/// sits 32° past WARN: at 98° a snapped marigold still read as amber's
+/// mustard cousin beside a warning card; lemon (112°) stays outside.
+pub const ACCENT_AVOID: (f32, f32) = (15.0, 105.0);
 
 impl Accent {
     /// The roles for the colour the user picked (`None`: the default).
