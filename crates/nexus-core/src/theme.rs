@@ -38,12 +38,23 @@ pub struct Palette {
     pub crit: Rgb,
 }
 
-/// One text style: a size in pixels, a weight and extra space between letters.
+/// One text style: a size in pixels, a weight, a width, the kind of figures
+/// and extra space between letters.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextStyle {
     pub size: f32,
     /// CSS-style weight (400 regular, 500 medium). Only applies to variable fonts.
     pub weight: f32,
+    /// Value on the font's `wdth` axis, in percent of normal: 100 is normal,
+    /// 87.5 semi-condensed, 75 condensed (the CSS `font-width` names). Only applies to fonts with a width axis (see
+    /// `Font::width_range`); others draw at their one width. Values outside
+    /// a font's range are clamped to it.
+    pub width: f32,
+    /// Tabular figures (OpenType `tnum`): every digit has the same advance,
+    /// so a changing number does not shift sideways. Fonts whose digits are
+    /// proportional and lack `tnum` keep proportional digits (see
+    /// `Font::has_tabular_figures`).
+    pub tabular: bool,
     /// Extra pixels added after every character.
     pub tracking: f32,
 }
@@ -84,6 +95,8 @@ impl Default for Theme {
         let style = |size, tracking| TextStyle {
             size,
             weight: 400.0,
+            width: 100.0,
+            tabular: false,
             tracking,
         };
         Self {
