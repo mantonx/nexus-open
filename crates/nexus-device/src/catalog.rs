@@ -80,4 +80,33 @@ mod tests {
             rule.contains(r#"ENV{ID_USB_MODEL_ID}=="1b7c", ENV{ID_USB_INTERFACE_NUM}=="01|02""#)
         );
     }
+
+    /// The packaged rule opens the supported products only: devices that
+    /// are still planned stay closed until the app drives them.
+    #[test]
+    fn the_packaged_udev_rule_covers_the_supported_products_only() {
+        let rule =
+            include_str!("../../../packaging/udev/70-nexus-open.rules").replace("\r\n", "\n");
+        let lines: Vec<&str> = rule
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .collect();
+        for p in PRODUCTS {
+            let line = format!(
+                r#"SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="{CORSAIR:04x}", ATTRS{{idProduct}}=="{:04x}", TAG+="uaccess""#,
+                p.id
+            );
+            match p.support {
+                Support::Supported(_) => assert!(lines.contains(&line.as_str()), "{}", p.name),
+                Support::Planned(_) => {
+                    assert!(!rule.contains(&format!("{:04x}", p.id)), "{}", p.name)
+                }
+            }
+        }
+        let supported = PRODUCTS
+            .iter()
+            .filter(|p| matches!(p.support, Support::Supported(_)))
+            .count();
+        assert_eq!(lines.len(), supported, "{lines:?}");
+    }
 }

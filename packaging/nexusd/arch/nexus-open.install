@@ -1,0 +1,32 @@
+# pacman runs these as root. The work is in /usr/lib/nexus-open/package-hook,
+# shared with the deb and rpm packages.
+
+# The old Go package's install script copied its udev rule in by hand, so
+# pacman does not own it and leaves it behind. Numbered 99, it never granted
+# access, and `nexusctl doctor` reports it; remove it unless a package owns it.
+_remove_old_rule() {
+    local old=/usr/lib/udev/rules.d/99-corsair-nexus.rules
+    if [[ -e $old ]] && ! pacman -Qqo "$old" >/dev/null 2>&1; then
+        rm -f "$old"
+    fi
+}
+
+post_install() {
+    _remove_old_rule
+    /usr/lib/nexus-open/package-hook install
+    echo '==> Nexus Open starts by itself for every user who logs in, and is'
+    echo '    started now for users logged in. Open "Nexus Open Settings" to set it up.'
+}
+
+post_upgrade() {
+    _remove_old_rule
+    /usr/lib/nexus-open/package-hook upgrade
+}
+
+pre_remove() {
+    /usr/lib/nexus-open/package-hook remove
+}
+
+post_remove() {
+    udevadm control --reload-rules 2>/dev/null || true
+}

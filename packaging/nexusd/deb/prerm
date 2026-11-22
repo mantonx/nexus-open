@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stops the service for logged-in users and disables it, on removal only:
+# an upgrade restarts it from postinst instead.
+set -e
+
+case "$1" in
+remove)
+    /usr/lib/nexus-open/package-hook remove
+    ;;
+esac
+
+exit 0

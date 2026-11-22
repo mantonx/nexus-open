@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Nexus Open Settings
-GenericName=iCUE Nexus Settings
+GenericName=Touch Strip Settings
 Comment=Preview and set up your Corsair iCUE Nexus touch strip
 Icon=io.nexus.open
 Exec=nexusd ui
 Terminal=false
-Categories=Utility;Settings;HardwareSettings;
+Categories=Settings;HardwareSettings;
 Keywords=corsair;icue;nexus;strip;display;
 StartupNotify=true
 StartupWMClass=io.nexus.open

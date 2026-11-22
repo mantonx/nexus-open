@@ -291,7 +291,7 @@ README clip (now of the new strip), release verification.
   connected. The same fact means `nexusd.service`'s `DevicePolicy` and
   `DeviceAllow` lines do nothing as a user unit: the hardening claim in
   `REDESIGN_PLAN.md` (device access limited to hidraw and NVIDIA) is wrong
-  and needs correcting in Phase 5.
+  and needs correcting in Phase 5 (corrected 2026-11-22, `feat/packaging`).
 - 2026-11-22 — **The window's Appearance** (U5, at Matt's request): Match
   the system (the default), Light or Dark, in Settings (then named
   Preferences) under "This window", applied live. It is kept in the window's own file,
@@ -459,6 +459,64 @@ README clip (now of the new strip), release verification.
   headline's end on a hero card, when it fits. Costs the accent newspaper
   on most cards (the raised card carries the tap). DESIGN.md, Long
   titles. To be read on the panel.
+- 2026-11-22 — **U4/U5 merged** (window: storyboard editor, light and
+  dark, Appearance choice, status pill and plain-words recovery). Its last
+  isolated reviews scored 29/40 light and 28/40 dark against a target of
+  30. A final round (feed settings, fault colours, 1024×640, field edges,
+  pickers) is on `feat/window-final`.
+- 2026-11-22 — **Installed on Matt's machine** with
+  `scripts/nexusd-dev-install.sh`. His store was backed up first
+  (`~/.local/state/nexusd/nexusd-before-redesign-20261122-1713.db`), then
+  migrated from schema 1 to 4: integrity ok, all 6 pages and 19 widgets
+  kept, strip connected. On his own layout the new drawing shows three
+  defects, being fixed on `fix/strip-live`:
+  - compact temperature cards that don't say which reading they are;
+  - a track time cut with an ellipsis;
+  - an empty page that draws nothing.
+- 2026-11-22 — **Near miss, fixed:** the capture rig's daemon ran on
+  Matt's session bus with his PipeWire and Pulse sockets linked in. It
+  showed his real track, and a tap or a drag in a test could have paused
+  his music or changed his volume. The rig now gives the daemon a private
+  bus and no sound server (890a3bb). Checked: the rig sees no media and
+  no volume.
+- 2026-11-22 — Three defects on Matt's live layout, fixed; each rule
+  provisional, Matt to overturn (DESIGN.md, Size classes, Numbers are
+  never cut, States, open question 17):
+  - A value card always says what it reads. Compact cards are laid out
+    for the widest value of their unit ("212°", "100%"), never the value
+    now, and keep the icon by stepping numeral and icon down together
+    (32/22 to 20/17); narrower, the name above the numeral; narrower
+    still, the icon alone. A widget with no label is named for its
+    signal ("CPU"). Owner's 106 px temperatures: 26 px numerals, 17 px
+    icon. Cost: memory on the default System page drops to 22/17.
+  - Numbers and times are never ellipsized. A time drops "/ total", then
+    a style, then goes, chosen once per track for its widest elapsed
+    time; `fit` cuts before a word with a figure in it; ages, high/low,
+    "From 9:30", "Lost at 10:41" shorten in whole forms or go. Cost: a
+    107 px compact media card shows no time (it used to run into the
+    padding).
+  - An empty page says "Empty page / Add widgets in Settings", centred,
+    TEXT2, on bare ground: no card, outline or accent.
+  - Found, not fixed: a compact rate card in a 106 px zone runs
+    "12 kB/s" past its edge.
+  Frames: `live-p1-compact-temps`, `live-p5-seek`, `live-p5-seek-hours`,
+  `live-p6-empty-page`, `narrow-values`, `specimen-slider-seek`,
+  `specimen-slider-seek-hours`, `specimen-media-hours`. Not yet judged
+  by an isolated critique.
+- 2026-11-22 — The same rule for compact rate and weather cards,
+  provisional: laid out for "888 MB/s" and "888°", steps down the type
+  scale, then (rate) the arrow and unit stacked over a 20 px number.
+  The unit is not shortened: "12 kB" reads as an amount. Fixes the 106
+  px rate running "12 kB/s" off its card, and weather running "104°" off
+  at every compact width. Cost: default System network 32 to 20 px,
+  Home weather 40 to 32. Frames `live-p1-rate`, `overflow-sweep-*`.
+- 2026-11-22 — **Open, for the panel check:** on Matt's page 1 the
+  106 px network card now stacks "↓ kB/s" above a 20 px number, so the
+  unit outweighs the reading. Cause: `rate_plan` lays the card out for
+  "888 MB/s", which fits on one line at no compact size at that width.
+  The choices are: let the unit go under a larger number at under 18 px;
+  widen the card (his layout has six 106 px cards); or accept the stack.
+  Decide by looking at the strip.
 - 2026-11-22 — **The window's last round (U5), provisional (Claude; Matt to
   overturn).** After the round-3 rescores (light 29/40, dark 28/40):
   - "Preferences…" is now **Settings**, a sheet with three sections: Strip,

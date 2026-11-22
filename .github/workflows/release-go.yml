@@ -1,0 +1,322 @@
+# DISABLED: the release of the old Go and Flutter app. Tags no longer run
+# it: release.yml now builds the Rust app, and the two would publish
+# packages named nexus-open to the same release (this one also pushes the
+# Go app to the AUR). It can still be run by hand from the Actions tab to
+# rebuild an old Go tag. It goes with the Go code in Phase 8 of
+# docs/REDESIGN_PLAN.md.
+name: Release (legacy Go app, manual only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Go tag to rebuild (e.g. v0.3.8)'
+        required: true
+
+jobs:
+  # ── Build Go binary + Flutter UI, produce all three package formats ──────────
+  build:
+    name: Build Packages
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ -n "$INPUT_TAG" ]]; then
+            # workflow_dispatch: use the explicit tag input, strip leading 'v'
+            VERSION="${INPUT_TAG#v}"
+          else
+            # tag push: the ref is refs/tags/vX.Y.Z — strip refs/tags/v
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building release v$VERSION"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2.23.0
+        with:
+          channel: stable
+          cache: true
+
+      - name: Cache pub dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.pub-cache
+          key: pub-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock') }}
+          restore-keys: pub-ubuntu-24.04-
+
+      - name: Cache apt packages
+        uses: actions/cache@v6
+        with:
+          path: /var/cache/apt/archives
+          key: apt-ubuntu-24.04-flutter-build-v1
+          restore-keys: apt-ubuntu-24.04-flutter-build-
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            rpm libarchive-tools
+
+      - name: Generate design tokens
+        working-directory: design
+        run: npm ci && npm run build
+
+      - name: Cache build_runner output
+        uses: actions/cache@v6
+        with:
+          path: ui/.dart_tool/build
+          key: build-runner-ubuntu-24.04-${{ hashFiles('ui/pubspec.lock', 'ui/lib/**/*.dart') }}
+          restore-keys: build-runner-ubuntu-24.04-
+
+      - name: Generate code (freezed / json_serializable)
+        working-directory: ui
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build Flutter UI
+        run: |
+          cd ui && flutter build linux --release \
+            --dart-define=APP_VERSION="${{ steps.version.outputs.version }}"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Cache fpm gem
+        uses: actions/cache@v6
+        with:
+          path: ~/.local/share/gem
+          key: gem-fpm-ubuntu-24.04-2.2.1
+          restore-keys: gem-fpm-ubuntu-24.04-
+
+      - name: Install fpm
+        run: |
+          echo "GEM_HOME=$HOME/.local/share/gem" >> "$GITHUB_ENV"
+          echo "$HOME/.local/share/gem/bin" >> "$GITHUB_PATH"
+          GEM_HOME="$HOME/.local/share/gem" gem install fpm --no-document
+
+      - name: Install appimagetool
+        run: |
+          curl -Lo /tmp/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/latest/download/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          # appimagetool is itself an AppImage; extract it so it runs without FUSE in CI
+          cd /tmp && /tmp/appimagetool --appimage-extract
+          sudo mv /tmp/squashfs-root /usr/local/lib/appimagetool-extracted
+          sudo ln -sf /usr/local/lib/appimagetool-extracted/AppRun /usr/local/bin/appimagetool
+
+      - name: Build packages (deb + rpm + pacman + appimage)
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          TMDB_TOKEN: ${{ secrets.TMDB_TOKEN }}
+        run: ./build-package.sh --deb --rpm --pacman --appimage
+
+      - name: Generate checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Upload packages artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-packages
+          path: dist/
+          retention-days: 7
+
+  # ── Runtime tests — gate the release on all three distros passing ────────────
+  test:
+    name: Runtime Test (${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    needs: build
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: ubuntu-24.04
+            flag: --test-deb
+            image: ubuntu:24.04
+          - label: fedora-40
+            flag: --test-rpm
+            image: fedora:40
+          - label: arch
+            flag: --test-pacman
+            image: archlinux@sha256:a9a1e6db522cf5f8018c920d035e2bfbf8e39c485ee737ce0388990898f2f042
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: release-packages
+          path: dist/
+
+      - name: Pull Docker image (with retry)
+        run: |
+          for i in 1 2 3; do
+            docker pull ${{ matrix.image }} && break
+            echo "Attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+
+      - name: Runtime test (${{ matrix.label }})
+        run: ./build-package.sh ${{ matrix.flag }}
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-${{ matrix.label }}
+          path: test-screenshots/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ── Publish — only runs when all runtime tests pass ──────────────────────────
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-24.04
+    needs: [build, test]
+    permissions:
+      contents: write
+      models: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: release-packages
+          path: dist/
+
+      - name: Install git-cliff
+        run: |
+          curl -sSL https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz \
+            | tar -xz --strip-components=1 -C /usr/local/bin git-cliff-2.13.1/git-cliff
+          git-cliff --version
+
+      - name: Generate release notes
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "v${VERSION}" | head -1)
+          if [[ -n "$PREV_TAG" ]]; then
+            git-cliff "${PREV_TAG}..v${VERSION}" --strip all > /tmp/cliff-notes.md
+          else
+            git-cliff --tag "v${VERSION}" --strip all > /tmp/cliff-notes.md
+          fi
+          cat /tmp/cliff-notes.md
+
+      - name: Write prose summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SUMMARY=$(python3 .github/scripts/ai-release-summary.py < /tmp/cliff-notes.md || true)
+          if [[ -n "$SUMMARY" ]]; then
+            printf '%s\n\n%s\n' "$SUMMARY" "$(cat /tmp/cliff-notes.md)" > /tmp/release-notes.md
+          else
+            cp /tmp/cliff-notes.md /tmp/release-notes.md
+          fi
+          cat /tmp/release-notes.md
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          if gh release view "v${VERSION}" > /dev/null 2>&1; then
+            # Release already exists (e.g. created manually before CI finished).
+            # Edit the notes and upload assets without re-publishing — avoids
+            # re-firing the release:published event before assets are attached.
+            gh release edit "v${VERSION}" \
+              --title "Nexus Open v${VERSION}" \
+              --notes-file /tmp/release-notes.md
+            gh release upload "v${VERSION}" --clobber \
+              dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.AppImage dist/SHA256SUMS
+          else
+            gh release create "v${VERSION}" \
+              --title "Nexus Open v${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.AppImage dist/SHA256SUMS
+          fi
+
+  # ── AUR — runs after GitHub release assets are attached ──────────────────────
+  aur:
+    name: Publish to AUR
+    runs-on: ubuntu-24.04
+    needs: [build, publish]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve tarball URL
+        id: meta
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          echo "tarball_url=https://github.com/mantonx/nexus-open/releases/download/v${VERSION}/nexus-open-${VERSION}-linux-amd64.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256 of release tarball
+        id: sha256
+        env:
+          TARBALL_URL: ${{ steps.meta.outputs.tarball_url }}
+        run: |
+          SHA=$(curl -fsSL "$TARBALL_URL" | sha256sum | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update PKGBUILD and .SRCINFO
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ steps.sha256.outputs.sha256 }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([._-][a-zA-Z0-9]+)*$ ]] \
+            || { echo "Invalid VERSION: $VERSION"; exit 1; }
+          [[ "$SHA256" =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "Invalid SHA256: $SHA256"; exit 1; }
+
+          cd packaging/arch
+          sed -i "s|^pkgver=.*|pkgver=${VERSION}|" PKGBUILD
+          sed -i "s|^pkgrel=.*|pkgrel=1|" PKGBUILD
+          sed -i "s|^sha256sums=.*|sha256sums=('${SHA256}')|" PKGBUILD
+          docker run --rm \
+            -v "$PWD:/pkg" \
+            -w /pkg \
+            archlinux:latest bash -c "
+              pacman -Sy --noconfirm --quiet base-devel 2>/dev/null | tail -1
+              useradd -m builder
+              chown -R builder /pkg
+              su builder -c 'makepkg --printsrcinfo > .SRCINFO'
+            "
+
+      - name: Push to AUR
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          cat >> ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+            StrictHostKeyChecking no
+          EOF
+
+          git clone ssh://aur@aur.archlinux.org/nexus-open.git /tmp/aur-nexus-open
+          cp packaging/arch/PKGBUILD /tmp/aur-nexus-open/PKGBUILD
+          cp packaging/arch/.SRCINFO /tmp/aur-nexus-open/.SRCINFO
+          cd /tmp/aur-nexus-open
+          git config user.name "mantonx"
+          git config user.email "matthew.panton@gmail.com"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet || git commit -m "Update to v${VERSION}"
+          git push

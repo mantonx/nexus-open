@@ -42,7 +42,8 @@ fixed the strip lights without a restart.
 
 An older version installed a rule numbered 99. systemd applies seat
 access in `73-seat-late.rules`, so a rule sorting after it never grants
-access. Remove it; the current rule is `70-nexus.rules`:
+access. Remove it; the current rule is `70-nexus-open.rules`, which the
+package installs:
 
 ```
 sudo rm /etc/udev/rules.d/99-corsair-nexus.rules
@@ -88,18 +89,23 @@ it lasts, replug it.
 
 `FAIL access: permission denied`
 
-The strip is found but this user cannot open it. If the udev rule is not
-installed, install it (packages do this), then unplug the Nexus and plug
-it back in:
+The strip is found but this user cannot open it. The packages install
+the udev rule (`/usr/lib/udev/rules.d/70-nexus-open.rules`) and apply it,
+so this means it is missing or was not applied.
+
+If it is missing, reinstall the package. With the tarball, `install.sh`
+leaves a copy in `~/.local/share/nexusd/`; install it with:
 
 ```
-sudo install -m 644 data/udev/70-nexus.rules /etc/udev/rules.d/
-sudo udevadm control --reload
+sudo install -m 644 ~/.local/share/nexusd/70-nexus-open.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
 ```
 
-If the rule is installed, it applies only when the device appears:
-unplug and replug. The rule grants access to the user at the seat, so a
-session over SSH does not get it.
+From a source checkout, the rule is `packaging/udev/70-nexus-open.rules`.
+
+If the rule is installed but not applied yet, unplug the Nexus and plug it
+back in, or run the second command above. The rule grants access to the
+user at the seat, so a session over SSH does not get it.
 
 ## holders
 
@@ -131,7 +137,7 @@ or rewritten to recover; see [STORAGE.md](STORAGE.md) for its backups.
 Corsair devices other than the strip were found. None is needed for the
 strip, and their support is still being built, so this is a note, not a
 failure. `nexusctl devices` lists each one, what it will be for, and
-what blocks it: "no access" means the udev rule is not installed, or was
-installed after the device was plugged in (unplug it and plug it back
-in). The rule opens only the interfaces the app uses; a keyboard's typing
-interface stays closed.
+what blocks it. "no access" is expected with the package: its rule opens
+only the strip, and devices whose support is still being built stay
+closed. The development rule (`data/udev/70-nexus.rules`) opens the
+interfaces the app will use; a keyboard's typing interface stays closed.

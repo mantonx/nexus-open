@@ -82,8 +82,8 @@ impl fmt::Display for DeviceError {
             ),
             DeviceError::PermissionDenied(path) => write!(
                 f,
-                "no permission to open {}; install data/udev/70-nexus.rules into \
-                 /etc/udev/rules.d/ and replug the device",
+                "no permission to open {}; the udev rule (70-nexus-open.rules) is \
+                 missing or not applied yet, and `nexusctl doctor` says how to fix it",
                 path.display()
             ),
             DeviceError::Disconnected => write!(f, "the iCUE Nexus was unplugged"),

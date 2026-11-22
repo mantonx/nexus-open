@@ -247,7 +247,7 @@ Every size is a constant in `theme.rs`. Cap height is 0.70 em; at about
 | `NUM_HERO_BANDED` | 40 | 600 | −0.4 | 28 px, 5.5 mm | Hero numerals with a bar band below (value, load, memory): a step under `NUM_HERO` so the bar can run the whole card. |
 | `NUM_BANDED` | 36 | 600 | −0.4 | 25 px, 5.0 mm | Medium numerals with a bar band below (values, network at hero). |
 | `NUM_COMPACT` | 32 | 600 | −0.3 | 22 px, 4.4 mm | Compact numerals; the medium slider's number. |
-| `NUM_SECOND` | 26 | 600 | −0.2 | 18 px | A second reading beside the first (load), upload rate. |
+| `NUM_SECOND` | 26 | 600 | −0.2 | 18 px | A second reading beside the first (load), upload rate; a compact reading's numeral in a 106 px zone. |
 | `NUM_SECOND_TIGHT` | 22 | 600 | −0.2 | 15.5 px | A medium card's second reading when 26 would not leave room for its icon beside the widest first. |
 | `NUM_SECOND_SMALL` | 20 | 600 | −0.2 | 14 px | The step under that: a 200 px card with "212°" and "100%" and the icon. |
 | `TITLE_BIG` | 26 | 560 | −0.2 | 18 px | The track title in the now-playing takeover. |
@@ -273,7 +273,16 @@ legibility card has not been read on the panel, and 18 may move. Where
   before it would be cut.
 - A hero media card shows only the elapsed time ("1:37") when the
   artist would be cut by "1:37 / 5:18", measured against the artist
-  even while paused, so pausing does not change the times.
+  even while paused, so pausing does not change the times, and for the
+  times' widest ("8:88 / 5:18"), so the seconds do not. The elapsed
+  time goes too when it would leave the artist less than
+  `MEDIA_ARTIST_MIN` 40 px.
+- A seek slider's "9:26 / 43:12" drops "/ 43:12" where it does not fit
+  (a medium card shows "9:26"), takes the next style down (`TITLE` to
+  `BODY` at hero), then goes; the compact media card's elapsed time does
+  the same from `TITLE`. Chosen for the track's widest elapsed time, so
+  the form is fixed for the track, not changed at ten minutes. See
+  Numbers are never cut.
 - The empty music sleeve is 27 px at compact and medium (31 at hero),
   and the hero hint is "Play some music".
 - A medium rate card whose down and up are in different units uses two
@@ -326,20 +335,45 @@ card beside it (content centres in its room when it has spare width).
 | Widget | Compact (≤149) | Medium (150–299) | Hero (≥300) |
 |---|---|---|---|
 | Clock | 10:53 at 32, centred | 10:53 at 40 + "Sun" / "Nov 22" | 10:53 at 50 + "Sunday" / "November 22" |
-| Value (temperature) | icon + 115° at 32; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 40; the name over the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it); the bar band runs the **whole card** under them |
+| Value (temperature) | icon + 115°, at the largest step that holds the widest value ("212°") beside the icon: 32 with icon 22 from a 125 px zone, 28 / 22, 28 / 17, 26 / 17 (a 106 px zone: six widgets on a page), 22 / 17; narrower, the name ("CPU") above the numeral at 20; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 40; the name over the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it); the bar band runs the **whole card** under them |
 | Value + second reading | as compact (second hidden) | Laid out for the widest both readings can be (three digits each, "212°" / "100°" and "100%", from the units alone, before the first reading), never for the values now: nothing goes or moves as they change. Icon + 115°, the second's own 17 px icon (a gauge for load) just before "6%" at the right; two bars in the band, split where the widest second's icon starts. Sizes step down until that fits: 36 / 26, 36 / 22, 32 / 22, 32 / 20 (a 204 px zone, the System page), 28 / 20 (a 200 px zone), the first's icon 22 from the third step | icon + 115° at 40, name; the second named on the numeral's baseline at the right ("load 6%" at 26); the first reading's bar runs the whole card, the second has none (a percent is its own scale) |
-| Load, memory | icon + 62% at 32; bar | icon + 62% at 36, name; bar | icon + 62% at 40, name over "limit 85%"; bar the whole card |
-| Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
-| Weather | icon + 58° at 40 | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
+| Load, memory | icon + 62%, sized for "100%" as the temperature is (32 / 22 at 128, 22 / 17 at 108); bar | icon + 62% at 36, name; bar | icon + 62% at 40, name over "limit 85%"; bar the whole card |
+| Network rate | ↓ + 12 kB/s, sized for the widest rate on its scale ("888 MB/s"), at the largest step that fits on one line (20 / 17 at 124 px); narrower, ↓ and "MB/s" above the number at 20 (the 106 px zone); log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
+| Weather | icon + 58°, sized for "888°": 40 / 26, then the value card's steps (32 / 22 at 124 px, 28 / 22 at 107), half a pad at the sides; narrower, the icon above a 20 px number | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
 | Media | play/pause key + elapsed + progress line | artwork + title / artist + a raised `MEDIA_KEY_W` 36 × 33 play/pause key at the right, `PAD` in from the card's edge, accent-filled (the whole card is the hit zone; the key says so) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
 | Key | icon (label from 96 px) | icon + label | icon + label + second line ("Hold for a new window") |
 | News | the whole card a key: newspaper `ICON_KEY` 22 in the accent + the headline's age ("12 min") at `TITLE` 20, centred; no headline, which would be two words at this width | the whole card a key: the headline alone, over two lines at `LABEL` 18 in TEXT (baselines `NEWS_BASE1` 23.5 and `NEWS_BASE2` 41.5), as many whole words as fit on the first, the second cut by `fit`; one line with nothing under it is centred (`NEWS_BASE_ONE` 33). About 30 characters at 200 px | the same two lines; after the headline's end on line two, `NEWS_FROM_GAP` 12 px on, the newspaper at `ICON_SMALL` 17 in the accent + "Harbour Gazette · 12 min" in TEXT2, when it fits there; else left out. About 60 characters at 320 px, 80 at 440, 100 at 512 |
 
 Frames: `specimen-*.png` draws every widget in zones of 128, 200 and
-312 px (cards of 124, 196 and 308) in each state. A compact reading of
-three digits ("115°") steps down to `NUM_COMPACT_TIGHT` 28 px when 32 px
-would crowd the card's edge.
+312 px (cards of 124, 196 and 308) in each state.
+
+**A value card always says what it reads** (provisional, 2026-11-22).
+The owner's layout put six widgets on a page; two compact temperatures
+in 106 and 107 px zones showed "111°" and "120°" with no icon, and the
+CPU could not be told from the GPU. A compact value card now keeps its
+icon and steps its numeral and icon down together (`COMPACT_STEPS` in
+`widget.rs`: 32 / 22, 28 / 22, 28 / 17, 26 / 17, 22 / 17, 20 / 17, the
+numeral giving way first), decided by the reading's widest value for its
+unit ("212°" in °F, "100°" in °C, "100%"), never the value now. Where
+even 20 / 17 does not fit (a zone under about 96 px) the name goes above
+a 20 px numeral in place of the icon: the widget's label, else the
+signal's short name ("CPU", "GPU load", "Memory"); where no number fits
+(about 70 px), the icon alone over the bar. The numeral sits at the left
+of its widest box, so "45°" and "212°" start at the same column. Frames:
+`live-p1-compact-temps` (the owner's page), `narrow-values` (one
+temperature at 125, 112, 106, 96, 88, 72 and 41 px).
+
+Compact rate and weather cards follow the same rule (provisional,
+2026-11-22). A rate is laid out for "888" in its longest unit ("MB/s",
+up to the scale's 1 GB/s); where that does not fit on one line even at
+20 / 17, the arrow and the unit go above the number. The unit is never
+shortened: "12 kB" (no "/s") would read as an amount, not a rate, so no
+shorter form is unambiguous. Weather is laid out for "888°" (a hot
+day in °F; "-88°" is narrower). Frames: `live-p1-rate` ("512 kB/s" in
+the owner's 106 px zone), `overflow-sweep-rate`, `-load`, `-memory` and
+`-weather` (each at its worst value in zones of 124, 112, 106, 102, 100
+and 96 px).
 
 ### The default layout
 
@@ -349,7 +383,7 @@ Five pages; controls get whole pages; no page is another page stretched.
 |---|---|---|
 | 1 Home | clock 196, weather 124, CPU 124, media 196 | The glance: time, weather, the hottest part, and music under a finger. |
 | 2 Music | media 428 (three transport keys), volume slider 212 | Control: play, skip, set the volume. |
-| 3 System | CPU + load 204, GPU + load 204, memory 108, network 124 | The machine, every reading with its fixed bar. |
+| 3 System | CPU + load 204, GPU + load 204, memory 108, network 124 | The machine, every reading with its fixed bar. Memory's 108 px zone holds "100%" beside its icon only at 22 / 17 (open question 17). |
 | 4 Launch | clock 128, keys Browser, Files, Settings, Music (128 each) | Control: launchers, with the time kept. Settings opens the settings window (no terminal by default). Music shows the Music page (a long press plays or pauses): a games launcher is not on every desktop, and a key that opens nothing is worse than none. |
 | 5 Desk | clock 332, weather 308 | Across the room: the biggest figures, full date, the day's high and low. |
 
@@ -441,6 +475,7 @@ What can be touched looks like it; what cannot does not.
 | No data (source works, no reading yet) | Normal card; the numeral is two TEXT3 dashes; "No reading" (medium) / "No reading yet" (hero); empty bar | `specimen-value-no-data`, `specimen-weather-no-data` |
 | Source lost / stale | The last value kept in TEXT3; the reading's own icon kept (at compact and medium it is the card's name) in TEXT3 with a broken-link badge on its lower right, cut out by a ring of the card (weather: the icon becomes a cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. A second reading on a lost card is drawn lost too (TEXT3, its own badge, an empty bar), so a lost card never carries a bright number. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
 | Not set up | No fill; dashed accent outline; plus or pin icon; "Weather / Set up" (compact), "Weather / Add your town" | `specimen-*-not-set-up`, `6-first-run` |
+| Empty page | A page with no widgets: no card, outline, icon or accent; "Empty page" (`LABEL`) / "Add widgets in Settings" (`BODY`), both TEXT2, centred on the strip at `BASE_LINE1` and `BASE_LINE2` − 1. The page markers as on any page. Quiet, so it is taken for neither a fault nor a control (before, the page drew nothing and looked broken) | `live-p6-empty-page` |
 | Pressed, holding, dragging | See Keys | |
 | Paused | Play glyph in the key, artwork dimmed, title in TEXT2, "Paused" in place of the artist, progress line TEXT3 | `specimen-media-paused` |
 | Nothing playing | When the layout says how to open the music player (the media widget's own `tap`, or a Music key, by the `music-notes` icon or the label "Music", whose tap runs or opens something; `Config::music_action`): the whole card is a key, the note in the accent, "Nothing playing" / "Tap to open music" ("Open music" where that is cut; "Open" / "music" at compact), and a tap does that. A Music key that only shows a page opens no player, so with the default layout nothing resolves and the card stays quiet: a dashed TEXT3 sleeve with a note, "Nothing playing" / "Play some music", no key look | `specimen-media-nothing-playing`, `specimen-media-nothing-playing-opens`, `-opens-pressed` |
@@ -488,6 +523,26 @@ as one card: one colour, one size, no motion. What it costs: the source
 and the accent newspaper go when the headline needs the room, so a
 medium card, and a hero card with a long headline, say "tap me" by the
 raised card alone. To be confirmed on the panel.
+
+### Numbers are never cut
+
+A number or a time never ends in an ellipsis: "43…" or "19…" is a
+different number. `fit` never cuts through a word with a figure in it
+(it cuts before that word), and every place a number can meet the edge
+shortens it in whole forms instead (`first_fit`, laid out for the
+widest form so it does not flip as the value ticks):
+
+| Where | Shortened as |
+|---|---|
+| A value card's numeral | Never shortened: sized for its widest (above) |
+| Seek slider, compact media, hero media times | "9:26 / 43:12", then "9:26", then a style smaller, then none |
+| Weather's high and low | "61° / 49°", "61°/49°", then none |
+| "From 9:30" (stale weather, hero) | Whole or none; the cloud-slash still says it |
+| "Lost at 10:41" (hero reading) | "Lost 10:41", then "Lost" |
+| A headline's age ("12 min") | Whole or none (compact card, source line) |
+
+Frames: `live-p5-seek`, `live-p5-seek-hours`, `specimen-slider-seek`,
+`specimen-slider-seek-hours`, `specimen-media-hours`.
 
 ### Page markers
 
@@ -733,12 +788,28 @@ signal's base unit (°C).
     `xdg-mime query default audio/mpeg` names, launched with
     `gtk-launch`), or the default layout could name a player. Matt to
     choose.
-16. **The System page does not name CPU and GPU.** At medium a value
+16. **The System page does not name CPU and GPU.** (A compact card now
+    always names its reading, by icon or by name; this question is about
+    the medium card with a second reading.) At medium a value
     card with a second reading has no room for its name, so the two
     cards differ by icon alone (the U3 polish 2 review). A user can
     already name it (`label`, shown at hero) or give it a hero card;
     whether medium cards name themselves, and at what cost to the
     numerals, is Matt's to decide.
+17. **What "widest" costs on the owner's and the default layouts**
+    (provisional, 2026-11-22, Matt to overturn). Laying compact cards
+    out for "212°" and "100%" means: memory on the default System page
+    (108 px) draws "54%" at 22 px with a 17 px icon, where it was 32 /
+    22 until it reached 100% (and then lost its icon); a compact media
+    card in a 107 px zone has no room for "9:26" and shows only its
+    progress line (before, the time ran into the card's padding, and
+    past an hour off the card). Rate and weather, laid out the same
+    way: network on the default System page (124 px) is "12 kB/s" at
+    20 px, where it was 32 and ran off the card at "999 MB/s"; the
+    owner's 106 px rate stacks its unit over a 20 px number; weather on
+    Home (124 px) is 32 px, not 40, and in the owner's 107 px zone 28.
+    Ways out: wider zones for those widgets; or "kB" without "/s",
+    if Matt reads it as a rate.
 
 ## Shared identity
 

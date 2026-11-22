@@ -121,13 +121,7 @@ pub fn devices() -> Vec<DeviceLine> {
             } else if let Some(e) = &blocked {
                 (blocked_state(e), blocked_fix(e, thing(f.product)))
             } else if used.iter().any(|n| !n.access) {
-                (
-                    "no access".to_string(),
-                    "Install the udev rule, then unplug the device and plug it back in:\n\
-                     sudo install -m 644 data/udev/70-nexus.rules /etc/udev/rules.d/\n\
-                     sudo udevadm control --reload"
-                        .to_string(),
-                )
+                ("no access".to_string(), rule_fix(rule_installed()))
             } else if !others.is_empty() {
                 (
                     format!("in use by {}", others.join(", ")),
@@ -367,9 +361,6 @@ fn device(r: &mut Report) {
             );
         }
     }
-    let rule_installed = ["/etc/udev/rules.d", "/usr/lib/udev/rules.d"]
-        .iter()
-        .any(|d| Path::new(d).join("70-nexus.rules").exists());
 
     let node = match nexus_device::hidraw::locate() {
         Ok(node) => {
@@ -393,15 +384,7 @@ fn device(r: &mut Report) {
     match OpenOptions::new().read(true).write(true).open(&node) {
         Ok(_) => r.ok("access", "this user can open the device"),
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            let fix = if rule_installed {
-                "The udev rule is installed but not applied to this device yet.\n\
-                 Unplug the Nexus and plug it back in."
-            } else {
-                "Install the udev rule, then unplug and replug the Nexus:\n\
-                 sudo install -m 644 data/udev/70-nexus.rules /etc/udev/rules.d/\n\
-                 sudo udevadm control --reload"
-            };
-            r.fail("access", "permission denied", fix);
+            r.fail("access", "permission denied", &rule_fix(rule_installed()));
         }
         Err(e) => r.fail("access", &e.to_string(), ""),
     }
@@ -430,6 +413,70 @@ fn device(r: &mut Report) {
             "Stop the other program so only nexusd draws on the strip."
         };
         r.fail("holders", &format!("also open in {}", list.join(", ")), fix);
+    }
+}
+
+/// The rule's file names: the packaged one, and the wider one a source
+/// checkout installs by hand (`data/udev/70-nexus.rules`).
+#[cfg(target_os = "linux")]
+const RULES: [&str; 2] = ["70-nexus-open.rules", "70-nexus.rules"];
+
+/// Whether a udev rule that grants access to the strip is installed.
+#[cfg(target_os = "linux")]
+fn rule_installed() -> bool {
+    rule_installed_in(&[
+        Path::new("/etc/udev/rules.d"),
+        Path::new("/usr/lib/udev/rules.d"),
+        Path::new("/lib/udev/rules.d"),
+    ])
+}
+
+#[cfg(target_os = "linux")]
+fn rule_installed_in(dirs: &[&Path]) -> bool {
+    dirs.iter()
+        .any(|d| RULES.iter().any(|rule| d.join(rule).exists()))
+}
+
+/// Where a copy of the rule waits to be installed: the tarball's
+/// install.sh leaves one in the user's data folder.
+#[cfg(target_os = "linux")]
+fn rule_copy() -> Option<std::path::PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".local/share")))?;
+    Some(data.join("nexusd").join(RULES[0])).filter(|p| p.exists())
+}
+
+/// What to do when the strip cannot be opened for lack of permission.
+#[cfg(target_os = "linux")]
+fn rule_fix(installed: bool) -> String {
+    rule_fix_with(installed, rule_copy().as_deref())
+}
+
+#[cfg(target_os = "linux")]
+fn rule_fix_with(installed: bool, copy: Option<&Path>) -> String {
+    let apply = "sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw";
+    if installed {
+        return format!(
+            "The udev rule is installed but not applied to this device yet.\n\
+             Unplug the Nexus and plug it back in, or apply it now:\n\
+             {apply}"
+        );
+    }
+    match copy {
+        Some(copy) => format!(
+            "Install the udev rule that came with Nexus Open, then apply it:\n\
+             sudo install -m 644 {} /etc/udev/rules.d/\n\
+             {apply}",
+            copy.display()
+        ),
+        None => format!(
+            "The udev rule is missing. Reinstalling the Nexus Open package puts it back.\n\
+             From a source checkout, install it and apply it:\n\
+             sudo install -m 644 packaging/udev/70-nexus-open.rules /etc/udev/rules.d/\n\
+             {apply}"
+        ),
     }
 }
 
@@ -511,6 +558,44 @@ mod tests {
         let unseen = blocked_fix(&DeviceError::InUse(vec![]), "the strip");
         assert!(unseen.contains("cannot see which"), "{unseen}");
         assert_eq!(blocked_state(&old), "in use by nexus-open (pid 42)");
+    }
+
+    /// Both rule names count as installed, and the fix names a file that
+    /// exists: the tarball's copy when there is one.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_rule_fix_names_the_rule_that_can_be_installed() {
+        let dir = std::env::temp_dir().join(format!("nexus-doctor-rules-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!rule_installed_in(&[&dir]));
+        for rule in RULES {
+            std::fs::write(dir.join(rule), "").unwrap();
+            assert!(rule_installed_in(&[&dir]), "{rule}");
+            std::fs::remove_file(dir.join(rule)).unwrap();
+        }
+        std::fs::remove_dir(&dir).unwrap();
+
+        let applied = rule_fix_with(true, None);
+        assert!(applied.contains("Unplug the Nexus"), "{applied}");
+        assert!(
+            applied.contains("udevadm trigger --subsystem-match=hidraw"),
+            "{applied}"
+        );
+        let copy = Path::new("/home/u/.local/share/nexusd/70-nexus-open.rules");
+        let tarball = rule_fix_with(false, Some(copy));
+        assert!(
+            tarball.contains("sudo install -m 644 /home/u/.local/share/nexusd/70-nexus-open.rules /etc/udev/rules.d/"),
+            "{tarball}"
+        );
+        let missing = rule_fix_with(false, None);
+        assert!(
+            missing.contains("Reinstalling the Nexus Open package"),
+            "{missing}"
+        );
+        assert!(
+            missing.contains("packaging/udev/70-nexus-open.rules"),
+            "{missing}"
+        );
     }
 
     #[test]

@@ -5,6 +5,10 @@ Documentation=https://github.com/mantonx/nexus-open
 # desktop, so this starts with the user session rather than the graphical one.
 After=dbus.socket
 Conflicts=nexus-open.service
+# Packages enable this for every user, which includes the login screen's
+# own users (gdm, sddm, lightdm). Those are system users: skip them, or the
+# login screen's daemon would take the strip before anyone logs in.
+ConditionUser=!@system
 
 [Service]
 # notify: start counts as done once the control socket is up. The daemon
@@ -16,6 +20,26 @@ WatchdogSec=20s
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=5
+
+# ── What this sandbox does and does not do ─────────────────────────────────
+# This is a user unit: it runs in the user's own service manager, which has
+# no privileges. That limits what the options below can do:
+#  - Options that need a mount or other namespace (ProtectSystem=,
+#    PrivateTmp=, the Protect* options, ReadWritePaths=) work because
+#    systemd sets up a user namespace for them; PrivateUsers= is turned on
+#    by itself. Where the kernel refuses unprivileged user namespaces
+#    (Ubuntu 24.04 restricts them through AppArmor), these cannot take
+#    effect; that case is untested.
+#  - Options built on seccomp (SystemCallFilter=, RestrictAddressFamilies=,
+#    RestrictNamespaces=, LockPersonality=, RestrictRealtime=,
+#    RestrictSUIDSGID=) and NoNewPrivileges= work as they do anywhere.
+#  - DevicePolicy= and DeviceAllow= are NOT enforced: they need the cgroup
+#    device controller, which a user manager cannot use. They are left out.
+#    Device access is what the user has: through the udev rule
+#    (70-nexus-open.rules), the strip's hidraw node; and whatever else the
+#    user can open, such as NVIDIA's /dev/nvidia* for GPU readings.
+#  - Capabilities: the service has none to drop, so CapabilityBoundingSet=
+#    adds nothing.
 
 # ── Privilege ──────────────────────────────────────────────────────────────
 NoNewPrivileges=true
@@ -33,6 +57,9 @@ UMask=0077
 ProtectSystem=strict
 StateDirectory=nexusd
 ReadWritePaths=-%h/.config/nexus-open %t
+# Read-only /proc/sys and /sys, and the kernel's modules and log hidden.
+# ProtectKernelLogs= and ProtectClock= also try to deny /dev/kmsg and the RTC
+# through the device policy; that part, as above, does not apply here.
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true
@@ -40,14 +67,6 @@ ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
 RestrictNamespaces=true
-
-# ── Devices: the strip (hidraw) and, for GPU readings, NVIDIA's control
-# devices. Everything else is denied. AMD GPUs are read from sysfs, which
-# needs no device access.
-DevicePolicy=closed
-DeviceAllow=char-hidraw rw
-DeviceAllow=char-nvidiactl rw
-DeviceAllow=char-nvidia rw
 
 # ── Network: the control socket and session bus (unix), weather (inet);
 # netlink for sysinfo's network counters.

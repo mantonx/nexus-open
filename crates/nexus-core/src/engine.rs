@@ -1083,8 +1083,11 @@ impl Engine {
         let mut zones = self.bind(row, now, marquee);
         self.show_sliders(row, &mut zones);
         let touch = self.touch_on(row);
+        if matches!(row, Row::Page(_)) {
+            return self.renderer.render_page(&zones, touch);
+        }
         let width = self.span(row).1;
-        let raised = matches!(row, Row::Takeover(_)) && width < crate::WIDTH;
+        let raised = width < crate::WIDTH;
         self.renderer.render_row(&zones, touch, width, raised)
     }
 
