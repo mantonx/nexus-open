@@ -339,3 +339,27 @@ README clip (now of the new strip), release verification.
   Also: partial takeovers snap to the page's card edges (within 40 %),
   and a medium rate card with down and up in different units shows both
   in two rows.
+
+  **Rescored in isolation: 26/36, still under 28.** The reviewer's top
+  findings were an unnamed medium second reading ("6%" of what, with a
+  near-empty bar read as ".6%") and a 45 px slider after the snap. Fixed
+  in one more round (also provisional): the second reading carries its
+  own icon with its bar starting under it; a snap never leaves a partial
+  takeover under 320 px (`TAKEOVER_MIN`); a lost reading keeps its icon
+  with a broken-link badge; the current page's marker stays cream with
+  the alert as a segment after it; a medium name is laid out for two
+  digits and hero media times do not move on pause.
+
+  **Rescored once more, by a fresh reviewer: 26/36 again** (Good, bottom
+  of the band; recognition rather than recall 2, everything else 3). Its
+  top findings, not addressed (the brief allowed one fix round):
+  1. *P1, the medium media card does not look tappable*: its only sign
+     is a 14 px badge, while every other key has a raised face.
+  2. *P1, page markers and edge flags are faint at 60 cm*: 2 px
+     markers, and an amber edge flag beside an amber end card reads as
+     the card's lip.
+  3. *P1, the idle media slot is a dead end*: "Play something" with
+     nothing to tap (resume the last player, or open one).
+  Also P2: the second reading's icon still goes beside three-digit
+  firsts with a two-digit second (DESIGN.md open question 14), and lost
+  and no-data states use drifting words and cannot be acted on.

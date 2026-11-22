@@ -425,8 +425,8 @@ What can be touched looks like it; what cannot does not.
 - **Sliders are relative**: landing changes nothing; dragging moves the
   value by the finger's travel (full track width = 0–100). At rest the
   thumb is `THUMB_R` 7.5 px; while held it grows to `THUMB_R_HELD` 10 px,
-  fills with the accent and gets a soft `THUMB_HALO` glow, and the number
-  turns `Accent::text`. `specimen-slider-dragging.png`.
+  fills with the accent and gets a soft `THUMB_HALO` glow; the number
+  stays cream (a value is information). `specimen-slider-dragging.png`.
 
 ### States
 
@@ -495,10 +495,10 @@ content.
 
 - **Now playing** (`takeover-now-playing.png`): when the track changes,
   the whole card band (rows 6–46) becomes B's media scene: artwork 35 px,
-  artist in `Accent::text`, a progress line, "1:37 / 5:18", the full title
-  at 26 px, and prev / play-pause / next keys 50 px wide. The artist and
-times are TEXT2 and the progress line cream (information, not touch).
-Markers stay.
+  the artist, a progress line, "1:37 / 5:18", the full title at 26 px,
+  and prev / play-pause / next keys 50 px wide. The artist and times are
+  TEXT2 and the progress line cream (information, not touch). Markers
+  stay.
   Same timing as today's takeovers (`seconds`, kept up while touched).
 - **Volume** (`takeover-volume-right.png`, `takeover-volume-left-held.png`):
   a card over **part** of the page, aligned `right` (default) or `left`,
