@@ -36,8 +36,11 @@ start_daemon() {
   systemd-run --user --quiet --unit "$UNIT" --collect -p DevicePolicy=closed \
     -p DeviceAllow='char-nvidiactl rw' -p DeviceAllow='char-nvidia rw' \
     -E XDG_RUNTIME_DIR="$R" -E XDG_STATE_HOME="$ST/state" -E XDG_CONFIG_HOME="$ST/config" \
-    -E DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus" \
-    "$(cat "$ST/bin")/nexusd" run --no-device --db "$ST/rig.db"
+    -E DBUS_SESSION_BUS_ADDRESS= \
+    dbus-run-session -- "$(cat "$ST/bin")/nexusd" run --no-device --db "$ST/rig.db"
+  # A private session bus: on the user's bus the daemon would read their media
+  # player and a tap in a test would pause their music. With its own
+  # XDG_RUNTIME_DIR it also cannot reach their sound server or start programs.
   for i in $(seq 20); do [ -S "$R/nexus-open.sock" ] && break; sleep 0.3; done
   [ -S "$R/nexus-open.sock" ] || { echo "daemon did not start"; return 1; }
   # Safety: the throwaway daemon must never hold the real strip. (A user unit's
@@ -63,7 +66,8 @@ case "${1:-}" in
     "$0" down >/dev/null 2>&1
     mkdir -p "$R" "$ST/state" "$ST/config" "$ST/data" "$RIG/shots"; chmod 700 "$R"
     echo "$2/target/release" > "$ST/bin"
-    for n in pipewire-0 pulse; do [ -e "$XDG_RUNTIME_DIR/$n" ] && ln -sfn "$XDG_RUNTIME_DIR/$n" "$R/$n"; done
+    # No links to the sound server: a slider drag in a test would change the
+    # user's real volume.
     before=$(pgrep -a Xwayland | grep -oE 'Xwayland :[0-9]+' | sort -u)
     ( kwin_wayland --virtual --xwayland --width 1600 --height 1000 --socket "$UNIT" >"$ST/kwin.log" 2>&1 & )
     d=""; for i in $(seq 40); do after=$(pgrep -a Xwayland | grep -oE 'Xwayland :[0-9]+' | sort -u)
