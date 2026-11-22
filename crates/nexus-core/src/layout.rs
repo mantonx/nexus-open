@@ -317,6 +317,36 @@ fn reading(
     }
 }
 
+/// A short name for what a signal reads, for a value card the layout
+/// gives no label: "CPU" for `cpu.temp`, "GPU load", "Memory". A card
+/// always says what it reads, and where its icon does not fit the name
+/// does.
+pub fn short_name(signal: &str) -> String {
+    let (part, what) = signal.split_once('.').unwrap_or((signal, ""));
+    let part = part.trim();
+    let named = match part {
+        "mem" | "memory" => "Memory".to_string(),
+        "net" => "Network".to_string(),
+        "weather" => "Weather".to_string(),
+        "volume" => "Volume".to_string(),
+        "media" => "Music".to_string(),
+        "news" => "News".to_string(),
+        // An acronym of up to four letters ("cpu", "nvme") in capitals,
+        // a longer word with a capital.
+        p if p.chars().count() <= 4 => p.to_uppercase(),
+        p => {
+            let mut c = p.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect())
+                .unwrap_or_default()
+        }
+    };
+    match what {
+        "load" => format!("{named} load"),
+        _ => named,
+    }
+}
+
 /// The base unit a signal is expected in before its first reading, so a
 /// card waiting for data already has the right bar.
 fn expected_unit(signal: &str) -> Unit {
@@ -358,9 +388,16 @@ fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
             second_crit,
             ..
         } => {
+            // With no label, the signal's short name: the card must say
+            // what it reads.
+            let name = if label.trim().is_empty() {
+                short_name(signal)
+            } else {
+                label.clone()
+            };
             let first = reading(
                 ctx,
-                label,
+                &name,
                 signal,
                 *warn,
                 *crit,
@@ -550,7 +587,12 @@ pub fn slider(
             match length.filter(|_| active) {
                 Some(length) => {
                     let f = held.or(number("media.position").map(|p| (p / length) as f32));
-                    let at = f.map_or(0.0, |f| f64::from(f.clamp(0.0, 1.0)) * length);
+                    // The position itself at rest: through the f32 fraction
+                    // 9:26 came back as 9:25, a second behind the media card.
+                    let at = match (held, number("media.position")) {
+                        (None, Some(p)) => p.clamp(0.0, length),
+                        _ => f.map_or(0.0, |f| f64::from(f.clamp(0.0, 1.0)) * length),
+                    };
                     let value = format!("{} / {}", track_time(at), track_time(length));
                     (f, (value, String::new()), false, icons::MUSIC)
                 }
@@ -920,6 +962,16 @@ mod tests {
         // Over 45 minutes without a forecast: stale.
         let got = avail(&s, true, 100.0 + WEATHER_STALE + 60.0);
         assert!(matches!(&got[2], Avail::Lost(_)), "{got:?}");
+    }
+
+    #[test]
+    fn an_unlabelled_reading_is_named_for_its_signal() {
+        assert_eq!(short_name("cpu.temp"), "CPU");
+        assert_eq!(short_name("gpu.temp"), "GPU");
+        assert_eq!(short_name("gpu.load"), "GPU load");
+        assert_eq!(short_name("mem.used"), "Memory");
+        assert_eq!(short_name("nvme.temp"), "NVME");
+        assert_eq!(short_name("chipset.temp"), "Chipset");
     }
 
     #[test]

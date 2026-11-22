@@ -471,9 +471,14 @@ impl Renderer {
     }
 
     /// One page of zones, left to right, on the whole strip, without its
-    /// page markers (`draw_markers` adds them).
+    /// page markers (`draw_markers` adds them). A page with no widgets
+    /// says so quietly, so it is not taken for a fault.
     pub fn render_page(&mut self, zones: &[Zone], touch: Option<Touch>) -> Canvas {
-        self.render_row(zones, touch, WIDTH, false)
+        let mut canvas = self.render_row(zones, touch, WIDTH, false);
+        if zones.is_empty() {
+            self.pen(&mut canvas).empty_page();
+        }
+        canvas
     }
 
     /// A row of zones in a new frame `width` pixels wide: a page is the
@@ -678,6 +683,41 @@ struct SecondPlan {
     fits: bool,
 }
 
+/// A compact value card's numeral and icon sizes, from the largest down,
+/// tried until the reading's widest value fits beside its icon: the
+/// numeral gives a step first, then the icon, then the numeral again.
+const COMPACT_STEPS: [(TextStyle, f32); 6] = [
+    (NUM_COMPACT, ICON_COMPACT),
+    (NUM_COMPACT_TIGHT, ICON_COMPACT),
+    (NUM_COMPACT_TIGHT, ICON_SMALL),
+    (NUM_SECOND, ICON_SMALL),
+    (NUM_SECOND_TIGHT, ICON_SMALL),
+    (NUM_SECOND_SMALL, ICON_SMALL),
+];
+
+/// How a compact value card names its reading and how big its numeral is,
+/// chosen from the card's width and the reading's widest value alone.
+struct CompactPlan {
+    /// The numeral's size; `None` when not even the smallest step holds
+    /// the widest value (a card narrower than any reading needs).
+    num: Option<TextStyle>,
+    /// The width the numeral is laid out for: its widest.
+    num_w: f32,
+    /// The icon's size, beside the numeral.
+    icon: f32,
+    /// What names the reading above the numeral, when the icon does not
+    /// fit beside it.
+    above: Option<Above>,
+}
+
+/// What names a narrow compact reading above its numeral.
+enum Above {
+    /// Its name ("CPU"), in place of the icon.
+    Name(String),
+    /// Its icon, when not even the name's first word fits.
+    Icon,
+}
+
 fn fmt_time(s: f64) -> String {
     let s = s.max(0.0) as u64;
     if s >= 3600 {
@@ -685,6 +725,27 @@ fn fmt_time(s: f64) -> String {
     } else {
         format!("{}:{:02}", s / 60, s % 60)
     }
+}
+
+/// The ways to show a time, longest first, for `Pen::first_fit`: "9:26 /
+/// 43:12" in the first style, then "9:26" in each style. Each is laid out
+/// for its widest (the elapsed time as long as the total can be), so a
+/// form is chosen once per track, not as the seconds tick.
+fn time_forms(
+    elapsed: &str,
+    total: Option<&str>,
+    with_total: bool,
+    styles: &[TextStyle],
+) -> Vec<(String, String, TextStyle)> {
+    let probe = wide_probe(total.unwrap_or(elapsed), 0);
+    let mut forms = Vec::new();
+    if let (Some(t), true, Some(s)) = (total, with_total, styles.first()) {
+        forms.push((format!("{elapsed} / {t}"), format!("{probe} / {t}"), *s));
+    }
+    for s in styles {
+        forms.push((elapsed.to_string(), probe.clone(), *s));
+    }
+    forms
 }
 
 /// The dashes shown where a number has not arrived.
@@ -722,11 +783,12 @@ impl Pen<'_> {
         w
     }
 
-    /// `t` shortened with an ellipsis to fit `room`.
     /// `t`, or as much of it as fits in `room` with an ellipsis: cut after
     /// a whole word when that keeps most of what a cut between letters
     /// would ("Weird Fishes…" over "Weird Fishes / Ar…"), else between
-    /// letters. Never a letter cut through.
+    /// letters. Never a letter cut through, and never a word with a figure
+    /// in it: numbers and times are shown whole or not at all (`first_fit`
+    /// chooses among their shorter forms).
     fn fit(&mut self, f: Face, s: &TextStyle, t: &str, room: f32) -> String {
         if self.measure(f, s, t) <= room {
             return t.to_string();
@@ -743,6 +805,13 @@ impl Pen<'_> {
                 break;
             }
         }
+        // A number is never cut: a cut through a word with a figure in it
+        // ("43:12", "194°") goes before that word instead.
+        let start = t[..glyph].rfind(' ').map_or(0, |i| i + 1);
+        let end = t[glyph..].find(' ').map_or(t.len(), |i| glyph + i);
+        if glyph < end && t[start..end].chars().any(|c| c.is_ascii_digit()) {
+            glyph = start;
+        }
         let kept = trim(&t[..glyph]);
         let word = t[..glyph]
             .rfind(' ')
@@ -754,6 +823,21 @@ impl Pen<'_> {
         } else {
             format!("{cut}…")
         }
+    }
+
+    /// The first of `forms` (each a text and its style, longest first)
+    /// whose `widest` fits `room`, drawn as its text: how a number or a
+    /// time is shortened, since it is never cut. `None` when none fits.
+    fn first_fit(
+        &mut self,
+        f: Face,
+        forms: &[(String, String, TextStyle)],
+        room: f32,
+    ) -> Option<(String, TextStyle, f32)> {
+        forms.iter().find_map(|(text, widest, s)| {
+            let w = self.measure(f, s, widest).max(self.measure(f, s, text));
+            (w <= room).then(|| (text.clone(), *s, w))
+        })
     }
 
     /// A title that may not fit between `x` and `right`: at rest it fades
@@ -906,6 +990,55 @@ impl Pen<'_> {
             }
         }
         plan.expect("steps is not empty")
+    }
+
+    /// The sizes for a compact value card of width `w`. A value card always
+    /// says what it reads: the icon beside the numeral at the largest step
+    /// of `COMPACT_STEPS` that holds the reading's widest value ("212°",
+    /// "100%"), never the value now, so nothing moves or goes as it
+    /// changes. Narrower than every step, the name ("CPU") goes above a
+    /// `NUM_SECOND_SMALL` numeral instead (the icon, if not even the
+    /// name's first word fits); narrower still, the icon alone.
+    fn compact_plan(&mut self, w: f32, r: &Reading, txt: &str, unit: &str) -> CompactPlan {
+        let room = w - 2.0 * PAD;
+        let probe = wide_probe(&r.widest.0, 3);
+        let wide_unit = if r.widest.1.is_empty() {
+            unit
+        } else {
+            r.widest.1.as_str()
+        };
+        // The value now as well, in case it is wider than its scale says
+        // (a text reading): a numeral is never cut.
+        let widest = |pen: &mut Self, num: &TextStyle| {
+            let a = pen.num_unit_w(num, &probe, wide_unit, &UNIT);
+            a.max(pen.num_unit_w(num, txt, unit, &UNIT))
+        };
+        for (num, icon) in COMPACT_STEPS {
+            let nw = widest(self, &num);
+            if icon + ICON_GAP + nw <= room {
+                return CompactPlan {
+                    num: Some(num),
+                    num_w: nw,
+                    icon,
+                    above: None,
+                };
+            }
+        }
+        let num = NUM_SECOND_SMALL;
+        let nw = widest(self, &num);
+        let first = r.name.split(' ').next().unwrap_or_default().to_string();
+        let name = [r.name.clone(), first]
+            .into_iter()
+            .find(|n| !n.is_empty() && self.measure(Face::Word, &LABEL, n) <= room);
+        let fits = nw <= room;
+        CompactPlan {
+            num: fits.then_some(num),
+            num_w: nw,
+            icon: ICON_SMALL,
+            // A card that cannot show a number still says what it would
+            // show, with its icon.
+            above: fits.then(|| name.map_or(Above::Icon, Above::Name)),
+        }
     }
 
     /// A reading's icon; a lost one carries a broken-link badge at its
@@ -1320,24 +1453,43 @@ impl Pen<'_> {
                 } else {
                     BASE_COMPACT + 3.0
                 };
-                let mut nx = x + PAD + ICON_COMPACT + ICON_GAP;
-                let room = x + w - PAD - nx;
-                let mut num = NUM_COMPACT;
-                let mut nw = self.num_unit_w(&num, &txt, unit, &UNIT);
-                if nw > room {
-                    num = NUM_COMPACT_TIGHT;
-                    nw = self.num_unit_w(&num, &txt, unit, &UNIT);
-                }
-                let show_icon = nw <= room;
-                if show_icon {
-                    let ix = x + PAD + ICON_COMPACT / 2.0;
-                    self.reading_icon(lost, glyph, ICON_COMPACT, ix, fig_mid(&num, base), icon_c);
-                    nx += ((room - nw) / 2.0).max(0.0);
+                let lc = if r.avail == Avail::Live {
+                    kr.label
                 } else {
-                    nx = x + ((w - nw) / 2.0).max(PAD / 2.0);
+                    TEXT3
+                };
+                let plan = self.compact_plan(w, r, &txt, unit);
+                let cx = x + w / 2.0;
+                match (plan.num, &plan.above) {
+                    // The icon names it, beside the numeral.
+                    (Some(num), None) => {
+                        let ix = x + PAD + plan.icon / 2.0;
+                        let iy = fig_mid(&num, base);
+                        self.reading_icon(lost, glyph, plan.icon, ix, iy, icon_c);
+                        let nx = x + PAD + plan.icon + ICON_GAP;
+                        let room = x + w - PAD - nx;
+                        let nx = nx + ((room - plan.num_w) / 2.0).max(0.0).floor();
+                        self.num_unit(&num, &txt, unit, &UNIT, nx, base, num_c, kr.label);
+                    }
+                    // Too narrow for the icon beside it: the name (or the
+                    // icon) above.
+                    (Some(num), Some(above)) => {
+                        match above {
+                            Above::Name(name) => {
+                                self.text_c(Face::Word, &LABEL, name, cx, 20.0, lc);
+                            }
+                            Above::Icon => {
+                                self.reading_icon(lost, glyph, plan.icon, cx, 15.0, icon_c);
+                            }
+                        }
+                        let nx = (x + (w - plan.num_w) / 2.0).floor();
+                        self.num_unit(&num, &txt, unit, &UNIT, nx, base, num_c, kr.label);
+                    }
+                    (None, _) => {
+                        let iy = CARD_Y + 15.0;
+                        self.reading_icon(lost, glyph, plan.icon, cx, iy, icon_c);
+                    }
                 }
-                let txt = self.fit(Face::Num, &num, &txt, w - PAD);
-                self.num_unit(&num, &txt, unit, &UNIT, nx, base, num_c, kr.label);
                 if let Some(b) = bar {
                     self.bar(x + PAD, BAR_Y_COMPACT, w - 2.0 * PAD, BAR_H_BANDED, &b, &kr);
                 }
@@ -1360,7 +1512,6 @@ impl Pen<'_> {
                 let ix = x + PAD + isz / 2.0;
                 self.reading_icon(lost, glyph, isz, ix, fig_mid(&num, base), icon_c);
                 let nx = x + PAD + isz + ICON_GAP;
-                let txt = self.fit(Face::Num, &num, &txt, right - nx);
                 let nw = self.num_unit(&num, &txt, unit, &UNIT, nx, base, num_c, kr.label);
                 if let (Some(s), Some(p)) = (second, plan) {
                     let ks = reading_ink(sev, s.severity);
@@ -1443,7 +1594,6 @@ impl Pen<'_> {
                 self.reading_icon(lost, glyph, ICON_HERO, ix, fig_mid(&num, base), icon_c);
                 let nx = x + PAD + 2.0 + ICON_HERO + ICON_GAP + 2.0;
                 let right = x + w - PAD;
-                let txt = self.fit(Face::Num, &num, &txt, right - nx);
                 let nw = self.num_unit(&num, &txt, unit, &UNIT, nx, base, num_c, kr.label);
                 if let Some(b) = bar {
                     self.bar(x + PAD, BAR_Y_COMPACT, w - 2.0 * PAD, BAR_H_BANDED, &b, &kr);
@@ -1493,7 +1643,20 @@ impl Pen<'_> {
                 if right - cx < 30.0 {
                     return;
                 }
-                let words = self.fit(Face::Word, &LABEL, &words, right - cx);
+                // A name may be cut; the time it was lost is shortened
+                // instead, never cut.
+                let words = match &r.avail {
+                    Avail::Lost(t) => {
+                        let forms: Vec<_> =
+                            [format!("Lost at {t}"), format!("Lost {t}"), "Lost".into()]
+                                .into_iter()
+                                .map(|v| (v.clone(), v, LABEL))
+                                .collect();
+                        self.first_fit(Face::Word, &forms, right - cx)
+                            .map_or_else(String::new, |(v, _, _)| v)
+                    }
+                    _ => self.fit(Face::Word, &LABEL, &words, right - cx),
+                };
                 self.text(Face::Word, &LABEL, &words, cx, BASE_HERO_NAME, lc);
                 if let (Some(lim), Avail::Live) = (limit, &r.avail) {
                     let limw = self.measure(Face::Word, &LABEL, lim);
@@ -1761,23 +1924,11 @@ impl Pen<'_> {
                 };
                 let c1 = if live { TEXT } else { TEXT3 };
                 let l1 = self.fit(Face::Word, &BODY, &l1, room);
-                // "61° / 49°" closes up to "61°/49°" before it would be cut,
-                // and is left out before that.
-                let l2 = if self.measure(Face::Num, &BODY, &l2) <= room {
-                    l2
-                } else {
-                    let tight = l2.replace(" / ", "/");
-                    if self.measure(Face::Num, &BODY, &tight) <= room {
-                        tight
-                    } else {
-                        String::new()
-                    }
-                };
+                let l2 = self.high_low(&l2, room);
                 if l2.is_empty() {
                     self.text(Face::Word, &BODY, &l1, dx, 32.0, c1);
                 } else {
                     self.text(Face::Word, &BODY, &l1, dx, BASE_LINE1, c1);
-                    let l2 = self.fit(Face::Num, &BODY, &l2, room);
                     self.text(Face::Num, &BODY, &l2, dx, BASE_LINE2 - 1.0, TEXT2);
                 }
             }
@@ -1795,10 +1946,17 @@ impl Pen<'_> {
                 let nw = self.text(Face::Num, &NUM_HERO, t, nx, BASE_HERO, tc);
                 let dx = nx + nw + 14.0;
                 let room = x + w - PAD - dx;
-                let line1 = self.fit(Face::Word, &TITLE, &words, room);
+                // "From 9:30" is shown whole or not at all (the cloud-slash
+                // still says it is old); a condition may be cut.
+                let line1 = if matches!(avail, Avail::Lost(_)) {
+                    let w1 = self.measure(Face::Word, &TITLE, &words);
+                    if w1 <= room { words } else { String::new() }
+                } else {
+                    self.fit(Face::Word, &TITLE, &words, room)
+                };
                 let c1 = if live { TEXT } else { TEXT3 };
                 let l2 = if live {
-                    high_low.unwrap_or("").to_string()
+                    self.high_low(high_low.unwrap_or(""), room)
                 } else {
                     String::new()
                 };
@@ -1806,11 +1964,21 @@ impl Pen<'_> {
                     self.text(Face::Word, &TITLE, &line1, dx, 32.0, c1);
                 } else {
                     self.text(Face::Word, &TITLE, &line1, dx, BASE_LINE1, c1);
-                    let l2 = self.fit(Face::Num, &BODY, &l2, room);
                     self.text(Face::Num, &BODY, &l2, dx, BASE_LINE2 - 1.0, TEXT2);
                 }
             }
         }
+    }
+
+    /// The day's high and low ("61° / 49°") in `room` at `BODY`: closed
+    /// up ("61°/49°") before it would be cut, and left out before that.
+    /// Also any other short line of figures, such as a time.
+    fn high_low(&mut self, l2: &str, room: f32) -> String {
+        let tight = l2.replace(" / ", "/");
+        [l2.to_string(), tight]
+            .into_iter()
+            .find(|t| self.measure(Face::Num, &BODY, t) <= room)
+            .unwrap_or_default()
     }
 
     fn media(&mut self, zx: f32, x: f32, w: f32, zw: u32, track: Option<&Track>, press: Press) {
@@ -1850,8 +2018,13 @@ impl Pen<'_> {
                 self.icon(false, glyph, ICON_KEY, kx + kw / 2.0, cy, self.a.ink);
                 let tx = kx + kw + 8.0;
                 if let Some(pos) = t.position {
+                    // Elapsed only; a step smaller, or none, before it is cut.
                     let el = fmt_time(pos);
-                    self.text(Face::Num, &TITLE, &el, tx, BASE_LINE1 + 1.0, tc);
+                    let len = t.length.map(fmt_time);
+                    let forms = time_forms(&el, len.as_deref(), false, &[TITLE, BODY]);
+                    if let Some((el, st, _)) = self.first_fit(Face::Num, &forms, x + w - PAD - tx) {
+                        self.text(Face::Num, &st, &el, tx, BASE_LINE1 + 1.0, tc);
+                    }
                 }
                 if let Some(f) = t.progress() {
                     self.progress(tx, 34.0, x + w - PAD - tx, f, t.playing);
@@ -1911,26 +2084,30 @@ impl Pen<'_> {
                     CARD,
                     t.marquee,
                 );
-                let mut times = match (t.position, t.length.filter(|l| *l > 0.0)) {
-                    (Some(p), Some(l)) => format!("{} / {}", fmt_time(p), fmt_time(l)),
-                    (Some(p), None) => fmt_time(p),
-                    _ => String::new(),
-                };
                 // The length goes before the artist would be cut: the
                 // elapsed time is what changes. Measured against the artist
-                // even while paused, so pausing never moves the times.
+                // even while paused, so pausing never moves the times, and
+                // for the times' widest, so the seconds ticking never do.
+                // The elapsed time goes too before it would be cut, or
+                // leave the artist no room.
                 let aw = self.measure(Face::Word, &BODY, line2).max(self.measure(
                     Face::Word,
                     &BODY,
                     &t.artist,
                 ));
-                let mut tw = self.measure(Face::Num, &LABEL, &times);
-                if tx + aw + 10.0 + tw > right
-                    && let Some(p) = t.position
-                {
-                    times = fmt_time(p);
-                    tw = self.measure(Face::Num, &LABEL, &times);
-                }
+                let len = t.length.filter(|l| *l > 0.0).map(fmt_time);
+                let (times, tw) = match t.position {
+                    Some(p) => {
+                        let el = fmt_time(p);
+                        let forms = time_forms(&el, len.as_deref(), true, &[LABEL]);
+                        let (whole, short) = forms.split_at(forms.len() - 1);
+                        let short_room = right - tx - 10.0 - MEDIA_ARTIST_MIN;
+                        self.first_fit(Face::Num, whole, right - tx - aw - 10.0)
+                            .or_else(|| self.first_fit(Face::Num, short, short_room))
+                            .map_or((String::new(), 0.0), |(v, _, w)| (v, w))
+                    }
+                    None => (String::new(), 0.0),
+                };
                 let artist_right = if times.is_empty() {
                     right
                 } else {
@@ -2147,9 +2324,10 @@ impl Pen<'_> {
                 let nx = x + PAD + 22.0;
                 if numeric {
                     self.num_unit(&TITLE, s.value, s.unit, &LABEL, nx, 25.0, num_c, TEXT2);
-                } else {
-                    let v = self.fit(Face::Num, &BODY, s.value, x + w - PAD - nx);
-                    self.text(Face::Num, &BODY, &v, nx, 24.0, TEXT2);
+                } else if let Some((v, st, _)) =
+                    self.slider_words(s.value, &[BODY], x + w - PAD - nx)
+                {
+                    self.text(Face::Num, &st, &v, nx, 24.0, TEXT2);
                 }
                 self.slider_track(
                     x + PAD + 2.0,
@@ -2185,8 +2363,15 @@ impl Pen<'_> {
                         TEXT2,
                     )
                 } else {
-                    let v = self.fit(Face::Num, &BODY, s.value, (w - 2.0 * PAD) / 2.0);
-                    self.text(Face::Num, &BODY, &v, nx, 32.0, TEXT2)
+                    // Laid out for the words' widest, so the track does not
+                    // move as a time ticks.
+                    match self.slider_words(s.value, &[BODY], (w - 2.0 * PAD) / 2.0) {
+                        Some((v, st, vw)) => {
+                            self.text(Face::Num, &st, &v, nx, 32.0, TEXT2);
+                            vw
+                        }
+                        None => 0.0,
+                    }
                 };
                 let min = self.measure(Face::Num, &NUM_COMPACT, "00");
                 let tx = nx + nw.max(min) + 12.0;
@@ -2213,8 +2398,14 @@ impl Pen<'_> {
                     let v = format!("{}", value.round() as i32);
                     self.num_unit(&NUM_HERO, &v, "%", &UNIT_HERO, nx, BASE_HERO, TEXT3, TEXT3)
                 } else {
-                    let v = self.fit(Face::Num, &TITLE, s.value, (w - 2.0 * PAD) / 2.0);
-                    self.text(Face::Num, &TITLE, &v, nx, 33.0, TEXT2)
+                    let room = (w - 2.0 * PAD) / 2.0;
+                    match self.slider_words(s.value, &[TITLE, BODY], room) {
+                        Some((v, st, vw)) => {
+                            self.text(Face::Num, &st, &v, nx, 33.0, TEXT2);
+                            vw
+                        }
+                        None => 0.0,
+                    }
                 };
                 let tx = nx + nw + 18.0;
                 let tw = x + w - PAD - 6.0 - tx;
@@ -2224,6 +2415,26 @@ impl Pen<'_> {
                 }
             }
         }
+    }
+
+    /// A slider's words in `room`, in the first of `styles` that holds
+    /// them, with the width they are laid out for. A time ("9:26 / 43:12")
+    /// is never cut: it drops "/ 43:12", then takes the next style, then
+    /// goes. Other words ("Muted") end in an ellipsis as usual.
+    fn slider_words(
+        &mut self,
+        value: &str,
+        styles: &[TextStyle],
+        room: f32,
+    ) -> Option<(String, TextStyle, f32)> {
+        if let Some((elapsed, total)) = value.split_once(" / ") {
+            let forms = time_forms(elapsed, Some(total), true, styles);
+            return self.first_fit(Face::Num, &forms, room);
+        }
+        let st = *styles.first()?;
+        let v = self.fit(Face::Num, &st, value, room);
+        let vw = self.measure(Face::Num, &st, &v);
+        Some((v, st, vw))
     }
 
     /// A slider track with its thumb. `from` marks where the value was
@@ -2496,8 +2707,10 @@ impl Pen<'_> {
             let cy = CARD_Y + CARD_H / 2.0 + 0.5 + dy;
             self.news_glyph(live, icon, ICON_KEY, x0 + ICON_KEY / 2.0, cy, glyph_c);
             let tx = x0 + ICON_KEY + ICON_GAP;
-            let age = self.fit(Face::Word, &TITLE, age, x + w - PAD - tx);
-            self.text(Face::Word, &TITLE, &age, tx, cy + 7.0, head_c);
+            // The age whole ("12 min"), or not at all: never "12…".
+            if tx + tw <= x + w - PAD {
+                self.text(Face::Word, &TITLE, age, tx, cy + 7.0, head_c);
+            }
             return;
         }
         let (left, right) = (x + PAD, x + w - PAD);
@@ -2593,13 +2806,24 @@ impl Pen<'_> {
         self.news_glyph(live, icon, ICON_SMALL, x + ICON_SMALL / 2.0, icy, glyph_c);
         let lx = x + ICON_SMALL + ICON_GAP;
         let room = right - lx;
-        let words = if source.is_empty() || age.is_empty() {
-            self.fit(Face::Word, &LABEL, &news_from_text(source, age), room)
+        // The age is whole or left out, never "12…".
+        let whole_age = |pen: &mut Self| {
+            let aw = pen.measure(Face::Word, &LABEL, age);
+            if aw <= room {
+                age.to_string()
+            } else {
+                String::new()
+            }
+        };
+        let words = if age.is_empty() {
+            self.fit(Face::Word, &LABEL, source, room)
+        } else if source.is_empty() {
+            whole_age(self)
         } else {
             let tail = self.measure(Face::Word, &LABEL, &format!(" · {age}"));
             let fitted = self.fit(Face::Word, &LABEL, source, room - tail);
             if fitted.chars().count() < 4 {
-                self.fit(Face::Word, &LABEL, age, room)
+                whole_age(self)
             } else {
                 format!("{fitted} · {age}")
             }
@@ -2620,6 +2844,16 @@ impl Pen<'_> {
         let (bx, by) = (cx + size * 0.42, cy + size * 0.32);
         self.circle(bx, by, bs * 0.62 + 1.0, CARD);
         self.icon(true, icons::LINK_BREAK, bs, bx, by, TEXT2);
+    }
+
+    /// A page with no widgets: two quiet lines centred on the strip, in
+    /// the secondary text colour, on the bare ground. No card, outline,
+    /// icon or accent, so it reads as neither a fault nor a control.
+    fn empty_page(&mut self) {
+        let cx = WIDTH as f32 / 2.0;
+        self.text_c(Face::Word, &LABEL, "Empty page", cx, BASE_LINE1, TEXT2);
+        let hint = "Add widgets in Settings";
+        self.text_c(Face::Word, &BODY, hint, cx, BASE_LINE2 - 1.0, TEXT2);
     }
 
     /// "Not set up": a dashed accent outline and plain words.
@@ -2771,6 +3005,69 @@ mod tests {
                 assert!(plan.second.size >= TEXT_FLOOR);
             }
         }
+    }
+
+    fn temp(value: &str) -> Reading {
+        Reading {
+            name: "CPU".into(),
+            value: value.into(),
+            unit: String::new(),
+            severity: Severity::Ok,
+            avail: Avail::Live,
+            bar: None,
+            widest: ("212°".into(), String::new()),
+        }
+    }
+
+    #[test]
+    fn a_compact_reading_always_says_what_it_reads() {
+        let mut r = Renderer::new(Theme::default(), crate::fonts::FontChoice::default().load());
+        let mut c = Canvas::new(WIDTH, HEIGHT, CARD);
+        let mut p = r.pen(&mut c);
+        // Six widgets on a page: 106 and 107 px zones, three-digit °F.
+        for zone in [106.0, 107.0, 128.0] {
+            let plan = p.compact_plan(zone - 2.0 * CARD_INSET, &temp("111°"), "111°", "");
+            assert!(plan.above.is_none(), "the icon beside it at {zone}");
+            assert!(plan.num.is_some_and(|n| n.size >= TEXT_FLOOR));
+        }
+        // Narrower than any icon step: the name above the numeral.
+        let plan = p.compact_plan(84.0, &temp("111°"), "111°", "");
+        assert!(matches!(plan.above, Some(Above::Name(ref n)) if n == "CPU"));
+        // Laid out for the widest, not the value now: "45°" and "212°"
+        // get the same sizes.
+        for w in [92.0, 100.0, 104.0, 112.0, 124.0] {
+            let a = p.compact_plan(w, &temp("45°"), "45°", "");
+            let b = p.compact_plan(w, &temp("212°"), "212°", "");
+            assert_eq!((a.num, a.icon), (b.num, b.icon), "at {w}");
+        }
+    }
+
+    #[test]
+    fn numbers_and_times_are_never_cut() {
+        let mut r = Renderer::new(Theme::default(), crate::fonts::FontChoice::default().load());
+        let mut c = Canvas::new(WIDTH, HEIGHT, CARD);
+        let mut p = r.pen(&mut c);
+        // The fit rule never stops inside a word with a figure in it.
+        for room in 20..160 {
+            let t = p.fit(Face::Num, &BODY, "Over its 194° limit", room as f32);
+            assert!(!t.contains("19…") && !t.contains("1…"), "{t}");
+        }
+        // A time drops its total, then a step, then goes: never "43…".
+        for room in 0..200 {
+            if let Some((v, _, w)) = p.slider_words("9:26 / 43:12", &[TITLE, BODY], room as f32) {
+                assert!(v == "9:26 / 43:12" || v == "9:26", "{v}");
+                assert!(w <= room as f32);
+            }
+            let hours = p.slider_words("1:02:33 / 2:10:00", &[BODY], room as f32);
+            if let Some((v, _, _)) = hours {
+                assert!(v == "1:02:33 / 2:10:00" || v == "1:02:33", "{v}");
+            }
+        }
+        // Chosen for the widest elapsed time, so it does not flip as the
+        // seconds tick past ten minutes.
+        let room = p.measure(Face::Num, &BODY, "9:26 / 43:12") + 2.0;
+        let early = p.slider_words("9:26 / 43:12", &[BODY], room);
+        assert_eq!(early.map(|e| e.0).as_deref(), Some("9:26"));
     }
 
     #[test]
