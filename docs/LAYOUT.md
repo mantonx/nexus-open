@@ -34,7 +34,9 @@ if this app does not already have them.
 font = "ibm-plex-sans"
 temperature = "fahrenheit"
 clock = "12h"
-accent = "#e08a3c"
+accent = "sky"
+night = { from = "22:30", to = "07:00" }
+idle_dim = true
 
 [weather]
 location = "Lisbon"
@@ -44,18 +46,18 @@ name = "System"
 
 [[page.widget]]
 type = "clock"
-width = 140
-tap = { page = "Clock" }
+width = 128
+tap = { page = "Desk" }
 
 [[page.widget]]
 type = "value"
-width = 160
+width = 200
 label = "CPU"
 signal = "cpu.temp"
-graph = "area"
 warn = 75
 crit = 90
 second = "cpu.load"
+second_label = "load"
 second_warn = 80
 
 [[page.widget]]
@@ -67,24 +69,33 @@ up = "net.up"
 
 [[page.widget]]
 type = "media"
-width = 140
-tap = { media = "play-pause" }
+width = 172
 hold = { media = "next" }
 
-[[page.widget]]
-type = "key"
-width = 60
-icon = "forward"
-label = "Next"
-tap = { media = "next" }
-
 [[page]]
-name = "Clock"
+name = "Desk"
 
 [[page.widget]]
 type = "clock"
-width = 640
+width = 320
 tap = { page = "System" }
+
+[[page.widget]]
+type = "value"
+width = 160
+label = "Water"
+signal = "loop.temp"
+icon = "drop"
+scale = [20, 45]
+crit = 40
+
+[[page.widget]]
+type = "key"
+width = 160
+icon = "terminal-window"
+label = "Shell"
+sub = "Console"
+tap = { run = ["kgx"] }
 
 [[takeover]]
 name = "Volume"
@@ -124,19 +135,34 @@ All optional.
 
 | Key           | Values                                                                | Default         |
 | ------------- | --------------------------------------------------------------------- | --------------- |
-| `font`        | `ibm-plex-sans`, `atkinson-hyperlegible`, `roboto`, `noto-sans`, `lato` | `ibm-plex-sans` |
+| `font`        | `rubik`, `ibm-plex-sans`, `atkinson-hyperlegible`, `roboto`, `noto-sans`, `lato` | `rubik` |
 | `temperature` | `celsius`, `fahrenheit`                                               | `celsius`       |
 | `clock`       | `24h`, `12h`                                                          | `24h`           |
-| `accent`      | A colour written `"#rrggbb"`, as in `"#e08a3c"`; either case          | the default accent |
+| `accent`      | A colour written `"#rrggbb"` (either case), or a preset's name: `lilac`, `sky`, `teal`, `mint`, `rose`, `lemon` | `lilac` |
+| `night`       | `{ from = "22:30", to = "07:00" }`: hours, `"HH:MM"`, when the strip is dimmed; across midnight when `to` is earlier | none |
+| `idle_dim`    | `true`, `false`: dim after five minutes with no touch               | `true`          |
 
-Warning and critical colours are separate from the accent and do not
-change with it.
+`font` chooses the face for words: labels, titles, keys. Numbers are
+always drawn in Rubik, so a reading keeps its shape whatever is chosen.
+
+The accent goes on what a finger can act on: a slider's fill, a key's
+press, the play key. Warning (amber) and critical (red) are separate
+from it and do not change with it. So that no accent can be mistaken for
+them, a colour in the orange-to-yellow range is moved to the nearest hue
+outside it: `"#ffc53a"` is drawn as an olive yellow, `"#ff9a62"` as a
+pink. An exported layout writes a preset by its name.
+
+Dimming draws everything darker, never smaller, and night dims more
+than idle. Idle dimming waits while a reading on any page is at warning
+or critical. Nothing is dimmed while the alarm or a takeover is up, and
+a warning or critical card stays bright even at night.
 
 ## `[weather]`
 
-Optional. Without it there is no `weather.temp`. Weather comes from
+Optional. Without it there is no weather. Weather comes from
 Open-Meteo, which is sent this place (or the coordinates) and nothing
-else.
+else, every 15 minutes. With no new forecast for 45 minutes, the weather
+widget shows the last one dimmed, with the time it is from.
 
 | Key                      | Value                                                        |
 | ------------------------ | ------------------------------------------------------------ |
@@ -153,25 +179,65 @@ must have a widget other than a slider, or it could not be swiped away.
 ## Widgets
 
 Every widget has `type` and `width` (at least 40 px), and any but a
-slider may have `tap` and `hold` actions.
+slider may have `tap` and `hold` actions. Any widget may have `icon`,
+the name of an icon (below) to draw instead of the one it would choose.
 
 | `type`   | Keys                                                                     | Shows                                                        |
 | -------- | ------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| `clock`  | none                                                                     | Date and time, in the `clock` setting's format               |
-| `value`  | `label`, `signal`; optional `graph` (`area`, `line`), `warn`, `crit`, `second`, `second_warn`, `second_crit` | One reading, colored past its thresholds; with `second`, a second reading beside it |
-| `rate`   | `label`, `down`, `up` (signal names)                                     | Download and upload rates, with a graph of the download rate |
-| `media`  | none                                                                     | Title, artist and progress from the `media.*` signals        |
+| `clock`  | none                                                                     | Time, and the date when there is room, in the `clock` setting's format |
+| `value`  | `label`, `signal`; optional `warn`, `crit`, `scale`, `second`, `second_label`, `second_warn`, `second_crit` | One reading over a fixed-scale bar, the card amber or red past its thresholds; with `second`, a second reading beside it. `signal = "weather.temp"` shows the weather |
+| `rate`   | `label`, `down`, `up` (signal names)                                     | Download and upload rates, each over its bar                 |
+| `media`  | none                                                                     | Title, artist and progress from the `media.*` signals, with transport keys |
 | `slider` | `label`, `controls`; optional `signal`                                   | A bar to drag                                                |
-| `key`    | optional `icon` (an icon's name), `label`                                | A control to press; nothing live                             |
+| `key`    | optional `icon`, `label`, `sub`                                          | A control to press; nothing live. `sub` is a second line under the label on a key 300 px or wider |
+
+How much a widget shows depends on its width: up to 149 px it is
+compact (the reading alone), up to 299 px medium (with its label, or a
+second reading), and from 300 px hero (everything, large). A `second`
+reading shows from medium up.
 
 `warn` and `crit` are in the signal's base unit (°C for temperatures),
-whichever unit is shown. `second` names another signal, shown beside the
-first; `second_warn` and `second_crit` are its thresholds, in its own
-base unit, and need a `second`. A `crit` on any page, first or second
-reading, can raise [the critical alarm](#the-critical-alarm).
+whichever unit is shown. A hero card says the limit (`limit 167°`) from
+`warn`, or `crit` without one. `second` names another signal, shown
+beside the first; `second_warn` and `second_crit` are its thresholds, in
+its own base unit, and need a `second`. `second_label` names it where it
+is named: in [the critical alarm](#the-critical-alarm) it is "CPU load"
+from `label = "CPU"`, `second_label = "load"`; without one, the
+signal's last word. A `crit` on any page, first or second reading, can
+raise the alarm.
+
+Bars have a fixed scale, so a glance compares them: temperatures from
+30 to 100 °C, percentages from 0 to 100, rates from 1 kB/s to 1 GB/s on
+a logarithmic scale. `scale = [min, max]`, in the signal's base unit,
+sets another (for a coolant loop, say). A signal with no unit has no bar
+without one. `graph` from older layouts is accepted and drawn as the bar.
 
 A key is what to press for something: give it a `tap`, and a `hold` if
-you like. The icon set is not chosen yet, so `icon` is any name for now.
+you like. Pressing lights it at once; while a `hold` is pending it fills
+from the left.
+
+A media widget showing a track has transport keys where it draws them:
+a compact one has a play/pause key; a medium one is one play/pause key
+all over, and its `hold` still works; a hero one has a play/pause key
+at the right end, or previous, play/pause and next from 400 px. A long
+press on a key is a slow tap. Elsewhere on the widget its own `tap` and
+`hold` apply. With nothing playing there are no keys.
+
+Icons: `activity`, `arrow-down`, `arrow-fat-down`, `arrow-fat-up`,
+`arrow-up`, `arrows-left-right`, `bell`, `browser`, `calculator`,
+`calendar-blank`, `camera`, `chat-circle`, `check`, `check-circle`,
+`clock`, `cloud`, `cloud-moon`, `cloud-rain`, `cloud-slash`, `cloud-sun`,
+`code`, `cpu`, `drop`, `envelope-simple`, `fan`, `folder-simple`,
+`game-controller`, `gauge`, `gear`, `globe-simple`, `graphics-card`,
+`hand-pointing`, `hand-tap`, `headphones`, `house`, `image`,
+`lightning`, `link-break`, `map-pin`, `map-pin-plus`, `memory`, `moon`,
+`moon-stars`, `music-note`, `music-notes`, `pause`, `play`, `plugs`,
+`plus`, `power`, `rocket-launch`, `skip-back`, `skip-forward`,
+`speaker-high`, `speaker-low`, `speaker-none`, `speaker-x`,
+`squares-four`, `sun`, `terminal-window`, `thermometer`,
+`thermometer-simple`, `warning`, `warning-circle`, `wifi-high`, `x`
+(from [Phosphor](https://phosphoricons.com)). Another name is kept but
+draws no icon.
 
 A slider's `controls` is one of:
 
@@ -200,7 +266,7 @@ Lifting sooner is a tap.
 | `{ page = "Clock" }`                           | Shows a page: its name, `"next"` or `"prev"`                 |
 | `{ media = "play-pause" }`                     | `play-pause`, `next`, `previous` or `stop` for the player   |
 | `{ run = ["pavucontrol", "-t", "3"] }`         | Starts a program with arguments. No shell: write `["sh", "-c", "…"]` for one |
-| `{ open = "https://example.org" }`             | Opens a URL or file in the desktop's default app             |
+| `{ open = "https://example.org" }`             | Opens a URL or file in the desktop's default app; a leading `~` is your home folder |
 | `{ publish = { signal = "mode", value = "focus" } }` | Sets a signal: a number if it reads as one, else text  |
 
 ## `[[takeover]]`
@@ -217,6 +283,10 @@ keeps it up; a swipe on it or the timer puts the page back.
 | `align`      | Optional: `"full"` (the default), `"left"` or `"right"`               |
 | `width`      | Pixels, 40 to 640: required for `left` and `right`, not allowed for `full` |
 
+A takeover fades in over the page and, when its time is up, fades out.
+A volume takeover shows the new level, the change, and a faint mark on
+the bar at the level it came from.
+
 Its `[[takeover.widget]]`s follow the same rules as a page's, with the
 takeover's width in place of the strip's. Beside a `left` or `right`
 takeover the page stays on the strip and works as usual: its readings
@@ -226,12 +296,13 @@ changes page, and the takeover goes). Touches on the takeover go to it.
 ## The critical alarm
 
 When a reading with a `crit` on any page of the layout rises from under
-it to it or above, the whole strip says so: the reading's label and
-value, and an OK key at the right end. It covers every takeover, and
-none shows while it is up. It stays until one of:
+it to it or above, the whole strip says so, red and slowly breathing:
+the reading's name, value and limit, and an OK key at the right end
+(the last 94 px take the touch). It covers every takeover, and none
+shows while it is up. It stays until one of:
 
 - OK is tapped (or long-pressed), which acknowledges every reading
-  critical at the time;
+  critical at the time, and shows the page with the reading;
 - the strip is swiped, which does the same and does not change page;
 - the reading has been back under its `crit` for 10 seconds.
 
@@ -273,8 +344,11 @@ Signals are named readings, in base units. The built-in sources publish:
 
 | Signals                                                  | Unit              |
 | -------------------------------------------------------- | ----------------- |
-| `cpu.temp`, `gpu.temp`, `weather.temp`                   | degrees Celsius   |
+| `cpu.temp`, `gpu.temp`, `weather.temp`, `weather.high`, `weather.low` | degrees Celsius |
 | `cpu.load`, `gpu.load`, `mem.used`                       | percent           |
+| `weather.code`                                           | WMO weather code  |
+| `weather.condition`                                      | text, as "Cloudy" |
+| `weather.day`                                            | 1 by day, else 0  |
 | `net.down`, `net.up`                                     | bytes per second  |
 | `volume.level`                                           | percent           |
 | `volume.muted`                                           | 1 if muted, else 0 |
@@ -282,4 +356,6 @@ Signals are named readings, in base units. The built-in sources publish:
 | `media.position`, `media.length`                         | seconds           |
 
 The settings window's Signals list shows every signal published right
-now, with its value.
+now, with its value. When a source stops publishing a signal, a widget
+keeps its last reading, dimmed, with the time it was lost; a lost
+reading raises nothing.

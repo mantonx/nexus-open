@@ -52,14 +52,16 @@ components:
 
 # Design System: Nexus Open strip
 
-This is the strip's visual system as `crates/nexus-core` will build it in
-phase U3. It is proven in frames rendered by
-`cargo run -p nexus-core --example design_system -- <dir>`, through the
-real canvas, tiny-skia and swash. Every number below is a named constant in
-**one module**, `crates/nexus-core/examples/design_system/tokens.rs`, and
-the names here are those names. **All sizes are provisional**: the panel
-has not been measured (U0's legibility card has not been read). When it
-has, change `tokens.rs` and this file together.
+This is the strip's visual system, as `crates/nexus-core` draws it since
+phase U3. Its frames are rendered by the shipped renderer from real
+layouts and readings (`nexus_core::scenes`):
+`cargo run -p nexus-core --example design_system -- <dir>`, and
+`tests/frames.rs` holds them to it. Every number below is a named constant
+in **one module**, `crates/nexus-core/src/theme.rs` (the media and alarm
+geometry in `widget.rs`), and the names here are those names. **All sizes
+are provisional**: the panel has not been measured (U0's legibility card
+has not been read). When it has, change `theme.rs` and this file
+together.
 
 The structure is the one Matt chose at the U1 gate: pages of widgets the
 user arranges and swipes between ("better cards"), with the by-context
@@ -159,14 +161,31 @@ and its chroma is capped; every role's lightness is fixed, in OKLCH:
 Below `ACCENT_GREY_C` (0.02 chroma) the user's colour counts as grey and
 every role is a warm grey at the same lightness. Out-of-gamut results lose
 chroma (hue and lightness kept) until they fit sRGB. Code:
-`Accent::from` and `from_oklch` in `tokens.rs`.
+`Accent::from` and `from_oklch` in `theme.rs`.
+
+**No accent in amber or red's hues.** A hue from `ACCENT_AVOID` 15° to
+105° (OKLCH) is moved to the nearer end of that band before the roles are
+made: from a little under CRIT (h 30) to 32° past WARN (h 73). So an
+apricot pick is drawn as a pink and a marigold pick as an olive yellow,
+and nothing the accent touches can be read as a warning. (The U2 frames
+drew apricot and marigold as asked; the review read a marigold slider
+beside a warning card as a second warning, open question 9.) The band
+first ended at 98°, but a marigold snapped there still read as amber's
+mustard cousin beside a warning card.
+
+Presets, which the `accent` setting also takes by name, all outside the
+band: `lilac` (the default), `sky`, `teal`, `mint`, `rose`, `lemon`.
 
 | Accent | User picks | base | text | fill | soft |
 |---|---|---|---|---|---|
 | **lilac (default)** | #b6a2ff | #c0b0fe | #ccc1fe | #9583d5 | #443b64 |
-| apricot (warm) | #ff9a62 | #ffa574 | #ffb893 | #cd7a4c | #60361f |
-| sky (cool) | #5fb4ff | #86c4fe | #a0d0fe | #5098d8 | #204566 |
-| marigold (near amber) | #ffc53a | #eab432 | #efc469 | #b48b2b | #543f0d |
+| sky | #5fb4ff | #86c4fe | #a0d0fe | #5098d8 | #204566 |
+| teal | #4fd1c5 | #54d5c9 | #63e3d6 | #09a89d | #014d48 |
+| mint | #7ad9b0 | #75d4ab | #82e1b8 | #46a780 | #144e38 |
+| rose | #ff8fb1 | #fe9cb8 | #ffb1c6 | #cd718d | #603140 |
+| lemon | #d8e04a | #c0c745 | #ccd373 | #949938 | #434614 |
+| apricot pick, moved | #ff9a62 | #ff9fa6 | #ffb3b8 | #d1717a | #623236 |
+| marigold pick, moved | #ffc53a | #ccc23b | #d6cf6e | #9d9631 | #484411 |
 
 **Why lilac by default.** The world is warm brown and cream; a warm accent
 (peach, coral, gold) would sit between the two severity hues and blur them,
@@ -193,13 +212,11 @@ be mistaken for it:
 4. **Page markers** for a page in trouble get longer (`MARKER_W_ALERT`), not
    only coloured.
 
-Proof: `accent-marigold-severity.png` puts a marigold play key and slider
-beside a warning card and a critical card. The marigold key is a 44 px key
-with a glyph; the warning is a whole amber card with amber figures. The
-weakest spot is honest: marigold's base (L 0.80) is as bright as WARN
-(L 0.82), so a marigold slider fill next to a warning bar has similar hue
-and brightness. They differ by place (a thumbed slider on a normal card
-vs. a bar on an amber card), not by colour.
+Proof: `accent-marigold-severity.png` puts a marigold pick's play key and
+slider beside a warning card and a critical card. The key is a 44 px key
+with a glyph; the warning is a whole amber card with amber figures. With
+the hue moved, the slider fill is olive, not amber: they now differ by
+colour as well as by place.
 
 ## Typography
 
@@ -210,7 +227,7 @@ round bowls are the friendliness; its figures are sturdy and open (the
 every numeral, so a ticking value does not shift. Sentence case only; no
 uppercase labels, no letter-spaced caps.
 
-Every size is a constant in `tokens.rs`. Cap height is 0.70 em; at about
+Every size is a constant in `theme.rs`. Cap height is 0.70 em; at about
 128 px per inch one pixel is 0.198 mm.
 
 | Constant | Size | Weight | Tracking | Cap height | Role |
@@ -257,8 +274,10 @@ Baselines (strip rows): `BASE_HERO` 44 (50 px numeral, ink rows 9–44),
 numerals above a bar band, clear of the limit notches), `BASE_LINE1` 24 and `BASE_LINE2` 42 for two
 lines of text (descenders end at row 45).
 
-Widths in a page plus gutters and edges add up to exactly 640; the example
-refuses a page that does not (`positions`).
+A layout's widths are **zone** widths, and add up to 640 or less: each
+zone holds its card inset `CARD_INSET` 2 px on both sides, which makes
+the `GUTTER` between cards and the `EDGE` at the ends. A 128 px zone
+draws a 124 px card. The widths below are cards unless they say zones.
 
 ### Size classes
 
@@ -281,20 +300,22 @@ card beside it (content centres in its room when it has spare width).
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
 | Key | icon (label from 96 px) | icon + label | icon + label + second line ("Hold for a new window") |
 
-Frames: `specimen-*.png` draws every widget at 124, 196 and 308 px in each
-state.
+Frames: `specimen-*.png` draws every widget in zones of 128, 200 and
+312 px (cards of 124, 196 and 308) in each state. A compact reading of
+three digits ("115°") steps down to `NUM_COMPACT_TIGHT` 28 px when 32 px
+would crowd the card's edge.
 
 ### The default layout
 
 Five pages; controls get whole pages; no page is another page stretched.
 
-| Page | Widgets (widths) | Why |
+| Page | Widgets (zone widths) | Why |
 |---|---|---|
-| 1 Home | clock 192, weather 120, CPU 120, media 192 | The glance: time, weather, the hottest part, and music under a finger. |
-| 2 Music | media 424 (three transport keys), volume slider 208 | Control: play, skip, set the volume. |
-| 3 System | CPU + load 200, GPU + load 200, memory 104, network 120 | The machine, every reading with its fixed bar. |
-| 4 Launch | clock 124, keys Browser, Files, Settings, Games (124 each) | Control: launchers, with the time kept. Settings opens the settings window (no terminal by default). |
-| 5 Desk | clock 328, weather 304 | Across the room: the biggest figures, full date, the day's high and low. |
+| 1 Home | clock 196, weather 124, CPU 124, media 196 | The glance: time, weather, the hottest part, and music under a finger. |
+| 2 Music | media 428 (three transport keys), volume slider 212 | Control: play, skip, set the volume. |
+| 3 System | CPU + load 204, GPU + load 204, memory 108, network 124 | The machine, every reading with its fixed bar. |
+| 4 Launch | clock 128, keys Browser, Files, Settings, Music (128 each) | Control: launchers, with the time kept. Settings opens the settings window (no terminal by default). Music shows the Music page (a long press plays or pauses): a games launcher is not on every desktop, and a key that opens nothing is worse than none. |
+| 5 Desk | clock 332, weather 308 | Across the room: the biggest figures, full date, the day's high and low. |
 
 Frames: `default-p1-home.png` … `default-p5-desk.png`, and
 `default-night-desk.png`.
@@ -407,7 +428,8 @@ uses the same marquee there).
 
 ### Page markers
 
-Small pills along the top edge, rows 2–4 (`MARKER_Y`, `MARKER_H` 3),
+Small pills along the top edge, rows 2–3 (`MARKER_Y`, `MARKER_H` 2: at
+3 they crowded the margin over the cards, open question 11),
 centred, `MARKER_GAP` 6 apart: one per page, `MARKER_W` 14 px, the
 current one `MARKER_W_CURRENT` 26 px and TEXT; the others TEXT3 at 55 %.
 A page holding a warning reading has a WARN marker and one holding a
@@ -435,7 +457,9 @@ visible; the alarm covers them.
   warning icon, "GPU is too hot" with the reading's icon, "Over its 194°
   limit · check the fans", the reading at 50 px, and one white **OK** key
   (84 × 36). It stays until the user taps OK or swipes it away, or the
-  reading has been back under its limit for 10 s. After OK the page
+  reading has been back under its limit for 10 s. The OK key's touch
+  zone runs from x 546 to the strip's right end (`alarm_ok_span`), wider
+  than the key drawn, so a hurried tap at the edge still lands. After OK the page
   returns; that reading's card stays in its critical style and its page's
   marker stays red (`takeover-after-ok-system.png`). The alarm re-arms only
   after the reading has stayed below the limit for 30 s. While up, it
@@ -509,7 +533,7 @@ states. Icon sizes: `ICON_HERO` 30, `ICON_MEDIUM` 26, `ICON_COMPACT` 22,
 
 Album artwork when the player gives it; otherwise (and in every frame
 here) a generated placeholder: a warm two-colour sky, a sun and two soft
-hills, seeded by the title (`Gfx::art`). Never real artwork in mockups.
+hills, seeded by the title (`draw::art`). Never real artwork in mockups.
 Paused artwork is dimmed 55 % toward the card.
 
 ## Layout format additions
@@ -518,15 +542,15 @@ All optional; existing layouts keep working unchanged.
 
 | Key | Where | Value | Meaning |
 |---|---|---|---|
-| `accent` | `[settings]` | `"#b6a2ff"` or a preset name (`lilac`, `apricot`, `sky`, `marigold`, …) | The user's accent; default `lilac` |
+| `accent` | `[settings]` | `"#b6a2ff"` or a preset name (`lilac`, `sky`, `teal`, `mint`, `rose`, `lemon`) | The user's accent; default `lilac`; hues in amber and red's band move out of it |
 | `night` | `[settings]` | `{ from = "22:30", to = "07:00" }` | Night dimming hours; none by default |
 | `idle_dim` | `[settings]` | `true` / `false` | Idle dimming; default `true` |
 | `second` | `value` widget | a signal name, e.g. `"cpu.load"` | A second reading beside the first, from medium up |
-| `second_label` | `value` widget | text | Its name on hero cards; default from the signal ("load") |
+| `second_label` | `value` widget | text | The second reading's name where it is named: the alarm says "GPU load". Default: the signal's last word. Hero cards show only its number, as the frames draw it |
 | `scale` | `value` widget | `[min, max]` in base units | Override the fixed scale (defaults per signal kind above) |
 | `icon` | any widget | a Phosphor name, e.g. `"fan"` | Override the default icon (which comes from the signal) |
 | `align` | `[[takeover]]` | `"full"` (default), `"left"`, `"right"` | A takeover narrower than the strip covers only that side |
-| `width` | `[[takeover]]` | px | Its width when `align` is `left` or `right`; snapped to card edges |
+| `width` | `[[takeover]]` | px | Its width when `align` is `left` or `right`; give a width that ends where the page's cards do (not snapped) |
 | `type = "key"` | widget | with `icon`, optional `label`, `sub`, `tap`, `hold` | The new key widget: runs `tap` (any existing action: `run`, `open`, `page`, `media`, `publish`); `hold` fires at 0.5 s |
 | `critical` | `[[takeover]]`-like rule, built in | – | The alarm needs no key: any widget with `crit` arms it |
 
@@ -544,7 +568,7 @@ signal's base unit (°C).
   and don't let a bar or graph touch its numeral.
 - Do write plain words in sentence case ("Add your town"). Don't show
   signal identifiers, shell commands or uppercase labels on the strip.
-- Do keep every size in `tokens.rs`. Don't put a number in a widget's code
+- Do keep every size in `theme.rs`. Don't put a number in a widget's code
   that a measurement on the panel might change.
 - Don't draw anything essential in rows 0–1 or 46–47.
 - Don't add a second text face, monospace, glows on black, or a second
@@ -572,18 +596,17 @@ signal's base unit (°C).
 8. Weather conditions beyond "cloudy" are mapped to Phosphor icons but not
    drawn in frames.
 9. **Accents near amber.** The isolated review (25/36) read a marigold
-   slider beside a warning card as "a second warning". The area rule
-   holds, but the settings window should either leave hues within about
-   25° of WARN (h 73) and CRIT (h 30) out of its presets and warn when a
-   custom pick lands there, or the strip should then draw slider fills in
-   FILL instead of the accent. Matt to decide; the owner's brief says any
-   reasonable accent.
+   slider beside a warning card as "a second warning". Settled in U3: a
+   hue in the band 15°–105° moves to its nearer end (see Colour), and the
+   presets are all outside it. The settings window should still say so
+   when a pick is moved.
 10. **Secondary text size.** The same review found 15–17 px labels (2.1 mm
     caps), including "limit 167°", small for 60 cm. Raising LABEL to 17
     costs the hero card's limit words at 300 px. Decide after U0.
-11. **Page markers** sit one row above the cards (rows 2–4, cards from 6)
-    and read as crowded into the top margin. Moving cards down costs the
-    hero numeral its room.
+11. **Page markers** sat one row above the cards (rows 2–4, cards from 6)
+    and read as crowded into the top margin. Settled in U3 by making them
+    2 px tall (rows 2–3), leaving two clear rows; the cards stay put, so
+    the hero numeral keeps its room.
 
 ## Shared identity
 
