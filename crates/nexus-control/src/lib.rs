@@ -31,6 +31,8 @@
 //! is a 4-byte little-endian length followed by that many bytes of 640×48
 //! RGBA. The current frame is sent first.
 
+pub mod links;
+
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 
