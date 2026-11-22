@@ -1,0 +1,17 @@
+# Nexus Open: let the user sitting at the computer drive the Corsair iCUE
+# Nexus touch strip (USB 1b1c:1b8e) without root, a group or mode 0666.
+#
+# "uaccess" asks systemd-logind to give the active local session's user an
+# ACL on the device node, and to take it away when the session ends or
+# another user switches in. It is applied by 73-seat-late.rules, which only
+# sees devices already tagged, so this file must sort before 73: an older
+# rule numbered 99 never granted anything.
+#
+# Only the strip's hidraw node is opened up. nexusd talks to the strip
+# through hidraw alone, so its USB device node (/dev/bus/usb/...) stays
+# root's.
+#
+# Installed by the package to /usr/lib/udev/rules.d/, or by hand to
+# /etc/udev/rules.d/. Source: packaging/udev/70-nexus-open.rules.
+
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1b8e", TAG+="uaccess"
