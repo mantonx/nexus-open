@@ -2129,15 +2129,22 @@ impl Editor {
     /// A fresh store: one layout, the default one, never changed. The
     /// starters are offered once.
     fn offer_first_run(&mut self) {
-        if self.first_run_seen {
+        // Test-only, for captures: offer it once whatever the store holds.
+        static FORCED: std::sync::Once = std::sync::Once::new();
+        let mut forced = false;
+        if std::env::var_os("NEXUS_UI_FIRST_RUN").is_some() {
+            FORCED.call_once(|| forced = true);
+        }
+        if self.first_run_seen && !forced {
             return;
         }
         let Some(l) = &self.layout else {
             return;
         };
-        let fresh = l.layouts.len() <= 1
-            && l.undo.is_none()
-            && l.config.pages == Config::default_layout().pages;
+        let fresh = forced
+            || (l.layouts.len() <= 1
+                && l.undo.is_none()
+                && l.config.pages == Config::default_layout().pages);
         if !fresh {
             // Not a first run: never offered on this computer again.
             self.first_run_done();

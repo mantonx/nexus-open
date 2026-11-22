@@ -69,8 +69,33 @@ pub fn roles(user: Rgb) -> Roles {
         text: role(L_TEXT, C_TEXT),
         fill: role(L_FILL, C_FILL),
         soft: role(L_SOFT, C_SOFT),
-        deep: role(L_DEEP, C_DEEP),
+        deep: deep(&role),
     }
+}
+
+/// The darkest light-theme surface accent words and rings sit on
+/// (theme.slint's surface-2).
+const LIGHT_SURFACE_2: Rgb = Rgb::hex(0xece2d3);
+
+/// `deep` at L_DEEP, or darker for hues (greens, yellows) whose luminance
+/// runs high at that lightness, until words read at 4.5:1 on every light
+/// surface. The hue and chroma stay the user's.
+fn deep(role: &impl Fn(f32, f32) -> Rgb) -> Rgb {
+    let mut l = L_DEEP;
+    loop {
+        let c = role(l, C_DEEP);
+        if contrast(c, LIGHT_SURFACE_2) >= 4.5 || l <= 0.2 {
+            return c;
+        }
+        l -= 0.01;
+    }
+}
+
+/// WCAG contrast of two colours.
+pub fn contrast(a: Rgb, b: Rgb) -> f32 {
+    let y = |c: Rgb| 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+    let (hi, lo) = (y(a).max(y(b)), y(a).min(y(b)));
+    (hi + 0.05) / (lo + 0.05)
 }
 
 /// Whether the colour's hue sits close to warning amber or critical red.
@@ -162,6 +187,37 @@ mod tests {
         assert_eq!(lilac.soft, Rgb::hex(0x443b64));
         let sky = roles(Rgb::hex(0x5fb4ff));
         assert_eq!(sky.base, Rgb::hex(0x86c4fe));
+    }
+
+    /// Accent words and focus rings: `deep` on the light theme's three
+    /// surfaces (theme.slint) and `base` on the dark theme's, at 4.5:1 or
+    /// better for every hue, not only the presets.
+    #[test]
+    fn accent_words_and_rings_read_on_both_themes() {
+        let light = [0xfffaf3, 0xf3ebdf, 0xece2d3].map(Rgb::hex);
+        let dark = [0x14110f, 0x201a17, 0x2b241f].map(Rgb::hex);
+        let hues = (0..24).map(|i| from_oklch(0.7, 0.15, i as f32 * 15.0));
+        for user in hues.chain(PRESETS.map(|(_, c)| c)).chain([DEFAULT]) {
+            let r = roles(user);
+            for s in light {
+                assert!(contrast(r.deep, s) >= 4.5, "{user:?} deep on {s:?}");
+            }
+            for s in dark {
+                assert!(contrast(r.base, s) >= 4.5, "{user:?} base on {s:?}");
+            }
+        }
+    }
+
+    /// The light theme's words (theme.slint text, text-2, text-3, warn,
+    /// crit) on its surfaces.
+    #[test]
+    fn light_theme_words_read_on_cream() {
+        let surfaces = [0xfffaf3, 0xf3ebdf, 0xece2d3].map(Rgb::hex);
+        for word in [0x2a211b, 0x5b4b3f, 0x76624f, 0x8a5600, 0xb3261e].map(Rgb::hex) {
+            for s in surfaces {
+                assert!(contrast(word, s) >= 4.5, "{word:?} on {s:?}");
+            }
+        }
     }
 
     #[test]
