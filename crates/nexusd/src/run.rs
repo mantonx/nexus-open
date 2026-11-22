@@ -30,6 +30,8 @@ use crate::notify::Notifier;
 
 /// How often to look for the device while it is unplugged.
 const RECONNECT_POLL: Duration = Duration::from_millis(250);
+/// How often to look while another program has the strip.
+const HELD_POLL: Duration = Duration::from_secs(1);
 /// How long the device must stay unopenable before why is logged. After a
 /// resume the strip comes back within about 3 s, and on the way its node
 /// is briefly missing and then briefly without the seat's access, which
@@ -255,6 +257,10 @@ impl Daemon {
                 self.next_attempt = match e {
                     // Retrying cannot help on an OS without a backend.
                     DeviceError::Unsupported => Instant::now() + Duration::from_secs(86_400),
+                    // Taken by another program: only the user ends that, by
+                    // quitting it and replugging, and each attempt walks
+                    // /proc looking for the holder.
+                    DeviceError::InUse(_) | DeviceError::Detached => Instant::now() + HELD_POLL,
                     _ => Instant::now() + RECONNECT_POLL,
                 };
             }

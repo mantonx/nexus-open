@@ -33,7 +33,7 @@ terminal.
 
 nexusd is running but is not drawing on the strip. The detail says why;
 usually it is the same reason the `device`, `access` or `holders` line
-below fails. nexusd retries by itself every few seconds, so once that is
+below fails. nexusd retries by itself every second or so, so once that is
 fixed the strip lights without a restart.
 
 ## old udev rule
@@ -56,6 +56,33 @@ sudo udevadm control --reload
 No USB device with id `1b1c:1b8e` is present. Check the cable, and that
 `lsusb | grep 1b1c:1b8e` lists it. A hub that sleeps can drop it; try a
 port on the computer itself.
+
+`FAIL device: the strip is in use by nexus-open (pid …)`
+
+Another program has taken the strip: it detached the kernel's HID driver
+to drive the strip itself, so nexusd cannot reach it. The old Go version
+of Nexus Open does this whenever it runs, including when started from its
+menu entry. Quit it from its tray icon (Quit). Then unplug the strip and
+plug it back in: the old app does not hand the strip back to its driver
+when it quits, so it stays dark until replugged. nexusd picks it up by
+itself.
+
+For another program the doctor names, quit it; if the strip stays dark,
+replug it. When the line says `in use by another program` without a
+name, the program runs as another user, so this user cannot see which.
+When nexusd runs as its service, `nexusctl status` always says it that
+way: the service's sandbox cannot see other programs' open files. The
+doctor and the settings window can, and name it.
+
+`FAIL device: the strip was left without its driver by another program`
+
+A program took the strip (see above) and has quit without giving it
+back. Unplug the strip and plug it back in.
+
+`FAIL device: the iCUE Nexus is plugged in but its hidraw node is not there yet`
+
+Normal for a few seconds after plugging it in or waking the computer. If
+it lasts, replug it.
 
 ## access
 
