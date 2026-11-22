@@ -219,6 +219,8 @@ be mistaken for it:
 4. **Page markers** for a page in trouble get longer and taller
    (`MARKER_W_ALERT`, `MARKER_H_ALERT`), not only coloured, and an edge
    flag stands at the strip's end on that page's side (Page markers).
+   The current page's marker stays cream with its trouble as a separate
+   segment after it, so "you are here" is never told by length alone.
 
 Proof: `accent-marigold-severity.png` puts a marigold pick's play key and
 slider beside a warning card and a critical card. The key is a 44 px key
@@ -261,12 +263,15 @@ Every size is a constant in `theme.rs`. Cap height is 0.70 em; at about
 legibility card has not been read on the panel, and 18 may move. Where
 18 does not fit at its old place, and what gives:
 
-- A medium value card drops its name ("CPU load") when a two-digit
-  percent and the name do not both fit; the icon still names it.
+- A medium value card shows its name's first word ("CPU" of "CPU
+  load", the icon says load) when the whole name does not fit beside a
+  two-digit value. It is decided for two digits whatever the value, so
+  the name does not change as the reading climbs into its warning.
 - Medium weather closes its range up ("61°/49°"), and leaves it out
   before it would be cut.
 - A hero media card shows only the elapsed time ("1:37") when the
-  artist would be cut by "1:37 / 5:18".
+  artist would be cut by "1:37 / 5:18", measured against the artist
+  even while paused, so pausing does not change the times.
 - The empty music sleeve is 27 px at compact and medium (31 at hero),
   and the hero hint is "Play some music".
 - A medium rate card whose down and up are in different units uses two
@@ -320,7 +325,7 @@ card beside it (content centres in its room when it has spare width).
 |---|---|---|---|
 | Clock | 10:53 at 32, centred | 10:53 at 40 + "Sun" / "Nov 22" | 10:53 at 50 + "Sunday" / "November 22" |
 | Value (temperature) | icon + 115° at 32; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 40; the name over the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it); the bar band runs the **whole card** under them |
-| Value + second reading | as compact (second hidden) | icon + 115° at 36, second "6%" at 26 right; two bars in the band, each under its number | icon + 115° at 40, name; the second named on the numeral's baseline at the right ("load 6%" at 26); the first reading's bar runs the whole card, the second has none (a percent is its own scale) |
+| Value + second reading | as compact (second hidden) | icon + 115° at 36, the second's own 17 px icon (a gauge for load) + "6%" at 26 right; two bars in the band, the second's starting under its icon (a low fill sits under the icon, not beside the digit as a decimal point). A two-digit second beside a three-digit first ("172° 62%") leaves no room for the icon at 200 px: it goes, open question 14 | icon + 115° at 40, name; the second named on the numeral's baseline at the right ("load 6%" at 26); the first reading's bar runs the whole card, the second has none (a percent is its own scale) |
 | Load, memory | icon + 62% at 32; bar | icon + 62% at 36, name; bar | icon + 62% at 40, name over "limit 85%"; bar the whole card |
 | Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
 | Weather | icon + 58° at 40 | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
@@ -431,7 +436,7 @@ What can be touched looks like it; what cannot does not.
 | Warning | Whole card WARN_SURFACE; the warning reading's numeral, icon and bar WARN, a second reading that is fine stays cream (so an amber numeral always means warning); page marker WARN and longer | `specimen-value-warning`, `specimen-value2-warning`, `3-hot` |
 | Critical | Whole card CRIT; everything white; track CRIT_DEEP, and limit notches under the white fill CRIT_DEEP so they stay visible; a hero card names the critical limit, as the alarm does; page marker CRIT and longer; plus the alarm | `specimen-value-critical`, `takeover-after-ok-system` |
 | No data (source works, no reading yet) | Normal card; the numeral is two TEXT3 dashes; "No reading" (medium) / "No reading yet" (hero); empty bar | `specimen-value-no-data`, `specimen-weather-no-data` |
-| Source lost / stale | The last value kept in TEXT3, icon replaced by a broken link (or cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
+| Source lost / stale | The last value kept in TEXT3; the reading's own icon kept (at compact and medium it is the card's name) in TEXT3 with a broken-link badge on its lower right, cut out by a ring of the card (weather: the icon becomes a cloud-slash); "Lost at 10:41" / "From 9:30" where there is room (medium alone, hero); the broken link always. Dimmed is never mistaken for lost (Idle and night) | `specimen-value-lost`, `specimen-weather-stale`, `default-night-system-lost`, `default-day-system-lost` |
 | Not set up | No fill; dashed accent outline; plus or pin icon; "Weather / Set up" (compact), "Weather / Add your town" | `specimen-*-not-set-up`, `6-first-run` |
 | Pressed, holding, dragging | See Keys | |
 | Paused | Play glyph in the key, artwork dimmed, title in TEXT2, "Paused" in place of the artist, progress line TEXT3 | `specimen-media-paused` |
@@ -460,6 +465,9 @@ Small pills along the top edge, rows 2–3 (`MARKER_Y`, `MARKER_H` 2: at
 3 they crowded the margin over the cards, open question 11),
 centred, `MARKER_GAP` 6 apart: one per page, `MARKER_W` 14 px, the
 current one `MARKER_W_CURRENT` 26 px and TEXT; the others TEXT3 at 55 %.
+On the current page, trouble does not recolour the cream: it is a
+separate WARN or CRIT segment `MARKER_SPLIT` 2 px after it, filling the
+alert's extra length.
 A page holding a warning reading has a WARN marker and one holding a
 critical reading a CRIT marker, each `MARKER_W_ALERT` 16 px longer and
 `MARKER_H_ALERT` 3 px tall (rows 2–4, row 5 still clear), never dimmed.
@@ -495,8 +503,11 @@ Markers stay.
 - **Volume** (`takeover-volume-right.png`, `takeover-volume-left-held.png`):
   a card over **part** of the page, aligned `right` (default) or `left`,
   with a set `width` snapped to the card edges of the page under it (the
-  nearest edge within 40 % of the width, `TAKEOVER_SNAP` in `engine.rs`;
-  `takeover-volume-snapped-system` shows 320 snapping to 232 over System),
+  nearest edge within 40 % of the width, `TAKEOVER_SNAP` in `engine.rs`,
+  but never narrower than `TAKEOVER_MIN` 320 px or the width given, so
+  its slider keeps a track of about 125 px or more;
+  `takeover-volume-snapped-system` shows 320 snapping out to 436 over
+  System, since 232 would leave a 45 px slider),
   so the clock and weather stay where the eye left them and no card is
   cut in two. Speaker, the new level at 40 px, the change in TEXT2
   ("+15"), and a slider whose part from the old level (a cream
@@ -676,6 +687,11 @@ signal's base unit (°C).
     at hero.
 13. **Edge flags** sit partly in columns 0–1, which the bezel may hide
     (`SAFE`); 2 px of each is on the visible part even so. A U0 check.
+14. **The medium second reading's icon** goes when a two-digit second
+    sits beside a three-digit first (172° and 62% at 200 px: 8 px
+    short), so there it is a number with no name again. Celsius readings
+    (two digits) keep it. Smaller second numerals, or a wider card for
+    a value with a second reading, would keep it; Matt to choose.
 
 ## Shared identity
 

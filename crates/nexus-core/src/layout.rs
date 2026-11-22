@@ -333,6 +333,7 @@ fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
                 let (v, u) = format_number(l, unit, ctx.settings.temperature);
                 format!("limit {v}{u}")
             });
+            let second_signal = second.as_deref();
             let second = second.as_deref().map(|s| {
                 let name = second_label.clone().unwrap_or_default();
                 reading(
@@ -349,6 +350,7 @@ fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
                 icon: icon_of(widget, icons::for_signal(signal)),
                 reading: first,
                 limit,
+                second_icon: second_signal.map_or(icons::GAUGE, icons::for_signal),
                 second,
             }
         }
@@ -717,11 +719,13 @@ mod tests {
             second,
             icon,
             limit,
+            second_icon,
         } = &zones[0].view
         else {
             unreachable!()
         };
         assert_eq!(*icon, icons::GPU);
+        assert_eq!(*second_icon, icons::GAUGE, "named by its own icon");
         assert_eq!(reading.severity, Severity::Ok);
         assert_eq!(reading.value, "50°");
         assert_eq!(limit.as_deref(), Some("limit 90°"));

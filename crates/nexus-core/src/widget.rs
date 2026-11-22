@@ -136,6 +136,9 @@ pub enum WidgetView {
         /// The limit in words on hero cards: "limit 167°".
         limit: Option<String>,
         second: Option<Reading>,
+        /// The second reading's icon, which names it where its name does
+        /// not fit (medium cards).
+        second_icon: char,
     },
     Weather {
         icon: char,
@@ -515,7 +518,17 @@ impl Renderer {
                 (c, MARKER_H_ALERT)
             };
             let mw = w(m);
-            draw::rrect(canvas, x, MARKER_Y, mw, h, h / 2.0, c);
+            if m.current && m.severity != Severity::Ok {
+                // "You are here" stays cream; the trouble on this page is
+                // a segment after it, so the two are never told apart by
+                // length alone.
+                let cw = MARKER_W_CURRENT;
+                draw::rrect(canvas, x, MARKER_Y, cw, h, h / 2.0, TEXT);
+                let ax = x + cw + MARKER_SPLIT;
+                draw::rrect(canvas, ax, MARKER_Y, mw - cw - MARKER_SPLIT, h, h / 2.0, c);
+            } else {
+                draw::rrect(canvas, x, MARKER_Y, mw, h, h / 2.0, c);
+            }
             x += mw + MARKER_GAP;
         }
         // Trouble on a page to one side: a pill at that end of the strip,
@@ -598,6 +611,21 @@ struct Pen<'a> {
 /// Vertical centre of a numeral's figures for a style and baseline.
 fn fig_mid(num: &TextStyle, base: f32) -> f32 {
     base - num.size * 0.35
+}
+
+/// The value to lay a card out for, so it does not rearrange as the
+/// reading changes: its digits as 8s (tabular, all one width), and at
+/// least two of them.
+fn steady_probe(t: &str) -> String {
+    let digits = t.chars().filter(char::is_ascii_digit).count();
+    let mut out: String = t
+        .chars()
+        .map(|c| if c.is_ascii_digit() { '8' } else { c })
+        .collect();
+    if digits == 1 {
+        out.insert(0, '8');
+    }
+    out
 }
 
 fn fmt_time(s: f64) -> String {
@@ -762,6 +790,20 @@ impl Pen<'_> {
     }
 
     // ------------------------------------------------------------ shapes
+
+    /// A reading's icon; a lost one carries a broken-link badge at its
+    /// lower right, cut out of the icon by a ring of the card.
+    fn reading_icon(&mut self, lost: bool, ch: char, size: f32, cx: f32, cy: f32, c: Rgb) {
+        self.icon(false, ch, size, cx, cy, c);
+        if lost {
+            // Big enough to read as a broken link at 60 cm: 14 px on a
+            // medium icon, 11 on the second reading's.
+            let bs = (size * 0.55).max(ICON_BADGE + 1.0);
+            let (bx, by) = (cx + size * 0.36, cy + size * 0.3);
+            self.circle(bx, by, bs * 0.62 + 1.0, CARD);
+            self.icon(true, icons::LINK_BREAK, bs, bx, by, TEXT2);
+        }
+    }
 
     fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, c: Rgb) {
         draw::rrect(self.c, x, y, w, h, r, c);
@@ -944,6 +986,7 @@ impl Pen<'_> {
                 reading,
                 limit,
                 second,
+                second_icon,
             } => self.value(
                 x,
                 w,
@@ -951,7 +994,7 @@ impl Pen<'_> {
                 *icon,
                 reading,
                 limit.as_deref(),
-                second.as_ref(),
+                second.as_ref().map(|s| (*second_icon, s)),
                 press,
             ),
             WidgetView::Weather {
@@ -1078,9 +1121,10 @@ impl Pen<'_> {
         icon: char,
         r: &Reading,
         limit: Option<&str>,
-        second: Option<&Reading>,
+        second: Option<(char, &Reading)>,
         press: Press,
     ) {
+        let (second_icon, second) = (second.map(|s| s.0), second.map(|s| s.1));
         if r.avail == Avail::NotSetUp {
             self.setup_prompt(
                 x,
@@ -1122,7 +1166,9 @@ impl Pen<'_> {
             kr.num
         };
         let icon_c = if lost { TEXT3 } else { kr.icon };
-        let glyph = if lost { icons::LINK_BREAK } else { icon };
+        // A lost reading keeps its own icon, its name at compact and
+        // medium; a broken-link badge on it says the source is gone.
+        let glyph = icon;
         match cls {
             Class::Compact => {
                 // With no bar the numeral sits lower, in the middle.
@@ -1142,7 +1188,7 @@ impl Pen<'_> {
                 let show_icon = nw <= room;
                 if show_icon {
                     let ix = x + PAD + ICON_COMPACT / 2.0;
-                    self.icon(false, glyph, ICON_COMPACT, ix, fig_mid(&num, base), icon_c);
+                    self.reading_icon(lost, glyph, ICON_COMPACT, ix, fig_mid(&num, base), icon_c);
                     nx += ((room - nw) / 2.0).max(0.0);
                 } else {
                     nx = x + ((w - nw) / 2.0).max(PAD / 2.0);
@@ -1160,8 +1206,8 @@ impl Pen<'_> {
                     BASE_MEDIUM - 2.0
                 };
                 let ix = x + PAD + ICON_MEDIUM / 2.0;
-                self.icon(
-                    false,
+                self.reading_icon(
+                    lost,
                     glyph,
                     ICON_MEDIUM,
                     ix,
@@ -1183,7 +1229,19 @@ impl Pen<'_> {
                     if sx > nx + nw + 6.0 {
                         self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, ks.label);
                     }
-                    let split = (sx - 10.0).max(nx + nw + 6.0);
+                    // Its own icon names it ("6%" alone is a riddle), and
+                    // its bar starts under the icon, so a low fill sits
+                    // there and not beside the digit like a decimal point.
+                    let iw = ICON_SMALL + 3.0;
+                    let mut split = (sx - 10.0).max(nx + nw + 6.0);
+                    if let Some(si) = second_icon.filter(|_| sx - iw >= nx + nw + 8.0) {
+                        let gc = if live { ks.icon } else { TEXT3 };
+                        let icx = sx - iw + ICON_SMALL / 2.0;
+                        let icy = fig_mid(&NUM_SECOND, base);
+                        let slost = matches!(s.avail, Avail::Lost(_));
+                        self.reading_icon(slost, si, ICON_SMALL, icx, icy, gc);
+                        split = sx - iw;
+                    }
                     if let Some(b) = bar {
                         let bw = split - 8.0 - (x + PAD);
                         self.bar(x + PAD, BAR_Y_COMPACT, bw, BAR_H_BANDED, &b, &kr);
@@ -1203,9 +1261,22 @@ impl Pen<'_> {
                     } else {
                         TEXT3
                     };
-                    let lw = self.measure(Face::Word, &LABEL, &words);
-                    if nx + nw + 8.0 + lw <= right {
-                        self.text_r(Face::Word, &LABEL, &words, right, 20.0, lc);
+                    // Laid out for a two-digit value at least, so the name
+                    // does not leave just as the reading climbs into its
+                    // warning; when the whole name does not fit, its first
+                    // word ("CPU" of "CPU load": the icon says load).
+                    let probe: String = steady_probe(&txt);
+                    let pw = self.num_unit_w(&NUM_BANDED, &probe, unit, &UNIT).max(nw);
+                    let room = right - (nx + pw + 8.0);
+                    let first = words.split(' ').next().unwrap_or_default().to_string();
+                    let words = [words.clone(), first].into_iter().find(|t| {
+                        r.avail != Avail::Live || self.measure(Face::Word, &LABEL, t) <= room
+                    });
+                    if let Some(words) = words {
+                        let lw = self.measure(Face::Word, &LABEL, &words);
+                        if nx + nw + 8.0 + lw <= right {
+                            self.text_r(Face::Word, &LABEL, &words, right, 20.0, lc);
+                        }
                     }
                     if let Some(b) = bar {
                         self.bar(x + PAD, BAR_Y_COMPACT, w - 2.0 * PAD, BAR_H_BANDED, &b, &kr);
@@ -1220,7 +1291,7 @@ impl Pen<'_> {
                 let num = NUM_HERO_BANDED;
                 let base = BASE_COMPACT;
                 let ix = x + PAD + 2.0 + ICON_HERO / 2.0;
-                self.icon(false, glyph, ICON_HERO, ix, fig_mid(&num, base), icon_c);
+                self.reading_icon(lost, glyph, ICON_HERO, ix, fig_mid(&num, base), icon_c);
                 let nx = x + PAD + 2.0 + ICON_HERO + ICON_GAP + 2.0;
                 let right = x + w - PAD;
                 let txt = self.fit(Face::Num, &num, &txt, right - nx);
@@ -1693,8 +1764,13 @@ impl Pen<'_> {
                     _ => String::new(),
                 };
                 // The length goes before the artist would be cut: the
-                // elapsed time is what changes.
-                let aw = self.measure(Face::Word, &BODY, line2);
+                // elapsed time is what changes. Measured against the artist
+                // even while paused, so pausing never moves the times.
+                let aw = self.measure(Face::Word, &BODY, line2).max(self.measure(
+                    Face::Word,
+                    &BODY,
+                    &t.artist,
+                ));
                 let mut tw = self.measure(Face::Num, &LABEL, &times);
                 if tx + aw + 10.0 + tw > right
                     && let Some(p) = t.position

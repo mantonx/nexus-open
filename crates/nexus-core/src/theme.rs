@@ -454,6 +454,9 @@ pub const MARKER_GAP: f32 = 6.0;
 /// (rows 2–4, still one clear row above the cards).
 pub const MARKER_W_ALERT: f32 = 16.0;
 pub const MARKER_H_ALERT: f32 = 3.0;
+/// On the current page's marker the alert is a separate segment after the
+/// cream, this far from it.
+pub const MARKER_SPLIT: f32 = 2.0;
 /// Trouble on a page to one side of the one shown: a pill standing at
 /// that end of the strip, in the warning's or the alarm's colour. It sits
 /// over the strip's edge and the end card's padding (content starts

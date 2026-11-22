@@ -397,8 +397,9 @@ fn takeovers(out: &mut Out) {
         shot(&mut e, &now, 1.2),
     );
 
-    // The same 320 px takeover over System, whose cards meet at 408: it
-    // snaps to that edge (232 px) rather than cut the GPU card in two.
+    // The same 320 px takeover over System, whose cards meet at 204 and
+    // 408: 232 px would cramp its slider, so it snaps out to 204 (436 px)
+    // rather than cut the GPU card in two.
     let mut e = engine(layout(None, true), &music(), "System");
     e.handle(Input::Signal(
         "volume.level".into(),

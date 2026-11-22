@@ -66,6 +66,11 @@ const SLIDER_SLOP: f32 = 4.0;
 /// under it when that is within this share of its width.
 const TAKEOVER_SNAP: f32 = 0.4;
 
+/// A snap never leaves a partial takeover narrower than this (or than the
+/// width it was given, if that is less): a slider in it keeps a track
+/// long enough to set (about 125 px at "100%").
+const TAKEOVER_MIN: u32 = 320;
+
 /// The alarm ends by itself once its reading has been back under the
 /// threshold this many seconds.
 pub const ALARM_CLEARS: f64 = 10.0;
@@ -992,9 +997,13 @@ impl Engine {
                 }
                 let edges = snap_edges(&self.config.pages[self.page].widgets, t.align);
                 // Only so far: over a card much wider than the gap, the
-                // given width stands (the card is cut, as asked).
+                // given width stands (the card is cut, as asked). Never
+                // narrower than the floor: a cramped slider is worse than
+                // a card covered whole.
+                let floor = width.min(TAKEOVER_MIN);
                 let snapped = edges
                     .into_iter()
+                    .filter(|e| *e >= floor)
                     .min_by_key(|e| e.abs_diff(width))
                     .filter(|e| e.abs_diff(width) as f32 <= width as f32 * TAKEOVER_SNAP)
                     .unwrap_or(width);
@@ -2268,12 +2277,13 @@ mod tests {
         ));
         assert_eq!(e.takeover(), Some("V"));
         let row = Row::Takeover(0);
-        // 232 is nearer 320 than 436: the takeover ends where a card does.
-        assert_eq!(e.span(row), (408, 232));
-        assert_eq!(e.widths(row), [232]);
-        assert_eq!(e.zone_span(row, 0), 408..640);
-        assert_eq!(e.hit(500.0), Some((row, 0)));
-        assert_eq!(e.hit(400.0), Some((Row::Page(0), 1)));
+        // 232 is nearer 320, but would cramp the slider under the floor:
+        // it ends at the next card edge out, covering that card whole.
+        assert_eq!(e.span(row), (204, 436));
+        assert_eq!(e.widths(row), [436]);
+        assert_eq!(e.zone_span(row, 0), 204..640);
+        assert_eq!(e.hit(300.0), Some((row, 0)));
+        assert_eq!(e.hit(150.0), Some((Row::Page(0), 0)));
     }
 
     #[test]
