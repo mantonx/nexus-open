@@ -36,6 +36,9 @@ optdepends=(
 # checkout's rust-toolchain.toml picks the pinned compiler (a rustup
 # "stable" that has not been updated may be too old).
 makedepends=('cargo')
+# !lto: makepkg's -flto turns the bundled SQLite (built by rusqlite's cc
+# step) into GCC bitcode, which Rust's linker (rust-lld) cannot read.
+options=('!lto')
 install=nexus-open.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 # Filled in by the release workflow for the AUR; build-local.sh skips it.
