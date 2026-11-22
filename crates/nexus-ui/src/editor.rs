@@ -1703,6 +1703,7 @@ impl Editor {
                     width: s.width,
                     widgets: vec![Widget::Clock {
                         width: s.width.unwrap_or(STRIP),
+                        icon: None,
                         tap: None,
                         hold: None,
                     }],

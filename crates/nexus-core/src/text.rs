@@ -207,6 +207,114 @@ impl TextEngine {
         width as f32
     }
 
+    /// Draws `text` like `draw`, but only between columns `clip.0` and
+    /// `clip.1`, fading to nothing over `fade.0` pixels inside the left
+    /// edge and `fade.1` inside the right (0: a hard edge). Used for a
+    /// title that does not fit: at rest it fades out at the right; while it
+    /// scrolls it fades at both ends.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_faded(
+        &mut self,
+        canvas: &mut Canvas,
+        fonts: &[Font],
+        style: &TextStyle,
+        text: &str,
+        at: (f32, f32),
+        color: Rgb,
+        clip: (f32, f32),
+        fade: (f32, f32),
+    ) {
+        let (glyphs, _) = self.layout(fonts, style, text);
+        let origin_x = at.0.round() as i32;
+        let origin_y = at.1.round() as i32;
+        let (left, right) = (clip.0.round() as i32, clip.1.round() as i32);
+        let gain = |px: i32| -> f32 {
+            if px < left || px >= right {
+                return 0.0;
+            }
+            let k = |d: i32, f: f32| {
+                if f <= 0.0 {
+                    1.0
+                } else {
+                    ((d as f32 + 0.5) / f).min(1.0)
+                }
+            };
+            let k = k(px - left, fade.0) * k(right - 1 - px, fade.1);
+            k * k
+        };
+        for g in glyphs {
+            let Some(m) = self.mask(&fonts[g.font], style, g.glyph) else {
+                continue;
+            };
+            let x0 = origin_x + g.x + m.left;
+            if x0 >= right || x0 + m.width as i32 <= left {
+                continue;
+            }
+            let mut alpha = m.alpha.clone();
+            for col in 0..m.width as usize {
+                let k = gain(x0 + col as i32);
+                if k >= 1.0 {
+                    continue;
+                }
+                for row in 0..m.height as usize {
+                    let i = row * m.width as usize + col;
+                    alpha[i] = (f32::from(alpha[i]) * k).round() as u8;
+                }
+            }
+            canvas.blend_mask(x0, origin_y - m.top, m.width, m.height, &alpha, color);
+        }
+    }
+
+    /// Draws the glyph for `c` in `font` at `size` px, its ink centred on
+    /// (`cx`, `cy`). Returns the ink's width, 0 if the font lacks it. For
+    /// icons, whose boxes say little about where their ink is.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_icon(
+        &mut self,
+        canvas: &mut Canvas,
+        font: &Font,
+        size: f32,
+        c: char,
+        cx: f32,
+        cy: f32,
+        color: Rgb,
+    ) -> f32 {
+        let glyph = font.as_ref().charmap().map(c);
+        if glyph == 0 {
+            return 0.0;
+        }
+        let style = TextStyle {
+            size,
+            weight: 400.0,
+            width: 100.0,
+            tabular: false,
+            tracking: 0.0,
+        };
+        let Some(m) = self.mask(font, &style, glyph) else {
+            return 0.0;
+        };
+        let x = (cx - m.width as f32 / 2.0).round() as i32;
+        let y = (cy - m.height as f32 / 2.0).round() as i32;
+        canvas.blend_mask(x, y, m.width, m.height, &m.alpha, color);
+        m.width as f32
+    }
+
+    /// The cached mask of one glyph, rasterized on first use.
+    fn mask(&mut self, font: &Font, style: &TextStyle, glyph: u16) -> Option<&GlyphMask> {
+        let key = GlyphKey {
+            font: font.key.value(),
+            glyph,
+            size: style.size.to_bits(),
+            weight: style.weight.to_bits(),
+            width: style.width.to_bits(),
+        };
+        if !self.cache.contains_key(&key) {
+            let mask = self.rasterize(font, style, glyph);
+            self.cache.insert(key, mask);
+        }
+        self.cache.get(&key).and_then(Option::as_ref)
+    }
+
     /// Shapes `text` and snaps every glyph to a whole pixel.
     /// Returns the placed glyphs and the total advance in pixels.
     fn layout(&mut self, fonts: &[Font], style: &TextStyle, text: &str) -> (Vec<Placed>, i32) {

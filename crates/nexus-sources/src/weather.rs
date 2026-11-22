@@ -1,4 +1,7 @@
-//! The current temperature from Open-Meteo (no account or key needed).
+//! The weather from Open-Meteo (no account or key needed): the current
+//! temperature, condition and whether it is day, and today's high and
+//! low, as the `weather.*` signals the weather widget reads
+//! (`nexus_core::layout::WEATHER_SIGNALS`).
 //!
 //! A place name is turned into coordinates with Open-Meteo's geocoding
 //! service once per change of location; after that only the forecast is
@@ -35,7 +38,7 @@ pub fn spawn(
         .spawn(move || {
             let agent: ureq::Agent = ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
-                .user_agent(concat!("nexus-open/", env!("CARGO_PKG_VERSION")))
+                .user_agent(crate::USER_AGENT)
                 .build()
                 .into();
             let mut config: Option<Weather> = None;
@@ -48,11 +51,9 @@ pub fn spawn(
                     Some(c) => {
                         let result = fetch(&agent, c, &mut place);
                         match result {
-                            Ok(celsius) => {
+                            Ok(now) => {
                                 last_error.clear();
-                                let reading =
-                                    ("weather.temp", Value::Number(celsius, Unit::Celsius));
-                                if !publish(vec![reading]) {
+                                if !publish(now.readings()) {
                                     return;
                                 }
                                 Some(REFRESH)
@@ -89,8 +90,92 @@ pub fn spawn(
     tx
 }
 
-/// The current temperature in °C, looking the place up first if needed.
-fn fetch(agent: &ureq::Agent, c: &Weather, place: &mut Option<(f64, f64)>) -> Result<f64, String> {
+/// One forecast, as Open-Meteo answers `current` and `daily`.
+#[derive(Debug, Deserialize)]
+struct Forecast {
+    current: Current,
+    #[serde(default)]
+    daily: Option<Daily>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Current {
+    temperature_2m: f64,
+    #[serde(default)]
+    weather_code: Option<f64>,
+    #[serde(default)]
+    is_day: Option<f64>,
+}
+
+/// Today only (`forecast_days=1`): one entry per list.
+#[derive(Debug, Deserialize)]
+struct Daily {
+    #[serde(default)]
+    temperature_2m_max: Vec<Option<f64>>,
+    #[serde(default)]
+    temperature_2m_min: Vec<Option<f64>>,
+}
+
+impl Forecast {
+    /// The signals it gives. A field the answer lacks is left out, so the
+    /// widget shows what it has.
+    fn readings(&self) -> Vec<Reading> {
+        let c = &self.current;
+        let mut out = vec![(
+            "weather.temp",
+            Value::Number(c.temperature_2m, Unit::Celsius),
+        )];
+        if let Some(code) = c.weather_code {
+            out.push(("weather.code", Value::Number(code, Unit::None)));
+            out.push(("weather.condition", Value::Text(condition(code).into())));
+        }
+        if let Some(day) = c.is_day {
+            out.push(("weather.day", Value::Number(day, Unit::None)));
+        }
+        let today = |pick: fn(&Daily) -> &Vec<Option<f64>>| {
+            self.daily
+                .as_ref()
+                .and_then(|d| pick(d).first().copied().flatten())
+        };
+        let high = today(|d| &d.temperature_2m_max);
+        let low = today(|d| &d.temperature_2m_min);
+        if let (Some(high), Some(low)) = (high, low) {
+            out.push(("weather.high", Value::Number(high, Unit::Celsius)));
+            out.push(("weather.low", Value::Number(low, Unit::Celsius)));
+        }
+        out
+    }
+}
+
+/// A WMO weather code (as Open-Meteo gives it) in a few words, short
+/// enough for a medium weather widget.
+fn condition(code: f64) -> &'static str {
+    match code.round() as i64 {
+        0 => "Clear",
+        1 => "Mostly clear",
+        2 => "Partly cloudy",
+        3 => "Cloudy",
+        45 | 48 => "Fog",
+        51..=55 => "Drizzle",
+        56 | 57 => "Icy drizzle",
+        61 | 63 => "Rain",
+        65 => "Heavy rain",
+        66 | 67 => "Icy rain",
+        71 | 73 | 77 => "Snow",
+        75 => "Heavy snow",
+        80..=82 => "Showers",
+        85 | 86 => "Snow showers",
+        95..=99 => "Thunder",
+        _ => "",
+    }
+}
+
+/// The weather now, looking the place up first if needed.
+fn fetch(
+    agent: &ureq::Agent,
+    c: &Weather,
+    place: &mut Option<(f64, f64)>,
+) -> Result<Forecast, String> {
     let (lat, lon) = match (c.latitude, c.longitude, *place) {
         (Some(lat), Some(lon), _) => (lat, lon),
         (_, _, Some(p)) => p,
@@ -101,20 +186,15 @@ fn fetch(agent: &ureq::Agent, c: &Weather, place: &mut Option<(f64, f64)>) -> Re
             p
         }
     };
-    #[derive(Deserialize)]
-    struct Forecast {
-        current: Current,
-    }
-    #[derive(Deserialize)]
-    struct Current {
-        temperature_2m: f64,
-    }
-    let forecast: Forecast = get_json(agent.get(FORECAST_URL).query_pairs([
+    get_json(agent.get(FORECAST_URL).query_pairs([
         ("latitude", lat.to_string().as_str()),
         ("longitude", lon.to_string().as_str()),
-        ("current", "temperature_2m"),
-    ]))?;
-    Ok(forecast.current.temperature_2m)
+        ("current", "temperature_2m,weather_code,is_day"),
+        ("daily", "temperature_2m_max,temperature_2m_min"),
+        ("forecast_days", "1"),
+        // Today as the place counts it, not as UTC does.
+        ("timezone", "auto"),
+    ]))
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,6 +291,36 @@ mod tests {
         // An unrecognised qualifier ("ME") falls back to the top result.
         assert_eq!(best("Portland, ME", &portlands).unwrap().latitude, 45.5);
         assert!(best("Nowhere", &[]).is_none());
+    }
+
+    #[test]
+    fn a_forecast_gives_every_weather_signal() {
+        let f: Forecast = serde_json::from_str(
+            r#"{"current":{"time":"2026-11-22T10:45","temperature_2m":14.4,
+                "weather_code":3,"is_day":1},
+                "daily":{"time":["2026-11-22"],"temperature_2m_max":[16.1],
+                "temperature_2m_min":[9.4]}}"#,
+        )
+        .unwrap();
+        let readings = f.readings();
+        let mut got: Vec<&str> = readings.iter().map(|(n, _)| *n).collect();
+        let mut want = nexus_core::layout::WEATHER_SIGNALS.to_vec();
+        got.sort_unstable();
+        want.sort_unstable();
+        assert_eq!(got, want);
+        assert!(readings.contains(&("weather.condition", Value::Text("Cloudy".into()))));
+        assert!(readings.contains(&("weather.low", Value::Number(9.4, Unit::Celsius))));
+    }
+
+    #[test]
+    fn a_short_answer_gives_what_it_has() {
+        let f: Forecast = serde_json::from_str(r#"{"current":{"temperature_2m":-2.5}}"#).unwrap();
+        assert_eq!(
+            f.readings(),
+            [("weather.temp", Value::Number(-2.5, Unit::Celsius))]
+        );
+        assert_eq!(condition(99.0), "Thunder");
+        assert_eq!(condition(42.0), "");
     }
 
     #[test]

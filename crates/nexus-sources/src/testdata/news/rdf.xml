@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns="http://purl.org/rss/1.0/"
+         xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel rdf:about="https://tech.example.org/">
+    <title>Example Tech (RDF)</title>
+    <link>https://tech.example.org/</link>
+    <description>A made-up RSS 1.0 feed for tests.</description>
+    <items>
+      <rdf:Seq>
+        <rdf:li rdf:resource="https://tech.example.org/kernel-7-4"/>
+      </rdf:Seq>
+    </items>
+  </channel>
+  <item rdf:about="https://tech.example.org/kernel-7-4">
+    <title>Kernel 7.4 released</title>
+    <link>https://tech.example.org/kernel-7-4</link>
+    <dc:date>2026-11-20T09:00:00Z</dc:date>
+  </item>
+</rdf:RDF>

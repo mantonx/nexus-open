@@ -69,6 +69,8 @@ pub enum Missing {
 
 /// What a change to one field comes to.
 #[derive(Clone, Debug, PartialEq)]
+// One per edit, short-lived: not worth boxing the widget.
+#[allow(clippy::large_enum_variant)]
 pub enum Outcome {
     /// Send this widget.
     Send(Widget),
@@ -118,18 +120,23 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
         v.insert(k.to_string(), s.to_string());
     };
     put("width", &widget.width().to_string());
+    // Any widget may name its icon. Not every type has a field for it yet;
+    // the value is carried so that saving the form keeps it.
+    put("icon", widget.icon().unwrap_or_default());
     match widget {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
-        Widget::Key { icon, label, .. } => {
+        Widget::Key { label, sub, .. } => {
             put("type", KEY);
-            put("icon", icon.as_deref().unwrap_or_default());
             put("label", label.as_deref().unwrap_or_default());
+            put("sub", sub.as_deref().unwrap_or_default());
         }
         Widget::Value {
             label,
             signal,
             graph,
+            scale,
+            second_label,
             warn,
             crit,
             second,
@@ -138,6 +145,12 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
             ..
         } => {
             put("type", READING);
+            // Carried, like the icon: "0 5000", or empty.
+            put(
+                "scale",
+                &scale.map_or(String::new(), |[lo, hi]| format!("{lo} {hi}")),
+            );
+            put("second_label", second_label.as_deref().unwrap_or_default());
             put("label", label);
             put("signal", signal);
             put(
@@ -254,19 +267,29 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
         .map_err(|_| Missing::Invalid("The width must be a whole number of pixels.".into()))?;
     let tap = build_action(v, "tap", ctx)?;
     let hold = build_action(v, "hold", ctx)?;
+    let text = |k: &str| Some(get(k).to_string()).filter(|s| !s.is_empty());
+    let icon = text("icon");
     Ok(match get("type") {
-        CLOCK => Widget::Clock { width, tap, hold },
-        MEDIA => Widget::Media { width, tap, hold },
-        KEY => {
-            let text = |k: &str| Some(get(k).to_string()).filter(|s| !s.is_empty());
-            Widget::Key {
-                width,
-                icon: text("icon"),
-                label: text("label"),
-                tap,
-                hold,
-            }
-        }
+        CLOCK => Widget::Clock {
+            width,
+            icon,
+            tap,
+            hold,
+        },
+        MEDIA => Widget::Media {
+            width,
+            icon,
+            tap,
+            hold,
+        },
+        KEY => Widget::Key {
+            width,
+            icon,
+            label: text("label"),
+            sub: text("sub"),
+            tap,
+            hold,
+        },
         READING => {
             let signal = or("signal", "cpu.temp");
             let second = Some(get("second").to_string()).filter(|s| !s.is_empty());
@@ -289,10 +312,26 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
                     "Choose the second signal its thresholds are for.".into(),
                 ));
             }
+            let scale = match get("scale")
+                .split_whitespace()
+                .map(str::parse::<f64>)
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(v) if v.is_empty() => None,
+                Ok(v) if v.len() == 2 && v[0] < v[1] => Some([v[0], v[1]]),
+                _ => {
+                    return Err(Missing::Invalid(
+                        "The scale is two numbers, the lowest first.".into(),
+                    ));
+                }
+            };
             Widget::Value {
                 second,
                 second_warn,
                 second_crit,
+                second_label: text("second_label"),
+                scale,
+                icon,
                 width,
                 label: or("label", "CPU"),
                 graph: match get("graph") {
@@ -309,6 +348,7 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
         }
         RATE => Widget::Rate {
             width,
+            icon,
             label: or("label", "Net"),
             down: or("down", "net.down"),
             up: or("up", "net.up"),
@@ -342,6 +382,7 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
                 label: or("label", "Volume"),
                 controls,
                 signal,
+                icon,
                 tap,
                 hold,
             }
@@ -718,7 +759,9 @@ mod tests {
             },
         );
         Context {
-            pages: vec!["System".into(), "Clock".into()],
+            pages: ["System", "Clock", "Home", "Music", "Launch", "Desk"]
+                .map(String::from)
+                .to_vec(),
             fahrenheit: true,
             signals,
         }
@@ -745,6 +788,9 @@ mod tests {
             label: "CPU".into(),
             signal: "cpu.temp".into(),
             graph: None,
+            icon: None,
+            scale: None,
+            second_label: None,
             warn: Some(80.0),
             crit: None,
             second: None,
@@ -777,6 +823,9 @@ mod tests {
             label: "CPU".into(),
             signal: "cpu.temp".into(),
             graph: None,
+            icon: None,
+            scale: None,
+            second_label: None,
             warn: Some(75.0),
             crit: Some(90.0),
             second: None,
@@ -800,6 +849,7 @@ mod tests {
         let ctx = ctx();
         let w = Widget::Clock {
             width: 100,
+            icon: None,
             tap: None,
             hold: None,
         };
@@ -828,6 +878,7 @@ mod tests {
         let ctx = ctx();
         let w = Widget::Clock {
             width: 120,
+            icon: None,
             tap: Some(Action::Page("next".into())),
             hold: None,
         };
@@ -843,6 +894,7 @@ mod tests {
         let ctx = ctx();
         let w = Widget::Media {
             width: 100,
+            icon: None,
             tap: None,
             hold: None,
         };
@@ -873,6 +925,7 @@ mod tests {
             width: 80,
             icon: Some("play".into()),
             label: None,
+            sub: None,
             tap: Some(Action::Media(MediaCommand::PlayPause)),
             hold: None,
         };
@@ -891,6 +944,7 @@ mod tests {
 
         let w = Widget::Media {
             width: 120,
+            icon: None,
             tap: None,
             hold: None,
         };

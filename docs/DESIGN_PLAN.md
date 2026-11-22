@@ -307,3 +307,21 @@ README clip (now of the new strip), release verification.
   leaves Slint's palette on `unknown` so it keeps tracking it. Checked in
   the rig's own session (its own bus, dconf and portal), both directions.
 
+- 2026-11-22 — **Matt: light and dark mode for the window.** The window
+  follows the desktop's colour scheme by default, with a "Match the
+  system / Light / Dark" choice saved as a window preference (not in the
+  strip layout, so it never enters undo). Light mode inverts the walnut
+  ladder at the same hue (cream ground, walnut text) and must pass the same
+  U5 bar as dark, judged from captures of both. The strip stays dark.
+- 2026-11-22 — **Matt: news on the strip.** Provisional shape (Claude,
+  his to overturn): headlines from RSS, Atom or JSON feeds the user adds;
+  no feed is on by default, so nothing is fetched until the user adds a
+  feed (as with weather). One headline at a time, rotating every 12 s,
+  cut at a word with an ellipsis, source and age as a second label; no
+  scrolling marquee. Tap opens the article; hold shows the next one. News
+  never raises a takeover (Product Principle 2). Phase 1, the source
+  (`crates/nexus-sources/src/news/`, `docs/design/news.md`), is merged;
+  phase 2 (the `[news]` section, the widget, the window's feed settings
+  and presets whose terms are checked) waits for U3 and U5. Before tap
+  opens a link on Windows, the open-URL action must stop going through
+  `cmd /C start`, which would run `&`, `|` and `^` in an untrusted link.

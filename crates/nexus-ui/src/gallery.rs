@@ -38,6 +38,9 @@ fn value(
         second: second.map(Into::into),
         second_warn: None,
         second_crit: None,
+        second_label: None,
+        scale: None,
+        icon: None,
         tap: None,
         hold: None,
     }
@@ -88,6 +91,7 @@ pub fn presets() -> Vec<Preset> {
             group: 0,
             widget: Widget::Rate {
                 width: 160,
+                icon: None,
                 label: "Network".into(),
                 down: "net.down".into(),
                 up: "net.up".into(),
@@ -101,6 +105,7 @@ pub fn presets() -> Vec<Preset> {
             group: 1,
             widget: Widget::Slider {
                 width: 208,
+                icon: None,
                 label: "Volume".into(),
                 controls: SliderControl::Volume,
                 signal: None,
@@ -114,6 +119,7 @@ pub fn presets() -> Vec<Preset> {
             group: 1,
             widget: Widget::Media {
                 width: 240,
+                icon: None,
                 tap: Some(Action::Media(MediaCommand::PlayPause)),
                 hold: Some(Action::Media(MediaCommand::Next)),
             },
@@ -124,6 +130,7 @@ pub fn presets() -> Vec<Preset> {
             group: 1,
             widget: Widget::Key {
                 width: 124,
+                sub: None,
                 icon: Some("globe-simple".into()),
                 label: Some("Browser".into()),
                 tap: Some(Action::Open("https://".into())),
@@ -136,6 +143,7 @@ pub fn presets() -> Vec<Preset> {
             group: 1,
             widget: Widget::Key {
                 width: 96,
+                sub: None,
                 icon: Some("arrow-right".into()),
                 label: Some("Next".into()),
                 tap: Some(Action::Page("next".into())),
@@ -148,6 +156,7 @@ pub fn presets() -> Vec<Preset> {
             group: 2,
             widget: Widget::Clock {
                 width: 192,
+                icon: None,
                 tap: None,
                 hold: None,
             },

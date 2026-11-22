@@ -311,10 +311,11 @@ pub(crate) fn apply(conn: &Connection, edit: &Edit) -> Result<(), StoreError> {
             let s = serde_json::to_value(settings).map_err(corrupt)?;
             let text = |key: &str| s[key].as_str().unwrap_or_default().to_string();
             let w = weather.as_ref();
+            let night = settings.night.as_ref();
             conn.execute(
                 "UPDATE settings SET font = ?1, temperature = ?2, clock = ?3,
                    weather_location = ?4, weather_latitude = ?5, weather_longitude = ?6,
-                   accent = ?7",
+                   accent = ?7, night_from = ?8, night_to = ?9, idle_dim = ?10",
                 params![
                     text("font"),
                     text("temperature"),
@@ -322,7 +323,11 @@ pub(crate) fn apply(conn: &Connection, edit: &Edit) -> Result<(), StoreError> {
                     w.and_then(|w| w.location.clone()),
                     w.and_then(|w| w.latitude),
                     w.and_then(|w| w.longitude),
-                    s["accent"].as_str(),
+                    // Stored as hex, whatever name the layout gave it.
+                    settings.accent.map(nexus_core::config::colour_text),
+                    night.map(|n| n.from.clone()),
+                    night.map(|n| n.to.clone()),
+                    settings.idle_dim,
                 ],
             )?;
         }

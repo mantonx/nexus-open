@@ -3,76 +3,46 @@
 //! Not real readings. Lets the renderer be exercised the same way everywhere
 //! until live signals exist.
 
-use crate::signal::{Unit, Value};
-use crate::widget::{Graph, Severity, WidgetView, Zone};
+use jiff::Zoned;
 
-/// The System page from the current app, with representative data.
+use crate::config::Config;
+use crate::layout::{Bind, bind_page};
+use crate::signal::{Signals, Unit, Value};
+use crate::widget::Zone;
+
+/// The moment sample frames are drawn at: a Sunday morning.
+pub fn sample_time() -> Zoned {
+    "2026-11-22T10:53:00-05:00[America/New_York]"
+        .parse()
+        .expect("a valid time")
+}
+
+/// The signals of `readings(0)`, stored.
+pub fn sample_signals() -> Signals {
+    let mut s = Signals::new();
+    for (name, value) in readings(0.0) {
+        s.set(name, value);
+    }
+    s
+}
+
+/// The default layout's System page, bound to `readings(0)`.
 pub fn system_page() -> Vec<Zone> {
-    let flat: Vec<f32> = (0..60)
-        .map(|i| 0.12 + 0.03 * ((i as f32) * 0.7).sin())
-        .collect();
-    let spiky: Vec<f32> = (0..60)
-        .map(|i| match i {
-            6 => 0.85,
-            7 => 0.4,
-            8 => 0.2,
-            _ => 0.08 + 0.02 * ((i as f32) * 1.3).sin(),
-        })
-        .collect();
-    vec![
-        Zone {
-            width: 128,
-            view: WidgetView::Clock {
-                date: "Tue, Jun 09".into(),
-                time: "4:17".into(),
-                meridiem: Some("PM".into()),
-            },
-        },
-        Zone {
-            width: 128,
-            view: WidgetView::Value {
-                label: "Jersey City".into(),
-                value: "79".into(),
-                unit: "°F".into(),
-                icon: Some('\u{f185}'),
-                graph: None,
-                severity: Severity::Ok,
-                second: None,
-            },
-        },
-        Zone {
-            width: 128,
-            view: WidgetView::Value {
-                label: "CPU".into(),
-                value: "28".into(),
-                unit: "°C".into(),
-                icon: None,
-                graph: Some(Graph::Area(flat.clone())),
-                severity: Severity::Ok,
-                second: None,
-            },
-        },
-        Zone {
-            width: 128,
-            view: WidgetView::Value {
-                label: "GPU".into(),
-                value: "82".into(),
-                unit: "°C".into(),
-                icon: None,
-                graph: Some(Graph::Area(flat)),
-                severity: Severity::Warn,
-                second: None,
-            },
-        },
-        Zone {
-            width: 128,
-            view: WidgetView::Rate {
-                label: "Net".into(),
-                caption: "↓292K/s ↑309K/s".into(),
-                graph: Some(Graph::Line(spiky)),
-            },
-        },
-    ]
+    let config = Config::default_layout();
+    let page = config
+        .page_index("System")
+        .map_or(&config.pages[0], |i| &config.pages[i]);
+    let signals = sample_signals();
+    let now = sample_time();
+    let ctx = Bind {
+        signals: &signals,
+        settings: &config.settings,
+        weather: true,
+        now: &now,
+        mono: 0.0,
+        marquee: None,
+    };
+    bind_page(&page.widgets, &ctx)
 }
 
 /// Plausible fake readings for every signal the default layout uses, as a
@@ -91,7 +61,12 @@ pub fn readings(t: f64) -> Vec<(&'static str, Value)> {
             "gpu.temp",
             Value::Number(74.0 + 8.0 * wave(45.0, 1.0), Unit::Celsius),
         ),
-        ("weather.temp", Value::Number(21.0, Unit::Celsius)),
+        ("weather.temp", Value::Number(14.0, Unit::Celsius)),
+        ("weather.code", Value::Number(3.0, Unit::None)),
+        ("weather.condition", Value::Text("Cloudy".into())),
+        ("weather.high", Value::Number(16.0, Unit::Celsius)),
+        ("weather.low", Value::Number(9.0, Unit::Celsius)),
+        ("weather.day", Value::Number(1.0, Unit::None)),
         (
             "cpu.load",
             Value::Number(30.0 + 25.0 * wave(17.0, 0.5), Unit::Percent),

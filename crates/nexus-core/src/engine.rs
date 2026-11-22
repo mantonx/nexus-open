@@ -19,6 +19,12 @@
 //! (its OK key, or a swipe) or the reading has been back under for
 //! `ALARM_CLEARS` seconds.
 //!
+//! Frames are finished here: page markers along the top, takeovers fading
+//! in and out, the strip dimmed when idle or at night (never a warning or
+//! critical card), and the alarm's slow breathing. `animating` says when
+//! frames are due at the display's pace: a page springing, a long press
+//! filling, a takeover fading, a title scrolling.
+//!
 //! The engine never reads a clock or touches a thread. Wall time (for the
 //! clock widget) and monotonic time (for touch, animation and the alarm's
 //! timers, in seconds from any origin) are passed in, so tests can drive it
@@ -31,15 +37,19 @@ use std::time::Duration;
 use jiff::Zoned;
 
 use crate::canvas::Canvas;
-use crate::config::{Action, Config, SLIDER_VALUE, SliderControl, Widget};
+use crate::config::{Action, Config, MediaCommand, SLIDER_VALUE, SliderControl, Widget};
 use crate::fonts::FontChoice;
 use crate::gesture::{Gesture, LONG_PRESS, MIN_TAP, Recognizer, should_commit};
+use crate::icons;
 use crate::layout::{
-    bind_page, judge, reading_text, shows_clock, signals_used, slider, thresholds,
+    Bind, WEATHER_STALE, bind_page, format_number, judge, media, reading_text, shows_clock,
+    signals_used, slider, thresholds,
 };
 use crate::signal::{Signals, Unit, Value};
-use crate::theme::Theme;
-use crate::widget::{Renderer, Severity, WidgetView, Zone};
+use crate::theme::{self, Theme};
+use crate::widget::{
+    AlarmView, Marker, Renderer, Severity, Touch, WidgetView, Zone, alarm_ok_span, media_keys,
+};
 
 const WIDTH: f32 = crate::WIDTH as f32;
 
@@ -59,8 +69,15 @@ pub const ALARM_CLEARS: f64 = 10.0;
 /// under the threshold this many seconds without a break, so a reading
 /// hovering at the threshold does not raise it over and over.
 pub const ALARM_REARMS: f64 = 30.0;
-/// The alarm's OK key: this many pixels at the right end of the strip.
-pub const ALARM_OK_WIDTH: u32 = 120;
+/// The alarm's OK key on the strip: the key drawn, and on to the strip's
+/// right edge, so a finger that lands just past it still counts.
+pub fn alarm_ok() -> Range<u32> {
+    alarm_ok_span().start..crate::WIDTH
+}
+
+/// How often the alarm's breathing is redrawn, in seconds: slow enough
+/// that the strip is not kept busy, smooth enough at a 2.4 s breath.
+const BREATHE_STEP: f64 = 0.08;
 
 /// Something that happened.
 #[derive(Clone, Debug)]
@@ -114,13 +131,58 @@ pub struct Alarm {
     pub signal: String,
     /// The label of the value widget that shows it.
     pub label: String,
-    /// The reading now, formatted as its widget shows it.
+    /// The reading now, formatted as its widget shows it: "92°".
     pub value: String,
-    pub unit: String,
+    /// The critical limit it is over, formatted the same way: "90°".
+    pub limit: String,
+    /// The widget's icon.
+    pub icon: char,
+    /// It is a temperature: "too hot", and the fans are worth a look.
+    pub hot: bool,
+    /// The reading is back under its limit; the alarm stays until it has
+    /// been for `ALARM_CLEARS` seconds, or OK.
+    pub under: bool,
     /// How many readings it holds, this one included. OK acknowledges all.
     pub count: usize,
     /// The OK key's pixels on the strip: a tap there acknowledges.
     pub ok: Range<u32>,
+}
+
+impl Alarm {
+    /// The alarm in words, as the strip shows it.
+    pub fn view(&self) -> AlarmView {
+        let label = if self.label.is_empty() {
+            "A reading"
+        } else {
+            &self.label
+        };
+        let (headline, detail) = match (self.hot, self.under) {
+            (true, false) => (
+                format!("{label} is too hot"),
+                format!("Over its {} limit · check the fans", self.limit),
+            ),
+            (false, false) => (
+                format!("{label} is too high"),
+                format!("Over its {} limit", self.limit),
+            ),
+            // The value shown is the reading now, so the words must not
+            // say it is over.
+            (true, true) => (
+                format!("{label} was too hot"),
+                format!("Back under its {} limit · check the fans", self.limit),
+            ),
+            (false, true) => (
+                format!("{label} was too high"),
+                format!("Back under its {} limit", self.limit),
+            ),
+        };
+        AlarmView {
+            icon: self.icon,
+            headline,
+            detail,
+            value: self.value.clone(),
+        }
+    }
 }
 
 /// A long press on its way: the zone under the finger, whose hold action
@@ -140,12 +202,43 @@ enum Row {
     Takeover(usize),
 }
 
-/// What a finger rests on, drawn lit: a zone whose tap would act, or the
-/// alarm's OK key.
+/// What a finger rests on, drawn lit: a zone whose tap would act (or one
+/// of its parts: a media widget's transport key), or the alarm's OK key.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Lit {
-    Zone(Row, usize),
+    Zone(Row, usize, Option<usize>),
     AlarmOk,
+}
+
+/// A takeover fading in or out, from monotonic time `start`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fade {
+    index: usize,
+    start: f64,
+    out: bool,
+    /// The takeover's `Cover::from`, kept while it fades out.
+    from: Option<f32>,
+}
+
+impl Fade {
+    fn seconds(&self) -> f64 {
+        let ms = if self.out {
+            theme::MS_TAKEOVER_OUT
+        } else {
+            theme::MS_TAKEOVER_IN
+        };
+        f64::from(ms) / 1000.0
+    }
+
+    /// How far it has come, 0–1, at `now`; eased out.
+    fn progress(&self, now: f64) -> f32 {
+        let t = ((now - self.start) / self.seconds()).clamp(0.0, 1.0) as f32;
+        1.0 - (1.0 - t) * (1.0 - t)
+    }
+
+    fn done(&self, now: f64) -> bool {
+        now - self.start >= self.seconds()
+    }
 }
 
 /// A takeover on the strip.
@@ -157,6 +250,9 @@ struct Cover {
     until: Option<f64>,
     /// How long it lasts, when not its own `seconds`: shown on request.
     lease: Option<f64>,
+    /// The volume before the change that brought it up, 0–1: its slider
+    /// shows the change from there.
+    from: Option<f32>,
 }
 
 /// A finger on a slider. The value moves by the finger's travel from what
@@ -203,8 +299,9 @@ enum Motion {
 struct Watch {
     /// The lowest `crit` any widget gives it.
     crit: f64,
-    /// That widget's label, for the alarm.
+    /// That widget's label and icon, for the alarm.
     label: String,
+    icon: char,
     /// The last reading was at or above `crit`.
     critical: bool,
     /// When the reading went under `crit`, or first came in under it.
@@ -257,15 +354,25 @@ pub struct Engine {
     /// The readings the alarm holds, oldest first; it shows the last.
     /// Empty while there is no alarm.
     alarm: Vec<String>,
+    /// When the alarm was last drawn, for its breathing.
+    breathed_at: Option<f64>,
+    /// A takeover fading in or out.
+    fade: Option<Fade>,
+    /// When the track's title last changed: it scrolls once if it is too
+    /// long to fit. Cleared once the scroll is over.
+    marquee_at: Option<f64>,
+    /// The last touch, or the first frame: idle dimming counts from here.
+    active_at: Option<f64>,
+    /// The brightness the last frame was drawn at.
+    drawn_dim: f32,
+    /// The last frame was drawn with the weather stale.
+    drawn_stale: bool,
 }
 
 impl Engine {
     pub fn new(config: Config) -> Self {
         let font = config.settings.font;
-        let theme = Theme {
-            accent: config.settings.accent,
-            ..Theme::default()
-        };
+        let theme = Theme::new(config.settings.accent);
         Self {
             renderer: Renderer::new(theme.clone(), font.load()),
             theme,
@@ -289,6 +396,12 @@ impl Engine {
             touch_start: None,
             ignoring: false,
             alarm: Vec::new(),
+            breathed_at: None,
+            fade: None,
+            marquee_at: None,
+            active_at: None,
+            drawn_dim: 1.0,
+            drawn_stale: false,
         }
     }
 
@@ -352,13 +465,21 @@ impl Engine {
         let signal = self.alarm.last()?;
         let watch = self.watches.get(signal)?;
         let (value, unit) = reading_text(&self.signals, signal, &self.config.settings);
+        let base = match self.signals.get(signal) {
+            Some(Value::Number(_, u)) => *u,
+            _ => Unit::None,
+        };
+        let (limit, limit_unit) = format_number(watch.crit, base, self.config.settings.temperature);
         Some(Alarm {
             signal: signal.clone(),
             label: watch.label.clone(),
-            value,
-            unit,
+            value: value + &unit,
+            limit: limit + &limit_unit,
+            icon: watch.icon,
+            hot: base == Unit::Celsius,
+            under: !watch.critical,
             count: self.alarm.len(),
-            ok: crate::WIDTH - ALARM_OK_WIDTH..crate::WIDTH,
+            ok: alarm_ok(),
         })
     }
 
@@ -370,6 +491,10 @@ impl Engine {
         }
         let (x, start) = self.gestures.holding()?;
         let (row, zone) = self.hit(x)?;
+        // A transport key's long press is a slow tap, with nothing to fill.
+        if self.part_at(row, zone, x).is_some_and(|(_, key)| key) {
+            return None;
+        }
         self.widgets(row)[zone].hold()?;
         Some(Hold {
             zone: self.zone_span(row, zone),
@@ -377,10 +502,50 @@ impl Engine {
         })
     }
 
-    /// True while a page is springing into place and frames are due as fast
-    /// as the device takes them.
+    /// True while frames are due as fast as the device takes them: a page
+    /// springing into place, a long press filling, a takeover fading in or
+    /// out, a long title scrolling.
     pub fn animating(&self) -> bool {
         matches!(self.motion, Motion::Settle { .. })
+            || self.hold().is_some()
+            || self.fade.is_some()
+            || (self.marquee_at.is_some() && self.alarm.is_empty())
+    }
+
+    /// The page markers as the strip shows them.
+    pub fn markers(&self) -> Vec<Marker> {
+        (0..self.page_count())
+            .map(|i| Marker {
+                current: i == self.page,
+                severity: self.page_severity(i),
+            })
+            .collect()
+    }
+
+    /// How bright the strip is drawn, 0–1: dimmed at night (the layout's
+    /// `night` hours) and after `IDLE_DIM_AFTER_S` with no touch, unless a
+    /// reading on some page is at warning or worse, or something has come
+    /// up over the page.
+    pub fn brightness(&self, now: &Zoned) -> f32 {
+        if !self.alarm.is_empty() || self.cover.is_some() {
+            return 1.0;
+        }
+        let settings = &self.config.settings;
+        let mut k: f32 = 1.0;
+        if let Some(night) = &settings.night {
+            let minute = i32::from(now.hour()) * 60 + i32::from(now.minute());
+            if night.contains(minute as u32) {
+                k = k.min(theme::NIGHT_DIM);
+            }
+        }
+        let idle = self
+            .active_at
+            .is_some_and(|t| self.now - t >= f64::from(theme::IDLE_DIM_AFTER_S));
+        let calm = self.page_severities().iter().all(|s| *s == Severity::Ok);
+        if settings.idle_dim && idle && calm {
+            k = k.min(theme::IDLE_DIM);
+        }
+        k
     }
 
     /// Moves the engine's clock to `mono` (monotonic seconds, the touch
@@ -402,21 +567,28 @@ impl Engine {
                 let visible = self.visible(&name);
                 let on_page =
                     signals_used(&self.config.pages[self.page].widgets).any(|s| s == name);
-                // A change, not a first reading: the daemon starting up
-                // is not news.
-                let changed = self.signals.get(&name).is_some_and(|old| *old != value);
+                // A change, not a first reading: the daemon starting up,
+                // or a source coming back, is not news.
+                let old = self.signals.get(&name).cloned();
+                let back = self.signals.lost_at(&name).is_some();
+                let changed = !back && old.as_ref().is_some_and(|old| *old != value);
                 let blank = matches!(&value, Value::Text(t) if t.trim().is_empty());
-                self.signals.set(&name, value);
+                let new_title = name == "media.title" && !blank && old.as_ref() != Some(&value);
+                self.signals.set_at(&name, value, self.now);
                 self.dirty |= visible;
                 self.watch(&name);
                 if changed && !blank && !on_page {
-                    self.take_over(&name);
+                    self.take_over(&name, old.as_ref());
+                }
+                // A new title scrolls once, if it is too long to fit.
+                if new_title && self.visible(&name) {
+                    self.marquee_at = Some(self.now);
                 }
             }
             Input::Forget(name) => {
                 let visible = self.visible(&name);
                 self.dirty |= visible;
-                self.signals.remove(&name);
+                self.signals.forget(&name, self.now);
                 // No data is not critical; it comes back as a first reading.
                 if let Some(w) = self.watches.get_mut(&name) {
                     w.critical = false;
@@ -449,13 +621,13 @@ impl Engine {
                     index,
                     until: None,
                     lease: Some(seconds),
+                    from: None,
                 });
                 if !same {
-                    self.pressed = None;
-                    self.dirty = true;
+                    self.fade_in(index);
                 }
             }
-            Input::EndTakeover => self.uncover(),
+            Input::EndTakeover => self.fade_out(),
             Input::Acknowledge => self.acknowledge(),
             Input::Redraw => self.dirty = true,
         }
@@ -465,6 +637,7 @@ impl Engine {
     /// monotonic time in seconds, on the same clock as touch samples.
     pub fn frame(&mut self, now: &Zoned, mono: f64) -> Option<Canvas> {
         self.tick(mono);
+        self.active_at.get_or_insert(self.now);
         if self.motion != Motion::Still {
             self.step(mono);
         }
@@ -472,19 +645,21 @@ impl Engine {
             return Some(self.slide(offset, now));
         }
         if let Some(alarm) = self.alarm() {
-            if !self.dirty {
+            let breathe_due = self.breathed_at.is_none_or(|t| mono - t >= BREATHE_STEP);
+            if !self.dirty && !breathe_due {
                 return None;
             }
             self.dirty = false;
             self.drawn_minute = None;
+            self.breathed_at = Some(mono);
             let lit = self.pressed == Some(Lit::AlarmOk);
-            return Some(self.renderer.render_alarm(
-                &alarm.label,
-                &alarm.value,
-                &alarm.unit,
-                ALARM_OK_WIDTH,
-                lit,
-            ));
+            return Some(
+                self.renderer
+                    .render_alarm(&alarm.view(), lit, breathe(mono)),
+            );
+        }
+        if self.breathed_at.take().is_some() {
+            self.dirty = true;
         }
         if let Some(cover) = self.cover {
             let seconds = self.cover_seconds(&cover);
@@ -496,32 +671,87 @@ impl Engine {
                 .get_or_insert(mono + seconds);
             // Never pulled from under a finger.
             if mono >= until && !self.gestures.pressed() && self.slide.is_none() {
-                self.uncover();
+                self.fade_out();
             }
         }
-        let minute = self
-            .clock_shown()
+        if self.fade.is_some_and(|f| f.done(self.now)) {
+            self.fade = None;
+            self.dirty = true;
+        }
+        let stale = self.weather_stale();
+        if stale != self.drawn_stale {
+            self.drawn_stale = stale;
+            self.dirty |= self.visible("weather.temp");
+        }
+        let minute = (self.clock_shown() || self.config.settings.night.is_some())
             .then(|| now.timestamp().as_second().div_euclid(60));
-        if !self.dirty && minute == self.drawn_minute {
+        let dim = self.brightness(now);
+        if !self.dirty && !self.animating() && minute == self.drawn_minute && dim == self.drawn_dim
+        {
             return None;
         }
-        let canvas = match self.cover {
-            None => self.render_row(Row::Page(self.page), now),
+        let canvas = self.compose(now, dim);
+        self.dirty = false;
+        self.drawn_minute = minute;
+        self.drawn_dim = dim;
+        Some(canvas)
+    }
+
+    /// The strip's picture now: the page, the takeover over it (fading in
+    /// or out), dimmed as `dim` says, with the page markers on top.
+    fn compose(&mut self, now: &Zoned, dim: f32) -> Canvas {
+        let marquee = self.marquee_at.map(|t| (self.now - t) as f32);
+        let mut moving = false;
+        let mut canvas = match self.cover {
             Some(c) => {
                 let over = Row::Takeover(c.index);
                 let (left, width) = self.span(over);
-                if width == crate::WIDTH {
-                    self.render_row(over, now)
+                let top = self.render_row(over, now, marquee);
+                moving |= self.renderer.moving();
+                let fading = self.fade.filter(|f| !f.out && f.index == c.index);
+                if width == crate::WIDTH && fading.is_none() {
+                    top
                 } else {
-                    let mut page = self.render_row(Row::Page(self.page), now);
-                    page.copy_shifted(&self.render_row(over, now), left as i32);
+                    let mut page = self.render_row(Row::Page(self.page), now, marquee);
+                    moving |= self.renderer.moving();
+                    match fading {
+                        Some(f) => {
+                            let t = f.progress(self.now);
+                            let rise = ((1.0 - t) * theme::TAKEOVER_RISE).round() as i32;
+                            page.blend_from(&top, left as i32, rise, t);
+                        }
+                        None => page.copy_shifted(&top, left as i32),
+                    }
                     page
                 }
             }
+            None => {
+                let mut page = self.render_row(Row::Page(self.page), now, marquee);
+                moving |= self.renderer.moving();
+                let alerts = self.renderer.alerts().to_vec();
+                if let Some(f) = self.fade.filter(|f| f.out) {
+                    let row = Row::Takeover(f.index);
+                    let left = self.span(row).0;
+                    let top = self.render_row(row, now, None);
+                    page.blend_from(&top, left as i32, 0, 1.0 - f.progress(self.now));
+                }
+                page.dim(dim, &alerts);
+                page
+            }
         };
-        self.dirty = false;
-        self.drawn_minute = minute;
-        Some(canvas)
+        let markers = self.markers();
+        self.renderer.draw_markers(&mut canvas, &markers, dim);
+        if !moving {
+            self.marquee_at = None;
+        }
+        canvas
+    }
+
+    /// The weather shown is old: no new reading for `WEATHER_STALE`.
+    fn weather_stale(&self) -> bool {
+        self.signals
+            .heard_at("weather.temp")
+            .is_some_and(|t| self.now - t > WEATHER_STALE)
     }
 
     /// How long until the picture changes, or a timer is due, without any
@@ -536,7 +766,25 @@ impl Engine {
         let after = |at: f64| Duration::from_secs_f64((at - mono).max(0.0));
         let mut soonest: Option<Duration> = None;
         let mut sooner = |d: Duration| soonest = Some(soonest.map_or(d, |s: Duration| s.min(d)));
-        if self.clock_shown() {
+        if !self.alarm.is_empty() {
+            let at = self.breathed_at.map_or(mono, |t| t + BREATHE_STEP);
+            sooner(after(at));
+        }
+        if self.config.settings.idle_dim
+            && let Some(t) = self.active_at
+        {
+            let idle_at = t + f64::from(theme::IDLE_DIM_AFTER_S);
+            if idle_at > mono {
+                sooner(after(idle_at));
+            }
+        }
+        if let Some(t) = self.signals.heard_at("weather.temp")
+            && t + WEATHER_STALE >= mono
+            && self.visible("weather.temp")
+        {
+            sooner(after(t + WEATHER_STALE + 0.001));
+        }
+        if self.clock_shown() || self.config.settings.night.is_some() {
             let ms = now.timestamp().as_millisecond().rem_euclid(60_000);
             sooner(Duration::from_millis((60_000 - ms) as u64));
         }
@@ -561,6 +809,7 @@ impl Engine {
 
     fn touch(&mut self, down: bool, x: f32, at: f64) {
         self.now = self.now.max(at);
+        self.active_at = Some(self.now);
         self.expire_alarm();
         if down && self.touch_start.is_none() {
             self.touch_start = Some(x);
@@ -626,7 +875,7 @@ impl Engine {
         // The alarm takes every touch: OK acknowledges it, a swipe puts it
         // away, and nothing else does anything.
         if !self.alarm.is_empty() {
-            let ok = crate::WIDTH - ALARM_OK_WIDTH;
+            let ok = alarm_ok().start;
             match gesture {
                 Gesture::Drag { .. } => {
                     self.acknowledge();
@@ -679,12 +928,20 @@ impl Engine {
                 self.stepped_at = None;
             }
             Gesture::Tap { x } => {
-                if let Some(action) = self.widget_at(x).and_then(Widget::tap).cloned() {
+                if let Some((_, key)) = self.media_key_at(x) {
+                    self.act(Action::Media(key));
+                } else if let Some(action) = self.widget_at(x).and_then(Widget::tap).cloned() {
                     self.act(action);
                 }
             }
             Gesture::LongPress { x } => {
-                if let Some(action) = self.widget_at(x).and_then(Widget::hold).cloned() {
+                // A transport key held is a slow tap; the whole card as
+                // play/pause keeps the widget's own long press.
+                let action = match self.media_key_at(x) {
+                    Some((true, key)) => Some(Action::Media(key)),
+                    _ => self.widget_at(x).and_then(Widget::hold).cloned(),
+                };
+                if let Some(action) = action {
                     // It has fired: the zone goes dark, and lifting or
                     // moving the finger now does nothing more.
                     self.ignoring = self.gestures.pressed();
@@ -747,23 +1004,70 @@ impl Engine {
     }
 
     /// A row's zones, drawn, at its own width.
-    fn render_row(&mut self, row: Row, now: &Zoned) -> Canvas {
-        let mut zones = bind_page(self.widgets(row), &self.signals, &self.config.settings, now);
+    fn render_row(&mut self, row: Row, now: &Zoned, marquee: Option<f32>) -> Canvas {
+        let mut zones = self.bind(row, now, marquee);
         self.show_sliders(row, &mut zones);
-        let pressed = match self.pressed {
-            Some(Lit::Zone(r, zone)) if r == row => Some(zone),
-            _ => None,
-        };
+        let touch = self.touch_on(row);
         let width = self.span(row).1;
-        let background = self.theme.palette.background;
-        self.renderer.render_row(&zones, pressed, width, background)
+        let raised = matches!(row, Row::Takeover(_)) && width < crate::WIDTH;
+        self.renderer.render_row(&zones, touch, width, raised)
+    }
+
+    fn bind(&self, row: Row, now: &Zoned, marquee: Option<f32>) -> Vec<Zone> {
+        let ctx = Bind {
+            signals: &self.signals,
+            settings: &self.config.settings,
+            weather: self.config.weather.is_some(),
+            now,
+            mono: self.now,
+            marquee,
+        };
+        bind_page(self.widgets(row), &ctx)
+    }
+
+    /// The finger on `row`, as drawn: the zone lit, the part of it, and how
+    /// far its long press has come.
+    fn touch_on(&self, row: Row) -> Option<Touch> {
+        let Some(Lit::Zone(r, zone, part)) = self.pressed else {
+            return None;
+        };
+        if r != row {
+            return None;
+        }
+        let span = self.zone_span(row, zone);
+        let hold = self.hold().filter(|h| h.zone == span).map(|h| h.progress);
+        Some(Touch { zone, part, hold })
+    }
+
+    /// The transport target under x in a media widget showing a track: its
+    /// index, and whether it is drawn as a key.
+    fn part_at(&self, row: Row, zone: usize, x: f32) -> Option<(usize, bool)> {
+        let widget = &self.widgets(row)[zone];
+        if !matches!(widget, Widget::Media { .. })
+            || media(&self.signals, None) == WidgetView::Media(None)
+        {
+            return None;
+        }
+        let local = x - self.zone_span(row, zone).start as f32;
+        media_keys(widget.width())
+            .iter()
+            .position(|k| k.span.contains(&local))
+            .map(|i| (i, media_keys(widget.width())[i].key))
+    }
+
+    /// The transport command under x, and whether it is drawn as a key.
+    fn media_key_at(&self, x: f32) -> Option<(bool, MediaCommand)> {
+        let (row, zone) = self.hit(x)?;
+        let (part, key) = self.part_at(row, zone, x)?;
+        let width = self.widgets(row)[zone].width();
+        Some((key, media_keys(width)[part].command))
     }
 
     /// Shows the takeover that `signal` sets off, if there is one. The same
     /// takeover again only starts its time over. A different one waits for
     /// no finger: it would swap the widgets out from under a touch. None
     /// shows while the alarm is up, nor afterwards for this change.
-    fn take_over(&mut self, signal: &str) {
+    fn take_over(&mut self, signal: &str, old: Option<&Value>) {
         if !self.alarm.is_empty() {
             return;
         }
@@ -780,14 +1084,51 @@ impl Engine {
         if !same && busy {
             return;
         }
+        // The level before this run of changes: a burst of volume steps
+        // shows the change from where it started.
+        let from = match (signal, old) {
+            ("volume.level", Some(Value::Number(n, _))) => Some((*n / 100.0) as f32),
+            _ => None,
+        };
+        let from = if same {
+            self.cover.and_then(|c| c.from).or(from)
+        } else {
+            from
+        };
         self.cover = Some(Cover {
             index,
             until: None,
             lease: None,
+            from,
         });
         if !same {
-            self.pressed = None;
-            self.dirty = true;
+            self.fade_in(index);
+        }
+    }
+
+    /// A takeover comes up: it fades in over what is there.
+    fn fade_in(&mut self, index: usize) {
+        self.pressed = None;
+        self.dirty = true;
+        self.fade = Some(Fade {
+            index,
+            start: self.now,
+            out: false,
+            from: None,
+        });
+    }
+
+    /// The takeover goes, fading out over the page. Touches go to the page
+    /// at once.
+    fn fade_out(&mut self) {
+        if let Some(c) = self.cover {
+            self.uncover();
+            self.fade = Some(Fade {
+                index: c.index,
+                start: self.now,
+                out: true,
+                from: c.from,
+            });
         }
     }
 
@@ -797,6 +1138,7 @@ impl Engine {
     }
 
     fn uncover(&mut self) {
+        self.fade = None;
         if self.cover.take().is_some() {
             self.pressed = None;
             self.slide = None;
@@ -922,14 +1264,14 @@ impl Engine {
     /// The length of a slider's bar in pixels: the zone less its padding,
     /// so a drag from one end of the bar to the other is the full range.
     fn bar_length(&self, row: Row, zone: usize) -> f32 {
-        let pad = Theme::default().grid.pad_left;
+        let pad = theme::CARD_INSET + theme::PAD;
         (self.widgets(row)[zone].width() as f32 - 2.0 * pad).max(1.0)
     }
 
     /// What a slider shows at rest, 0–1; 0 when it shows nothing.
     fn slider_value(&self, row: Row, zone: usize) -> f32 {
         let last = self.last_set.get(&(row, zone)).copied();
-        match slider(&self.widgets(row)[zone], &self.signals, None, last) {
+        match slider(&self.widgets(row)[zone], &self.signals, None, last, None) {
             WidgetView::Slider {
                 fraction: Some(f), ..
             } => f,
@@ -1017,14 +1359,25 @@ impl Engine {
     /// a finger is on them (drawn held, with a thumb), and a `run`
     /// slider's last value at rest.
     fn show_sliders(&self, row: Row, zones: &mut [Zone]) {
+        // A volume takeover shows the change that brought it up.
+        let from = match row {
+            Row::Takeover(t) => match (self.cover, self.fade) {
+                (Some(c), _) if c.index == t => c.from,
+                (None, Some(f)) if f.out && f.index == t => f.from,
+                _ => None,
+            },
+            Row::Page(_) => None,
+        };
         for (i, widget) in self.widgets(row).iter().enumerate() {
-            if matches!(widget, Widget::Slider { .. }) {
+            if let Widget::Slider { controls, .. } = widget {
                 let held = self
                     .slide
                     .filter(|s| s.zone == i && s.row == row)
                     .map(|s| s.fraction);
                 let last = self.last_set.get(&(row, i)).copied();
-                zones[i].view = slider(widget, &self.signals, held, last);
+                // Kept under a finger: the change is still the news.
+                let from = from.filter(|_| *controls == SliderControl::Volume);
+                zones[i].view = slider(widget, &self.signals, held, last, from);
             }
         }
     }
@@ -1033,14 +1386,14 @@ impl Engine {
     /// press does something, or the alarm's OK key.
     fn lit_at(&self, x: f32) -> Option<Lit> {
         if !self.alarm.is_empty() {
-            return (x >= (crate::WIDTH - ALARM_OK_WIDTH) as f32).then_some(Lit::AlarmOk);
+            return (x >= alarm_ok().start as f32).then_some(Lit::AlarmOk);
         }
-        self.hit(x)
-            .filter(|&(row, zone)| {
-                let w = &self.widgets(row)[zone];
-                w.tap().is_some() || w.hold().is_some()
-            })
-            .map(|(row, zone)| Lit::Zone(row, zone))
+        let (row, zone) = self.hit(x)?;
+        if let Some((part, _)) = self.part_at(row, zone, x) {
+            return Some(Lit::Zone(row, zone, Some(part)));
+        }
+        let w = &self.widgets(row)[zone];
+        (w.tap().is_some() || w.hold().is_some()).then_some(Lit::Zone(row, zone, None))
     }
 
     fn act(&mut self, action: Action) {
@@ -1130,11 +1483,7 @@ impl Engine {
     /// The current page shifted by `offset`, with its neighbour beside it.
     fn slide(&mut self, offset: f32, now: &Zoned) -> Canvas {
         let shift = offset.round() as i32;
-        let mut frame = Canvas::new(
-            crate::WIDTH,
-            crate::HEIGHT,
-            Theme::default().palette.background,
-        );
+        let mut frame = Canvas::new(crate::WIDTH, crate::HEIGHT, theme::GROUND);
         frame.copy_shifted(self.snapshot(self.page, now), shift);
         // The offset has the drag's sign, so it picks the same neighbour.
         if let Some(next) = self.neighbour(offset) {
@@ -1146,19 +1495,19 @@ impl Engine {
             };
             frame.copy_shifted(self.snapshot(next, now), at);
         }
+        let dim = self.brightness(now);
+        let markers = self.markers();
+        self.renderer.draw_markers(&mut frame, &markers, dim);
         frame
     }
 
     fn snapshot(&mut self, page: usize, now: &Zoned) -> &Canvas {
         if !self.snapshots.contains_key(&page) {
-            let mut zones = bind_page(
-                &self.config.pages[page].widgets,
-                &self.signals,
-                &self.config.settings,
-                now,
-            );
+            let mut zones = self.bind(Row::Page(page), now, None);
             self.show_sliders(Row::Page(page), &mut zones);
-            let canvas = self.renderer.render_page(&zones, None);
+            let mut canvas = self.renderer.render_page(&zones, None);
+            let alerts = self.renderer.alerts().to_vec();
+            canvas.dim(self.brightness(now), &alerts);
             self.snapshots.insert(page, canvas);
         }
         &self.snapshots[&page]
@@ -1166,6 +1515,7 @@ impl Engine {
 
     fn go_to(&mut self, index: usize) {
         self.uncover();
+        self.marquee_at = None;
         self.motion = Motion::Still;
         self.pressed = None;
         self.slide = None;
@@ -1185,13 +1535,12 @@ impl Engine {
             .unwrap_or(self.page.min(config.pages.len() - 1));
         if config.settings.font != self.font || config.settings.accent != self.theme.accent {
             self.font = config.settings.font;
-            self.theme = Theme {
-                accent: config.settings.accent,
-                ..Theme::default()
-            };
+            self.theme = Theme::new(config.settings.accent);
             self.renderer = Renderer::new(self.theme.clone(), self.font.load());
         }
         self.motion = Motion::Still;
+        self.fade = None;
+        self.marquee_at = None;
         self.pressed = None;
         self.slide = None;
         // A takeover stays if it still exists by name, as an edit to it
@@ -1216,30 +1565,62 @@ impl Engine {
 
 /// The readings with a critical threshold on the layout's pages, by
 /// signal, keeping the state of those in `old`. A signal on several
-/// widgets is watched at the lowest `crit`, named by that widget's label.
+/// widgets is watched at the lowest `crit`, named by that widget's label;
+/// a second reading by the label and its `second_label` ("GPU load").
 fn watches(config: &Config, old: &HashMap<String, Watch>) -> HashMap<String, Watch> {
     let mut out: HashMap<String, Watch> = HashMap::new();
     for page in &config.pages {
         for (widget, signal, _, crit) in thresholds(&page.widgets) {
-            let (Some(crit), Widget::Value { label, .. }) = (crit, widget) else {
+            let (
+                Some(crit),
+                Widget::Value {
+                    label,
+                    signal: first,
+                    second_label,
+                    ..
+                },
+            ) = (crit, widget)
+            else {
                 continue;
             };
+            let is_second = signal != first;
             if out.get(signal).is_some_and(|w| w.crit <= crit) {
                 continue;
             }
             let mut watch = old.get(signal).cloned().unwrap_or(Watch {
                 crit,
                 label: String::new(),
+                icon: icons::ACTIVITY,
                 critical: false,
                 below_since: None,
                 armed: true,
             });
             watch.crit = crit;
-            watch.label = label.clone();
+            watch.label = if is_second {
+                let name = second_label
+                    .clone()
+                    .unwrap_or_else(|| signal.rsplit('.').next().unwrap_or(signal).to_string());
+                format!("{label} {name}").trim().to_string()
+            } else {
+                label.clone()
+            };
+            // The widget's own icon stands for its first reading.
+            watch.icon = widget
+                .icon()
+                .filter(|_| !is_second)
+                .and_then(icons::by_name)
+                .unwrap_or_else(|| icons::for_signal(signal));
             out.insert(signal.to_string(), watch);
         }
     }
     out
+}
+
+/// Where the alarm's red is in its slow breathing at `mono`, 0–1.
+fn breathe(mono: f64) -> f32 {
+    let period = f64::from(theme::MS_ALARM_BREATHE) / 1000.0;
+    let phase = (mono / period).fract() as f32;
+    0.5 - 0.5 * (phase * std::f32::consts::TAU).cos()
 }
 
 /// A slider's 0–1 as the whole percent it sets.
@@ -1326,12 +1707,12 @@ mod tests {
     #[test]
     fn reload_keeps_the_page_by_name() {
         let mut e = Engine::new(Config::default_layout());
-        e.handle(Input::ShowPage(2)); // "Load"
+        e.handle(Input::ShowPage(2)); // "System"
         let mut c = Config::default_layout();
-        c.pages.remove(0); // "Load" is now index 1
+        c.pages.remove(0); // "System" is now index 1
         e.handle(Input::Config(Box::new(c)));
         assert_eq!(e.page(), 1);
-        assert_eq!(e.config().pages[e.page()].name, "Load");
+        assert_eq!(e.config().pages[e.page()].name, "System");
     }
 
     #[test]
@@ -1440,7 +1821,7 @@ mod tests {
         let mut e = tappable();
         let now = at("16:17:05");
         e.frame(&now, 0.0);
-        let lit = Theme::default().palette.pressed;
+        let lit = theme::CARD.mix(theme::KEY, 0.4);
         let lit = [lit.r, lit.g, lit.b];
 
         e.handle(Input::Touch {
@@ -1449,8 +1830,8 @@ mod tests {
             at: 10.0,
         });
         let frame = e.frame(&now, 10.0).expect("the first sample redraws");
-        assert_eq!(pixel(&frame, 150, 2), lit, "media zone lit");
-        assert_ne!(pixel(&frame, 50, 2), lit, "clock zone not lit");
+        assert_eq!(pixel(&frame, 150, 9), lit, "media zone lit");
+        assert_ne!(pixel(&frame, 50, 9), lit, "clock zone not lit");
 
         e.handle(Input::Touch {
             down: false,
@@ -1458,7 +1839,7 @@ mod tests {
             at: 10.1,
         });
         let frame = e.frame(&now, 10.1).expect("lifting redraws");
-        assert_ne!(pixel(&frame, 150, 2), lit);
+        assert_ne!(pixel(&frame, 150, 9), lit);
 
         // No action under the finger: nothing lights, nothing redraws.
         e.handle(Input::Touch {
@@ -1561,7 +1942,7 @@ mod tests {
     #[test]
     fn a_volume_drag_sends_each_level_once_and_never_swipes() {
         let mut e = sliders();
-        let pad = Theme::default().grid.pad_left;
+        let pad = theme::CARD_INSET + theme::PAD;
         drag(&mut e, pad, 200.0 - pad, 0.3);
         let levels: Vec<u8> = e
             .take_effects()
@@ -1604,14 +1985,14 @@ mod tests {
             "media.length".into(),
             Value::Number(200.0, Unit::None),
         ));
-        let pad = Theme::default().grid.pad_left;
+        let pad = theme::CARD_INSET + theme::PAD;
         let mid = 300.0 + 100.0; // the middle of the seek bar
         drag(&mut e, 300.0 + pad, mid, 0.2);
         assert_eq!(e.take_effects(), [Effect::Seek(100.0)]);
 
-        // The run slider's bar is 124 px; with nothing set yet it starts at
-        // 0, so 62 px to the right is 50.
-        drag(&mut e, 520.0, 582.0, 0.1);
+        // The run slider's bar is 118 px; with nothing set yet it starts at
+        // 0, so 59 px to the right is 50.
+        drag(&mut e, 520.0, 579.0, 0.1);
         let fx = e.take_effects();
         let Some(Effect::Run(argv)) = fx.last() else {
             panic!("{fx:?}")
@@ -1621,7 +2002,7 @@ mod tests {
         // next drag starts from.
         drag(&mut e, 600.0, 600.0, 0.1);
         assert!(e.take_effects().is_empty());
-        drag(&mut e, 600.0, 569.0, 0.1);
+        drag(&mut e, 600.0, 570.5, 0.1);
         let fx = e.take_effects();
         assert!(
             matches!(fx.last(), Some(Effect::Run(argv)) if argv[3] == "25"),
@@ -1771,6 +2152,33 @@ mod tests {
     }
 
     #[test]
+    fn a_takeover_fades_in_and_out_and_frames_come_only_while_it_moves() {
+        let mut e = covered();
+        let now = at("16:17:05");
+        e.handle(title("First"));
+        let page = e.frame(&now, 0.0).expect("the page").rgba().to_vec();
+        e.tick(10.0);
+        e.handle(title("Second"));
+        let mid = e.frame(&now, 10.1).expect("fading in").rgba().to_vec();
+        assert_eq!(e.next_wait(&now, 10.1), Some(Duration::ZERO), "paced");
+        let full = e.frame(&now, 10.5).expect("faded in").rgba().to_vec();
+        assert!(mid != page && mid != full, "part way between the two");
+        assert!(e.next_wait(&now, 10.5) > Some(Duration::from_secs(4)));
+        assert!(e.frame(&now, 11.0).is_none(), "nothing moves: no frame");
+        // At its time the takeover fades out over the page, from the frame
+        // that finds it over.
+        let mut t = 14.0;
+        while e.takeover().is_some() {
+            t += 0.05;
+            e.frame(&now, t);
+        }
+        assert!(t < 15.5, "over after its five seconds: {t}");
+        let out = e.frame(&now, t + 0.15).expect("fading out").rgba().to_vec();
+        assert!(out != page && out != full);
+        assert_eq!(e.frame(&now, 16.0).expect("gone").rgba(), &page[..]);
+    }
+
+    #[test]
     fn no_takeover_for_what_the_page_already_shows() {
         let mut e = covered();
         e.handle(Input::ShowPage(1)); // the media page
@@ -1831,6 +2239,7 @@ mod tests {
         e.handle(show());
         assert_eq!(e.takeover(), Some("Volume"));
         e.frame(&now, 0.0);
+        e.frame(&now, 1.0); // its fade in is over
         assert!(e.frame(&now, 10.0).is_none(), "longer than its own 2 s");
         e.handle(show());
         e.frame(&now, 10.0);
@@ -1884,14 +2293,18 @@ mod tests {
     }
 
     #[test]
-    fn a_forgotten_signal_shows_no_data_and_returns_as_new() {
+    fn a_forgotten_signal_is_shown_lost_and_returns_as_new() {
         let mut e = covered();
         let now = at("16:17:05");
         e.handle(title("First"));
         e.handle(Input::ShowPage(1)); // the media page
         e.frame(&now, 0.0);
         e.handle(Input::Forget("media.title".into()));
-        assert!(e.signals().get("media.title").is_none());
+        assert!(e.signals().live("media.title").is_none());
+        assert!(
+            e.signals().lost_at("media.title").is_some(),
+            "kept, as lost"
+        );
         assert!(e.frame(&now, 0.1).is_some(), "redrawn without it");
         e.handle(Input::ShowPage(0));
         e.handle(title("Second"));
@@ -1947,8 +2360,8 @@ mod tests {
     #[test]
     fn a_drag_moves_the_value_by_the_distance_from_where_it_was() {
         let mut e = sliders();
-        let pad = Theme::default().grid.pad_left;
-        let half = (200.0 - 2.0 * pad) / 2.0; // half the volume bar: 92 px
+        let pad = theme::CARD_INSET + theme::PAD;
+        let half = (200.0 - 2.0 * pad) / 2.0; // half the volume bar: 89 px
         volume(&mut e, 40.0);
         // From anywhere on the bar: half its length is half the range.
         drag(&mut e, 20.0, 20.0 + half, 0.3);
@@ -1975,12 +2388,7 @@ mod tests {
         });
         let slide = e.slide.expect("the slider has the touch");
         assert!((slide.fraction - 0.4).abs() < 1e-6, "{slide:?}");
-        let mut zones = bind_page(
-            &e.config.pages[0].widgets,
-            &e.signals,
-            &e.config.settings,
-            &at("16:17:05"),
-        );
+        let mut zones = e.bind(Row::Page(0), &at("16:17:05"), None);
         e.show_sliders(Row::Page(0), &mut zones);
         assert!(matches!(
             zones[0].view,
@@ -2030,11 +2438,8 @@ mod tests {
         assert_eq!(e.hold().map(|h| h.progress), Some(0.0));
         e.tick(10.25);
         assert_eq!(e.hold().map(|h| h.progress), Some(0.5), "half way");
-        assert_eq!(
-            e.next_wait(&now, 10.25),
-            Some(Duration::from_millis(250)),
-            "wakes for the threshold"
-        );
+        assert!(e.animating(), "the fill is drawn as it grows");
+        assert_eq!(e.next_wait(&now, 10.25), Some(Duration::ZERO));
         e.tick(10.5);
         assert_eq!(
             e.take_effects(),
@@ -2153,18 +2558,21 @@ mod tests {
             (
                 alarm.label.as_str(),
                 alarm.value.as_str(),
-                alarm.unit.as_str()
+                alarm.limit.as_str()
             ),
-            ("CPU", "92", "°C")
+            ("CPU", "92°", "90°")
         );
-        assert_eq!((alarm.count, alarm.ok.clone()), (1, 520..640));
+        assert_eq!((alarm.count, alarm.ok.clone()), (1, 546..640));
         let frame = e.frame(&now, 1.0).expect("drawn at once");
-        let crit = Theme::default().palette.crit;
-        assert_eq!(pixel(&frame, 300, 2), [crit.r, crit.g, crit.b], "filled");
-        // A tap off the OK key does nothing; on it, acknowledges.
+        let [r, g, _] = pixel(&frame, 300, 2);
+        assert!(r > 160 && g < 70, "filled red, breathing: {r} {g}");
+        // A tap off the OK key does nothing, even just left of it; on it,
+        // acknowledges.
         trace(&mut e, &[(2.0, 100.0), (2.05, 100.0)], 2.1);
         assert!(e.alarm().is_some());
-        trace(&mut e, &[(3.0, 600.0), (3.05, 600.0)], 3.1);
+        trace(&mut e, &[(2.3, 540.0), (2.35, 540.0)], 2.4);
+        assert!(e.alarm().is_some(), "540 is left of the key");
+        trace(&mut e, &[(3.0, 550.0), (3.05, 550.0)], 3.1);
         assert_eq!(e.alarm(), None, "acknowledged");
         assert!(e.take_effects().is_empty());
         assert!(e.frame(&now, 3.1).is_some(), "the page again");
@@ -2188,12 +2596,38 @@ mod tests {
     }
 
     #[test]
+    fn the_alarm_says_when_the_reading_is_back_under() {
+        let mut e = alarmed();
+        reading(&mut e, 0.0, "cpu.temp", 95.0);
+        let words = |e: &Engine| e.alarm().map(|a| a.view().headline);
+        assert_eq!(words(&e).as_deref(), Some("CPU is too hot"));
+        reading(&mut e, 1.0, "cpu.temp", 74.0);
+        let view = e.alarm().expect("still up").view();
+        assert_eq!(
+            (
+                view.headline.as_str(),
+                view.detail.as_str(),
+                view.value.as_str()
+            ),
+            (
+                "CPU was too hot",
+                "Back under its 90° limit · check the fans",
+                "74°"
+            )
+        );
+        reading(&mut e, 2.0, "cpu.temp", 93.0);
+        assert_eq!(words(&e).as_deref(), Some("CPU is too hot"), "over again");
+    }
+
+    #[test]
     fn the_alarm_clears_itself_ten_seconds_after_the_reading_drops() {
         let mut e = alarmed();
         let now = at("16:17:05");
         reading(&mut e, 0.0, "cpu.temp", 95.0);
         reading(&mut e, 5.0, "cpu.temp", 80.0);
-        assert_eq!(e.next_wait(&now, 5.0), Some(Duration::from_secs(10)));
+        // The red breathes, so it wakes often; it clears at 15 s.
+        let wait = e.next_wait(&now, 5.0).expect("a wake-up");
+        assert!(wait <= Duration::from_millis(80), "{wait:?}");
         e.tick(14.9);
         assert!(e.alarm().is_some(), "not yet");
         reading(&mut e, 14.9, "cpu.temp", 91.0);
@@ -2252,11 +2686,12 @@ mod tests {
             ("GPU", 2),
             "the most recent"
         );
-        // A second reading has its own threshold and label.
+        // A second reading has its own threshold, and is named by the
+        // widget's label and its own (here none: the signal's last word).
         reading(&mut e, 2.0, "mem.used", 97.0);
         assert_eq!(
             (alarm_label(&e).as_deref(), e.alarm().unwrap().count),
-            (Some("Load"), 3)
+            (Some("Load used"), 3)
         );
         trace(&mut e, &[(3.0, 630.0), (3.05, 630.0)], 3.1);
         assert_eq!(e.alarm(), None, "all acknowledged");
@@ -2506,6 +2941,155 @@ mod tests {
                 Effect::Act(Action::Run(vec!["notify-send".into(), "held".into()])),
             ]
         );
+    }
+
+    // Dimming.
+
+    #[test]
+    fn the_strip_dims_when_idle_and_at_night_but_not_over_trouble() {
+        let mut e = alarmed();
+        let day = at("16:17:05");
+        reading(&mut e, 0.0, "cpu.temp", 50.0);
+        assert!(e.frame(&day, 0.0).is_some());
+        let idle = f64::from(theme::IDLE_DIM_AFTER_S);
+        assert_eq!(e.brightness(&day), 1.0);
+        // Wakes in time to dim (the clock's minute may come first).
+        assert!(e.next_wait(&day, 1.0) <= Some(Duration::from_secs_f64(idle - 1.0)));
+        e.tick(idle + 1.0);
+        assert_eq!(e.brightness(&day), theme::IDLE_DIM);
+        // A touch wakes it.
+        trace(&mut e, &[(idle + 2.0, 300.0)], idle + 2.05);
+        assert_eq!(e.brightness(&day), 1.0);
+        // A warning on any page keeps it bright.
+        reading(&mut e, idle + 3.0, "gpu.temp", 80.0);
+        e.tick(2.0 * idle + 10.0);
+        assert_eq!(e.brightness(&day), 1.0, "a warning is showing");
+        reading(&mut e, 2.0 * idle + 11.0, "gpu.temp", 60.0);
+        assert_eq!(e.brightness(&day), theme::IDLE_DIM);
+
+        // Night: dimmer still, whatever the touches; the alarm undims.
+        let mut c = e.config.clone();
+        c.settings.night = Config::parse(
+            "[settings]\nnight = { from = \"22:30\", to = \"07:00\" }\n[[page]]\nname = \"A\"\n",
+        )
+        .unwrap()
+        .settings
+        .night;
+        c.settings.idle_dim = false;
+        e.handle(Input::Config(Box::new(c)));
+        let late = at("23:40:00");
+        assert_eq!(e.brightness(&day), 1.0, "idle_dim off");
+        assert_eq!(e.brightness(&late), theme::NIGHT_DIM);
+        reading(&mut e, 2.0 * idle + 20.0, "cpu.temp", 95.0);
+        assert!(e.alarm().is_some());
+        assert_eq!(e.brightness(&late), 1.0, "the alarm is never dimmed");
+    }
+
+    // Media transport keys.
+
+    /// A media widget of each width on one page, from x = 0, playing.
+    fn media_row(widths: &[u32]) -> Engine {
+        let mut text = String::from("[[page]]\nname = \"A\"\n");
+        for w in widths {
+            text.push_str(&format!(
+                "[[page.widget]]\ntype = \"media\"\nwidth = {w}\nhold = {{ media = \"next\" }}\n"
+            ));
+        }
+        let mut e = Engine::new(Config::parse(&text).unwrap());
+        for (name, v) in [
+            ("media.title", "Weird Fishes"),
+            ("media.artist", "Radiohead"),
+            ("media.status", "Playing"),
+        ] {
+            e.handle(Input::Signal(name.into(), Value::Text(v.into())));
+        }
+        assert!(e.frame(&at("16:17:05"), 0.0).is_some());
+        e
+    }
+
+    /// The middle of each drawn target of a media widget `width` wide that
+    /// starts at `x0`.
+    fn key_centres(x0: f32, width: u32) -> Vec<f32> {
+        media_keys(width)
+            .iter()
+            .map(|k| x0 + (k.span.start + k.span.end) / 2.0)
+            .collect()
+    }
+
+    fn media_act(c: MediaCommand) -> Effect {
+        Effect::Act(Action::Media(c))
+    }
+
+    #[test]
+    fn media_keys_are_where_they_are_drawn() {
+        // Compact (128), medium (200), hero with one key (312).
+        let mut e = media_row(&[128, 200, 312]);
+        let compact = key_centres(0.0, 128);
+        let hero = key_centres(328.0, 312);
+        assert_eq!((compact.len(), hero.len()), (1, 1));
+        press(&mut e, compact[0], 0.05);
+        press(&mut e, 228.0, 0.05); // anywhere on the medium card
+        press(&mut e, hero[0], 0.05);
+        assert_eq!(
+            e.take_effects(),
+            vec![media_act(MediaCommand::PlayPause); 3]
+        );
+        // Beside a compact or hero key is the widget, which has no tap.
+        press(&mut e, 120.0, 0.05);
+        press(&mut e, 340.0, 0.05);
+        assert!(e.take_effects().is_empty());
+        // A long press on a key is a slow tap; on the medium card, whose
+        // whole face is the key, it is the widget's own hold.
+        press(&mut e, compact[0], 0.9);
+        press(&mut e, 228.0, 0.9);
+        assert_eq!(
+            e.take_effects(),
+            [
+                media_act(MediaCommand::PlayPause),
+                media_act(MediaCommand::Next),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wide_media_widget_has_three_keys_in_order() {
+        let mut e = media_row(&[428]);
+        let keys = key_centres(0.0, 428);
+        assert_eq!(keys.len(), 3);
+        for x in &keys {
+            press(&mut e, *x, 0.05);
+        }
+        assert_eq!(
+            e.take_effects(),
+            [
+                media_act(MediaCommand::Previous),
+                media_act(MediaCommand::PlayPause),
+                media_act(MediaCommand::Next),
+            ]
+        );
+        // Between two keys, and on the title, is the widget: it has no tap.
+        let spans = media_keys(428);
+        press(
+            &mut e,
+            (spans[0].span.end + spans[1].span.start) / 2.0,
+            0.05,
+        );
+        press(&mut e, 40.0, 0.05);
+        assert!(e.take_effects().is_empty());
+    }
+
+    #[test]
+    fn nothing_playing_has_no_keys() {
+        let config = Config::parse(
+            "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"media\"\nwidth = 428\n",
+        )
+        .unwrap();
+        let mut e = Engine::new(config);
+        assert!(e.frame(&at("16:17:05"), 0.0).is_some());
+        for x in key_centres(0.0, 428) {
+            press(&mut e, x, 0.05);
+        }
+        assert!(e.take_effects().is_empty());
     }
 
     #[test]
