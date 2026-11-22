@@ -5,7 +5,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { Theme, Icon, Glyph } from "theme.slint";
-import { Button, TextField, Select, Segmented, Chip, Hint, Label } from "controls.slint";
+import { Button, TextField, Select, Segmented, Chip, Hint, Label, FocusRing } from "controls.slint";
 
 /// One setting, as the form shows it.
 export struct Field {
@@ -52,6 +52,8 @@ export global Grid {
 export component Picker inherits Rectangle {
     in property <[PickRow]> rows;
     in property <string> title;
+    /// Lists the strip's icons instead of readings.
+    in property <bool> icons;
     callback filter(string);
     callback pick(string);
     width: 0px;
@@ -76,7 +78,7 @@ export component Picker inherits Rectangle {
             padding: 8px;
             spacing: 6px;
             search := TextField {
-                placeholder: @tr("Search readings");
+                placeholder: root.icons ? @tr("Search icons") : @tr("Search readings");
                 leading-icon: Glyph.search;
                 label: root.title;
                 init => {
@@ -172,7 +174,7 @@ export component Picker inherits Rectangle {
                 }
             }
             if root.rows.length == 0: Hint {
-                text: @tr("Nothing matches. A reading appears here once a source publishes it.");
+                text: root.icons ? @tr("No icon by that name.") : @tr("Nothing matches. A reading appears here once a source publishes it.");
                 horizontal-alignment: center;
             }
         }
@@ -247,12 +249,18 @@ export component FieldRow inherits HorizontalLayout {
                 }
             }
         }
-        if root.field.kind == "signal": signal-button := Rectangle {
+        if root.field.kind == "signal" || root.field.kind == "icon": signal-button := Rectangle {
             height: 44px;
             border-radius: Theme.r-control;
             background: sig-touch.has-hover && root.enabled ? Theme.raised.brighter(0.06) : Theme.raised;
             border-width: 1px;
-            border-color: sig-focus.has-focus ? Theme.act-line : Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
+            border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
+            FocusRing {
+                width: parent.width + 8px;
+                height: parent.height + 8px;
+                radius: Theme.r-control;
+                shown: sig-focus.has-focus;
+            }
             opacity: root.enabled ? 1 : 0.55;
             accessible-role: combobox;
             accessible-label: root.field.label;
@@ -282,7 +290,7 @@ export component FieldRow inherits HorizontalLayout {
                     alignment: center;
                     horizontal-stretch: 1;
                     Text {
-                        text: root.field.value == "" ? @tr("Choose a reading") : root.field.shown;
+                        text: root.field.value == "" ? (root.field.kind == "icon" ? @tr("The widget's own") : @tr("Choose a reading")) : root.field.shown;
                         font-family: Theme.font;
                         font-size: Theme.size-body;
                         font-weight: 500;
@@ -336,7 +344,8 @@ export component FieldRow inherits HorizontalLayout {
                 x: 0;
                 y: parent.height + 4px;
                 rows: root.picks;
-                title: @tr("Search readings for {}", root.field.label);
+                icons: root.field.kind == "icon";
+                title: root.field.kind == "icon" ? @tr("Choose an icon") : @tr("Search readings for {}", root.field.label);
                 filter(text) => {
                     root.picker-filter(text);
                 }
@@ -388,7 +397,7 @@ export component FieldRow inherits HorizontalLayout {
             border-radius: Theme.r-control;
             background: Theme.dark ? Theme.ground : Theme.surface;
             border-width: 1px;
-            border-color: note.has-focus ? Theme.act-line : Theme.line-strong;
+            border-color: Theme.line-strong;
             clip: true;
             note := TextInput {
                 x: 10px;

@@ -10,7 +10,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use nexus_core::config::{Action, GraphStyle, MediaCommand, SLIDER_VALUE, SliderControl, Widget};
+use nexus_core::config::{
+    Action, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, SLIDER_VALUE, SliderControl, Widget,
+};
 
 /// A widget's values by key, in the window's words.
 pub type Values = BTreeMap<String, String>;
@@ -46,6 +48,8 @@ pub enum Kind {
     Segmented(Vec<String>),
     /// The signals that set off a takeover, as chips.
     Triggers,
+    /// An icon's name, chosen from the picker of the strip's icons.
+    Icon,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,17 +149,13 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
             ..
         } => {
             put("type", READING);
-            // "20 60", or empty; in the shown unit, like the thresholds.
-            put(
-                "scale",
-                &scale.map_or(String::new(), |[lo, hi]| {
-                    format!(
-                        "{} {}",
-                        number(threshold_out(lo, signal, ctx)),
-                        number(threshold_out(hi, signal, ctx))
-                    )
-                }),
-            );
+            // The bar's ends, or empty; in the shown unit, like the
+            // thresholds.
+            let end = |i: usize| {
+                scale.map_or(String::new(), |s| number(threshold_out(s[i], signal, ctx)))
+            };
+            put("scale_from", &end(0));
+            put("scale_to", &end(1));
             put("second_label", second_label.as_deref().unwrap_or_default());
             put("label", label);
             put("signal", signal);
@@ -318,21 +318,24 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
                     "Choose the second signal its thresholds are for.".into(),
                 ));
             }
-            let scale = match get("scale")
-                .split_whitespace()
-                .map(str::parse::<f64>)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(v) if v.is_empty() => None,
-                Ok(v) if v.len() == 2 && v[0] < v[1] => Some([
-                    threshold_in(v[0], &signal, ctx),
-                    threshold_in(v[1], &signal, ctx),
-                ]),
-                _ => {
-                    return Err(Missing::Invalid(
-                        "The scale is two numbers, the lowest first.".into(),
-                    ));
-                }
+            let scale = match (get("scale_from"), get("scale_to")) {
+                ("", "") => None,
+                (from, to) => match (from.parse::<f64>(), to.parse::<f64>()) {
+                    (Ok(lo), Ok(hi)) if lo < hi => Some([
+                        threshold_in(lo, &signal, ctx),
+                        threshold_in(hi, &signal, ctx),
+                    ]),
+                    (Ok(_), Ok(_)) => {
+                        return Err(Missing::Invalid(
+                            "The bar's end must be above its start.".into(),
+                        ));
+                    }
+                    _ => {
+                        return Err(Missing::Incomplete(
+                            "Give the bar both ends, or leave both empty.".into(),
+                        ));
+                    }
+                },
             };
             Widget::Value {
                 second,
@@ -482,7 +485,9 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
         "width",
         "Width",
         Kind::Number,
-        "In strip pixels; dragging the grip on the strip does the same. The widget on its right gives or takes the difference.".into(),
+        format!(
+            "{MIN_WIDGET_WIDTH} to 640 strip pixels. Dragging the grip on the strip does the same, and the widget on its right gives or takes the difference."
+        ),
     );
     match ty.as_str() {
         READING => {
@@ -495,12 +500,16 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             );
             let unit = threshold_unit(&get("signal"), ctx);
             add(
-                "scale",
-                "Bar from–to",
-                Kind::Text,
-                format!(
-                    "Two numbers{unit}, the lowest first, as in: 20 60. Empty: the signal's usual scale."
-                ),
+                "scale_from",
+                "Bar starts at",
+                Kind::Number,
+                format!("The empty bar's value{unit}. Both empty: the signal's usual scale."),
+            );
+            add(
+                "scale_to",
+                "Bar ends at",
+                Kind::Number,
+                format!("The full bar's value{unit}."),
             );
             add(
                 "warn",
@@ -550,8 +559,8 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             add(
                 "icon",
                 "Icon",
-                Kind::Text,
-                "The icon's name, as in: play.".into(),
+                Kind::Icon,
+                "Drawn on the key. Its name is how a layout file writes it.".into(),
             );
             add("label", "Label", Kind::Text, String::new());
             add(
@@ -608,8 +617,8 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
         add(
             "icon",
             "Icon",
-            Kind::Text,
-            "Optional: an icon's name, as in: thermometer. Empty: the widget's own.".into(),
+            Kind::Icon,
+            "Optional: another icon than the widget's own.".into(),
         );
     }
     for (prefix, label) in [("tap", "Tap"), ("hold", "Long press")] {
@@ -1020,21 +1029,30 @@ mod tests {
         );
         // A bar's scale is typed in the shown unit too, and named where
         // the second reading is named.
-        let Outcome::Send(scaled) = apply(&with, &Values::new(), "scale", "86 212", &ctx) else {
+        // One end alone is a draft; the other end sends it.
+        let Outcome::Draft(draft, _) = apply(&with, &Values::new(), "scale_from", "86", &ctx)
+        else {
+            panic!("not a draft");
+        };
+        let Outcome::Send(scaled) = apply(&with, &draft, "scale_to", "212", &ctx) else {
             panic!("not sent");
         };
         let Widget::Value { scale, .. } = &scaled else {
             panic!("not a value");
         };
         assert_eq!(*scale, Some([30.0, 100.0]));
-        assert_eq!(flatten(&scaled, &ctx)["scale"], "86 212");
+        let v = flatten(&scaled, &ctx);
+        assert_eq!(
+            (v["scale_from"].as_str(), v["scale_to"].as_str()),
+            ("86", "212")
+        );
         let shown: Vec<String> = fields(&flatten(&scaled, &ctx), &ctx)
             .into_iter()
             .map(|f| f.key)
             .collect();
         assert!(shown.contains(&"second_label".into()) && shown.contains(&"icon".into()));
         assert!(matches!(
-            apply(&scaled, &Values::new(), "scale", "60 20", &ctx),
+            apply(&scaled, &Values::new(), "scale_to", "20", &ctx),
             Outcome::Invalid(_)
         ));
     }

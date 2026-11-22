@@ -556,8 +556,8 @@ export component AppWindow inherits Window {
                                 }
                             }
                             FocusRing {
-                                width: parent.width + 6px;
-                                height: parent.height + 6px;
+                                width: parent.width + 8px;
+                                height: parent.height + 8px;
                                 shown: chip-focus.has-focus;
                                 radius: 16px;
                             }
@@ -847,7 +847,7 @@ export component AppWindow inherits Window {
                                     border-radius: 12px;
                                     background: Theme.bezel;
                                     border-width: row.active ? 2px : 1px;
-                                    border-color: row.active && !root.trying ? Theme.act-line.transparentize(0.3) : row.active ? Theme.line-strong : Theme.dark ? Theme.line : Theme.bezel;
+                                    border-color: row.active && !root.trying ? Theme.text-2 : row.active ? Theme.line-strong : Theme.dark ? Theme.line : Theme.bezel;
                                     accessible-role: button;
                                     accessible-label: row.live && root.status.tone == "ok"
                                         ? @tr("{}, on the strip. {}", row.name, row.summary)
@@ -989,7 +989,7 @@ export component AppWindow inherits Window {
                                                 width: zone.width * root.unit;
                                                 border-radius: 4px * root.zoom;
                                                 border-width: i == root.selected ? 2px : 1px;
-                                                border-color: i == root.selected ? Theme.accent-base : #fbf1e333;
+                                                border-color: i == root.selected ? #d2c2ad : #fbf1e333;
                                                 accessible-role: list-item;
                                                 accessible-label: @tr("{}, {} pixels wide", zone.name, zone.width);
                                                 accessible-item-selectable: true;
@@ -1465,7 +1465,7 @@ export component AppWindow inherits Window {
                                         }
                                         Text {
                                             text: !root.connected ? @tr("not live while disconnected")
-                                                : @tr("every reading the strip can show, by its raw name ({})", root.signal-rows.length);
+                                                : @tr("every reading the strip can show ({})", root.signal-rows.length);
                                             font-family: Theme.font;
                                             font-size: Theme.size-label;
                                             color: Theme.text-3;
@@ -1493,8 +1493,8 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     FocusRing {
-                                        width: parent.width + 6px;
-                                        height: parent.height + 6px;
+                                        width: parent.width + 8px;
+                                        height: parent.height + 8px;
                                         shown: drawer-focus.has-focus;
                                     }
                                 }
@@ -1511,25 +1511,26 @@ export component AppWindow inherits Window {
                                             padding-left: 6px;
                                             padding-right: 6px;
                                             accessible-role: list-item;
-                                            accessible-label: s.id + ", " + s.name + ", " + s.value;
+                                            accessible-label: s.name + ", " + s.value + ". " + s.id;
                                             Icon {
                                                 glyph: s.icon;
                                                 fill: true;
                                                 width: 18px;
                                             }
                                             Text {
-                                                text: s.id;
+                                                text: s.name;
                                                 font-family: Theme.font;
                                                 font-size: Theme.size-label;
                                                 color: Theme.text;
                                                 vertical-alignment: center;
-                                                width: 160px;
+                                                width: 200px;
                                                 overflow: elide;
                                             }
+                                            // The raw name, for a layout file or a script.
                                             Text {
-                                                text: s.name;
+                                                text: s.id;
                                                 font-family: Theme.font;
-                                                font-size: Theme.size-label;
+                                                font-size: Theme.size-small;
                                                 color: Theme.text-3;
                                                 vertical-alignment: center;
                                                 horizontal-stretch: 1;
@@ -1853,9 +1854,15 @@ export component AppWindow inherits Window {
                     height: 48 * root.unit + 84px;
                     border-radius: Theme.r-surface;
                     background: tile-touch.has-hover && root.can-add ? Theme.surface-2 : Theme.surface;
-                    border-width: tile-focus.has-focus ? 2px : 1px;
-                    border-color: tile-focus.has-focus ? Theme.act-line : Theme.line;
+                    border-width: 1px;
+                    border-color: Theme.line;
                     opacity: root.can-add ? 1 : 0.5;
+                    FocusRing {
+                        width: parent.width + 8px;
+                        height: parent.height + 8px;
+                        radius: Theme.r-surface;
+                        shown: tile-focus.has-focus;
+                    }
                     accessible-role: button;
                     accessible-label: @tr("{}: {}", t.name, t.about);
                     accessible-enabled: root.can-add;
@@ -1947,10 +1954,16 @@ export component AppWindow inherits Window {
                 height: 48px + 82px;
                 border-radius: Theme.r-surface;
                 background: st-touch.has-hover ? Theme.surface-2 : Theme.surface;
-                border-width: st-focus.has-focus ? 2px : 1px;
-                border-color: st-focus.has-focus ? Theme.act-line : Theme.line;
+                border-width: 1px;
+                border-color: Theme.line;
                 accessible-role: button;
                 accessible-label: @tr("{}: {}", s.name, s.about);
+                FocusRing {
+                    width: parent.width + 8px;
+                    height: parent.height + 8px;
+                    radius: Theme.r-surface;
+                    shown: st-focus.has-focus;
+                }
                 accessible-action-default => {
                     root.choose-starter(i);
                     root.sheet = "";
@@ -2171,10 +2184,28 @@ export component AppWindow inherits Window {
                                 }
                             }
                             FocusRing {
-                                width: parent.width + 6px;
-                                height: parent.height + 6px;
+                                width: parent.width + 8px;
+                                height: parent.height + 8px;
                                 shown: sw-focus.has-focus;
                                 radius: 17px;
+                            }
+                            // Its name, as a tooltip: above, where nothing
+                            // drawn later covers it.
+                            if sw-touch.has-hover || sw-focus.has-focus: Rectangle {
+                                y: -30px;
+                                x: (parent.width - self.width) / 2;
+                                width: sw-name.preferred-width + 16px;
+                                height: 24px;
+                                border-radius: 6px;
+                                background: Theme.text;
+                                sw-name := Text {
+                                    text: root.accent-names[i];
+                                    font-family: Theme.font;
+                                    font-size: Theme.size-small;
+                                    font-weight: 500;
+                                    color: Theme.surface;
+                                    accessible-role: none;
+                                }
                             }
                         }
                         for item in [{ v: root.pref-accent, epoch: root.resets }]: TextField {

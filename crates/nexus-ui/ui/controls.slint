@@ -11,9 +11,9 @@ import { Theme, Icon, Glyph } from "theme.slint";
 export component FocusRing inherits Rectangle {
     in property <bool> shown;
     in property <length> radius: Theme.r-control;
-    x: -3px;
-    y: -3px;
-    border-radius: radius + 3px;
+    x: -4px;
+    y: -4px;
+    border-radius: radius + 4px;
     border-width: shown ? 2px : 0px;
     border-color: Theme.act-line;
 }
@@ -108,8 +108,8 @@ export component Button inherits Rectangle {
         }
     }
     FocusRing {
-        width: parent.width + 6px;
-        height: parent.height + 6px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
         shown: focus.has-focus;
     }
 }
@@ -164,8 +164,8 @@ export component IconButton inherits Rectangle {
         }
     }
     FocusRing {
-        width: parent.width + 6px;
-        height: parent.height + 6px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
         shown: focus.has-focus;
     }
 }
@@ -257,8 +257,8 @@ export component Segmented inherits Rectangle {
         }
     }
     FocusRing {
-        width: parent.width + 6px;
-        height: parent.height + 6px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
         shown: focus.has-focus;
     }
 }
@@ -346,7 +346,7 @@ export component TextField inherits Rectangle {
     border-radius: Theme.r-control;
     background: root.enabled ? (Theme.dark ? Theme.ground : Theme.surface) : Theme.surface-2;
     border-width: 1px;
-    border-color: input.has-focus ? Theme.act-line : Theme.line-strong;
+    border-color: Theme.line-strong;
     horizontal-stretch: 1;
     min-width: 80px;
 
@@ -400,6 +400,11 @@ export component TextField inherits Rectangle {
                 accessible-role: none;
             }
         }
+    }
+    FocusRing {
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        shown: input.has-focus;
     }
 }
 
@@ -475,8 +480,8 @@ export component Select inherits Rectangle {
         }
     }
     FocusRing {
-        width: parent.width + 6px;
-        height: parent.height + 6px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
         shown: focus.has-focus;
     }
     popup := PopupWindow {

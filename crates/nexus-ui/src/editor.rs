@@ -477,6 +477,39 @@ impl Editor {
         let Some(key) = self.picking.clone() else {
             return;
         };
+        if key == "icon" {
+            let now = self
+                .shown
+                .iter()
+                .find(|f| f.key == key)
+                .map(|f| f.value.trim().to_string())
+                .unwrap_or_default();
+            let filter = self.pick_filter.trim().to_lowercase();
+            let own = PickRow {
+                chosen: now.is_empty(),
+                id: SharedString::new(),
+                name: "The widget's own".into(),
+                icon: SharedString::new(),
+                value: SharedString::new(),
+            };
+            let rows: Vec<PickRow> = std::iter::once(own)
+                .filter(|_| filter.is_empty())
+                .chain(
+                    nexus_core::icons::NAMES
+                        .iter()
+                        .filter(|(n, _)| filter.is_empty() || n.replace('-', " ").contains(&filter))
+                        .map(|(n, c)| PickRow {
+                            chosen: now == *n,
+                            id: (*n).into(),
+                            name: icon_title(n).into(),
+                            icon: c.to_string().into(),
+                            value: SharedString::new(),
+                        }),
+                )
+                .collect();
+            update_in_place(&self.picks, rows, |a, b| a.id == b.id);
+            return;
+        }
         let ctx = self.context();
         let chosen: Vec<String> = if key == takeovers::ON_CHANGE {
             self.takeover_values()
@@ -2390,6 +2423,7 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
         Kind::Number => ("number", Vec::new()),
         Kind::Note => ("note", Vec::new()),
         Kind::Triggers => ("triggers", Vec::new()),
+        Kind::Icon => ("icon", Vec::new()),
         Kind::Choice(options) => ("choice", options.clone()),
         Kind::Segmented(options) => ("segmented", options.clone()),
     };
@@ -2411,6 +2445,12 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
                 }
             });
         (named.name, named.icon.to_string(), reading)
+    } else if matches!(f.kind, Kind::Icon) {
+        let name = f.value.trim();
+        match nexus_core::icons::by_name(name) {
+            Some(glyph) => (icon_title(name), glyph.to_string(), String::new()),
+            None => Default::default(),
+        }
     } else {
         Default::default()
     };
@@ -2431,6 +2471,15 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
         icon: icon.into(),
         reading: reading.into(),
     }
+}
+
+/// "globe-simple" as a person would say it: "Globe simple".
+fn icon_title(name: &str) -> String {
+    let mut s = name.replace('-', " ");
+    if let Some(first) = s.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    s
 }
 
 /// An undo or redo label, cut short: the buttons' width counts toward
