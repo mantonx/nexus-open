@@ -1,0 +1,5 @@
+# Nexus Open: start the strip's daemon for every user who logs in.
+# The package's install script applies it (systemctl --global preset).
+# To keep it off for everyone, write "disable nexusd.service" to
+# /etc/systemd/user-preset/80-nexus-open.preset, which overrides this file.
+enable nexusd.service

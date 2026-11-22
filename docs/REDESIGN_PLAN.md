@@ -607,7 +607,9 @@ golang` finds nothing outside the changelog.
   Verified with VLC (play, pause, seek, quit) and Matt's browser.
 - 2026-11-14 — Phase 3 step 3: `nexusd` is Matt's daily driver, as a
   sandboxed user service (`packaging/systemd/nexusd.service`, exposure 4.3
-  "OK"; device access limited to hidraw and NVIDIA's control devices).
+  "OK"). Corrected 2026-11-22: device access was never limited. As a user
+  unit, its `DevicePolicy`/`DeviceAllow` lines were not enforced, so the
+  service could open any device the user can; see the entry that day.
   `scripts/nexusd-dev-install.sh` builds, installs to `~/.local/bin`, and
   restarts it; rerun after each change. **GATE clock started:** the
   two-week daily-driver trial runs to 2026-11-28.
@@ -1086,6 +1088,27 @@ golang` finds nothing outside the changelog.
   "ship" half: strip first, then a new concept for the window, then
   packaging. The About screen with `AboutSlint` (Matt said yes) is built in
   the working tree; its final form belongs to U4.
+- 2026-11-22 — Phase 5, packaging (branch `feat/packaging`). The unit's
+  hardening claim corrected: a user unit runs in an unprivileged service
+  manager, so `DevicePolicy=`/`DeviceAllow=` are not enforced (the cgroup
+  device controller needs privilege) and `PrivateUsers=` is implied by the
+  namespace options. The device lines are gone; device access is whatever
+  the user has, which for the strip is the udev rule's ACL. What the
+  sandbox does do is seccomp (system calls, address families, namespaces,
+  personality, realtime, SUID) and, through the implied user namespace, a
+  read-only system with writes only to its store, config folder and
+  socket. Exposure is 4.4 "OK" offline (`systemd-analyze --user security`
+  scores a user unit as if it were a system one: it marks capabilities and
+  `PrivateUsers=` as missing). Also `ConditionUser=!@system`, since the
+  package enables the service for every user, the login screen's included.
+  Packages (`packaging/nexusd/`, one staging script for all formats): Arch
+  PKGBUILD, a dpkg-deb script, an rpm spec, and a tarball with an
+  `install.sh` for `~/.local`. The udev rule is
+  `packaging/udev/70-nexus-open.rules`, the strip's hidraw node only
+  (`data/udev/70-nexus.rules`, the wider one for planned devices, stays for
+  development). Install scripts reload udev and trigger hidraw (no replug),
+  apply the user preset, and start the service for users already logged in.
+  Clean-machine steps: `docs/RELEASE_CHECKLIST.md`.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
