@@ -4,6 +4,8 @@
 #
 # Usage: packaging/nexusd/arch/build-local.sh [OUTDIR]   (default target/dist)
 # Extra makepkg flags go in MAKEPKG_FLAGS, e.g. MAKEPKG_FLAGS=--nocheck.
+# With cargo from rustup's own installer rather than a pacman package,
+# makepkg cannot see it: pass MAKEPKG_FLAGS=--nodeps.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

@@ -41,6 +41,13 @@ mkdir -p "$doc"
     done
 } >"$doc/copyright"
 rm -r "$root/usr/share/licenses"
+# Rust links its crates in statically. lintian takes unsafe-libyaml (the
+# Rust translation of libyaml, behind serde_yaml_ng, which reads the old
+# app's layouts) for a copy of the C library.
+mkdir -p "$root/usr/share/lintian/overrides"
+printf '%s\n' "# unsafe-libyaml, a Rust crate, not the C libyaml; Rust links crates statically." \
+    "nexus-open: embedded-library libyaml [usr/bin/nexusctl]" \
+    >"$root/usr/share/lintian/overrides/nexus-open"
 printf '%s\n' \
     "nexus-open ($version) unstable; urgency=medium" "" \
     "  * Release $version. See https://github.com/mantonx/nexus-open/releases" "" \
@@ -49,7 +56,8 @@ printf '%s\n' \
 chmod 644 "$doc/copyright" "$doc/changelog.gz"
 
 # Libraries the binaries link: from dpkg-shlibdeps where it is installed
-# (it needs a debian/control to run), else the known list.
+# (it needs a debian/control to run, and the linked libraries installed:
+# libfontconfig1 and libfreetype6), else the known list.
 depends="libc6, libgcc-s1, libfontconfig1, libfreetype6"
 if command -v dpkg-shlibdeps >/dev/null; then
     mkdir -p "$work/shlibs/debian"

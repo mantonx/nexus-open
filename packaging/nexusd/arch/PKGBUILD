@@ -32,6 +32,9 @@ optdepends=(
     'libxi: the settings window on an X11 desktop'
     'libglvnd: OpenGL drawing for the settings window (it falls back to software)'
 )
+# Rust 1.100 or newer. RUSTUP_TOOLCHAIN is left alone: under rustup the
+# checkout's rust-toolchain.toml picks the pinned compiler (a rustup
+# "stable" that has not been updated may be too old).
 makedepends=('cargo')
 install=nexus-open.install
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -40,20 +43,17 @@ sha256sums=('SKIP')
 
 prepare() {
     cd "$pkgname-$pkgver"
-    export RUSTUP_TOOLCHAIN=stable
     cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
     cd "$pkgname-$pkgver"
-    export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo build --frozen --release -p nexusd -p nexusctl
 }
 
 check() {
     cd "$pkgname-$pkgver"
-    export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo test --frozen --release -p nexus-device -p nexus-doctor -p nexus-store
 }
