@@ -1,99 +1,85 @@
 # Nexus Open
 
-Linux support for the Corsair iCUE Nexus, the 640×48 pixel display strip that
-sits above your keyboard. Corsair doesn't make a Linux driver; this project
-reverse-engineered the protocol and built one.
+Linux software for the Corsair iCUE Nexus, the 640×48 touch strip that sits
+above a keyboard. Corsair makes no Linux software for it; Nexus Open is an
+open source (MIT) alternative. It is not made or endorsed by Corsair.
+
+<!-- CLIP: a short clip of the strip on a desk goes here (Matt records it):
+     a swipe between pages, a tap on a media control, and a takeover when
+     the volume changes. Keep it under 10 seconds and a few MB, e.g.
+     docs/media/strip.webm, embedded as a link to the file. -->
 
 [![Release](https://img.shields.io/github/v/release/mantonx/nexus-open)](https://github.com/mantonx/nexus-open/releases/latest)
-[![AUR](https://img.shields.io/aur/version/nexus-open)](https://aur.archlinux.org/packages/nexus-open)
-[![CI](https://github.com/mantonx/nexus-open/actions/workflows/ci.yml/badge.svg)](https://github.com/mantonx/nexus-open/actions/workflows/ci.yml)
-![Go](https://img.shields.io/github/go-mod/go-version/mantonx/nexus-open?color=00ADD8)
-![Flutter](https://img.shields.io/badge/dynamic/yaml?url=https://raw.githubusercontent.com/mantonx/nexus-open/main/ui/pubspec.yaml&query=$.environment.flutter&label=flutter&color=02569B)
-![Platform](https://img.shields.io/badge/platform-Linux-orange)
+[![Rust](https://github.com/mantonx/nexus-open/actions/workflows/rust.yml/badge.svg)](https://github.com/mantonx/nexus-open/actions/workflows/rust.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-## Screenshots
+## What it is
 
-![640×48 hardware display showing clock, weather, CPU, GPU, and network zones](docs/screenshots/display.png)
+The strip becomes a glance display and a control surface: the time,
+temperatures and load, network, the weather and what is playing, at a
+glance; media, volume and launchers under a finger. You arrange it as pages
+of widgets and swipe between them. When something changes, such as the
+track or the volume, a takeover covers the page for a moment.
 
-![Settings app with layout editor and live hardware preview strip](docs/screenshots/settings-ui.png)
+You set it up in a native settings window with a live preview. Every edit
+shows on the strip at once and can be undone. There is no account, no cloud
+service, and no root once it is installed.
 
-## What you get
+## How it is built
 
-Live stats on the display strip: CPU and GPU temperature and load, network
-throughput, and weather from open-meteo. Swipe left and right to switch between
-pages. Each zone is independently configurable: pick a plugin, choose a graph
-style (sparkline, bar, area), and set the colours.
-
-A settings app lets you rearrange the layout and swap plugins without restarting
-anything. The preview shows the exact image going to the hardware in real time.
-
-The daemon runs quietly as a systemd user service and starts automatically on
-login. No Corsair software, no Wine, no background cloud process.
-
-## Plugins
-
-| Plugin    | What it shows                                  |
-| --------- | ---------------------------------------------- |
-| cpu-temp  | CPU package temperature                        |
-| cpu-load  | Per-core or aggregate CPU utilisation          |
-| gpu-temp  | GPU temperature (AMD, Intel, NVIDIA)           |
-| gpu-load  | GPU utilisation                                |
-| network   | Download and upload throughput                 |
-| weather   | Current conditions from open-meteo             |
-| media     | Now playing via MPRIS/playerctl                |
-| clock     | Time and date (built in)                       |
-
-You can also write your own. A plugin is a Go binary that implements a
-three-method interface. Drop it anywhere and reference it in a YAML file.
-See [CONTRIBUTING.md](CONTRIBUTING.md) for a walkthrough.
+A small daemon, `nexusd`, runs as a systemd user service. It reads the
+machine's sensors, the media player (MPRIS) and the weather, draws the strip
+with its own renderer, and talks to the strip over hidraw; a udev rule gives
+the user at the computer access. Its layouts live in one SQLite database,
+and the daemon is the only program that writes to it. The settings window
+(`nexusd ui`, built with Slint) and the command line (`nexusctl`) send it
+edits over a socket in your runtime folder. Your own programs can feed the
+strip too, by printing lines the daemon reads.
 
 ## Install
 
-Download from the [releases page](https://github.com/mantonx/nexus-open/releases/latest):
+Packages for Arch, Debian and Ubuntu, and Fedora, and a tarball for any
+other distribution, are on the
+[releases page](https://github.com/mantonx/nexus-open/releases/latest).
+Install one and the strip lights up a few seconds later; open **Nexus Open
+Settings** from your app menu to set it up.
 
-| Format         | Distro                                              |
-| -------------- | --------------------------------------------------- |
-| `.pkg.tar.zst` | Arch Linux (or `yay -S nexus-open`)                 |
-| `.deb`         | Ubuntu 24.04+, Debian 13+                           |
-| `.rpm`         | Fedora 40+, RHEL 9+                                 |
-| `.tar.gz`      | Any distro, static binary, no runtime dependencies  |
+[docs/INSTALL.md](docs/INSTALL.md) has the steps for each distribution,
+what the package does, and how to uninstall.
 
-After installing, unplug and replug the Nexus. The bundled udev rule grants
-access without adding your user to any group.
+**Coming from the old Nexus Open** (the Go app): the new package replaces
+it. To bring your old layout across, run `nexusctl import-legacy`.
 
-See [docs/INSTALLATION.md](docs/INSTALLATION.md) for details, or
-[DEVICE_SETUP.md](DEVICE_SETUP.md) if you run into USB permission issues.
+## Set it up
 
-## Building from source
+- [docs/LAYOUT.md](docs/LAYOUT.md): every setting of a layout, for editing
+  it as text with `nexusctl edit`, or sharing it with `export` and `import`.
+- [docs/EXTERNAL_SOURCES.md](docs/EXTERNAL_SOURCES.md): show readings from
+  your own programs and scripts on the strip.
 
-Requires Go 1.26+ and Flutter 3.24+. No C libraries needed.
+## When something is wrong
 
-```bash
-git clone https://github.com/mantonx/nexus-open.git
-cd nexus-open
-make setup   # installs dev tools
-make dev     # Go + Flutter with hot-reload
+`nexusctl doctor` checks everything the strip needs and says how to fix
+what is wrong. The settings window runs the same checks and shows a
+problem in its header. [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+explains each check.
+
+## Build from source
+
+Rust 1.100 (the version is pinned in `rust-toolchain.toml`) and, on Linux,
+the fontconfig headers (`libfontconfig-dev` or `fontconfig-devel`).
+
+```
+cargo build --release --locked -p nexusd -p nexusctl
+scripts/nexusd-dev-install.sh   # installs under ~/.local and runs the service
 ```
 
-No hardware? `NEXUS_MOCK_DEVICE=1 make dev` works without the device plugged in.
-
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the full dev workflow.
-
-## Known issues
-
-The display stays black after the daemon stops. The firmware has no command to
-restore the Corsair boot screen, so unplug and replug to get it back. The
-settings UI requires XWayland (handled automatically in the packaged binary).
-
-## More
-
-- [docs/INSTALLATION.md](docs/INSTALLATION.md) — install, build from source, configuration
-- [DEVICE_SETUP.md](DEVICE_SETUP.md) — USB permissions and troubleshooting
-- [DEVELOPMENT.md](DEVELOPMENT.md) — architecture, hot-reload workflow, testing
-- [CONTRIBUTING.md](CONTRIBUTING.md) — writing plugins, submitting PRs
-- [docs/USB_PROTOCOL.md](docs/USB_PROTOCOL.md) — reverse-engineered protocol, frame format, touch HID reports
+`nexusd run --no-device --demo` runs without the strip, with made-up
+readings; the settings window's preview shows what it would draw.
+Packaging lives in `packaging/nexusd/`.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). The fonts compiled into the app are under the
+OFL, MIT and Bitstream Vera licences; see
+`crates/nexus-core/assets/fonts/licenses/`.
