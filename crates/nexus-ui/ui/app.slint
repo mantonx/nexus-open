@@ -112,6 +112,11 @@ component Sheet inherits Rectangle {
     /// words (which a layout does not measure) are never cut.
     in property <bool> tall: false;
     callback close();
+    /// Focus back to the sheet, for a control that is about to go (a
+    /// removed row's button): with nothing focused, Escape reaches no one.
+    public function take-keys() {
+        keys.focus();
+    }
     background: Theme.scrim;
     TouchArea {
         clicked => {
@@ -133,7 +138,7 @@ component Sheet inherits Rectangle {
         TouchArea { }
         // Around the content, so Escape closes the sheet from a field in it
         // too: a key the field does not use goes up to its ancestors.
-        FocusScope {
+        keys := FocusScope {
             init => {
                 self.focus();
             }
@@ -2223,7 +2228,7 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.sheet == "settings": Sheet {
+    if root.sheet == "settings": settings-sheet := Sheet {
         title: @tr("Settings");
         subtitle: root.settings-tab == 0 ? @tr("For every layout: they show on the strip at once, and undo takes them back.")
             : root.settings-tab == 1 ? @tr("Headlines on news widgets. Undo takes a change back.")
@@ -2779,6 +2784,7 @@ export component AppWindow inherits Window {
                                         enabled: fi > 0;
                                         clicked => {
                                             root.move-feed(fi, fi - 1);
+                                            settings-sheet.take-keys();
                                         }
                                     }
                                 }
@@ -2790,6 +2796,7 @@ export component AppWindow inherits Window {
                                         enabled: fi < root.news-feeds.length - 1;
                                         clicked => {
                                             root.move-feed(fi, fi + 1);
+                                            settings-sheet.take-keys();
                                         }
                                     }
                                 }
@@ -2800,6 +2807,7 @@ export component AppWindow inherits Window {
                                         label: @tr("Remove {} (undo brings it back)", f.name);
                                         clicked => {
                                             root.remove-feed(fi);
+                                            settings-sheet.take-keys();
                                         }
                                     }
                                 }
@@ -2808,6 +2816,13 @@ export component AppWindow inherits Window {
                         for item in [{ epoch: root.feed-epoch }]: HorizontalLayout {
                             spacing: 8px;
                             feed-field := TextField {
+                                // A new field after an add: focus in it, ready
+                                // for the next address (and Escape still works).
+                                init => {
+                                    if item.epoch > 0 {
+                                        self.focus-input();
+                                    }
+                                }
                                 placeholder: @tr("Paste a feed's address: https://…");
                                 label: @tr("A feed's address, to add");
                                 enabled: root.feed-state != "checking";
