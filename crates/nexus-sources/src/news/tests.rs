@@ -494,3 +494,43 @@ fn redirects_are_followed_up_to_five() {
     let e = fetch::fetch(&agent, &url, &Validators::default()).unwrap_err();
     assert!(e.contains("more than 5"), "{e}");
 }
+
+// ---- checking one feed, for the window ----
+
+#[test]
+fn a_checked_feed_gives_its_title_and_newest_headline() {
+    let (url, _requests) = serve(vec![Reply::new(200, fixture("rss2.xml"))]);
+    assert_eq!(
+        check::check_within(&url, WAIT),
+        Ok(Checked {
+            title: "Example World News".into(),
+            newest: Some("Bridge reopens after repairs".into()),
+        })
+    );
+    let (url, _requests) = serve(vec![Reply::new(200, fixture("feed.json"))]);
+    let checked = check::check_within(&url, WAIT).unwrap();
+    assert_eq!(checked.title, "Example JSON Daily");
+    assert!(checked.newest.is_some());
+}
+
+#[test]
+fn a_feed_that_cannot_be_read_says_why_by_kind() {
+    let page = b"<!doctype html><html><head><title>Home</title></head><body>Hi</body></html>";
+    let (url, _r) = serve(vec![Reply::new(200, page.to_vec())]);
+    assert_eq!(check::check_within(&url, WAIT), Err(Problem::NotAFeed));
+    let (url, _r) = serve(vec![Reply::new(404, Vec::new())]);
+    assert_eq!(check::check_within(&url, WAIT), Err(Problem::NotFound));
+    let (url, _r) = serve(vec![Reply::new(503, Vec::new())]);
+    assert_eq!(check::check_within(&url, WAIT), Err(Problem::Status(503)));
+    assert_eq!(check_feed("file:///etc/passwd"), Err(Problem::NotWebAddress));
+    // Nothing listens there: bound, then closed.
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    assert_eq!(
+        check::check_within(&format!("http://127.0.0.1:{port}/feed"), WAIT),
+        Err(Problem::NoAnswer)
+    );
+}
