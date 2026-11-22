@@ -259,4 +259,37 @@ README clip (now of the new strip), release verification.
   under. A takeover may cover part of the strip (`align`, `width`). New:
   a `key` widget (icon, label, tap and hold actions), a second reading on
   a value widget, an `accent` setting, and page state for the markers.
+- 2026-11-22 — Groundwork merged. Text can be set condensed and with
+  tabular figures (90 frames byte-identical before and after). The strip's
+  new behaviour is in the engine with tests: relative sliders with a 4 px
+  dead zone, hold at the threshold, the critical alarm, partial takeovers,
+  the `key` widget, a second reading, `accent`, page state. The store's
+  schema moves to 2; an old database loads identically and keeps its undo.
+  Not deployed to Matt's machine until the new drawing is in.
+- 2026-11-22 — **U2 signed off provisionally by the agent** (Matt's to
+  overturn). `DESIGN.md`: "lamplight on walnut": brown-black ground,
+  cream type, Rubik 600 numerals, rounded cards, Phosphor icons, a lilac
+  default accent; any accent keeps only its hue (fixed lightness and capped
+  chroma per role). Warning fills the card amber, critical fills it red,
+  the alarm fills the strip. Reference frames: `docs/design/u2/`; all 74
+  come from `cargo run -p nexus-core --example design_system -- DIR`. An
+  isolated reviewer scored the frames 25/36 before the last fixes (U1 was
+  15/36); the 28 target is measured again on the built strip. Known weak
+  points: an accent near amber sits close to a warning bar; compact cards
+  need about 120 px for three digits; a medium media card fades a long
+  title; Rubik has no hinting; nothing is measured on the panel.
+  `DESIGN.md` names keys the engine does not have yet (`night`,
+  `idle_dim`, `second_label`, `scale`, accent preset names, `icon` on any
+  widget, a key's `sub`); the renderer build reconciles them.
+- 2026-11-22 — **Mistake, caught and fixed:** while testing a capture rig,
+  a throwaway daemon opened Matt's real strip for about four minutes and
+  drew on it alongside his own daemon. Root cause: the rig relied on
+  `DevicePolicy=closed` to keep it off the device, and a user unit's device
+  policy is not enforced (the daemon opened hidraw with no `DeviceAllow`
+  for it). `nexusd run --no-device` now exists; `scripts/ui-rig/rig.sh`
+  uses it and refuses to continue if its daemon reports the strip
+  connected. The same fact means `nexusd.service`'s `DevicePolicy` and
+  `DeviceAllow` lines do nothing as a user unit: the hardening claim in
+  `REDESIGN_PLAN.md` (device access limited to hidraw and NVIDIA) is wrong
+  and needs correcting in Phase 5.
 

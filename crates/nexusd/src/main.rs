@@ -74,6 +74,11 @@ enum Command {
         /// Publish fake readings, for testing before real sources exist.
         #[arg(long)]
         demo: bool,
+        /// Never open the strip. For trying a build with the settings window
+        /// while another daemon drives the real strip: the window's preview
+        /// still shows every frame.
+        #[arg(long)]
+        no_device: bool,
     },
     /// Open the settings window.
     Ui,
@@ -106,7 +111,15 @@ fn main() -> ExitCode {
             frames,
             out,
         ),
-        Command::Run { db, demo } => run::run(run::Options { db, demo }),
+        Command::Run {
+            db,
+            demo,
+            no_device,
+        } => run::run(run::Options {
+            db,
+            demo,
+            no_device,
+        }),
         Command::Ui => nexus_ui::run().map_err(Into::into),
         Command::Trace { out, seconds } => trace(&out, seconds),
     };

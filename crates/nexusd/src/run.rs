@@ -64,6 +64,8 @@ impl From<nexus_device::Input> for Msg {
 pub struct Options {
     pub db: Option<PathBuf>,
     pub demo: bool,
+    /// Never open the strip; frames go to viewers only.
+    pub no_device: bool,
 }
 
 pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
@@ -106,6 +108,12 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         sources,
         notifier: Notifier::from_env(),
     };
+    if options.no_device {
+        // Put the next attempt out of reach, as for an OS without a backend,
+        // so the loop neither opens the strip nor wakes to retry.
+        daemon.next_attempt = Instant::now() + Duration::from_secs(86_400 * 365);
+        daemon.last_device_error = Some("the strip is not used: started with --no-device".into());
+    }
     daemon.sources.apply(&daemon.engine.config().sources);
     if options.demo {
         spawn_demo(publisher(tx));
