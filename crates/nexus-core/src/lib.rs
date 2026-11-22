@@ -5,6 +5,7 @@
 //! whole visual layer testable on the simulator without hardware.
 
 pub mod canvas;
+pub mod card;
 pub mod config;
 pub mod demo;
 pub mod engine;

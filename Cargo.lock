@@ -3135,6 +3135,7 @@ dependencies = [
  "nexus-store",
  "nexus-ui",
  "serde_json",
+ "tiny-skia 0.12.0",
 ]
 
 [[package]]
