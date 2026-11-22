@@ -9,6 +9,7 @@
 //! to start it, and keeps retrying.
 
 mod accent;
+mod appearance;
 mod editor;
 mod files;
 mod first_run;
@@ -96,12 +97,24 @@ pub fn run() -> Result<(), slint::PlatformError> {
     slint::set_xdg_app_id(APP_ID)?;
 
     // Test-only, for captures: light or dark whatever the desktop says.
-    match std::env::var("NEXUS_UI_SCHEME").as_deref() {
-        Ok("light") => app.global::<Theme>().set_forced(1),
-        Ok("dark") => app.global::<Theme>().set_forced(2),
-        _ => {}
-    }
+    // The user's Appearance; for captures, NEXUS_UI_SCHEME overrides it
+    // without saving.
+    let chosen = match std::env::var("NEXUS_UI_SCHEME").as_deref() {
+        Ok("light") => appearance::Appearance::Light,
+        Ok("dark") => appearance::Appearance::Dark,
+        _ => appearance::load(),
+    };
+    app.global::<Theme>().set_forced(chosen.index());
     app.invoke_apply_scheme();
+    let weak = app.as_weak();
+    app.on_set_appearance(move |i| {
+        let chosen = appearance::Appearance::from_index(i);
+        appearance::save(chosen);
+        if let Some(app) = weak.upgrade() {
+            app.global::<Theme>().set_forced(chosen.index());
+            app.invoke_apply_scheme();
+        }
+    });
     set_accent(None);
     let swatches: Vec<slint::Color> = accent::PRESETS
         .iter()

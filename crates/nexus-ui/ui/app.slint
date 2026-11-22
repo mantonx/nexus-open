@@ -313,6 +313,8 @@ export component AppWindow inherits Window {
     callback move-step(int);
     callback resize-step(int);
     callback deselect();
+    /// 0 match the system, 1 light, 2 dark: the window only.
+    callback set-appearance(int);
     callback undo();
     callback redo();
     callback field-changed(string, string);
@@ -378,9 +380,10 @@ export component AppWindow inherits Window {
     /// About badge) follow it too. Without it they follow the desktop, as
     /// Theme does.
     public function apply-scheme() {
-        if Theme.forced != 0 {
-            Palette.color-scheme = Theme.forced == 2 ? ColorScheme.dark : ColorScheme.light;
-        }
+        // Unknown hands Slint's own widgets back to the desktop's live
+        // scheme, which Theme then reads (theme.slint).
+        Palette.color-scheme = Theme.forced == 2 ? ColorScheme.dark
+            : Theme.forced == 1 ? ColorScheme.light : ColorScheme.unknown;
     }
 
     // Copies through a text input's own clipboard support. Never shown.
@@ -552,10 +555,14 @@ export component AppWindow inherits Window {
                     }
                     VerticalLayout {
                         alignment: center;
+                        // A fixed width, so a long label never moves the
+                        // header's middle.
                         Button {
                             tier: "quiet";
+                            fit: false;
+                            width: 230px;
                             icon: Glyph.undo;
-                            text: root.undo-label == "" ? @tr("Undo") : root.undo-label;
+                            text: root.undo-label == "" ? @tr("Undo") : @tr("Undo: {}", root.undo-label);
                             label: root.undo-label == "" ? @tr("Undo: nothing to undo") : @tr("Undo: {}", root.undo-label);
                             enabled: root.connected && root.undo-label != "";
                             clicked => {
@@ -871,6 +878,14 @@ export component AppWindow inherits Window {
                                         y: root.bezel;
                                         width: root.strip-w;
                                         height: root.strip-h;
+                                        // A widget selected from elsewhere (a click on
+                                        // another strip, the gallery) takes the keys too.
+                                        property <int> sel: root.selected;
+                                        changed sel => {
+                                            if self.sel >= 0 && !self.has-focus {
+                                                self.focus();
+                                            }
+                                        }
                                         accessible-role: list;
                                         accessible-label: @tr("Widgets on {}. Left and right arrows select; with Control they move the widget, with Shift they resize it; Delete removes it.", row.name);
                                         key-pressed(event) => {
@@ -1061,6 +1076,17 @@ export component AppWindow inherits Window {
                                     if !root.trying && row.kind != "new-takeover": HorizontalLayout {
                                         spacing: 6px;
                                         alignment: end;
+                                        // Back from a widget to what holds it: the
+                                        // page's name, or the takeover's triggers.
+                                        if root.selected >= 0: Button {
+                                            tier: "quiet";
+                                            icon: row.kind == "page" ? Glyph.sliders : Glyph.cards;
+                                            text: row.kind == "page" ? @tr("Page settings") : @tr("Takeover settings");
+                                            label: row.kind == "page" ? @tr("Settings of the page {}", row.name) : @tr("Settings of the takeover {}: when it shows and for how long", row.name);
+                                            clicked => {
+                                                root.deselect();
+                                            }
+                                        }
                                         Button {
                                             tier: "quiet";
                                             icon: Glyph.widths;
@@ -1494,16 +1520,18 @@ export component AppWindow inherits Window {
                         checked: l.active;
                         note: l.active ? @tr("on the strip") : "";
                         clicked => {
-                            layout-menu.close();
                             root.use-layout(i);
+                            // Last: closing drops the menu, and what is in it.
+                            layout-menu.close();
                         }
                     }
                     if !l.active: IconButton {
                         icon: Glyph.trash;
                         label: @tr("Delete layout {} (undo brings it back)", l.name);
                         clicked => {
-                            layout-menu.close();
                             root.delete-layout(i);
+                            // Last: closing drops the menu, and what is in it.
+                            layout-menu.close();
                         }
                     }
                 }
@@ -1512,25 +1540,28 @@ export component AppWindow inherits Window {
                     icon: Glyph.plus;
                     text: @tr("New layout…");
                     clicked => {
-                        layout-menu.close();
                         root.open-starters();
                         root.show-sheet("starters");
+                        // Last: closing drops the menu, and what is in it.
+                        layout-menu.close();
                     }
                 }
                 MenuRow {
                     icon: Glyph.copy;
                     text: @tr("Duplicate");
                     clicked => {
-                        layout-menu.close();
                         root.duplicate-layout();
+                        // Last: closing drops the menu, and what is in it.
+                        layout-menu.close();
                     }
                 }
                 MenuRow {
                     icon: Glyph.pencil;
                     text: @tr("Rename…");
                     clicked => {
-                        layout-menu.close();
                         root.show-sheet("rename");
+                        // Last: closing drops the menu, and what is in it.
+                        layout-menu.close();
                     }
                 }
                 MenuDivider { }
@@ -1538,16 +1569,18 @@ export component AppWindow inherits Window {
                     icon: Glyph.import;
                     text: @tr("Import from a file…");
                     clicked => {
-                        layout-menu.close();
                         root.import-layout();
+                        // Last: closing drops the menu, and what is in it.
+                        layout-menu.close();
                     }
                 }
                 MenuRow {
                     icon: Glyph.export;
                     text: @tr("Export to a file…");
                     clicked => {
-                        layout-menu.close();
                         root.export-layout();
+                        // Last: closing drops the menu, and what is in it.
+                        layout-menu.close();
                     }
                 }
             }
@@ -1575,8 +1608,9 @@ export component AppWindow inherits Window {
                     text: @tr("Preferences…");
                     enabled: root.connected;
                     clicked => {
-                        more-menu.close();
                         root.show-sheet("prefs");
+                        // Last: closing drops the menu, and what is in it.
+                        more-menu.close();
                     }
                 }
                 MenuRow {
@@ -1584,8 +1618,9 @@ export component AppWindow inherits Window {
                     text: root.copied ? @tr("Copied") : @tr("Copy diagnostics");
                     enabled: root.diagnostics != "";
                     clicked => {
-                        more-menu.close();
                         root.copy-diagnostics();
+                        // Last: closing drops the menu, and what is in it.
+                        more-menu.close();
                     }
                 }
                 MenuDivider { }
@@ -1596,8 +1631,9 @@ export component AppWindow inherits Window {
                     icon: Glyph.info;
                     text: @tr("About Nexus Open");
                     clicked => {
-                        more-menu.close();
                         root.show-sheet("about");
+                        // Last: closing drops the menu, and what is in it.
+                        more-menu.close();
                     }
                 }
             }
@@ -1956,7 +1992,7 @@ export component AppWindow inherits Window {
 
     if root.sheet == "prefs": Sheet {
         title: @tr("Preferences");
-        subtitle: @tr("For every layout. Changes show on the strip at once, and undo takes them back.");
+        subtitle: @tr("The strip settings are for every layout: they show at once, and undo takes them back.");
         sheet-width: 680px;
         close => {
             root.sheet = "";
@@ -2285,6 +2321,48 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+            // The window's own preference: kept with the window, not in
+            // the layout, so it never enters undo.
+            Rectangle {
+                height: 1px;
+                background: Theme.line;
+            }
+            Text {
+                text: @tr("This window");
+                font-family: Theme.font;
+                font-size: Theme.size-title;
+                font-weight: 600;
+                color: Theme.text;
+                accessible-role: text;
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                Label {
+                    text: @tr("Appearance");
+                    width: Grid.label;
+                    y: 8px;
+                    vertical-alignment: top;
+                    color: Theme.text-2;
+                    font-weight: 500;
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    HorizontalLayout {
+                        alignment: start;
+                        Segmented {
+                            options: [@tr("Match the system"), @tr("Light"), @tr("Dark")];
+                            current: Theme.forced;
+                            label: @tr("Appearance of this window");
+                            chose(i) => {
+                                root.set-appearance(i);
+                            }
+                        }
+                    }
+                    Hint {
+                        text: @tr("Only this window. The strip stays dark, and undo leaves this alone.");
+                    }
+                }
+            }
         }
     }
 
@@ -2380,9 +2458,10 @@ export component AppWindow inherits Window {
                     color: Theme.text-3;
                     vertical-alignment: center;
                 }
+                // Its own badge and two lines of small print under it.
                 Rectangle {
                     width: 170px;
-                    height: 72px;
+                    height: 96px;
                     AboutSlint { }
                 }
                 Rectangle {

@@ -29,6 +29,9 @@ export component Button inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> destructive: false;
     in property <bool> compact: false;
+    /// False for a button given its own width: its words are then cut
+    /// short with an ellipsis instead of widening it.
+    in property <bool> fit: true;
     /// Said for the button by a screen reader, when the text alone is not
     /// enough; also shown as the reason when disabled, if given.
     in property <string> label;
@@ -37,7 +40,7 @@ export component Button inherits Rectangle {
     property <bool> primary: tier == "primary";
     property <bool> quiet: tier == "quiet";
     min-height: compact ? 28px : Theme.control-h;
-    min-width: row.preferred-width + (compact ? 16px : 24px);
+    min-width: fit ? row.preferred-width + (compact ? 16px : 24px) : 0px;
     horizontal-stretch: 0;
     border-radius: Theme.r-control;
     background: !root.enabled ? (quiet ? transparent : Theme.surface-2)
@@ -66,7 +69,7 @@ export component Button inherits Rectangle {
         padding-left: compact ? 8px : 12px;
         padding-right: compact ? 8px : 12px;
         spacing: 7px;
-        alignment: center;
+        alignment: fit ? LayoutAlignment.center : LayoutAlignment.start;
         if root.icon != "": Icon {
             glyph: root.icon;
             color: root.ink;

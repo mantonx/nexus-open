@@ -12,10 +12,16 @@ import "../assets/fonts/Phosphor-UI-Bold.ttf";
 import "../assets/fonts/Phosphor-UI-Fill.ttf";
 
 export global Theme {
-    /// 0 follows the desktop; 1 light; 2 dark. Set from Rust for tests and
-    /// captures (NEXUS_UI_SCHEME).
+    /// 0 follows the desktop; 1 light; 2 dark. The user's Appearance
+    /// preference (appearance.rs), or NEXUS_UI_SCHEME for captures.
     in property <int> forced: 0;
-    out property <bool> dark: forced == 0 ? Palette.color-scheme == ColorScheme.dark : forced == 2;
+    /// The desktop's scheme, live. While following it, Palette.color-scheme
+    /// is left unknown (AppWindow.apply-scheme) so the style tracks the
+    /// desktop itself; its background then says which scheme that is.
+    out property <bool> system-dark: Palette.color-scheme == ColorScheme.unknown
+        ? Palette.background == #1c1c1c
+        : Palette.color-scheme == ColorScheme.dark;
+    out property <bool> dark: forced == 0 ? system-dark : forced == 2;
 
     /// The user's accent, derived on the Rust side as the strip does
     /// (accent.rs): base fill, the dark ink on it, words on dark, slider

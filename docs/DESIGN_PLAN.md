@@ -292,4 +292,18 @@ README clip (now of the new strip), release verification.
   `DeviceAllow` lines do nothing as a user unit: the hardening claim in
   `REDESIGN_PLAN.md` (device access limited to hidraw and NVIDIA) is wrong
   and needs correcting in Phase 5.
+- 2026-11-22 — **The window's Appearance** (U5, at Matt's request): Match
+  the system (the default), Light or Dark, in Preferences under "This
+  window", applied live. It is kept in the window's own file,
+  `$XDG_CONFIG_HOME/nexus-open/window` (`appearance = "system"`), not in the
+  layout or the store's settings, because it changes only the window: the
+  strip stays dark whatever it says, it must not be exported with a
+  layout, and choosing it must not enter the layout's undo history (it does
+  not; checked in the capture rig). A config file rather than the state
+  folder beside the remembered window size, since it is a choice the user
+  makes, not something the window notices. "Match the system" follows a
+  desktop switch without a restart: Slint 1.18 watches the
+  `org.freedesktop.appearance color-scheme` portal setting, and the window
+  leaves Slint's palette on `unknown` so it keeps tracking it. Checked in
+  the rig's own session (its own bus, dconf and portal), both directions.
 
