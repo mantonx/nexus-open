@@ -104,6 +104,16 @@ rpm)
     removed_checks
     ;;
 tarball)
+    # What the tarball does not bring: the libraries it links, and systemd
+    # (for systemd-analyze).
+    if command -v apt-get >/dev/null; then
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libfontconfig1 systemd passwd >/dev/null
+    elif command -v dnf >/dev/null; then
+        dnf install -y -q fontconfig systemd shadow-utils util-linux
+    elif command -v pacman >/dev/null; then
+        pacman -Sy --noconfirm --needed fontconfig systemd >/dev/null
+    fi
     # As an ordinary user, with no service manager (as over plain su):
     # install.sh must still put every file in place and say what to run.
     id tester >/dev/null 2>&1 || useradd -m tester
@@ -114,7 +124,8 @@ tarball)
     home=/home/tester
     echo "== install.sh (as a user)"
     check "install.sh" su tester -c "$dir/install.sh"
-    sed 's/^/        /' /tmp/check.out
+    cp /tmp/check.out /tmp/install.out
+    sed 's/^/        /' /tmp/install.out
     for f in .local/bin/nexusd .local/bin/nexusctl .config/systemd/user/nexusd.service \
         .local/share/applications/io.nexus.open.desktop \
         .local/share/icons/hicolor/256x256/apps/io.nexus.open.png \
@@ -124,7 +135,7 @@ tarball)
     done
     check "unit runs ~/.local/bin/nexusd" grep -q "^ExecStart=$home/.local/bin/nexusd run$" "$home/.config/systemd/user/nexusd.service"
     check "menu entry runs ~/.local/bin/nexusd" grep -q "^Exec=$home/.local/bin/nexusd ui$" "$home/.local/share/applications/io.nexus.open.desktop"
-    check "install.sh prints the udev command" grep -q "sudo install -m 644 $home/.local/share/nexusd/70-nexus-open.rules /etc/udev/rules.d/" /tmp/check.out
+    check "install.sh prints the udev command" grep -q "sudo install -m 644 $home/.local/share/nexusd/70-nexus-open.rules /etc/udev/rules.d/" /tmp/install.out
     check "nexusd --version" su tester -c "$home/.local/bin/nexusd --version"
     check "nexusctl --help" su tester -c "$home/.local/bin/nexusctl --help"
     check "systemd-analyze verify" systemd-analyze verify "$home/.config/systemd/user/nexusd.service"
