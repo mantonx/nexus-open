@@ -36,7 +36,8 @@ BuildRequires:  systemd-rpm-macros
 %endif
 
 Requires:       hicolor-icon-theme
-Requires:       libxkbcommon
+# Loaded at run time (not linked), so rpm cannot find it by itself.
+Requires:       libxkbcommon.so.0()(64bit)
 Requires:       systemd
 Requires:       systemd-udev
 # Loaded at run time by the settings window (Wayland or X11, OpenGL with a
