@@ -395,3 +395,22 @@ README clip (now of the new strip), release verification.
   after a whole word, or between letters; it fades only while moving);
   a lost card's second reading is drawn lost too. "System does not name
   CPU and GPU" is DESIGN.md open question 16.
+- 2026-11-22 — **U3 closed on renders, provisionally (Claude; Matt to
+  overturn).** Four isolated reviews scored the built strip 25, 26, 26
+  and 25/36, against a target of 28. The 28 bar is **not met**. The
+  scores swing with each fresh reviewer while the strip measurably
+  improves (hero bars full width, accent only on controls, off-page
+  flags, 18 px secondary text, night distinct from lost, fixed layouts,
+  a real media key, ellipses), so more rounds on renders are measuring
+  the reviewer, not the strip. Every open finding but the first
+  needs the panel or Matt:
+  - the System page names CPU and GPU only by icon (open question 16);
+  - markers and edge flags may be faint at 60 cm;
+  - 18 px secondary text is unmeasured;
+  - Rubik is unhinted;
+  - the empty media slot opens nothing on the default layout (open
+    question 15).
+
+  The last gate for U3 is the deployed build read on the real strip with
+  the legibility card, and Matt's verdict on the frames. Whatever he
+  finds there is fixed before release.
