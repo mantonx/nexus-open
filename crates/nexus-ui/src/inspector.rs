@@ -80,7 +80,8 @@ const READING: &str = "Reading";
 const RATE: &str = "Network rate";
 const SLIDER: &str = "Slider";
 const MEDIA: &str = "Now playing";
-const TYPES: [&str; 5] = [CLOCK, READING, RATE, SLIDER, MEDIA];
+const KEY: &str = "Key";
+const TYPES: [&str; 6] = [CLOCK, READING, RATE, SLIDER, MEDIA, KEY];
 
 const NO_GRAPH: &str = "None";
 const AREA: &str = "Area";
@@ -116,12 +117,20 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
     match widget {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
+        Widget::Key { icon, label, .. } => {
+            put("type", KEY);
+            put("icon", icon.as_deref().unwrap_or_default());
+            put("label", label.as_deref().unwrap_or_default());
+        }
         Widget::Value {
             label,
             signal,
             graph,
             warn,
             crit,
+            second,
+            second_warn,
+            second_crit,
             ..
         } => {
             put("type", READING);
@@ -141,6 +150,14 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
             };
             put("warn", &shown(warn));
             put("crit", &shown(crit));
+            let second = second.as_deref().unwrap_or_default();
+            let shown = |t: &Option<f64>| {
+                t.map(|c| number(threshold_out(c, second, ctx)))
+                    .unwrap_or_default()
+            };
+            put("second", second);
+            put("second_warn", &shown(second_warn));
+            put("second_crit", &shown(second_crit));
         }
         Widget::Rate {
             label, down, up, ..
@@ -236,18 +253,42 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
     Ok(match get("type") {
         CLOCK => Widget::Clock { width, tap, hold },
         MEDIA => Widget::Media { width, tap, hold },
+        KEY => {
+            let text = |k: &str| Some(get(k).to_string()).filter(|s| !s.is_empty());
+            Widget::Key {
+                width,
+                icon: text("icon"),
+                label: text("label"),
+                tap,
+                hold,
+            }
+        }
         READING => {
             let signal = or("signal", "cpu.temp");
-            let threshold = |k: &str, name: &str| -> Result<Option<f64>, Missing> {
+            let second = Some(get("second").to_string()).filter(|s| !s.is_empty());
+            let threshold = |k: &str, of: &str, name: &str| -> Result<Option<f64>, Missing> {
                 match get(k) {
                     "" => Ok(None),
                     s => s
                         .parse::<f64>()
-                        .map(|n| Some(threshold_in(n, &signal, ctx)))
+                        .map(|n| Some(threshold_in(n, of, ctx)))
                         .map_err(|_| Missing::Invalid(format!("{name} must be a number."))),
                 }
             };
+            let of = second.as_deref().unwrap_or_default();
+            let (second_warn, second_crit) = (
+                threshold("second_warn", of, "Second warn at")?,
+                threshold("second_crit", of, "Second critical at")?,
+            );
+            if second.is_none() && (second_warn.is_some() || second_crit.is_some()) {
+                return Err(Missing::Incomplete(
+                    "Choose the second signal its thresholds are for.".into(),
+                ));
+            }
             Widget::Value {
+                second,
+                second_warn,
+                second_crit,
                 width,
                 label: or("label", "CPU"),
                 graph: match get("graph") {
@@ -255,8 +296,8 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
                     LINE => Some(GraphStyle::Line),
                     _ => None,
                 },
-                warn: threshold("warn", "Warn at")?,
-                crit: threshold("crit", "Critical at")?,
+                warn: threshold("warn", &signal, "Warn at")?,
+                crit: threshold("crit", &signal, "Critical at")?,
                 signal,
                 tap,
                 hold,
@@ -414,6 +455,40 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 Kind::Number,
                 format!("Shown red from this value{unit}. Empty: never."),
             );
+            add(
+                "second",
+                "Second signal",
+                Kind::Signal,
+                if get("second").trim().is_empty() {
+                    "Optional: a second reading shown beside the first.".into()
+                } else {
+                    reading_help(&get("second"), ctx)
+                },
+            );
+            if !get("second").trim().is_empty() {
+                let unit = threshold_unit(&get("second"), ctx);
+                add(
+                    "second_warn",
+                    "Second warn at",
+                    Kind::Number,
+                    format!("For the second reading{unit}. Empty: never."),
+                );
+                add(
+                    "second_crit",
+                    "Second critical at",
+                    Kind::Number,
+                    format!("For the second reading{unit}. Empty: never."),
+                );
+            }
+        }
+        KEY => {
+            add(
+                "icon",
+                "Icon",
+                Kind::Text,
+                "The icon's name, as in: play.".into(),
+            );
+            add("label", "Label", Kind::Text, String::new());
         }
         RATE => {
             add("label", "Label", Kind::Text, String::new());
@@ -502,9 +577,14 @@ pub fn apply(widget: &Widget, drafts: &Values, key: &str, value: &str, ctx: &Con
     // Thresholds are shown in the signal's unit (°F for a temperature
     // here). A new signal re-shows them in its own unit, so the stored
     // values carry over rather than the numbers on screen.
-    if key == "signal" {
-        let old = v.get("signal").cloned().unwrap_or_default();
-        for k in ["warn", "crit"] {
+    let thresholds = match key {
+        "signal" => Some(["warn", "crit"]),
+        "second" => Some(["second_warn", "second_crit"]),
+        _ => None,
+    };
+    if let Some(thresholds) = thresholds {
+        let old = v.get(key).cloned().unwrap_or_default();
+        for k in thresholds {
             if let Some(n) = v.get(k).and_then(|t| t.trim().parse::<f64>().ok()) {
                 let stored = threshold_in(n, &old, ctx);
                 v.insert(k.into(), number(threshold_out(stored, value, ctx)));
@@ -660,6 +740,9 @@ mod tests {
             graph: None,
             warn: Some(80.0),
             crit: None,
+            second: None,
+            second_warn: None,
+            second_crit: None,
             tap: None,
             hold: None,
         };
@@ -689,6 +772,9 @@ mod tests {
             graph: None,
             warn: Some(75.0),
             crit: Some(90.0),
+            second: None,
+            second_warn: None,
+            second_crit: None,
             tap: None,
             hold: None,
         };
@@ -770,6 +856,55 @@ mod tests {
         assert_eq!(
             apply(&w, &Values::new(), "type", MEDIA, &ctx),
             Outcome::Unchanged
+        );
+    }
+
+    #[test]
+    fn keys_and_second_readings_are_edited_like_any_field() {
+        let ctx = ctx();
+        let key = Widget::Key {
+            width: 80,
+            icon: Some("play".into()),
+            label: None,
+            tap: Some(Action::Media(MediaCommand::PlayPause)),
+            hold: None,
+        };
+        assert_eq!(build(&flatten(&key, &ctx), &ctx).as_ref(), Ok(&key));
+        let keys: Vec<String> = fields(&flatten(&key, &ctx), &ctx)
+            .into_iter()
+            .map(|f| f.key)
+            .collect();
+        assert!(keys.contains(&"icon".into()) && keys.contains(&"label".into()));
+        let Outcome::Send(Widget::Key { label, .. }) =
+            apply(&key, &Values::new(), "label", "Play", &ctx)
+        else {
+            panic!("not sent");
+        };
+        assert_eq!(label.as_deref(), Some("Play"));
+
+        let w = Widget::Media {
+            width: 120,
+            tap: None,
+            hold: None,
+        };
+        let Outcome::Send(value) = apply(&w, &Values::new(), "type", READING, &ctx) else {
+            panic!("not sent");
+        };
+        let Outcome::Send(with) = apply(&value, &Values::new(), "second", "cpu.temp", &ctx) else {
+            panic!("not sent");
+        };
+        // The second reading is a temperature: typed in °F, stored in °C.
+        let Outcome::Send(Widget::Value {
+            second,
+            second_crit,
+            ..
+        }) = apply(&with, &Values::new(), "second_crit", "194", &ctx)
+        else {
+            panic!("not sent");
+        };
+        assert_eq!(
+            (second.as_deref(), second_crit),
+            (Some("cpu.temp"), Some(90.0))
         );
     }
 

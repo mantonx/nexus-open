@@ -25,7 +25,8 @@ pub struct Fonts {
 }
 
 /// How a value is judged against its thresholds. Drives the value colour.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Ordered from calm to critical, so the worst of several is their `max`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     #[default]
     Ok,
@@ -59,6 +60,8 @@ pub enum WidgetView {
         icon: Option<char>,
         graph: Option<Graph>,
         severity: Severity,
+        /// A second reading, shown beside the first.
+        second: Option<Reading>,
     },
     /// A label with a small text readout and a graph, such as network rates.
     Rate {
@@ -79,6 +82,19 @@ pub enum WidgetView {
         /// Shown dimmed (muted audio).
         muted: bool,
     },
+    /// A control to press: an icon's name and a label, either optional.
+    Key {
+        icon: Option<String>,
+        label: Option<String>,
+    },
+}
+
+/// A formatted reading: the second one of a value widget.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reading {
+    pub value: String,
+    pub unit: String,
+    pub severity: Severity,
 }
 
 /// A track as the media widget shows it.
@@ -127,11 +143,28 @@ impl Renderer {
     /// The `pressed` zone gets a lit background: the instant answer to a
     /// finger landing on something that acts.
     pub fn render_page(&mut self, zones: &[Zone], pressed: Option<usize>) -> Canvas {
-        let mut canvas = Canvas::new(WIDTH, HEIGHT, self.theme.palette.background);
+        self.render_row(zones, pressed, WIDTH, self.theme.palette.background)
+    }
+
+    /// The theme it draws with, the user's accent included.
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
+    /// Renders a row of zones into a new frame `width` pixels wide: a page
+    /// is the whole strip, a takeover over one end of it less.
+    pub fn render_row(
+        &mut self,
+        zones: &[Zone],
+        pressed: Option<usize>,
+        width: u32,
+        background: Rgb,
+    ) -> Canvas {
+        let mut canvas = Canvas::new(width, HEIGHT, background);
         let mut x = 0u32;
         for (i, zone) in zones.iter().enumerate() {
             if pressed == Some(i) {
-                let w = zone.width.min(WIDTH.saturating_sub(x));
+                let w = zone.width.min(width.saturating_sub(x));
                 canvas.fill_rect(x, 0, w, HEIGHT, self.theme.palette.pressed);
             }
             if i > 0 {
@@ -148,6 +181,42 @@ impl Renderer {
             x += zone.width;
         }
         canvas
+    }
+
+    /// The critical alarm as a plain takeover: the strip filled with the
+    /// critical colour, the reading on the left and an OK key on the right,
+    /// `ok_width` wide. A placeholder until the strip is redrawn.
+    pub fn render_alarm(
+        &mut self,
+        label: &str,
+        value: &str,
+        unit: &str,
+        ok_width: u32,
+        ok_pressed: bool,
+    ) -> Canvas {
+        let zones = [
+            Zone {
+                width: WIDTH.saturating_sub(ok_width),
+                view: WidgetView::Value {
+                    label: label.to_string(),
+                    value: value.to_string(),
+                    unit: unit.to_string(),
+                    icon: None,
+                    graph: None,
+                    severity: Severity::Ok,
+                    second: None,
+                },
+            },
+            Zone {
+                width: ok_width,
+                view: WidgetView::Key {
+                    icon: None,
+                    label: Some("OK".into()),
+                },
+            },
+        ];
+        let background = self.theme.palette.crit;
+        self.render_row(&zones, ok_pressed.then_some(1), WIDTH, background)
     }
 
     fn render_zone(&mut self, canvas: &mut Canvas, x: f32, width: f32, view: &WidgetView) {
@@ -169,24 +238,57 @@ impl Renderer {
                 icon,
                 graph,
                 severity,
+                second,
             } => {
                 if let Some(graph) = graph {
                     self.graph(canvas, x, width, graph);
                 }
                 self.label(canvas, x, label);
-                if graph.is_some() {
+                // A second reading follows the first after a gap.
+                const GAP: f32 = 8.0;
+                let first = self.value_and_unit_width(value, unit);
+                let both = first
+                    + second
+                        .as_ref()
+                        .map_or(0.0, |s| GAP + self.value_and_unit_width(&s.value, &s.unit));
+                let left = if graph.is_some() {
                     // With a graph the reading is centred so it reads as one
                     // block above the trend line.
-                    let w = self.value_and_unit_width(value, unit);
-                    let left = x + ((width - w) / 2.0).round();
-                    self.value_and_unit(canvas, left, value, unit, *severity);
+                    x + ((width - both) / 2.0).round()
                 } else {
                     let mut left = x + self.theme.grid.pad_left;
                     if let Some(icon) = icon {
                         left += self.icon(canvas, left, *icon, *severity) + 3.0;
                     }
-                    self.value_and_unit(canvas, left, value, unit, *severity);
+                    left
+                };
+                self.value_and_unit(canvas, left, value, unit, *severity);
+                if let Some(s) = second {
+                    let at = left + first + GAP;
+                    self.value_and_unit(canvas, at, &s.value, &s.unit, s.severity);
                 }
+            }
+            WidgetView::Key { icon, label } => {
+                // The icon set is not chosen yet: its name stands in for it
+                // on the label line, and the label is the key's text.
+                let room = width - 2.0 * self.theme.grid.pad_left;
+                let ts = self.theme.type_scale.clone();
+                let p = self.theme.palette.clone();
+                let g = self.theme.grid.clone();
+                let (small, big) = match (icon, label) {
+                    (Some(i), Some(l)) => (Some(i.as_str()), l.as_str()),
+                    (Some(i), None) => (None, i.as_str()),
+                    (None, Some(l)) => (None, l.as_str()),
+                    (None, None) => (None, ""),
+                };
+                if let Some(small) = small {
+                    let small = self.fit(&ts.label, small, room);
+                    self.label(canvas, x, &small);
+                }
+                let big = self.fit(&ts.value, big, room);
+                let at = (x + g.pad_left, g.value_baseline);
+                self.text
+                    .draw(canvas, &self.text_fonts, &ts.value, &big, at, p.value);
             }
             WidgetView::Rate {
                 label,

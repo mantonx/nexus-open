@@ -1,7 +1,9 @@
 //! The strip's own settings as fields: temperature unit, clock, font and
 //! where the weather is for.
 
-use nexus_core::config::{ClockFormat, Config, Settings, Temperature, Weather};
+use nexus_core::config::{
+    ClockFormat, Config, Settings, Temperature, Weather, colour_text, parse_colour,
+};
 use nexus_core::fonts::FontChoice;
 
 use crate::inspector::{Field, Kind, Missing, Values};
@@ -10,6 +12,7 @@ pub const TEMPERATURE: &str = "settings.temperature";
 pub const CLOCK: &str = "settings.clock";
 pub const FONT: &str = "settings.font";
 pub const WEATHER: &str = "settings.weather";
+pub const ACCENT: &str = "settings.accent";
 
 const FAHRENHEIT: &str = "°F (Fahrenheit)";
 const CELSIUS: &str = "°C (Celsius)";
@@ -45,6 +48,10 @@ pub fn flatten(c: &Config) -> Values {
         ),
         (FONT.into(), c.settings.font.display_name().into()),
         (WEATHER.into(), weather),
+        (
+            ACCENT.into(),
+            c.settings.accent.map(colour_text).unwrap_or_default(),
+        ),
     ])
 }
 
@@ -66,6 +73,15 @@ pub fn build(v: &Values) -> Result<(Settings, Option<Weather>), Missing> {
             ClockFormat::H12
         } else {
             ClockFormat::H24
+        },
+        accent: match get(ACCENT) {
+            "" => None,
+            text => Some(parse_colour(text).map_err(|_| {
+                Missing::Invalid(
+                    "The accent is a colour written #rrggbb, as in #5aa0e0. Empty: the default."
+                        .into(),
+                )
+            })?),
         },
     };
     Ok((settings, weather(get(WEATHER))?))
@@ -129,6 +145,13 @@ pub fn fields(v: &Values) -> Vec<Field> {
             value: get(WEATHER),
             help: "A place, as in: Paris, France; or latitude and longitude, as in: 48.85, 2.35. Empty: no weather. Looked up with Open-Meteo.".into(),
         },
+        Field {
+            key: ACCENT.into(),
+            label: "Accent colour".into(),
+            kind: Kind::Text,
+            value: get(ACCENT),
+            help: "A colour written #rrggbb, as in #5aa0e0. Empty: the default.".into(),
+        },
     ]
 }
 
@@ -164,6 +187,21 @@ mod tests {
             Some("Paris, France")
         );
         assert!(weather("95, 2").is_err());
+    }
+
+    #[test]
+    fn the_accent_is_typed_as_hex_or_left_empty() {
+        let mut v = flatten(&Config::default_layout());
+        assert_eq!(v[ACCENT], "");
+        assert_eq!(build(&v).unwrap().0.accent, None);
+        v.insert(ACCENT.into(), "#FF8800".into());
+        let (s, _) = build(&v).unwrap();
+        assert_eq!(s.accent, Some(nexus_core::theme::Rgb::hex(0xff8800)));
+        let mut c = Config::default_layout();
+        c.settings = s;
+        assert_eq!(flatten(&c)[ACCENT], "#ff8800");
+        v.insert(ACCENT.into(), "orange".into());
+        assert!(matches!(build(&v), Err(Missing::Invalid(_))));
     }
 
     #[test]

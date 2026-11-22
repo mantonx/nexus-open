@@ -165,6 +165,12 @@ impl Daemon {
             if self.device.is_none() && Instant::now() >= self.next_attempt {
                 self.connect();
             }
+            // Timers fire on time even with no device or viewer to draw
+            // for: a long press held still, the alarm clearing itself.
+            self.engine.tick(self.origin.elapsed().as_secs_f64());
+            for effect in self.engine.take_effects() {
+                self.effects.carry_out(effect);
+            }
             let now = Zoned::now();
             self.show(&now);
 
@@ -195,6 +201,9 @@ impl Daemon {
                 },
             };
 
+            // The engine's clock, for readings: they carry no time, and the
+            // alarm's clearing and re-arming are timed from them.
+            self.engine.tick(self.origin.elapsed().as_secs_f64());
             // Handle everything already queued before drawing, so a burst of
             // updates becomes one frame.
             for msg in first.into_iter().chain(rx.try_iter()) {
@@ -314,6 +323,7 @@ impl Daemon {
                     store_path: self.store_path.display().to_string(),
                     store_error: self.store_error.clone(),
                     takeover: self.engine.takeover().map(str::to_string),
+                    alarm: self.engine.alarm().map(|a| a.label),
                     revision: self.store.revision().unwrap_or_default(),
                 };
                 serde_json::to_value(status).map_err(|e| e.to_string())

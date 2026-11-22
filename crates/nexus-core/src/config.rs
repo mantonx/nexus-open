@@ -13,6 +13,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::WIDTH;
 use crate::fonts::FontChoice;
+use crate::theme::Rgb;
 
 /// The layout used when there is no config file yet.
 pub const DEFAULT: &str = include_str!("../assets/default.toml");
@@ -71,9 +72,9 @@ fn is_yes(b: &bool) -> bool {
     *b
 }
 
-/// A row of widgets that covers the whole strip for a few seconds when one
-/// of its signals changes: the new track, the new volume. A touch keeps it
-/// up; a swipe or the timer puts the page back.
+/// A row of widgets that covers the strip, or one end of it, for a few
+/// seconds when one of its signals changes: the new track, the new volume.
+/// A touch on it keeps it up; a swipe or the timer puts the page back.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Takeover {
@@ -81,10 +82,54 @@ pub struct Takeover {
     /// Signals whose change shows it. Not when a signal first appears, and
     /// not while the page on the strip already shows that signal.
     pub on_change: Vec<String>,
-    /// How long it stays after the change or the last touch.
+    /// How long it stays after the change or the last touch on it.
     pub seconds: f64,
+    /// Which part of the strip it covers. Beside a partial one the page
+    /// stays on the strip and works as usual.
+    #[serde(default, skip_serializing_if = "Align::is_full")]
+    pub align: Align,
+    /// Its width in pixels, for `left` and `right`; a full one has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
     #[serde(rename = "widget", default)]
     pub widgets: Vec<Widget>,
+}
+
+/// Where a takeover sits on the strip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Align {
+    #[default]
+    Full,
+    Left,
+    Right,
+}
+
+impl Align {
+    pub fn is_full(&self) -> bool {
+        *self == Align::Full
+    }
+
+    /// How a layout writes it: `full`, `left` or `right`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Align::Full => "full",
+            Align::Left => "left",
+            Align::Right => "right",
+        }
+    }
+}
+
+impl Takeover {
+    /// The pixels it covers: its first column and its width. A partial one
+    /// without a width that fits (which `validate` refuses) counts as full.
+    pub fn span(&self) -> (u32, u32) {
+        match (self.align, self.width) {
+            (Align::Left, Some(w)) if w <= WIDTH => (0, w),
+            (Align::Right, Some(w)) if w <= WIDTH => (WIDTH - w, w),
+            _ => (0, WIDTH),
+        }
+    }
 }
 
 /// Bounds for a takeover's `seconds`.
@@ -108,6 +153,13 @@ pub struct Settings {
     pub font: FontChoice,
     pub temperature: Temperature,
     pub clock: ClockFormat,
+    /// The user's accent colour, written `"#rrggbb"`. `None`: the default.
+    #[serde(
+        deserialize_with = "accent_from_text",
+        serialize_with = "accent_to_text",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub accent: Option<Rgb>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -161,6 +213,14 @@ pub enum Widget {
         warn: Option<f64>,
         #[serde(default)]
         crit: Option<f64>,
+        /// A second signal, shown beside the first, with its own
+        /// thresholds in its own base unit.
+        #[serde(default)]
+        second: Option<String>,
+        #[serde(default)]
+        second_warn: Option<f64>,
+        #[serde(default)]
+        second_crit: Option<f64>,
         #[serde(default)]
         tap: Option<Action>,
         #[serde(default)]
@@ -202,6 +262,19 @@ pub enum Widget {
         #[serde(default)]
         hold: Option<Action>,
     },
+    /// A control to press: an icon and a label. It shows nothing live.
+    Key {
+        width: u32,
+        /// The icon's name. Free-form for now: no icon set is chosen yet.
+        #[serde(default)]
+        icon: Option<String>,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
+    },
 }
 
 impl Widget {
@@ -211,7 +284,8 @@ impl Widget {
             | Widget::Slider { width, .. }
             | Widget::Media { width, .. }
             | Widget::Value { width, .. }
-            | Widget::Rate { width, .. } => *width,
+            | Widget::Rate { width, .. }
+            | Widget::Key { width, .. } => *width,
         }
     }
 
@@ -222,7 +296,8 @@ impl Widget {
             | Widget::Slider { width, .. }
             | Widget::Media { width, .. }
             | Widget::Value { width, .. }
-            | Widget::Rate { width, .. } => *width = new,
+            | Widget::Rate { width, .. }
+            | Widget::Key { width, .. } => *width = new,
         }
         self
     }
@@ -234,7 +309,8 @@ impl Widget {
             | Widget::Slider { tap, .. }
             | Widget::Media { tap, .. }
             | Widget::Value { tap, .. }
-            | Widget::Rate { tap, .. } => tap.as_ref(),
+            | Widget::Rate { tap, .. }
+            | Widget::Key { tap, .. } => tap.as_ref(),
         }
     }
 
@@ -245,7 +321,8 @@ impl Widget {
             | Widget::Slider { hold, .. }
             | Widget::Media { hold, .. }
             | Widget::Value { hold, .. }
-            | Widget::Rate { hold, .. } => hold.as_ref(),
+            | Widget::Rate { hold, .. }
+            | Widget::Key { hold, .. } => hold.as_ref(),
         }
     }
 }
@@ -311,6 +388,41 @@ fn font_from_id<'de, D: Deserializer<'de>>(d: D) -> Result<FontChoice, D::Error>
     id.parse().map_err(serde::de::Error::custom)
 }
 
+/// Reads an accent colour written `"#rrggbb"`, in either case. The error
+/// names the key and shows the form.
+pub fn parse_colour(text: &str) -> Result<Rgb, String> {
+    let hex = text
+        .strip_prefix('#')
+        .filter(|h| h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit()));
+    match hex.and_then(|h| u32::from_str_radix(h, 16).ok()) {
+        Some(v) => Ok(Rgb::hex(v)),
+        None => Err(format!(
+            "accent must be a colour written \"#rrggbb\", as in accent = \"#5aa0e0\"; \"{text}\" is not one"
+        )),
+    }
+}
+
+/// A colour as a layout writes it: `#5aa0e0`.
+pub fn colour_text(c: Rgb) -> String {
+    format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
+}
+
+fn accent_to_text<S: Serializer>(accent: &Option<Rgb>, s: S) -> Result<S::Ok, S::Error> {
+    match accent {
+        Some(c) => s.serialize_str(&colour_text(*c)),
+        None => s.serialize_none(),
+    }
+}
+
+fn accent_from_text<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Rgb>, D::Error> {
+    match Option::<String>::deserialize(d)? {
+        Some(text) => parse_colour(&text)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
+
 /// Why a config was rejected. The message names the place and the fix.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigError(pub String);
@@ -360,7 +472,7 @@ impl Config {
                     "{at} appears twice; page names must be unique"
                 )));
             }
-            self.check_widgets(&at, &page.widgets)?;
+            self.check_widgets(&at, &page.widgets, WIDTH)?;
             let sliders = page
                 .widgets
                 .iter()
@@ -396,7 +508,27 @@ impl Config {
             if t.widgets.is_empty() {
                 return err("it has no widgets; add a [[takeover.widget]]");
             }
-            self.check_widgets(&at, &t.widgets)?;
+            let room = match (t.align, t.width) {
+                (Align::Full, None) => WIDTH,
+                (Align::Full, Some(_)) => {
+                    return err(
+                        "width is only for a takeover with align = \"left\" or \"right\"; a full one is as wide as the strip",
+                    );
+                }
+                (align, None) => {
+                    return err(&format!(
+                        "align = \"{}\" needs a width in pixels, as in width = 320",
+                        align.id()
+                    ));
+                }
+                (_, Some(w)) if !(MIN_WIDGET_WIDTH..=WIDTH).contains(&w) => {
+                    return err(&format!(
+                        "width is {w}; it must be {MIN_WIDGET_WIDTH} to {WIDTH} px"
+                    ));
+                }
+                (_, Some(w)) => w,
+            };
+            self.check_widgets(&at, &t.widgets, room)?;
         }
         let mut names = HashSet::new();
         for source in &self.sources {
@@ -427,8 +559,8 @@ impl Config {
 
 impl Config {
     /// The rules every row of widgets follows, page or takeover. `at` names
-    /// the row in messages.
-    fn check_widgets(&self, at: &str, widgets: &[Widget]) -> Result<(), ConfigError> {
+    /// the row in messages; `room` is how wide the row is.
+    fn check_widgets(&self, at: &str, widgets: &[Widget], room: u32) -> Result<(), ConfigError> {
         let at_widget = |i: usize| format!("{at}, widget {}", i + 1);
         for (i, w) in widgets.iter().enumerate() {
             if w.width() < MIN_WIDGET_WIDTH {
@@ -440,9 +572,10 @@ impl Config {
             }
         }
         let total: u32 = widgets.iter().map(Widget::width).sum();
-        if total > WIDTH {
+        if total > room {
+            let what = if room == WIDTH { "the strip" } else { "it" };
             return Err(ConfigError(format!(
-                "{at}: widget widths add up to {total} px, but the strip is {WIDTH} px wide"
+                "{at}: widget widths add up to {total} px, but {what} is {room} px wide"
             )));
         }
         for (i, w) in widgets.iter().enumerate() {
@@ -466,6 +599,29 @@ impl Config {
                         "{}: a run slider needs a program and {SLIDER_VALUE} in its arguments",
                         at_widget(i)
                     )));
+                }
+            }
+            if let Widget::Value {
+                second,
+                second_warn,
+                second_crit,
+                ..
+            } = w
+            {
+                match second {
+                    Some(s) if s.trim().is_empty() => {
+                        return Err(ConfigError(format!(
+                            "{}: second is empty; name a signal, or leave second out",
+                            at_widget(i)
+                        )));
+                    }
+                    None if second_warn.is_some() || second_crit.is_some() => {
+                        return Err(ConfigError(format!(
+                            "{}: second_warn and second_crit need a second signal",
+                            at_widget(i)
+                        )));
+                    }
+                    _ => {}
                 }
             }
             for (gesture, action) in [("tap", w.tap()), ("hold", w.hold())] {
@@ -661,6 +817,135 @@ mod tests {
         assert_eq!(c.settings.font, FontChoice::Lato);
         assert_eq!(c.settings.temperature, Temperature::Fahrenheit);
         assert_eq!(c.settings.clock, ClockFormat::H12);
+    }
+
+    #[test]
+    fn the_accent_is_a_hex_colour_or_absent() {
+        let with = |accent: &str| {
+            Config::parse(&format!(
+                "[settings]\naccent = {accent}\n[[page]]\nname = \"A\"\n"
+            ))
+        };
+        assert_eq!(
+            with("\"#5AA0e0\"").unwrap().settings.accent,
+            Some(Rgb::hex(0x5aa0e0))
+        );
+        assert_eq!(Config::parse(PAGE).unwrap().settings.accent, None);
+        for bad in [
+            "\"blue\"",
+            "\"#12345\"",
+            "\"#1234567\"",
+            "\"#gggggg\"",
+            "\"5aa0e0\"",
+            "3",
+        ] {
+            let e = with(bad).unwrap_err().0;
+            assert!(e.contains("accent"), "{bad}: names the key: {e}");
+        }
+        let e = with("\"blue\"").unwrap_err().0;
+        assert!(e.contains("#rrggbb") && e.contains("\"blue\""), "{e}");
+        assert_eq!(colour_text(Rgb::hex(0x0a0b0c)), "#0a0b0c");
+    }
+
+    const PAGE: &str = "[[page]]\nname = \"A\"\n";
+
+    #[test]
+    fn keys_parse_with_their_actions() {
+        let c = Config::parse(&format!(
+            "{PAGE}[[page.widget]]\ntype = \"key\"\nwidth = 60\nicon = \"play\"\nlabel = \"Play\"\n\
+             tap = {{ media = \"play-pause\" }}\nhold = {{ media = \"next\" }}\n\
+             [[page.widget]]\ntype = \"key\"\nwidth = 40\n"
+        ))
+        .unwrap();
+        let Widget::Key { icon, label, .. } = &c.pages[0].widgets[0] else {
+            panic!("{:?}", c.pages[0].widgets[0])
+        };
+        assert_eq!(
+            (icon.as_deref(), label.as_deref()),
+            (Some("play"), Some("Play"))
+        );
+        assert_eq!(
+            c.pages[0].widgets[0].tap(),
+            Some(&Action::Media(MediaCommand::PlayPause))
+        );
+        assert_eq!(
+            c.pages[0].widgets[0].hold(),
+            Some(&Action::Media(MediaCommand::Next))
+        );
+        assert_eq!(c.pages[0].widgets[1].tap(), None, "both optional");
+        let narrow = err(&format!(
+            "{PAGE}[[page.widget]]\ntype = \"key\"\nwidth = 30\n"
+        ));
+        assert!(narrow.contains("too narrow"), "{narrow}");
+        let typo = err(&format!(
+            "{PAGE}[[page.widget]]\ntype = \"key\"\nwidth = 60\nicn = \"x\"\n"
+        ));
+        assert!(typo.contains("icn"), "{typo}");
+    }
+
+    #[test]
+    fn a_value_may_have_a_second_reading() {
+        let value = |more: &str| {
+            Config::parse(&format!(
+                "{PAGE}[[page.widget]]\ntype = \"value\"\nwidth = 160\nlabel = \"Load\"\nsignal = \"cpu.load\"\n{more}"
+            ))
+        };
+        let c = value("second = \"mem.used\"\nsecond_warn = 80\nsecond_crit = 95\n").unwrap();
+        let Widget::Value {
+            second,
+            second_warn,
+            second_crit,
+            ..
+        } = &c.pages[0].widgets[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            (second.as_deref(), *second_warn, *second_crit),
+            (Some("mem.used"), Some(80.0), Some(95.0))
+        );
+        for (more, says) in [
+            ("second_crit = 95\n", "need a second signal"),
+            ("second = \" \"\n", "second is empty"),
+        ] {
+            let e = value(more).unwrap_err().0;
+            assert!(e.contains(says), "{more}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_takeover_may_cover_one_end_of_the_strip() {
+        let t = |keys: &str, width: u32| {
+            Config::parse(&format!(
+                "{PAGE}[[takeover]]\nname = \"T\"\non_change = [\"x\"]\nseconds = 2\n{keys}\
+                 [[takeover.widget]]\ntype = \"clock\"\nwidth = {width}\n"
+            ))
+        };
+        let full = t("", 640).unwrap();
+        assert_eq!(
+            (full.takeovers[0].align, full.takeovers[0].width),
+            (Align::Full, None),
+            "full by default"
+        );
+        assert_eq!(full.takeovers[0].span(), (0, 640));
+        let right = t("align = \"right\"\nwidth = 200\n", 200).unwrap();
+        assert_eq!(right.takeovers[0].span(), (440, 200));
+        let left = t("align = \"left\"\nwidth = 120\n", 100).unwrap();
+        assert_eq!(left.takeovers[0].span(), (0, 120));
+        for (keys, width, says) in [
+            ("align = \"left\"\n", 100, "needs a width"),
+            ("width = 200\n", 200, "width is only for"),
+            ("align = \"right\"\nwidth = 30\n", 30, "must be 40 to 640"),
+            (
+                "align = \"right\"\nwidth = 200\n",
+                300,
+                "300 px, but it is 200 px wide",
+            ),
+            ("align = \"middle\"\nwidth = 200\n", 200, "unknown variant"),
+        ] {
+            let e = t(keys, width).unwrap_err().0;
+            assert!(e.contains(says), "{keys}: {e}");
+        }
     }
 
     fn err(text: &str) -> String {

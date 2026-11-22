@@ -8,8 +8,9 @@
 /// Panel width in pixels, as f32 for gesture maths.
 const WIDTH: f32 = crate::WIDTH as f32;
 
-/// Held at least this long without swiping, a press is a long press.
-const LONG_PRESS: f64 = 0.5;
+/// Held at least this long without swiping, a press is a long press. It
+/// fires as soon as this is reached, with the finger still down.
+pub const LONG_PRESS: f64 = 0.5;
 /// Shorter presses are ignored as brushes: the strip sits above the
 /// keyboard, and a knuckle grazing it while typing must not fire an action.
 /// From Matt's recordings (tests/traces): the strip reports every ~10 ms,
@@ -31,9 +32,10 @@ pub enum Gesture {
     /// A swipe ended. `velocity` is the finger's speed at lift in px/s,
     /// signed like `dx`.
     Release { dx: f32, velocity: f32 },
-    /// A short press without swiping.
+    /// A short press without swiping, on release.
     Tap { x: f32 },
-    /// A press held for `LONG_PRESS` without swiping.
+    /// A press held for `LONG_PRESS` without swiping, at that moment. The
+    /// release that follows is nothing; a swipe may still follow.
     LongPress { x: f32 },
 }
 
@@ -55,6 +57,8 @@ struct Press {
     /// so the release uses this instead.
     last_x: f32,
     swiping: bool,
+    /// The long press has fired.
+    held: bool,
 }
 
 impl Recognizer {
@@ -85,6 +89,7 @@ impl Recognizer {
                     start_t: t,
                     last_x: x,
                     swiping: false,
+                    held: false,
                 });
                 None
             }
@@ -99,7 +104,7 @@ impl Recognizer {
                     self.velocity.push(x, t);
                     return Some(Gesture::Drag { dx });
                 }
-                None
+                self.tick(t)
             }
             (false, Some(_)) => {
                 let press = self.press.take()?;
@@ -110,7 +115,10 @@ impl Recognizer {
                         dx,
                         velocity: self.velocity.velocity(),
                     })
+                } else if press.held {
+                    None
                 } else if t - press.start_t >= LONG_PRESS {
+                    // No sample came between the threshold and the lift.
                     Some(Gesture::LongPress { x: press.last_x })
                 } else if t - press.start_t >= MIN_TAP {
                     Some(Gesture::Tap { x: press.last_x })
@@ -122,9 +130,29 @@ impl Recognizer {
         }
     }
 
+    /// Fires the long press once `t` reaches its threshold, if a still
+    /// finger is down, whether or not a sample arrives then.
+    pub fn tick(&mut self, t: f64) -> Option<Gesture> {
+        let press = self.press.as_mut()?;
+        if press.swiping || press.held || t - press.start_t < LONG_PRESS {
+            return None;
+        }
+        press.held = true;
+        Some(Gesture::LongPress { x: press.last_x })
+    }
+
     /// True while a finger is on the strip.
     pub fn pressed(&self) -> bool {
         self.press.is_some()
+    }
+
+    /// A still finger on its way to a long press: where it landed and
+    /// when. `None` once it swipes or the long press has fired.
+    pub fn holding(&self) -> Option<(f32, f64)> {
+        self.press
+            .as_ref()
+            .filter(|p| !p.swiping && !p.held)
+            .map(|p| (p.start_x, p.start_t))
     }
 }
 
@@ -288,6 +316,29 @@ mod tests {
         let still = vec![300.0; 20];
         assert_eq!(replay(&still, 0.0), [Gesture::Tap { x: 300.0 }]);
         assert_eq!(replay(&still, 0.6), [Gesture::LongPress { x: 300.0 }]);
+    }
+
+    #[test]
+    fn a_long_press_fires_at_the_threshold_with_the_finger_down() {
+        let mut r = Recognizer::new();
+        let mut t = 0.0;
+        while t < 0.49 {
+            assert_eq!(r.update(true, 300.0, t), None);
+            t += 0.01;
+        }
+        assert_eq!(r.holding(), Some((300.0, 0.0)));
+        assert_eq!(
+            r.update(true, 300.0, 0.5),
+            Some(Gesture::LongPress { x: 300.0 })
+        );
+        assert_eq!(r.holding(), None);
+        assert_eq!(r.update(true, 300.0, 0.7), None, "once");
+        assert_eq!(r.update(false, 0.0, 0.9), None, "the release is nothing");
+        // With no sample at the threshold, a tick fires it.
+        r.update(true, 100.0, 2.0);
+        assert_eq!(r.tick(2.4), None);
+        assert_eq!(r.tick(2.5), Some(Gesture::LongPress { x: 100.0 }));
+        assert_eq!(r.tick(2.6), None);
     }
 
     #[test]

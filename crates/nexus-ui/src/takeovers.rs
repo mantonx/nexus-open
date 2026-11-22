@@ -2,13 +2,15 @@
 //! change shows it, and how long it stays. Its widgets are edited like a
 //! page's, in the preview.
 
-use nexus_core::config::{TAKEOVER_SECONDS, Takeover};
+use nexus_core::config::{Align, MIN_WIDGET_WIDTH, TAKEOVER_SECONDS, Takeover};
 
 use crate::inspector::{Field, Kind, Missing, Values};
 
 pub const NAME: &str = "takeover.name";
 pub const ON_CHANGE: &str = "takeover.on_change";
 pub const SECONDS: &str = "takeover.seconds";
+pub const ALIGN: &str = "takeover.align";
+pub const WIDTH: &str = "takeover.width";
 
 /// What a takeover's form sets.
 #[derive(Clone, Debug, PartialEq)]
@@ -16,6 +18,8 @@ pub struct Settings {
     pub name: String,
     pub on_change: Vec<String>,
     pub seconds: f64,
+    pub align: Align,
+    pub width: Option<u32>,
 }
 
 /// The values a new takeover starts from: the first free "Takeover N".
@@ -28,6 +32,8 @@ pub fn new_values(taken: &[&str]) -> Values {
         (NAME.into(), name),
         (ON_CHANGE.into(), String::new()),
         (SECONDS.into(), "3".into()),
+        (ALIGN.into(), Align::Full.id().into()),
+        (WIDTH.into(), String::new()),
     ])
 }
 
@@ -36,6 +42,11 @@ pub fn flatten(t: &Takeover) -> Values {
         (NAME.into(), t.name.clone()),
         (ON_CHANGE.into(), t.on_change.join(", ")),
         (SECONDS.into(), format_seconds(t.seconds)),
+        (ALIGN.into(), t.align.id().into()),
+        (
+            WIDTH.into(),
+            t.width.map(|w| w.to_string()).unwrap_or_default(),
+        ),
     ])
 }
 
@@ -76,10 +87,39 @@ pub fn build(v: &Values, taken: &[&str]) -> Result<Settings, Missing> {
             "Choose the signals whose change shows it.".into(),
         ));
     }
+    let align = match get(ALIGN) {
+        "" | "full" => Align::Full,
+        "left" => Align::Left,
+        "right" => Align::Right,
+        _ => {
+            return Err(Missing::Invalid("Covers is full, left or right.".into()));
+        }
+    };
+    let width = match (align, get(WIDTH)) {
+        (Align::Full, _) => None,
+        (_, "") => {
+            return Err(Missing::Incomplete(
+                "Give the width it covers, in pixels.".into(),
+            ));
+        }
+        (_, w) => Some(
+            w.parse::<u32>()
+                .ok()
+                .filter(|w| (MIN_WIDGET_WIDTH..=nexus_core::WIDTH).contains(w))
+                .ok_or_else(|| {
+                    Missing::Invalid(format!(
+                        "The width must be {MIN_WIDGET_WIDTH} to {} pixels.",
+                        nexus_core::WIDTH
+                    ))
+                })?,
+        ),
+    };
     Ok(Settings {
         name: name.into(),
         on_change,
         seconds,
+        align,
+        width,
     })
 }
 
@@ -132,6 +172,21 @@ pub fn fields(v: &Values) -> Vec<Field> {
                 TAKEOVER_SECONDS.end()
             ),
         },
+        Field {
+            key: ALIGN.into(),
+            label: "Covers".into(),
+            kind: Kind::Text,
+            value: get(ALIGN),
+            help: "full, left or right: the whole strip, or one end of it with the page beside it."
+                .into(),
+        },
+        Field {
+            key: WIDTH.into(),
+            label: "Width".into(),
+            kind: Kind::Number,
+            value: get(WIDTH),
+            help: "Pixels, for left or right. Its widgets must fit in it.".into(),
+        },
     ]
 }
 
@@ -150,9 +205,26 @@ mod tests {
             Ok(Settings {
                 name: "Takeover 2".into(),
                 on_change: vec!["volume.level".into()],
-                seconds: 3.0
+                seconds: 3.0,
+                align: Align::Full,
+                width: None,
             })
         );
+    }
+
+    #[test]
+    fn a_partial_takeover_needs_a_width() {
+        let mut v = new_values(&[]);
+        v.insert(ON_CHANGE.into(), "mode".into());
+        v.insert(ALIGN.into(), "right".into());
+        assert!(matches!(build(&v, &[]), Err(Missing::Incomplete(_))));
+        v.insert(WIDTH.into(), "20".into());
+        assert!(matches!(build(&v, &[]), Err(Missing::Invalid(_))));
+        v.insert(WIDTH.into(), "200".into());
+        let s = build(&v, &[]).unwrap();
+        assert_eq!((s.align, s.width), (Align::Right, Some(200)));
+        v.insert(ALIGN.into(), "middle".into());
+        assert!(matches!(build(&v, &[]), Err(Missing::Invalid(_))));
     }
 
     #[test]
@@ -182,12 +254,14 @@ mod tests {
             name: "Volume".into(),
             on_change: vec!["volume.level".into(), "volume.muted".into()],
             seconds: 2.5,
+            align: Align::Left,
+            width: Some(320),
             widgets: Vec::new(),
         };
         let s = build(&flatten(&t), &[]).unwrap();
         assert_eq!(
-            (s.name, s.on_change, s.seconds),
-            (t.name, t.on_change, t.seconds)
+            (s.name, s.on_change, s.seconds, s.align, s.width),
+            (t.name, t.on_change, t.seconds, t.align, t.width)
         );
     }
 }

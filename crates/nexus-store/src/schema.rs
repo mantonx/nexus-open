@@ -109,4 +109,36 @@ CREATE TABLE history (
   undone INTEGER NOT NULL DEFAULT 0 CHECK (undone IN (0, 1))
 );
 "#,
+    // 2: the accent colour; takeovers over one end of the strip; the key
+    // widget. Every new column is optional, so what was stored before
+    // reads back the same. SQLite cannot change a CHECK in place, so the
+    // widget table is rebuilt as its docs describe, with foreign keys off
+    // (`migrate` does that) so its actions are not cascaded away.
+    r#"
+ALTER TABLE settings ADD COLUMN accent TEXT
+  CHECK (accent IS NULL OR accent GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]');
+
+ALTER TABLE takeover ADD COLUMN align TEXT NOT NULL DEFAULT 'full'
+  CHECK (align IN ('full', 'left', 'right'));
+ALTER TABLE takeover ADD COLUMN width INTEGER CHECK (width BETWEEN 40 AND 640);
+
+CREATE TABLE widget_2 (
+  id          INTEGER PRIMARY KEY,
+  page_id     INTEGER REFERENCES page(id) ON DELETE CASCADE,
+  takeover_id INTEGER REFERENCES takeover(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
+  type        TEXT NOT NULL
+              CHECK (type IN ('clock', 'value', 'rate', 'slider', 'media', 'key')),
+  width       INTEGER NOT NULL CHECK (width BETWEEN 40 AND 640),
+  props       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props)),
+  note        TEXT NOT NULL DEFAULT '',
+  CHECK ((page_id IS NULL) <> (takeover_id IS NULL))
+);
+INSERT INTO widget_2 (id, page_id, takeover_id, position, type, width, props, note)
+  SELECT id, page_id, takeover_id, position, type, width, props, note FROM widget;
+DROP TABLE widget;
+ALTER TABLE widget_2 RENAME TO widget;
+CREATE INDEX widget_on_page     ON widget(page_id, position);
+CREATE INDEX widget_on_takeover ON widget(takeover_id, position);
+"#,
 ];

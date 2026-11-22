@@ -338,15 +338,24 @@ pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes
     }
 
     let mut q = conn.prepare(
-        "SELECT id, name, seconds, note FROM takeover WHERE layout_id = ?1 ORDER BY position, id",
+        "SELECT id, name, seconds, note, align, width FROM takeover WHERE layout_id = ?1 ORDER BY position, id",
     )?;
-    let takeover_rows: Vec<(i64, String, f64, String)> = q
+    type TakeoverRow = (i64, String, f64, String, String, Option<u32>);
+    let takeover_rows: Vec<TakeoverRow> = q
         .query_map([layout], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         })?
         .collect::<Result<_, _>>()?;
     let mut takeovers = Vec::new();
-    for (id, name, seconds, note) in takeover_rows {
+    for (id, name, seconds, note, align, width) in takeover_rows {
+        let align = serde_json::from_value(Json::String(align)).map_err(corrupt)?;
         let mut q = conn.prepare(
             "SELECT signal FROM takeover_signal WHERE takeover_id = ?1 ORDER BY position",
         )?;
@@ -356,6 +365,8 @@ pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes
             name,
             on_change,
             seconds,
+            align,
+            width,
             widgets,
         });
         notes.takeovers.push(RowNotes {
@@ -389,11 +400,16 @@ pub(crate) fn load(conn: &Connection, layout: LayoutId) -> Result<(Config, Notes
 
 fn read_settings(conn: &Connection) -> Result<(Settings, Option<Weather>, String), StoreError> {
     let row = conn.query_row(
-        "SELECT font, temperature, clock, weather_location, weather_latitude, weather_longitude, note FROM settings",
+        "SELECT font, temperature, clock, weather_location, weather_latitude, weather_longitude, note, accent FROM settings",
         [],
         |r| {
             Ok((
-                json!({ "font": r.get::<_, String>(0)?, "temperature": r.get::<_, String>(1)?, "clock": r.get::<_, String>(2)? }),
+                json!({
+                    "font": r.get::<_, String>(0)?,
+                    "temperature": r.get::<_, String>(1)?,
+                    "clock": r.get::<_, String>(2)?,
+                    "accent": r.get::<_, Option<String>>(7)?,
+                }),
                 Weather {
                     location: r.get(3)?,
                     latitude: r.get(4)?,
@@ -486,13 +502,36 @@ fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     if found > known {
         return Err(StoreError::Newer { found, known });
     }
-    for (i, sql) in schema::MIGRATIONS.iter().enumerate().skip(found) {
-        let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", (i + 1) as i64)?;
-        tx.commit()?;
+    if found == known {
+        return Ok(());
     }
-    Ok(())
+    // A migration may rebuild a table others point to, which with foreign
+    // keys on would cascade deletes through them. They are switched off
+    // around the migrations (it cannot be done inside a transaction), and
+    // each migration must leave every reference whole before it commits.
+    let keys: bool = conn.pragma_query_value(None, "foreign_keys", |r| r.get(0))?;
+    conn.pragma_update(None, "foreign_keys", false)?;
+    let result = (|| {
+        for (i, sql) in schema::MIGRATIONS.iter().enumerate().skip(found) {
+            let tx = conn.transaction()?;
+            tx.execute_batch(sql)?;
+            let broken: i64 =
+                tx.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                    r.get(0)
+                })?;
+            if broken > 0 {
+                return Err(corrupt(format!(
+                    "migration {} would leave {broken} broken references",
+                    i + 1
+                )));
+            }
+            tx.pragma_update(None, "user_version", (i + 1) as i64)?;
+            tx.commit()?;
+        }
+        Ok(())
+    })();
+    conn.pragma_update(None, "foreign_keys", keys)?;
+    result
 }
 
 pub(crate) fn write_layout(
@@ -549,13 +588,13 @@ pub(crate) fn write_settings(
     let text = |key: &str| s[key].as_str().unwrap_or_default().to_string();
     let w = config.weather.as_ref();
     conn.execute(
-        "INSERT INTO settings (id, font, temperature, clock, weather_location, weather_latitude, weather_longitude, active_layout, note)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO settings (id, font, temperature, clock, weather_location, weather_latitude, weather_longitude, active_layout, note, accent)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (id) DO UPDATE SET
            font = excluded.font, temperature = excluded.temperature, clock = excluded.clock,
            weather_location = excluded.weather_location, weather_latitude = excluded.weather_latitude,
            weather_longitude = excluded.weather_longitude, active_layout = excluded.active_layout,
-           note = excluded.note",
+           note = excluded.note, accent = excluded.accent",
         params![
             text("font"),
             text("temperature"),
@@ -564,7 +603,8 @@ pub(crate) fn write_settings(
             w.and_then(|w| w.latitude),
             w.and_then(|w| w.longitude),
             active,
-            note
+            note,
+            s["accent"].as_str(),
         ],
     )?;
     Ok(())
@@ -581,7 +621,7 @@ fn write_sources(conn: &Connection, sources: &[Source], notes: &Notes) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_core::config::Action;
+    use nexus_core::config::{Action, Align};
 
     fn with_default() -> (Store, LayoutId) {
         let mut store = Store::open_in_memory().unwrap();
@@ -880,6 +920,218 @@ mod tests {
             r0 + 6,
             "undo and redo count as changes"
         );
+    }
+
+    /// A snapshot as schema 1 had it: without the columns migration 2 adds.
+    fn as_schema_1(snapshot: &str) -> String {
+        let mut state: Map<String, Json> = serde_json::from_str(snapshot).unwrap();
+        for (table, columns) in [
+            ("settings", &["accent"][..]),
+            ("takeover", &["align", "width"]),
+        ] {
+            for row in state[table].as_array_mut().unwrap() {
+                for c in columns {
+                    row.as_object_mut().unwrap().remove(*c);
+                }
+            }
+        }
+        Json::Object(state).to_string()
+    }
+
+    #[test]
+    fn a_layout_stored_by_schema_1_loads_the_same_and_keeps_its_undo() {
+        let path = std::env::temp_dir().join(format!("nexus-store-v1-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        // The default layout and one undoable rename, as rows of today.
+        let (mut current, layout) = with_default();
+        let before = history::snapshot(&current.conn).unwrap();
+        let system = page_named(&current, "System");
+        current
+            .edit(&Edit::RenamePage {
+                page: system,
+                name: "Machine".into(),
+            })
+            .unwrap();
+        let after = history::snapshot(&current.conn).unwrap();
+        let renamed = current.load(layout).unwrap().0;
+        {
+            // A database the last release wrote, holding those rows.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(schema::MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            history::restore(&conn, &as_schema_1(&after)).unwrap();
+            history::record(
+                &conn,
+                "Rename page to Machine",
+                &as_schema_1(&before),
+                &as_schema_1(&after),
+            )
+            .unwrap();
+        }
+        let mut store = Store::open(&path).unwrap();
+        let version: i64 = store
+            .conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version as usize, schema::MIGRATIONS.len());
+        assert_eq!(store.load(layout).unwrap().0, renamed, "loads identically");
+        let broken: i64 = id(&store, "SELECT count(*) FROM pragma_foreign_key_check");
+        assert_eq!(broken, 0);
+        let keys: bool = store
+            .conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .unwrap();
+        assert!(keys, "foreign keys are on again");
+        // The rebuilt widget table is still what actions point at.
+        let actions = id(&store, "SELECT count(*) FROM action");
+        assert!(actions > 0);
+        let tapped = id(&store, "SELECT widget_id FROM action LIMIT 1");
+        store.edit(&Edit::DeleteWidget { widget: tapped }).unwrap();
+        assert!(
+            id(&store, "SELECT count(*) FROM action") < actions,
+            "cascaded"
+        );
+        store.undo().unwrap();
+        // An undo step from before the migration still restores.
+        assert_eq!(
+            store.undo().unwrap().as_deref(),
+            Some("Rename page to Machine")
+        );
+        assert_eq!(store.load(layout).unwrap().0, Config::default_layout());
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+    }
+
+    /// A layout with every key migration 2 added.
+    const NEW_KEYS: &str = r##"
+        [settings]
+        accent = "#FF8800"
+        [[page]]
+        name = "A"
+        [[page.widget]]
+        type = "value"
+        width = 200
+        label = "Load"
+        signal = "cpu.load"
+        crit = 90
+        second = "mem.used"
+        second_warn = 80
+        second_crit = 95
+        [[page.widget]]
+        type = "key"
+        width = 80
+        icon = "play"
+        label = "Play"
+        tap = { media = "play-pause" }
+        hold = { page = "A" }
+        [[page.widget]]
+        type = "key"
+        width = 40
+        [[takeover]]
+        name = "Mode"
+        on_change = ["mode"]
+        seconds = 3
+        align = "right"
+        width = 200
+        [[takeover.widget]]
+        type = "key"
+        width = 200
+        label = "Focus"
+    "##;
+
+    #[test]
+    fn the_new_keys_round_trip_through_rows_and_text() {
+        let config = Config::parse(NEW_KEYS).unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        let id = store
+            .import("New", &config, &Notes::default(), true)
+            .unwrap();
+        let (back, notes) = store.load(id).unwrap();
+        assert_eq!(back, config);
+        let text = text::write(&back, &notes);
+        assert!(text.contains("accent = \"#ff8800\""), "{text}");
+        assert!(text.contains("align = \"right\"\nwidth = 200\n"), "{text}");
+        assert_eq!(text::parse(&text).unwrap().0, config);
+        // An old layout writes none of them.
+        let old = text::write(&Config::default_layout(), &Notes::default());
+        for key in [
+            "\naccent =",
+            "\nalign =",
+            "\nsecond =",
+            "\nsecond_",
+            "type = \"key\"",
+        ] {
+            assert!(!old.contains(key), "{key} in\n{old}");
+        }
+    }
+
+    #[test]
+    fn edits_to_the_new_keys_undo_and_redo() {
+        let config = Config::parse(NEW_KEYS).unwrap();
+        let mut store = Store::open_in_memory().unwrap();
+        let layout = store
+            .import("New", &config, &Notes::default(), true)
+            .unwrap();
+        let ids = store.ids(layout).unwrap();
+        let mut settings = config.settings.clone();
+        settings.accent = None;
+        store
+            .edit(&Edit::SetSettings {
+                settings,
+                weather: None,
+            })
+            .unwrap();
+        store
+            .edit(&Edit::SetTakeover {
+                takeover: ids.takeovers[0].id,
+                name: "Mode".into(),
+                on_change: vec!["mode".into()],
+                seconds: 3.0,
+                align: Align::Left,
+                width: Some(240),
+            })
+            .unwrap();
+        store
+            .edit(&Edit::SetWidget {
+                widget: ids.pages[0].widgets[1],
+                value: Widget::Key {
+                    width: 80,
+                    icon: Some("pause".into()),
+                    label: None,
+                    tap: None,
+                    hold: None,
+                },
+            })
+            .unwrap();
+        let edited = store.load(layout).unwrap().0;
+        assert_eq!(edited.settings.accent, None);
+        assert_eq!(
+            (edited.takeovers[0].align, edited.takeovers[0].width),
+            (Align::Left, Some(240))
+        );
+        assert!(
+            matches!(&edited.pages[0].widgets[1], Widget::Key { icon: Some(i), .. } if i == "pause")
+        );
+        for _ in 0..3 {
+            store.undo().unwrap();
+        }
+        assert_eq!(store.load(layout).unwrap().0, config, "undone exactly");
+        for _ in 0..3 {
+            store.redo().unwrap();
+        }
+        assert_eq!(store.load(layout).unwrap().0, edited, "redone exactly");
+        // An edit sent without the new fields keeps the meaning it had.
+        let old: Edit = serde_json::from_str(&format!(
+            r#"{{"op": "set-takeover", "takeover": {}, "name": "Mode", "on_change": ["mode"], "seconds": 3}}"#,
+            ids.takeovers[0].id
+        ))
+        .unwrap();
+        store.edit(&old).unwrap();
+        let t = &store.load(layout).unwrap().0.takeovers[0];
+        assert_eq!((t.align, t.width), (Align::Full, None));
     }
 
     #[test]
