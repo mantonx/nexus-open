@@ -49,7 +49,6 @@ export component Button inherits Rectangle {
         : (touch.pressed ? Theme.surface-2 : touch.has-hover ? Theme.raised.brighter(0.08) : Theme.raised);
     border-width: !quiet && !primary && root.enabled ? 1px : 0px;
     border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
-    opacity: root.enabled ? 1 : 0.55;
 
     accessible-role: button;
     accessible-label: root.label != "" ? root.label : root.text;
@@ -60,7 +59,7 @@ export component Button inherits Rectangle {
         }
     }
 
-    property <color> ink: !root.enabled ? Theme.text-3
+    property <color> ink: !root.enabled ? Theme.text-off
         : primary ? Theme.act-ink
         : destructive && touch.has-hover ? Theme.crit
         : quiet ? Theme.text-2 : Theme.text;
@@ -140,7 +139,7 @@ export component IconButton inherits Rectangle {
         glyph: root.icon;
         fill: root.fill;
         font-size: 18px;
-        color: root.enabled ? Theme.text-2 : Theme.text-3.transparentize(0.4);
+        color: root.enabled ? Theme.text-2 : Theme.text-off;
     }
     touch := TouchArea {
         enabled: root.enabled;
@@ -187,7 +186,6 @@ export component Segmented inherits Rectangle {
     background: Theme.surface-2;
     min-width: row.preferred-width;
     horizontal-stretch: 0;
-    opacity: root.enabled ? 1 : 0.55;
     accessible-role: tab-list;
     accessible-label: root.label;
 
@@ -424,7 +422,6 @@ export component Select inherits Rectangle {
     border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
     horizontal-stretch: 1;
     min-width: 120px;
-    opacity: root.enabled ? 1 : 0.55;
     accessible-role: combobox;
     accessible-label: root.label;
     accessible-value: root.current >= 0 ? root.options[root.current] : "";
@@ -561,7 +558,7 @@ export component MenuRow inherits Rectangle {
             if root.checked || root.icon != "": Icon {
                 glyph: root.checked ? Glyph.check : root.icon;
                 font-size: 15px;
-                color: root.checked ? Theme.act-line : !root.enabled ? Theme.text-3 : root.destructive && touch.has-hover ? Theme.crit : Theme.text-2;
+                color: root.checked ? Theme.act-line : !root.enabled ? Theme.text-off : root.destructive && touch.has-hover ? Theme.crit : Theme.text-2;
             }
         }
         Text {
@@ -569,7 +566,7 @@ export component MenuRow inherits Rectangle {
             font-family: Theme.font;
             font-size: Theme.size-body;
             font-weight: root.checked ? 600 : 400;
-            color: !root.enabled ? Theme.text-3 : root.destructive && touch.has-hover ? Theme.crit : Theme.text;
+            color: !root.enabled ? Theme.text-off : root.destructive && touch.has-hover ? Theme.crit : Theme.text;
             vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;

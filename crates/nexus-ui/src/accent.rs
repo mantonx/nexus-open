@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn accent_words_and_rings_read_on_both_themes() {
         let light = [0xfffaf3, 0xf3ebdf, 0xece2d3].map(Rgb::hex);
-        let dark = [0x14110f, 0x201a17, 0x2b241f].map(Rgb::hex);
+        let dark = [0x1c1815, 0x251f1b, 0x2f2823].map(Rgb::hex);
         let hues = (0..24).map(|i| from_oklch(0.7, 0.15, i as f32 * 15.0));
         for user in hues.chain(PRESETS.map(|(_, c)| c)).chain([DEFAULT]) {
             let r = roles(user);
@@ -146,6 +146,20 @@ mod tests {
             for s in surfaces {
                 assert!(contrast(word, s) >= 4.5, "{word:?} on {s:?}");
             }
+        }
+    }
+
+    /// Disabled words (theme.slint text-off) at 3:1 or better on every
+    /// surface, in both themes.
+    #[test]
+    fn disabled_words_read_at_three_to_one() {
+        let light = [0xf3ebdf, 0xfffaf3, 0xece2d3].map(Rgb::hex);
+        let dark = [0x1c1815, 0x251f1b, 0x2f2823].map(Rgb::hex);
+        for s in light {
+            assert!(contrast(Rgb::hex(0x8c7a68), s) >= 3.0, "{s:?}");
+        }
+        for s in dark {
+            assert!(contrast(Rgb::hex(0x857669), s) >= 3.0, "{s:?}");
         }
     }
 
