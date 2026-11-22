@@ -1,0 +1,208 @@
+# Nexus Open design plan
+
+Status: opened 2026-11-22, after Matt said the UI "sucks" and asked for a
+brutal assessment and a plan for a beautiful, well-thought-out, useful app.
+Written for an agent to execute phase by phase, like `REDESIGN_PLAN.md`.
+Stop and ask Matt at every **GATE**.
+
+## Why this plan exists
+
+An Impeccable critique on 2026-11-22 (two isolated reviewers; snapshots in
+`.impeccable/critique/`) scored:
+
+- **The strip: 15/36 (Poor).** Only the value digits (3 mm tall) can be read
+  from a seat 60 cm away; labels, titles, rates and both takeovers are
+  1.4–1.6 mm. Every widget is one template stamped at any width, so the
+  full-width Clock page uses 6% of the strip. Graphs autoscale and run
+  through the digits. Critical red is the dimmest number shown. Sliders look
+  like progress bars and jump on touch. No icons, artwork, theme or identity.
+- **The settings window: 20/40 (bottom of Acceptable).** Stock Slint theme;
+  one grey button plays tab, toggle, action and delete; the Signals list
+  takes 27% of the window; layouts are buried under the font picker; the
+  form you work in is cut off; the first "Add widget" errors and always
+  inserts a Clock; failure states give shell commands and, on 2026-11-22,
+  the wrong cause.
+
+Both reviewers: the engineering is careful, and neither surface has been
+designed. The 9/10 bar in `REDESIGN_PLAN.md` let this through because it
+measures consistency ("one type scale", "crisp text"), not legibility at
+arm's length or whether anything looks good.
+
+## Decisions (Matt, 2026-11-22)
+
+- The strip is redesigned first; the window second.
+- The strip's direction is chosen by looking: three directions are mocked up
+  as real 640×48 frames.
+- The window gets a new concept, not a restyle.
+- The redesign comes before the first release. Packaging (Phase 5 "ship")
+  waits. The daily-driver trial to 2026-11-28 continues on the current build
+  and still decides whether takeovers stay.
+
+## What is kept, and what is replaced
+
+Kept: the daemon, the control protocol, the store and its undo, the gesture
+physics, sources and signals, takeover timing rules, the sandboxed service,
+the doctor, and the idea that the preview is the live strip and the editing
+canvas. None of the redesign throws engineering away.
+
+Replaced: how widgets are drawn (`nexus-core` `theme.rs`, `widget.rs`), the
+default layout, and the structure and look of `nexus-ui/ui/app.slint`.
+
+## The design bar (added to the 9/10 bar)
+
+Each is pass or fail with evidence.
+
+- `[U3]` Every widget has one primary element readable at Matt's seat,
+  proven with the legibility card on the real strip, not by calculation.
+- `[U3]` No text on the strip is smaller than the smallest size Matt could
+  read on that card.
+- `[U3]` A widget given more width shows more or shows it bigger; no widget
+  is a narrow one with black beside it.
+- `[U3]` Warning and critical states are noticeable without looking at the
+  strip directly: they change filled area or brightness, not only hue.
+- `[U3]` A graph never crosses its number, and its scale means the same
+  thing from one minute to the next.
+- `[U3]` You can tell what a touch will do before touching: sliders, taps
+  and inert zones look different, and a brush cannot set volume.
+- `[U3]` "No data", "not set up" and "source lost" look different.
+- `[U3]` Strip critique of 28/36 or better, by an isolated reviewer.
+- `[U5]` Someone who never opens a terminal can go from first open to a
+  strip they chose, and can recover from "strip busy" and "daemon stopped"
+  with buttons in the window.
+- `[U5]` Adding a widget never errors on a full page and never needs a
+  pixel number.
+- `[U5]` Signal identifiers (`cpu.load`) are never the primary name of
+  anything.
+- `[U5]` Window critique of 30/40 or better, by an isolated reviewer.
+- `[U5]` The Phase 4 exit test: Matt rebuilds his layout from empty using
+  only the window, on native Wayland.
+
+## Phases
+
+### U0 — Ground truth
+
+Design for the real panel and the real seat, not for a screenshot.
+
+1. The strip must be free: the old Go app (`/usr/bin/nexus-open --tray`)
+   took it on 2026-11-22. Matt quits it. Separately, fix the doctor so a
+   strip claimed through libusb is reported as "held by <program>", not
+   "not plugged in".
+2. **Legibility card.** A `nexusd preview` mode that shows test frames on
+   the strip: a ladder of numeral and text sizes (10 to 40 px, regular to
+   bold), a contrast ladder of greys on the background, the warn and
+   critical colours as text and as fills, and 1, 2 and 3 px lines. Matt
+   reads it from where he sits and reports the smallest size he reads at a
+   glance, the dimmest grey he sees, and whether the bottom two rows are
+   hidden by the bezel or the angle. Record the answers here; U2's type
+   scale is built from them.
+3. **PRODUCT.md** through `impeccable init`: who the strip is for, where it
+   sits, what it is for while gaming, working and idle, and what must stay
+   true. **GATE:** Matt answers the interview.
+
+### U1 — Three strip directions, as real frames
+
+Render each direction through the real renderer (a throwaway branch or an
+example binary; no layout or store changes yet), with the same six scenes:
+idle desk, music playing, a game running hot, a critical temperature, a
+volume change, and first run with nothing set up.
+
+- **Instrument.** State is carried by large fills, bars and colour that
+  can be read without reading; numerals second.
+- **Fewer, bigger, by context.** One or two things at full height
+  (numerals about 7.5 mm), and the strip chooses what to show: temperatures
+  when a game runs, a media hero with artwork when music plays, a big clock
+  when idle. This generalises today's takeovers into scenes.
+- **Better cards.** Pages of widgets stay, with a readable type scale,
+  icons, compact/medium/hero sizes and honest graphs. Least change to how
+  layouts work.
+
+Show them on the strip itself (the preview mode cycles them) and as one
+contact sheet printed at true size, 127 mm wide. **GATE:** Matt picks one,
+or names the parts to combine. Record what the choice means for the layout
+format: "by context" needs scene rules; the other two do not.
+
+### U2 — The strip's design system
+
+Write `DESIGN.md` (through `impeccable`'s new-work flow) for the chosen
+direction:
+
+- Type scale from U0's measurements; one display numeral face with real
+  weight; where labels become icons.
+- Size classes per widget and what each shows.
+- Colour: background, neutrals, one accent, severity. Where the accent
+  comes from (a setting, album art, time of day) is decided here.
+- Icons: one set, drawn or licensed for MIT distribution.
+- Graph rules: fixed ranges with a threshold mark, a band of their own,
+  severity colouring, inset from the zone edge.
+- States: nothing playing, not set up, no data, source lost, stale.
+- Touch: slider thumb at rest and relative drag, a visible pressed state,
+  a cue at the hold threshold, page ticks, minimum target width.
+- Motion: takeover entry and exit, page change, value change.
+- Idle and night: dimming, and what the strip shows when nothing matters.
+
+**GATE:** Matt signs off `DESIGN.md` from rendered examples of every
+widget in every size and state.
+
+### U3 — Build the strip
+
+Implement in `nexus-core`; migrate stored layouts (the config has a schema
+version); redo the default layout so no page only stretches another; add
+image tests for every widget, size and state. Deploy to Matt's strip as it
+lands (`scripts/nexusd-dev-install.sh`).
+
+Exit test: every `[U3]` bar item passes, and Matt has used it for three
+days without wanting the old one back.
+
+### U4 — The window's concept
+
+`impeccable shape`, then two or three structural comps as real Slint
+screens (not prose), using the new strip rendering. Ideas to test, from
+the critique:
+
+- A storyboard: every page and takeover as a live strip, stacked,
+  reorderable, edited where you click.
+- A gallery of rendered widget thumbnails to add from, including presets
+  ("CPU temperature", "Volume"), which makes room by itself.
+- Settings for the selected widget attached to it, not in a pane that gets
+  the leftovers.
+- A signal picker on the field, with human names and live values; the raw
+  list becomes a drawer for tinkerers.
+- Layouts in the header; app preferences out of the editor.
+- A one-line status that opens to in-app fixes ("Start the service",
+  "Retry", "Open the log"), with the true cause.
+- A first run that offers good-looking starter layouts.
+- The product's own name and mark; the About dialog with the Slint badge
+  in proportion.
+
+**GATE:** Matt picks the concept.
+
+### U5 — Build the window
+
+An authored Slint style (tokens, surfaces, three button tiers, real tabs
+and segmented controls) in place of the stock theme. Keep what the audit
+on 2026-11-15 established: keyboard reach, screen-reader labels, light and
+dark, 1024×640. Exit test: every `[U5]` bar item passes.
+
+### U6 — Back to shipping
+
+Resume `REDESIGN_PLAN.md` Phase 5: packaging, the install guide, the
+README clip (now of the new strip), release verification.
+
+## Standing rules
+
+- Judge rendered results at the size they ship: frames on the strip, the
+  window at 1024×640 and at its default size. A description is not a
+  design.
+- Before calling any phase's design done, run an isolated Impeccable
+  critique and record the score here, unsoftened.
+- An approved mock is evidence, not protection: if the build shows the
+  mock was wrong, say so and bring Matt the replacement as a decision.
+- Never test on Matt's live layout; use a throwaway daemon with its own
+  store and no device access, as the 2026-11-22 captures did.
+
+## Decision log
+
+- 2026-11-22 — Plan opened. Critique: strip 15/36, window 20/40. Matt:
+  strip first, three directions mocked up, new window concept, redesign
+  before release. Not judged in the critique: the physical panel
+  (brightness, angle, colour), the light theme, drag feel, HiDPI.

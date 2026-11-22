@@ -1078,6 +1078,14 @@ golang` finds nothing outside the changelog.
   made in the window (move page) stored and undone to an identical export,
   and a service restart with the window open reconnected within 4 s.
   Launching programs from the sandbox was verified in Phase 3.
+- 2026-11-22 — Matt judged the UI not good enough to release. An
+  Impeccable critique scored the strip 15/36 and the settings window
+  20/40: careful engineering, neither surface designed, and this plan's
+  9/10 bar had no item for legibility at arm's length or for looking
+  good. `docs/DESIGN_PLAN.md` (phases U0–U6) now comes before Phase 5's
+  "ship" half: strip first, then a new concept for the window, then
+  packaging. The About screen with `AboutSlint` (Matt said yes) is built in
+  the working tree; its final form belongs to U4.
 - 2026-11-15 — Matt asked to plan for all supported Corsair devices,
   starting with his K100, Commander Core and Elite LCD cap, so the app can
   become an alternative to iCUE. The plan is `docs/DEVICES_PLAN.md`; it
