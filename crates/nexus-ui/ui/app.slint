@@ -632,15 +632,29 @@ export component AppWindow inherits Window {
                                         color: Theme.warn;
                                         font-size: 18px;
                                     }
-                                    Text {
-                                        text: @tr("Not connected to the strip's service, so editing is paused and these pictures are not live. Nothing is lost: a change waiting to be sent goes out when it is back.");
-                                        font-family: Theme.font;
-                                        font-size: Theme.size-body;
-                                        color: Theme.text;
-                                        wrap: word-wrap;
-                                        vertical-alignment: center;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 4px;
                                         horizontal-stretch: 1;
-                                        accessible-role: text;
+                                        Text {
+                                            text: @tr("Not connected to the strip's service, so editing is paused and these pictures are not live. Nothing is lost: a change waiting to be sent goes out when it is back.");
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-body;
+                                            color: Theme.text;
+                                            wrap: word-wrap;
+                                            accessible-role: text;
+                                        }
+                                        // What the last try to start it said: here, as
+                                        // there may be no strip to say it under.
+                                        if root.problem != "": Text {
+                                            text: root.problem;
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-body;
+                                            font-weight: 600;
+                                            color: Theme.crit;
+                                            wrap: word-wrap;
+                                            accessible-role: text;
+                                        }
                                     }
                                     if root.status.start: VerticalLayout {
                                         alignment: center;
@@ -672,6 +686,10 @@ export component AppWindow inherits Window {
                                     wrap: no-wrap;
                                     overflow: elide;
                                 }
+                            }
+                            // Opened while the service is away: nothing read yet.
+                            if root.rows.length == 0 && !root.connected: Hint {
+                                text: @tr("The pages show here once the service answers.");
                             }
 
                             for row[ri] in root.rows: block := VerticalLayout {
@@ -1070,11 +1088,11 @@ export component AppWindow inherits Window {
                                 if row.active && root.zoom == 1: VerticalLayout {
                                     padding-top: 10px;
                                     Text {
-                                        text: root.problem != "" ? root.problem : root.caption;
+                                        text: root.problem != "" && root.connected ? root.problem : root.caption;
                                         font-family: Theme.font;
                                         font-size: Theme.size-label;
-                                        color: root.problem != "" ? Theme.crit : Theme.text-2;
-                                        font-weight: root.problem != "" ? 500 : 400;
+                                        color: root.problem != "" && root.connected ? Theme.crit : Theme.text-2;
+                                        font-weight: root.problem != "" && root.connected ? 500 : 400;
                                         wrap: word-wrap;
                                         accessible-role: text;
                                     }
@@ -1085,11 +1103,11 @@ export component AppWindow inherits Window {
                                     spacing: 8px;
                                     min-height: 50px;
                                     if root.zoom == 2: Text {
-                                        text: root.problem != "" ? root.problem : root.caption;
+                                        text: root.problem != "" && root.connected ? root.problem : root.caption;
                                         font-family: Theme.font;
                                         font-size: Theme.size-label;
-                                        color: root.problem != "" ? Theme.crit : Theme.text-2;
-                                        font-weight: root.problem != "" ? 500 : 400;
+                                        color: root.problem != "" && root.connected ? Theme.crit : Theme.text-2;
+                                        font-weight: root.problem != "" && root.connected ? 500 : 400;
                                         wrap: word-wrap;
                                         vertical-alignment: center;
                                         horizontal-stretch: 1;

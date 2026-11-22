@@ -230,6 +230,8 @@ fn show_status(app: &AppWindow) {
 
 /// "Start the service": runs it off the UI thread, then checks again.
 fn start_service() {
+    // A new try replaces what the last one said.
+    editor::problem(String::new());
     let _ = thread::Builder::new().name("start".into()).spawn(|| {
         let result = status::start();
         let _ = slint::invoke_from_event_loop(move || {
