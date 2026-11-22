@@ -459,3 +459,23 @@ README clip (now of the new strip), release verification.
   headline's end on a hero card, when it fits. Costs the accent newspaper
   on most cards (the raised card carries the tap). DESIGN.md, Long
   titles. To be read on the panel.
+- 2026-11-22 — **U4/U5 merged** (window: storyboard editor, light and
+  dark, Appearance choice, status pill and plain-words recovery). Its last
+  isolated reviews scored 29/40 light and 28/40 dark against a target of
+  30. A final round (feed settings, fault colours, 1024×640, field edges,
+  pickers) is on `feat/window-final`.
+- 2026-11-22 — **Installed on Matt's machine** with
+  `scripts/nexusd-dev-install.sh`. His store was backed up first
+  (`~/.local/state/nexusd/nexusd-before-redesign-20261122-1713.db`), then
+  migrated from schema 1 to 4: integrity ok, all 6 pages and 19 widgets
+  kept, strip connected. On his own layout the new drawing shows three
+  defects, being fixed on `fix/strip-live`:
+  - compact temperature cards that don't say which reading they are;
+  - a track time cut with an ellipsis;
+  - an empty page that draws nothing.
+- 2026-11-22 — **Near miss, fixed:** the capture rig's daemon ran on
+  Matt's session bus with his PipeWire and Pulse sockets linked in. It
+  showed his real track, and a tap or a drag in a test could have paused
+  his music or changed his volume. The rig now gives the daemon a private
+  bus and no sound server (890a3bb). Checked: the rig sees no media and
+  no volume.
