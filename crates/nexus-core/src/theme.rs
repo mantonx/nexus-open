@@ -290,6 +290,9 @@ pub const W_BODY: f32 = 480.0;
 pub const NUM_HERO: TextStyle = style(50.0, W_NUM, -0.5);
 /// Medium numerals with no bar below (clock, weather), weather at compact.
 pub const NUM_MEDIUM: TextStyle = style(40.0, W_NUM, -0.4);
+/// Hero numerals above a bar band (a reading's card): a step under
+/// `NUM_HERO`, so the bar can run the whole card under the figures.
+pub const NUM_HERO_BANDED: TextStyle = style(40.0, W_NUM, -0.4);
 /// Medium numerals above a bar band.
 pub const NUM_BANDED: TextStyle = style(36.0, W_NUM, -0.4);
 /// Compact numerals; the medium slider's number.
@@ -311,18 +314,21 @@ pub const TITLE: TextStyle = style(20.0, W_TITLE, 0.0);
 /// Key labels; the short words on compact "set up" cards.
 pub const KEY_LABEL: TextStyle = style(18.0, W_TITLE, 0.0);
 /// "%" and rates' units after a numeral, on its baseline.
-pub const UNIT: TextStyle = style(17.0, W_TITLE, 0.0);
+pub const UNIT: TextStyle = style(18.0, W_TITLE, 0.0);
 /// Artist, date, second lines, hints.
-pub const BODY: TextStyle = style(17.0, W_BODY, 0.1);
+pub const BODY: TextStyle = style(18.0, W_BODY, 0.1);
 /// Reading names, times, "limit 167°", "Muted". The smallest text.
-pub const LABEL: TextStyle = style(15.0, W_TITLE, 0.3);
-/// Nothing on the strip is smaller than this.
-pub const TEXT_FLOOR: f32 = 14.0;
+pub const LABEL: TextStyle = style(18.0, W_TITLE, 0.2);
+/// Nothing on the strip is smaller than this. Provisional, like every
+/// size: 18 px (2.5 mm caps) is the review's ask for 60 cm, not yet read
+/// on the panel (U0's legibility card).
+pub const TEXT_FLOOR: f32 = 18.0;
 
 /// Every text style, for checks such as the floor.
-pub const TEXT_STYLES: [TextStyle; 14] = [
+pub const TEXT_STYLES: [TextStyle; 15] = [
     NUM_HERO,
     NUM_MEDIUM,
+    NUM_HERO_BANDED,
     NUM_BANDED,
     NUM_COMPACT,
     NUM_COMPACT_TIGHT,
@@ -380,13 +386,11 @@ pub const BASE_MEDIUM: f32 = 41.0;
 pub const BASE_COMPACT: f32 = 36.0;
 pub const BASE_LINE1: f32 = 24.0;
 pub const BASE_LINE2: f32 = 42.0;
-/// A hero card's name line and its bar.
+/// A hero reading's name line (its limit sits on the numeral's baseline).
 pub const BASE_HERO_NAME: f32 = 20.0;
-pub const BAR_Y_HERO: f32 = 33.0;
 
-/// The fixed-scale bar.
-pub const BAR_H: f32 = 6.0;
-/// The bar's band in compact and medium cards, under the numeral.
+/// The fixed-scale bar's band, under the numeral, at every size: it runs
+/// the card's width (less a second reading's share at medium).
 pub const BAR_Y_COMPACT: f32 = 40.0;
 pub const BAR_H_BANDED: f32 = 5.0;
 /// Notches at the limits stick out this far above and below the track.
@@ -446,8 +450,17 @@ pub const MARKER_H: f32 = 2.0;
 pub const MARKER_W: f32 = 14.0;
 pub const MARKER_W_CURRENT: f32 = 26.0;
 pub const MARKER_GAP: f32 = 6.0;
-/// A page with a warning or critical reading gets a longer marker.
-pub const MARKER_W_ALERT: f32 = 8.0;
+/// A page with a warning or critical reading gets a longer, taller marker
+/// (rows 2–4, still one clear row above the cards).
+pub const MARKER_W_ALERT: f32 = 16.0;
+pub const MARKER_H_ALERT: f32 = 3.0;
+/// Trouble on a page to one side of the one shown: a pill standing at
+/// that end of the strip, in the warning's or the alarm's colour. It sits
+/// over the strip's edge and the end card's padding (content starts
+/// `PAD` in), never over a widget's content.
+pub const EDGE_FLAG_W: f32 = 4.0;
+pub const EDGE_FLAG_Y: f32 = 13.0;
+pub const EDGE_FLAG_H: f32 = 28.0;
 
 // ---------------------------------------------------------------- scales
 
@@ -474,9 +487,33 @@ pub const ALARM_BREATHE_LOW: f32 = 0.88;
 pub const MARQUEE_PX_PER_S: f32 = 28.0;
 /// Idle dimming: after this long with no touch and nothing at warning.
 pub const IDLE_DIM_AFTER_S: u32 = 300;
-/// Brightness kept when idle, and at night.
+/// Brightness kept when idle, and at night: what the ground and the cards
+/// keep. Figures keep more (`DIM_FIGURES`), so a dimmed live number never
+/// sinks to a lost one's grey.
 pub const IDLE_DIM: f32 = 0.6;
 pub const NIGHT_DIM: f32 = 0.35;
+/// How much of the dimming the brightest pixels (figures, cream text) are
+/// spared: they lose this share of what the surfaces lose. At night the
+/// surfaces keep 35 % and cream figures about 68 %; pixels between are
+/// eased by their lightness, so the order of tones never changes.
+pub const DIM_FIGURES: f32 = 0.5;
+
+/// A colour as a frame dimmed to `k` shows it: dark surfaces keep `k`,
+/// light figures keep more (`DIM_FIGURES`), by the colour's lightness.
+pub fn dimmed(c: Rgb, k: f32) -> Rgb {
+    if k >= 1.0 {
+        return c;
+    }
+    let k = k.max(0.0);
+    let hi = 1.0 - (1.0 - k) * DIM_FIGURES;
+    let luma =
+        (0.2126 * f32::from(c.r) + 0.7152 * f32::from(c.g) + 0.0722 * f32::from(c.b)) / 255.0;
+    // Ground and cards (luma under 0.15) take the full dimming; cream
+    // (over 0.75) the least.
+    let t = ((luma - 0.15) / 0.6).clamp(0.0, 1.0);
+    let t = t * t * (3.0 - 2.0 * t);
+    c.scaled(k + (hi - k) * t)
+}
 
 /// What frames are drawn with: the accent roles from the user's colour.
 #[derive(Clone, Debug, PartialEq)]
@@ -556,6 +593,21 @@ mod tests {
             let h = oklch(c).2;
             assert_eq!(allowed_hue(h), h, "{name} sits in the avoided band");
         }
+    }
+
+    #[test]
+    fn dimmed_live_figures_stay_above_lost_ones() {
+        for k in [NIGHT_DIM, IDLE_DIM] {
+            let live = contrast(dimmed(TEXT, k), dimmed(CARD, k));
+            // A lost reading is TEXT3: undimmed by day, dimmed beside it.
+            assert!(live > contrast(TEXT3, CARD), "{k}: {live}");
+            let lost = contrast(dimmed(TEXT3, k), dimmed(CARD, k));
+            assert!(live > lost * 1.5, "{k}: {live} vs {lost}");
+            // The ground and cards lose more than the figures.
+            assert!(dimmed(CARD, k).r < CARD.scaled(k).r + 1);
+            assert!(dimmed(TEXT, k).r > TEXT.scaled(k).r);
+        }
+        assert_eq!(dimmed(TEXT, 1.0), TEXT);
     }
 
     #[test]

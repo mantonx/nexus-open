@@ -509,14 +509,33 @@ impl Renderer {
                 (Severity::Ok, false) => TEXT3.mix(GROUND, 0.45),
             };
             // Trouble is never dimmed; the rest is as bright as the frame.
-            let c = if m.severity == Severity::Ok {
-                c.scaled(dim)
+            let (c, h) = if m.severity == Severity::Ok {
+                (dimmed(c, dim), MARKER_H)
             } else {
-                c
+                (c, MARKER_H_ALERT)
             };
             let mw = w(m);
-            draw::rrect(canvas, x, MARKER_Y, mw, MARKER_H, MARKER_H / 2.0, c);
+            draw::rrect(canvas, x, MARKER_Y, mw, h, h / 2.0, c);
             x += mw + MARKER_GAP;
+        }
+        // Trouble on a page to one side: a pill at that end of the strip,
+        // so it shows from the page in view without covering anything.
+        let Some(here) = markers.iter().position(|m| m.current) else {
+            return;
+        };
+        let worst = |ms: &[Marker]| ms.iter().map(|m| m.severity).max().unwrap_or_default();
+        let sides = [
+            (worst(&markers[..here]), 0.0),
+            (worst(&markers[here + 1..]), WIDTH as f32 - EDGE_FLAG_W),
+        ];
+        for (sev, fx) in sides {
+            let c = match sev {
+                Severity::Ok => continue,
+                Severity::Warn => WARN,
+                Severity::Crit => CRIT,
+            };
+            let r = EDGE_FLAG_W / 2.0;
+            draw::rrect(canvas, fx, EDGE_FLAG_Y, EDGE_FLAG_W, EDGE_FLAG_H, r, c);
         }
     }
 
@@ -546,6 +565,7 @@ impl Renderer {
             bold: &self.fonts.icon_bold,
             a: self.theme.roles,
             raised: false,
+            control: false,
             moving: false,
         }
     }
@@ -568,6 +588,9 @@ struct Pen<'a> {
     a: Accent,
     /// Cards are on top of a page (a partial takeover).
     raised: bool,
+    /// The card being drawn can be acted on (a key, a slider, media): only
+    /// then is a raised card rimmed in the accent.
+    control: bool,
     /// A title is mid-scroll.
     moving: bool,
 }
@@ -777,17 +800,13 @@ impl Pen<'_> {
             self.rrect(x, CARD_Y, w, CARD_H, CARD_R, surface);
         }
         if self.raised {
-            draw::rrect_line(
-                self.c,
-                x,
-                CARD_Y,
-                w,
-                CARD_H,
-                CARD_R,
-                self.a.base.mix(surface, 0.35),
-                PRESS_RIM,
-                None,
-            );
+            // On top of the page: a rim, in the accent only on a control.
+            let rim = if self.control {
+                self.a.base.mix(surface, 0.35)
+            } else {
+                KEY_TOP
+            };
+            draw::rrect_line(self.c, x, CARD_Y, w, CARD_H, CARD_R, rim, PRESS_RIM, None);
         }
     }
 
@@ -900,6 +919,10 @@ impl Pen<'_> {
         let x = zx + CARD_INSET;
         let w = zw as f32 - 2.0 * CARD_INSET;
         let cls = class(zw);
+        self.control = matches!(
+            view,
+            WidgetView::Slider { .. } | WidgetView::Key { .. } | WidgetView::Media(Some(_))
+        );
         match view {
             WidgetView::Clock {
                 time,
@@ -1025,7 +1048,7 @@ impl Pen<'_> {
             self.num_unit(&num, time, m, &unit_st, x0, BASE_COMPACT + 1.0, TEXT, TEXT2);
             return;
         }
-        let gap = if cls == Class::Hero { 14.0 } else { 10.0 };
+        let gap = if cls == Class::Hero { 14.0 } else { 8.0 };
         let (base, inset) = match cls {
             Class::Hero => (BASE_HERO, PAD + 4.0),
             _ => (BASE_MEDIUM, PAD),
@@ -1035,7 +1058,7 @@ impl Pen<'_> {
             .max(self.measure(Face::Word, &BODY, date));
         // The date may run closer to the right edge than the padding: it is
         // words, and the time is what must not move.
-        let show_date = tw + gap + dw <= w - inset - 1.0;
+        let show_date = tw + gap + dw <= w - inset / 2.0 - 2.0;
         let total = if show_date { tw + gap + dw } else { tw };
         let x0 = x + ((w - total) / 2.0).max(inset).min(w - total - 1.0).max(0.0);
         self.num_unit(&num, time, m, &unit_st, x0, base, TEXT, TEXT2);
@@ -1190,74 +1213,66 @@ impl Pen<'_> {
                 }
             }
             Class::Hero => {
+                // The numeral a step under the hero scale, so the bar can
+                // run the whole card beneath it: more width, a longer bar.
+                // A second reading sits at the right, over the bar's end,
+                // named; it takes no share of the band.
+                let num = NUM_HERO_BANDED;
+                let base = BASE_COMPACT;
                 let ix = x + PAD + 2.0 + ICON_HERO / 2.0;
-                self.icon(
-                    false,
-                    glyph,
-                    ICON_HERO,
-                    ix,
-                    fig_mid(&NUM_HERO, BASE_HERO),
-                    icon_c,
-                );
+                self.icon(false, glyph, ICON_HERO, ix, fig_mid(&num, base), icon_c);
                 let nx = x + PAD + 2.0 + ICON_HERO + ICON_GAP + 2.0;
-                let right = x + w - PAD - 2.0;
-                let txt = self.fit(Face::Num, &NUM_HERO, &txt, right - nx);
-                let nw = self.num_unit(
-                    &NUM_HERO, &txt, unit, &UNIT_HERO, nx, BASE_HERO, num_c, kr.label,
-                );
-                let cx = nx + nw + 14.0;
-                if cx + 40.0 > right {
-                    return;
+                let right = x + w - PAD;
+                let txt = self.fit(Face::Num, &num, &txt, right - nx);
+                let nw = self.num_unit(&num, &txt, unit, &UNIT, nx, base, num_c, kr.label);
+                if let Some(b) = bar {
+                    self.bar(x + PAD, BAR_Y_COMPACT, w - 2.0 * PAD, BAR_H_BANDED, &b, &kr);
                 }
+                let cx = nx + nw + 14.0;
+                let mut col_right = right;
                 if let Some(s) = second {
-                    // Two columns: the first reading's name and bar, then
-                    // the second reading's number and bar.
                     let ks = reading_ink(sev, s.severity);
-                    let (stxt, sbar) = shown(s);
+                    let (stxt, _) = shown(s);
                     let live = s.avail == Avail::Live;
                     let su = if live { s.unit.as_str() } else { "" };
                     let sc = if live { ks.num } else { TEXT3 };
+                    // Its name before its number, on the numeral's baseline.
                     let sw = self.num_unit_w(&NUM_SECOND, &stxt, su, &UNIT);
-                    let col2 = right - sw.max(56.0);
-                    let name = self.fit(Face::Word, &LABEL, &r.name, col2 - 12.0 - cx);
-                    self.text(Face::Word, &LABEL, &name, cx, BASE_HERO_NAME, kr.label);
-                    if let Some(b) = bar {
-                        self.bar(cx, BAR_Y_HERO, col2 - 12.0 - cx, BAR_H, &b, &kr);
+                    let nm = self.measure(Face::Word, &LABEL, &s.name) + 6.0;
+                    let named = right - sw - nm >= cx + 30.0;
+                    let colw = if named { sw + nm } else { sw };
+                    if right - colw < cx {
+                        return;
                     }
-                    self.num_unit(
-                        &NUM_SECOND,
-                        &stxt,
-                        su,
-                        &UNIT,
-                        right - sw,
-                        27.0,
-                        sc,
-                        ks.label,
-                    );
-                    if let Some(b) = sbar {
-                        self.bar(col2, BAR_Y_HERO, right - col2, BAR_H, &b, &ks);
+                    let sx = right - sw;
+                    self.num_unit(&NUM_SECOND, &stxt, su, &UNIT, sx, base, sc, ks.label);
+                    if named {
+                        self.text(Face::Word, &LABEL, &s.name, sx - nm, base, ks.label);
                     }
+                    col_right = right - colw - 14.0;
+                }
+                // The name, or why there is no number, over the limit.
+                let words = match &r.avail {
+                    Avail::NoData => "No reading yet".to_string(),
+                    Avail::Lost(t) => format!("Lost at {t}"),
+                    _ => r.name.clone(),
+                };
+                let lc = if r.avail == Avail::Live {
+                    kr.label
                 } else {
-                    let words = match &r.avail {
-                        Avail::NoData => "No reading yet".to_string(),
-                        Avail::Lost(t) => format!("Lost at {t}"),
-                        _ => r.name.clone(),
-                    };
-                    let lc = if r.avail == Avail::Live {
-                        kr.label
-                    } else {
-                        TEXT3
-                    };
-                    let words = self.fit(Face::Word, &LABEL, &words, right - cx);
-                    let lw = self.text(Face::Word, &LABEL, &words, cx, BASE_HERO_NAME, lc);
-                    if let (Some(lim), Avail::Live) = (limit, &r.avail) {
-                        let limw = self.measure(Face::Word, &LABEL, lim);
-                        if cx + lw + 10.0 + limw <= right {
-                            self.text_r(Face::Word, &LABEL, lim, right, BASE_HERO_NAME, kr.quiet);
-                        }
-                    }
-                    if let Some(b) = bar {
-                        self.bar(cx, BAR_Y_HERO, right - cx, BAR_H, &b, &kr);
+                    TEXT3
+                };
+                // The top line is the name's alone; the limit shares the
+                // numeral's baseline with a second reading, if any.
+                if right - cx < 30.0 {
+                    return;
+                }
+                let words = self.fit(Face::Word, &LABEL, &words, right - cx);
+                self.text(Face::Word, &LABEL, &words, cx, BASE_HERO_NAME, lc);
+                if let (Some(lim), Avail::Live) = (limit, &r.avail) {
+                    let limw = self.measure(Face::Word, &LABEL, lim);
+                    if cx + limw <= col_right {
+                        self.text(Face::Word, &LABEL, lim, cx, base + 1.0, kr.quiet);
                     }
                 }
             }
@@ -1336,18 +1351,32 @@ impl Pen<'_> {
                 };
                 let base = BASE_COMPACT;
                 let right = x + w - PAD;
-                let ix = x + PAD + isz / 2.0 - 2.0;
-                self.icon(true, icons::ARROW_DOWN, isz, ix, fig_mid(&num, base), TEXT2);
                 let nx = x + PAD + isz + 1.0;
-                let nw = self.num_unit(&num, &txt(down), unit, &UNIT, nx, base, num_c, TEXT2);
                 let up_unit = if nodata || (!hero && up.unit == down.unit) {
                     ""
                 } else {
                     up.unit.as_str()
                 };
+                let nw = self.num_unit_w(&num, &txt(down), unit, &UNIT);
                 let sw = self.num_unit_w(&NUM_SECOND, &txt(up), up_unit, &UNIT);
                 let ux = right - sw;
-                if ux - ICON_SMALL - 4.0 > nx + nw {
+                if ux - ICON_SMALL - 4.0 <= nx + nw {
+                    // Up in another unit than down, at medium: no room for
+                    // both side by side, so two rows, each reading with its
+                    // own unit and its own bar beside it.
+                    self.rate_rows(
+                        x,
+                        right,
+                        &[(down, icons::ARROW_DOWN), (up, icons::ARROW_UP)],
+                    );
+                    return;
+                }
+                let ix = x + PAD + isz / 2.0 - 2.0;
+                self.icon(true, icons::ARROW_DOWN, isz, ix, fig_mid(&num, base), TEXT2);
+                self.num_unit(&num, &txt(down), unit, &UNIT, nx, base, num_c, TEXT2);
+                // With no data, the words top right say so for both; up's
+                // own dashes under them would crowd them.
+                if !nodata {
                     self.num_unit(
                         &NUM_SECOND,
                         &txt(up),
@@ -1386,8 +1415,40 @@ impl Pen<'_> {
                         Avail::Lost(t) => format!("Lost {t}"),
                         _ => "No reading".into(),
                     };
-                    self.text_r(Face::Word, &LABEL, &words, right, 17.0, TEXT3);
+                    self.text_r(Face::Word, &LABEL, &words, right, 20.0, TEXT3);
                 }
+            }
+        }
+    }
+
+    /// Rates as rows: an arrow, the number with its unit, and its bar to
+    /// the right, one row per reading (a medium card whose two rates are
+    /// in different units).
+    fn rate_rows(&mut self, x: f32, right: f32, rows: &[(&Reading, char)]) {
+        let k = ink(Severity::Ok);
+        let bases = [22.0, 41.0];
+        let mut widths = Vec::new();
+        for (r, _) in rows {
+            widths.push(self.num_unit_w(&TITLE, &r.value, &r.unit, &UNIT));
+        }
+        let tx = x + PAD + ICON_SMALL + 3.0;
+        let bx = tx + widths.iter().cloned().fold(0.0, f32::max) + 10.0;
+        for (((r, glyph), base), _) in rows.iter().zip(bases).zip(&widths) {
+            let mid = fig_mid(&TITLE, base);
+            self.icon(
+                true,
+                *glyph,
+                ICON_SMALL,
+                x + PAD + ICON_SMALL / 2.0 - 1.0,
+                mid,
+                TEXT2,
+            );
+            self.num_unit(&TITLE, &r.value, &r.unit, &UNIT, tx, base, TEXT, TEXT2);
+            if let Some(b) = r.bar
+                && right - bx > 20.0
+            {
+                let h = BAR_H_BANDED - 1.0;
+                self.bar(bx, (mid - h / 2.0).round(), right - bx, h, &b, &k);
             }
         }
     }
@@ -1474,12 +1535,24 @@ impl Pen<'_> {
                 };
                 let c1 = if live { TEXT } else { TEXT3 };
                 let l1 = self.fit(Face::Word, &BODY, &l1, room);
+                // "61° / 49°" closes up to "61°/49°" before it would be cut,
+                // and is left out before that.
+                let l2 = if self.measure(Face::Num, &BODY, &l2) <= room {
+                    l2
+                } else {
+                    let tight = l2.replace(" / ", "/");
+                    if self.measure(Face::Num, &BODY, &tight) <= room {
+                        tight
+                    } else {
+                        String::new()
+                    }
+                };
                 if l2.is_empty() {
                     self.text(Face::Word, &BODY, &l1, dx, 32.0, c1);
                 } else {
                     self.text(Face::Word, &BODY, &l1, dx, BASE_LINE1, c1);
-                    let l2 = self.fit(Face::Num, &LABEL, &l2, room);
-                    self.text(Face::Num, &LABEL, &l2, dx, BASE_LINE2 - 1.0, TEXT2);
+                    let l2 = self.fit(Face::Num, &BODY, &l2, room);
+                    self.text(Face::Num, &BODY, &l2, dx, BASE_LINE2 - 1.0, TEXT2);
                 }
             }
             Class::Hero => {
@@ -1614,12 +1687,21 @@ impl Pen<'_> {
                     CARD,
                     t.marquee,
                 );
-                let times = match (t.position, t.length.filter(|l| *l > 0.0)) {
+                let mut times = match (t.position, t.length.filter(|l| *l > 0.0)) {
                     (Some(p), Some(l)) => format!("{} / {}", fmt_time(p), fmt_time(l)),
                     (Some(p), None) => fmt_time(p),
                     _ => String::new(),
                 };
-                let tw = self.measure(Face::Num, &LABEL, &times);
+                // The length goes before the artist would be cut: the
+                // elapsed time is what changes.
+                let aw = self.measure(Face::Word, &BODY, line2);
+                let mut tw = self.measure(Face::Num, &LABEL, &times);
+                if tx + aw + 10.0 + tw > right
+                    && let Some(p) = t.position
+                {
+                    times = fmt_time(p);
+                    tw = self.measure(Face::Num, &LABEL, &times);
+                }
                 let artist_right = if times.is_empty() {
                     right
                 } else {
@@ -1678,7 +1760,7 @@ impl Pen<'_> {
 
     /// The media scene (a media widget as wide as the strip, as the
     /// now-playing takeover is): bigger artwork and keys, the full title
-    /// large, the artist in the accent.
+    /// large, the artist and the times in the text ramp.
     fn media_scene(&mut self, zx: f32, x: f32, w: f32, t: &Track, keys: &[MediaKey], press: Press) {
         let s = ART_SCENE;
         let ay = CARD_Y + (CARD_H - s) / 2.0;
@@ -1694,7 +1776,9 @@ impl Pen<'_> {
             0.0
         } else {
             let a = self.fit(Face::Word, &BODY, artist, (right - tx) / 2.0);
-            self.text(Face::Word, &BODY, &a, tx, 20.0, self.a.text)
+            // Information, so the text ramp: the accent is for what a
+            // finger can act on.
+            self.text(Face::Word, &BODY, &a, tx, 20.0, TEXT2)
         };
         let times = match (t.position, t.length.filter(|l| *l > 0.0)) {
             (Some(p), Some(l)) => format!("{} / {}", fmt_time(p), fmt_time(l)),
@@ -1734,14 +1818,20 @@ impl Pen<'_> {
         }
         let h = PROGRESS_H;
         self.rrect(x, y, w, h, h / 2.0, TRACK);
-        let c = if playing { self.a.fill } else { TEXT3 };
+        // Information, not a control: cream, quieter when paused.
+        let c = if playing { TEXT2 } else { TEXT3 };
         self.rrect(x, y, (w * f).max(h), h, h / 2.0, c);
     }
 
     fn media_nothing(&mut self, x: f32, w: f32, cls: Class) {
         // An empty sleeve: a dashed rounded square in a quiet neutral.
-        let s = 31.0;
-        let sx = x + PAD - 2.0;
+        // Narrower cards give the sleeve's room to the words, at 18 px.
+        let (s, gap) = if cls == Class::Hero {
+            (31.0, 9.0)
+        } else {
+            (27.0, 7.0)
+        };
+        let sx = x + PAD - 3.0;
         let sy = CARD_Y + (CARD_H - s) / 2.0;
         draw::rrect_line(self.c, sx, sy, s, s, ART_R, TEXT3, 1.2, Some((3.0, 3.0)));
         self.icon(
@@ -1752,7 +1842,7 @@ impl Pen<'_> {
             sy + s / 2.0,
             TEXT3,
         );
-        let tx = sx + s + 9.0;
+        let tx = sx + s + gap;
         let room = x + w - PAD - tx;
         match cls {
             Class::Compact => {
@@ -1764,7 +1854,7 @@ impl Pen<'_> {
                 let l1 = self.fit(Face::Word, &st1, "Nothing playing", room);
                 self.text(Face::Word, &st1, &l1, tx, BASE_LINE1, TEXT2);
                 let hint = if cls == Class::Hero {
-                    "Music you play shows up here"
+                    "Play some music"
                 } else {
                     "Play something"
                 };
@@ -1778,10 +1868,10 @@ impl Pen<'_> {
         self.card(x, w, CARD, Press::default());
         let value = s.fraction.map_or(0.0, |f| f * 100.0);
         let ic = if s.muted { TEXT3 } else { TEXT2 };
+        // The level is information even while dragged: the held thumb is
+        // what shows the finger, in the accent.
         let num_c = if s.muted || s.fraction.is_none() {
             TEXT3
-        } else if s.held {
-            self.a.text
         } else {
             TEXT
         };
@@ -1942,7 +2032,7 @@ impl Pen<'_> {
     }
 
     /// A slider over part of a page after a change (the volume takeover):
-    /// the new level large, the change in the accent, and a track whose
+    /// the new level large, the change beside it in the text ramp, and a track whose
     /// part from the old level to the new is bright.
     fn volume_change(&mut self, x: f32, w: f32, s: &SliderLook, from: f32) {
         self.card(x, w, CARD, Press::default());
@@ -1982,7 +2072,8 @@ impl Pen<'_> {
         let dw = if delta.is_empty() {
             0.0
         } else {
-            self.text(Face::Num, &LABEL, &delta, dx, 21.0, self.a.text)
+            // The change is information: the text ramp, not the accent.
+            self.text(Face::Num, &LABEL, &delta, dx, 22.0, TEXT2)
         };
         let tx = dx + dw.max(22.0) + 12.0;
         let tw = x + w - PAD - 8.0 - tx;
