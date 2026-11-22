@@ -33,6 +33,10 @@ slint = { version = "1.18.1", default-features = false, features = [
 ] }
 rfd = "0.18.0"
 
+[dev-dependencies]
+# The window's icon fonts are checked against the strip's icons.
+swash.workspace = true
+
 [build-dependencies]
 slint-build = "1.18.1"
 

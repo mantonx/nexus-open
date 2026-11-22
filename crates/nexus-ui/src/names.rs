@@ -112,6 +112,33 @@ pub fn matches(signal: &str, query: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The window's own Phosphor subset draws every icon the strip can
+    /// (the icon picker lists them all, and a widget's tile shows its
+    /// own), in both weights: a glyph missing here shows as a blank tile.
+    #[test]
+    fn the_windows_icon_fonts_have_every_strip_icon() {
+        for (weight, data) in [
+            (
+                "Fill",
+                &include_bytes!("../assets/fonts/Phosphor-UI-Fill.ttf")[..],
+            ),
+            (
+                "Bold",
+                &include_bytes!("../assets/fonts/Phosphor-UI-Bold.ttf")[..],
+            ),
+        ] {
+            let font = swash::FontRef::from_index(data, 0).expect("a font");
+            let map = font.charmap();
+            for (name, ch) in nexus_core::icons::NAMES {
+                assert_ne!(
+                    map.map(ch),
+                    0,
+                    "{name} is missing from Phosphor-UI-{weight}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn known_signals_have_plain_names_and_the_strips_icons() {
         assert_eq!(named("cpu.temp").name, "CPU temperature");

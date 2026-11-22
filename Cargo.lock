@@ -3163,6 +3163,7 @@ dependencies = [
  "shlex 2.0.1",
  "slint",
  "slint-build",
+ "swash",
 ]
 
 [[package]]
