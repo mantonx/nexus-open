@@ -1,0 +1,126 @@
+// The window's design tokens, from DESIGN.md's "Shared identity": the
+// strip's warm browns and creams (dark mode maps GROUND, CARD, KEY and TEXT
+// to background, surface, raised control and text; light mode inverts the
+// ladder at the same hue), Rubik, Phosphor, rounded corners, and the
+// user's accent for what can be acted on: never data, never warnings.
+
+import { Palette } from "std-widgets.slint";
+import "../assets/fonts/Rubik-Regular.ttf";
+import "../assets/fonts/Rubik-Medium.ttf";
+import "../assets/fonts/Rubik-SemiBold.ttf";
+import "../assets/fonts/Phosphor-UI-Bold.ttf";
+import "../assets/fonts/Phosphor-UI-Fill.ttf";
+
+export global Theme {
+    /// 0 follows the desktop; 1 light; 2 dark. Set from Rust for tests and
+    /// captures (NEXUS_UI_SCHEME).
+    in property <int> forced: 0;
+    out property <bool> dark: forced == 0 ? Palette.color-scheme == ColorScheme.dark : forced == 2;
+
+    /// The user's accent, derived on the Rust side as the strip does
+    /// (accent.rs): base fill, the dark ink on it, words on dark, slider
+    /// fill, pressed, and words and rings on light.
+    in property <color> accent-base: #c0b0fe;
+    in property <color> accent-ink: #14110f;
+    in property <color> accent-text: #ccc1fe;
+    in property <color> accent-fill: #9583d5;
+    in property <color> accent-soft: #443b64;
+    in property <color> accent-deep: #6a55b8;
+
+    // Surfaces: the page behind everything, the panels on it, and a
+    // second level inside a panel (inputs, tracks, hovered rows).
+    out property <color> ground: dark ? #14110f : #f3ebdf;
+    out property <color> surface: dark ? #201a17 : #fffaf3;
+    out property <color> surface-2: dark ? #2b241f : #ece2d3;
+    out property <color> raised: dark ? #4a3e35 : #ffffff;
+    out property <color> raised-top: dark ? #65564a : #ffffff;
+    out property <color> line: dark ? #3a312b : #ddd0bf;
+    out property <color> line-strong: dark ? #5a4d43 : #c4b39e;
+    // The bezel the strip sits in, darker than the walnut in both modes.
+    out property <color> bezel: dark ? #0b0908 : #2a221d;
+
+    out property <color> text: dark ? #fbf1e3 : #2a211b;
+    out property <color> text-2: dark ? #d2c2ad : #5b4b3f;
+    out property <color> text-3: dark ? #a8988a : #76624f;
+
+    // Severity: area and words, never hue alone.
+    out property <color> warn: dark ? #ffb23e : #8a5600;
+    out property <color> warn-surface: dark ? #4f3612 : #fbe6c0;
+    out property <color> crit: dark ? #ff7a6b : #b3261e;
+    out property <color> crit-surface: dark ? #4a1d17 : #f9dcd7;
+
+    // The accent as the window uses it.
+    out property <color> act: accent-base;
+    out property <color> act-ink: accent-ink;
+    /// Accent words, rings and outlines on this background.
+    out property <color> act-line: dark ? accent-base : accent-deep;
+    out property <color> act-wash: dark ? accent-soft : accent-base.transparentize(0.55);
+
+    out property <color> scrim: dark ? #000000a0 : #2a211b66;
+
+    // Type: one face.
+    out property <string> font: "Rubik";
+    out property <length> size-small: 12px;
+    out property <length> size-body: 14px;
+    out property <length> size-label: 13px;
+    out property <length> size-title: 16px;
+    out property <length> size-heading: 20px;
+
+    // Corners: 10 surfaces, 9 controls, pills for chips.
+    out property <length> r-surface: 10px;
+    out property <length> r-control: 9px;
+    out property <length> control-h: 34px;
+}
+
+/// A Phosphor glyph: Fill for things, Bold for actions.
+export component Icon inherits Text {
+    in property <string> glyph;
+    in property <bool> fill: false;
+    text: glyph;
+    font-family: fill ? "Phosphor-Fill" : "Phosphor-Bold";
+    font-size: 16px;
+    color: Theme.text-2;
+    vertical-alignment: center;
+    horizontal-alignment: center;
+    accessible-role: none;
+}
+
+/// Glyphs used by the window's own controls (Phosphor Bold).
+export global Glyph {
+    out property <string> caret-down: "\u{e136}";
+    out property <string> caret-right: "\u{e13a}";
+    out property <string> dots: "\u{e1fe}";
+    out property <string> undo: "\u{e08a}";
+    out property <string> redo: "\u{e08c}";
+    out property <string> close: "\u{e4f6}";
+    out property <string> search: "\u{e30c}";
+    out property <string> grip: "\u{eae2}";
+    out property <string> check: "\u{e182}";
+    out property <string> plus: "\u{e3d4}";
+    out property <string> trash: "\u{e4a6}";
+    out property <string> pencil: "\u{e3b4}";
+    out property <string> copy: "\u{e1ca}";
+    out property <string> import: "\u{e20c}";
+    out property <string> export: "\u{e4c0}";
+    out property <string> widths: "\u{e534}";
+    out property <string> info: "\u{e2ce}";
+    out property <string> power: "\u{e3da}";
+    out property <string> log: "\u{e23a}";
+    out property <string> plug: "\u{e946}";
+    out property <string> warning: "\u{e4e2}";
+    out property <string> ok: "\u{e184}";
+    out property <string> keyboard: "\u{e2d8}";
+    out property <string> gear: "\u{e272}";
+    out property <string> retry: "\u{e094}";
+    out property <string> play: "\u{e3d2}";
+    out property <string> cursor: "\u{e7c8}";
+    out property <string> tap: "\u{ec90}";
+    out property <string> sliders: "\u{e434}";
+    out property <string> stack: "\u{e466}";
+    out property <string> grid: "\u{e464}";
+    out property <string> palette: "\u{e6c8}";
+    out property <string> sparkle: "\u{e6a2}";
+    out property <string> outside: "\u{e5de}";
+    out property <string> help: "\u{e3e8}";
+    out property <string> cards: "\u{e0f8}";
+}
