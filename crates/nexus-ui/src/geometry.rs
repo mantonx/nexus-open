@@ -5,7 +5,7 @@
 //! Widgets sit edge to edge from x = 0; whatever is left over is empty
 //! strip on the right.
 
-use nexus_core::config::MIN_WIDGET_WIDTH;
+use nexus_core::config::{MIN_WIDGET_WIDTH, Widget};
 
 /// Strip width in pixels.
 pub const STRIP: u32 = 640;
@@ -91,18 +91,33 @@ pub fn drop_x(widths: &[u32], index: usize, to: usize) -> u32 {
 /// below the minimum. The new one gets less than it wants only when the
 /// others are all at the minimum. `None` when not even a minimum-width
 /// widget fits.
+#[cfg(test)]
 pub fn make_room(widths: &[u32], want: u32) -> Option<(Vec<u32>, u32)> {
-    let want = want.clamp(MIN_WIDGET_WIDTH, STRIP);
+    let mins = vec![MIN_WIDGET_WIDTH; widths.len()];
+    make_room_above(widths, &mins, want, MIN_WIDGET_WIDTH)
+}
+
+/// `make_room`, with a floor of its own for each widget (`mins`, where
+/// it still reads) and for the new one (`new_min`).
+pub fn make_room_above(
+    widths: &[u32],
+    mins: &[u32],
+    want: u32,
+    new_min: u32,
+) -> Option<(Vec<u32>, u32)> {
+    let new_min = new_min.max(MIN_WIDGET_WIDTH);
+    let want = want.clamp(new_min, STRIP);
     let free = STRIP.saturating_sub(widths.iter().sum());
     if free >= want {
         return Some((widths.to_vec(), want));
     }
     let spare: Vec<u32> = widths
         .iter()
-        .map(|w| w.saturating_sub(MIN_WIDGET_WIDTH))
+        .zip(mins)
+        .map(|(w, m)| w.saturating_sub((*m).max(MIN_WIDGET_WIDTH)))
         .collect();
     let total: u32 = spare.iter().sum();
-    if free + total < MIN_WIDGET_WIDTH {
+    if free + total < new_min {
         return None;
     }
     let take = (want - free).min(total);
@@ -131,7 +146,20 @@ pub fn make_room(widths: &[u32], want: u32) -> Option<(Vec<u32>, u32)> {
     Some((out, free + take))
 }
 
+/// The narrowest a widget of this kind still reads at: a key shows its
+/// icon at the minimum, a reading needs room for its number, music for
+/// its title. Add never takes a widget below this.
+pub fn readable(w: &Widget) -> u32 {
+    match w {
+        Widget::Key { .. } => MIN_WIDGET_WIDTH,
+        Widget::Value { .. } | Widget::Rate { .. } | Widget::Clock { .. } => 72,
+        Widget::Slider { .. } => 80,
+        Widget::Media { .. } => 120,
+    }
+}
+
 /// Whether anything more fits on a row with these widths.
+#[cfg(test)]
 pub fn has_room(widths: &[u32]) -> bool {
     make_room(widths, MIN_WIDGET_WIDTH).is_some()
 }
@@ -201,6 +229,18 @@ pub fn class(width: u32) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Add takes room only down to where each widget still reads.
+    #[test]
+    fn room_is_made_only_down_to_where_each_reads() {
+        // A clock at 568 and a media widget at 72 already narrow.
+        let (out, w) = make_room_above(&[568, 72], &[72, 120], 72, 40).unwrap();
+        assert_eq!(w, 72);
+        assert_eq!(out, vec![496, 72], "media below its floor gives nothing");
+        // Nothing above the floors: no room, even though 40 px would fit.
+        assert_eq!(make_room_above(&[320, 320], &[320, 320], 72, 40), None);
+        assert_eq!(make_room(&[320, 320], 72).map(|r| r.1), Some(72));
+    }
 
     #[test]
     fn room_comes_from_the_empty_strip_first() {

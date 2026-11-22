@@ -290,22 +290,17 @@ pub fn start() -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
     if !installed && std::env::var_os(STUB_ENV).is_none() {
-        return cmd
-            .spawn()
-            .map(drop)
-            .map_err(|e| format!("The service could not be started ({e}). Copy diagnostics from the status menu: it says what is missing."));
+        return cmd.spawn().map(drop).map_err(|e| could_not_run(&e));
     }
-    let out = cmd
-        .output()
-        .map_err(|e| format!("The service could not be started ({e}). Copy diagnostics from the status menu: it says what is missing."))?;
+    let out = cmd.output().map_err(|e| could_not_run(&e))?;
     if out.status.success() {
         Ok(())
     } else {
         let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
         Err(if why.is_empty() {
-            "It did not start. The log may say why.".into()
+            "The system gave no reason.".into()
         } else {
-            format!("It did not start: {why}")
+            format!("The system said: {why}")
         })
     }
 }
@@ -328,6 +323,32 @@ pub fn log() -> String {
         ),
         Err(e) => format!("The log could not be read: {e}"),
     }
+}
+
+/// Why the command that starts the service did not run, in plain words.
+fn could_not_run(e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => {
+            "The program that starts it was not found on this computer.".into()
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            "This computer did not allow the program that starts it to run.".into()
+        }
+        _ => format!("The program that starts it did not run: {e}."),
+    }
+}
+
+/// The stopped view after a try to start it failed: the chip and the
+/// card say so, with the reason, instead of only "not running".
+pub fn did_not_start(mut v: View, why: &str) -> View {
+    v.chip = "Did not start".into();
+    v.headline = "The service did not start".into();
+    v.body = format!(
+        "{why} Open the log to see what it said, or copy the diagnostics to ask for help. Your layouts are safe."
+    );
+    v.log = true;
+    v.start = true;
+    v
 }
 
 #[cfg(test)]

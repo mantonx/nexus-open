@@ -194,6 +194,9 @@ thread_local! {
     /// the doctor's latest checks, for the status chip.
     static LAST: std::cell::RefCell<(Option<Status>, Vec<Check>)> =
         const { std::cell::RefCell::new((None, Vec::new())) };
+    /// Why the last try to start the service failed, if it did.
+    static START_FAILED: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// The user's accent, derived as the strip derives it, into the theme.
@@ -214,8 +217,20 @@ pub(crate) fn set_accent(user: Option<nexus_core::theme::Rgb>) {
 fn show_status(app: &AppWindow) {
     let view = LAST.with(|l| {
         let l = l.borrow();
-        status::view(l.0.as_ref(), &l.1)
+        let view = status::view(l.0.as_ref(), &l.1);
+        // A try to start it that failed holds until the service answers.
+        match (&l.0, START_FAILED.with(|f| f.borrow().clone())) {
+            (None, Some(why)) => status::did_not_start(view, &why),
+            _ => view,
+        }
     });
+    app.set_start_failure(
+        START_FAILED
+            .with(|f| f.borrow().clone())
+            .filter(|_| LAST.with(|l| l.borrow().0.is_none()))
+            .unwrap_or_default()
+            .into(),
+    );
     app.set_status(StatusView {
         tone: view.tone.into(),
         chip: view.chip.into(),
@@ -230,14 +245,12 @@ fn show_status(app: &AppWindow) {
 
 /// "Start the service": runs it off the UI thread, then checks again.
 fn start_service() {
-    // A new try replaces what the last one said.
-    editor::problem(String::new());
     let _ = thread::Builder::new().name("start".into()).spawn(|| {
         let result = status::start();
         let _ = slint::invoke_from_event_loop(move || {
-            if let Err(why) = result {
-                editor::problem(why);
-            }
+            // A new try replaces what the last one said.
+            START_FAILED.with(|f| *f.borrow_mut() = result.err());
+            with_app(show_status);
         });
         recheck();
     });

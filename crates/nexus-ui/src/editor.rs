@@ -937,12 +937,21 @@ impl Editor {
             app.set_ghost_width(0);
         }
         app.set_snap_x(self.snap_x.map_or(-1, |x| x as i32));
-        let room = geometry::has_room(&self.layout_widths());
+        // Room for at least a key, without taking any widget below
+        // where it reads.
+        let mins: Vec<u32> = self.widgets().iter().map(geometry::readable).collect();
+        let room = geometry::make_room_above(
+            &self.layout_widths(),
+            &mins,
+            nexus_core::config::MIN_WIDGET_WIDTH,
+            nexus_core::config::MIN_WIDGET_WIDTH,
+        )
+        .is_some();
         app.set_can_add(room);
         app.set_add_reason(if room {
             SharedString::new()
         } else {
-            "Every widget here is as narrow as it can be, so nothing more fits. Remove one, or add a page.".into()
+            "Every widget here is as narrow as it reads, so nothing more fits. Remove one, or add a page.".into()
         });
         app.set_caption(self.caption(&widths, selected).into());
         self.show_fields();
@@ -1450,8 +1459,17 @@ impl Editor {
             return;
         };
         let widths = self.layout_widths();
-        let Some((others, width)) = geometry::make_room(&widths, preset.widget.width()) else {
-            self.set_problem("Nothing more fits here. Remove a widget, or add a page.".into());
+        let mins: Vec<u32> = self.widgets().iter().map(geometry::readable).collect();
+        let Some((others, width)) = geometry::make_room_above(
+            &widths,
+            &mins,
+            preset.widget.width(),
+            geometry::readable(&preset.widget),
+        ) else {
+            self.set_problem(format!(
+                "{} does not fit here without making a widget too narrow to read. Remove one, or add a page.",
+                preset.name
+            ));
             return;
         };
         let at = self.selected_index().map_or(widths.len(), |i| i + 1);
@@ -2496,11 +2514,6 @@ pub fn connected(up: bool) {
 /// Pictures from `thumbs`, for the installed editor.
 pub fn pictures(done: Done) {
     with_editor(|e| e.pictures(done));
-}
-
-/// Something went wrong outside the editor, said where its problems are.
-pub fn problem(why: String) {
-    with_editor(|e| e.set_problem(why));
 }
 
 pub fn install(editor: &Shared) {

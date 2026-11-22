@@ -349,6 +349,8 @@ export component AppWindow inherits Window {
     callback choose-starter(int);
     callback dismiss-first-run();
     callback set-pref(string, string);
+    /// Why the last try to start the service failed; empty if it did not.
+    in property <string> start-failure;
     callback start-service();
     callback open-log();
 
@@ -622,14 +624,14 @@ export component AppWindow inherits Window {
                             if !root.connected: Rectangle {
                                 height: offline-row.preferred-height + 20px;
                                 border-radius: Theme.r-surface;
-                                background: Theme.warn-surface;
+                                background: root.start-failure != "" ? Theme.crit-surface : Theme.warn-surface;
                                 offline-row := HorizontalLayout {
                                     padding: 10px;
                                     padding-left: 14px;
                                     spacing: 12px;
                                     Icon {
-                                        glyph: Glyph.plug;
-                                        color: Theme.warn;
+                                        glyph: root.start-failure != "" ? Glyph.warning : Glyph.plug;
+                                        color: root.start-failure != "" ? Theme.crit : Theme.warn;
                                         font-size: 18px;
                                     }
                                     VerticalLayout {
@@ -646,8 +648,8 @@ export component AppWindow inherits Window {
                                         }
                                         // What the last try to start it said: here, as
                                         // there may be no strip to say it under.
-                                        if root.problem != "": Text {
-                                            text: root.problem;
+                                        if root.start-failure != "": Text {
+                                            text: @tr("It did not start. {}", root.start-failure);
                                             font-family: Theme.font;
                                             font-size: Theme.size-body;
                                             font-weight: 600;
@@ -658,10 +660,12 @@ export component AppWindow inherits Window {
                                     }
                                     if root.status.start: VerticalLayout {
                                         alignment: center;
+                                        // Neutral, not the accent: on a warning ground
+                                        // the accent would read as part of the trouble.
                                         Button {
-                                            tier: "primary";
+                                            tier: "default";
                                             icon: Glyph.power;
-                                            text: @tr("Start the service");
+                                            text: root.start-failure != "" ? @tr("Try to start it again") : @tr("Start the service");
                                             clicked => {
                                                 root.start-service();
                                             }
