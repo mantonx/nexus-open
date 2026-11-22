@@ -11,7 +11,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use nexus_core::config::{
-    Action, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, SLIDER_VALUE, SliderControl, Widget,
+    Action, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, NewsCommand, SLIDER_VALUE, SliderControl,
+    Widget,
 };
 
 /// A widget's values by key, in the window's words.
@@ -91,6 +92,7 @@ const RATE: &str = "Network rate";
 const SLIDER: &str = "Slider";
 const MEDIA: &str = "Now playing";
 const KEY: &str = "Key";
+const NEWS: &str = "News";
 
 const NO_GRAPH: &str = "None";
 const AREA: &str = "Area";
@@ -111,6 +113,10 @@ const NEXT_TRACK: &str = "Next track";
 const PREV_TRACK: &str = "Previous track";
 const STOP: &str = "Stop playback";
 const PUBLISH: &str = "Set a signal";
+const OPEN_STORY: &str = "Open the story";
+const NEXT_HEADLINE: &str = "Next headline";
+/// What a news widget's tap and long press can do besides the others.
+const NEWS_ACTIONS: [&str; 2] = [OPEN_STORY, NEXT_HEADLINE];
 /// Grouped by what they act on: music, pages, the computer.
 const ACTIONS: [&str; 11] = [
     NOTHING, PLAY_PAUSE, NEXT_TRACK, PREV_TRACK, STOP, SHOW_PAGE, NEXT_PAGE, PREV_PAGE, OPEN, RUN,
@@ -130,7 +136,7 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
     match widget {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
-        Widget::News { .. } => put("type", "news"),
+        Widget::News { .. } => put("type", NEWS),
         Widget::Key { label, sub, .. } => {
             put("type", KEY);
             put("label", label.as_deref().unwrap_or_default());
@@ -225,7 +231,9 @@ fn flatten_action(v: &mut Values, prefix: &str, action: Option<&Action>) {
         v.insert(key, s.to_string());
     };
     match action {
-        None | Some(Action::News(_)) => put("", NOTHING),
+        None => put("", NOTHING),
+        Some(Action::News(NewsCommand::Open)) => put("", OPEN_STORY),
+        Some(Action::News(NewsCommand::Next)) => put("", NEXT_HEADLINE),
         Some(Action::Page(p)) if p == "next" => put("", NEXT_PAGE),
         Some(Action::Page(p)) if p == "prev" => put("", PREV_PAGE),
         Some(Action::Page(p)) => {
@@ -284,6 +292,12 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
             hold,
         },
         MEDIA => Widget::Media {
+            width,
+            icon,
+            tap,
+            hold,
+        },
+        NEWS => Widget::News {
             width,
             icon,
             tap,
@@ -446,6 +460,8 @@ fn build_action(v: &Values, prefix: &str, ctx: &Context) -> Result<Option<Action
         NEXT_TRACK => Action::Media(MediaCommand::Next),
         PREV_TRACK => Action::Media(MediaCommand::Previous),
         STOP => Action::Media(MediaCommand::Stop),
+        OPEN_STORY => Action::News(NewsCommand::Open),
+        NEXT_HEADLINE => Action::News(NewsCommand::Next),
         PUBLISH => {
             let signal = get("signal");
             if signal.is_empty() {
@@ -624,7 +640,17 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
     }
     for (prefix, label) in [("tap", "Tap"), ("hold", "Long press")] {
         let action = get(prefix);
-        add(prefix, label, choice(&ACTIONS), String::new());
+        // The headline's own actions on a news widget, after Nothing; and
+        // on any other widget that already has one, so it shows as set.
+        let options: Vec<&str> = if ty == NEWS || NEWS_ACTIONS.contains(&action.as_str()) {
+            let mut o = vec![NOTHING];
+            o.extend(NEWS_ACTIONS);
+            o.extend(&ACTIONS[1..]);
+            o
+        } else {
+            ACTIONS.to_vec()
+        };
+        add(prefix, label, choice(&options), String::new());
         let key = |k: &str| format!("{prefix}.{k}");
         match action.as_str() {
             SHOW_PAGE => {
@@ -929,6 +955,31 @@ mod tests {
         };
         assert!(matches!(&sent, Widget::Value { signal, width: 120, .. } if signal == "cpu.temp"));
         assert_eq!(sent.tap(), w.tap(), "actions survive a change of type");
+    }
+
+    /// A news widget edits like any other: its width changes, and its
+    /// headline actions survive the edit rather than turning into nothing.
+    #[test]
+    fn a_news_widget_keeps_its_actions() {
+        let ctx = ctx();
+        let w = Widget::News {
+            width: 200,
+            icon: None,
+            tap: Some(Action::News(NewsCommand::Next)),
+            hold: Some(Action::News(NewsCommand::Open)),
+        };
+        let v = flatten(&w, &ctx);
+        let keys: Vec<String> = fields(&v, &ctx).into_iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["width", "icon", "tap", "hold"]);
+        let tap = fields(&v, &ctx)
+            .into_iter()
+            .find(|f| f.key == "tap")
+            .unwrap();
+        assert!(matches!(&tap.kind, Kind::Choice(o) if o.iter().any(|s| s == OPEN_STORY)));
+        let Outcome::Send(sent) = apply(&w, &Values::new(), "width", "240", &ctx) else {
+            panic!("a news widget's width is sent");
+        };
+        assert_eq!(sent, w.clone().with_width(240));
     }
 
     #[test]
