@@ -293,11 +293,11 @@ pub fn start() -> Result<(), String> {
         return cmd
             .spawn()
             .map(drop)
-            .map_err(|e| format!("Could not start it: {e}."));
+            .map_err(|e| format!("The service could not be started ({e}). Copy diagnostics from the status menu: it says what is missing."));
     }
     let out = cmd
         .output()
-        .map_err(|e| format!("Could not start it: {e}."))?;
+        .map_err(|e| format!("The service could not be started ({e}). Copy diagnostics from the status menu: it says what is missing."))?;
     if out.status.success() {
         Ok(())
     } else {

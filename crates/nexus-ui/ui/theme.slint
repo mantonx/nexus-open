@@ -62,7 +62,7 @@ export global Theme {
     out property <color> act-line: dark ? accent-base : accent-deep;
     out property <color> act-wash: dark ? accent-soft : accent-base.transparentize(0.55);
 
-    out property <color> scrim: dark ? #000000a0 : #2a211b66;
+    out property <color> scrim: dark ? #000000c0 : #2a211b80;
 
     // Type: one face.
     out property <string> font: "Rubik";
@@ -79,16 +79,25 @@ export global Theme {
 }
 
 /// A Phosphor glyph: Fill for things, Bold for actions.
-export component Icon inherits Text {
+// A wrapper, not `inherits Text`: Slint drops `accessible-role: none` when
+// a use site inherits it, and a screen reader then reads the glyph's
+// private-use character. Set on the inner Text itself, it holds.
+export component Icon {
     in property <string> glyph;
     in property <bool> fill: false;
-    text: glyph;
-    font-family: fill ? "Phosphor-Fill" : "Phosphor-Bold";
-    font-size: 16px;
-    color: Theme.text-2;
-    vertical-alignment: center;
-    horizontal-alignment: center;
-    accessible-role: none;
+    in property <color> color: Theme.text-2;
+    in property <length> font-size: 16px;
+    HorizontalLayout {
+        Text {
+            text: root.glyph;
+            font-family: root.fill ? "Phosphor-Fill" : "Phosphor-Bold";
+            font-size: root.font-size;
+            color: root.color;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            accessible-role: none;
+        }
+    }
 }
 
 /// Glyphs used by the window's own controls (Phosphor Bold).

@@ -505,7 +505,7 @@ export component AppWindow inherits Window {
                         alignment: center;
                         status-chip := Rectangle {
                             height: 32px;
-                            min-width: chip-row.preferred-width;
+                            width: max(168px, chip-row.preferred-width);
                             border-radius: 16px;
                             property <bool> trouble: root.status.tone == "warn" || root.status.tone == "stopped";
                             background: trouble ? Theme.warn-surface : chip-touch.has-hover ? Theme.surface-2 : transparent;
@@ -521,7 +521,7 @@ export component AppWindow inherits Window {
                                 padding-right: 12px;
                                 spacing: 7px;
                                 Icon {
-                                    glyph: status-chip.trouble ? Glyph.warning : root.status.tone == "note" ? Glyph.info : Glyph.ok;
+                                    glyph: root.status.tone == "stopped" ? Glyph.plug : status-chip.trouble ? Glyph.warning : root.status.tone == "note" ? Glyph.info : Glyph.ok;
                                     fill: true;
                                     color: status-chip.trouble ? Theme.warn : Theme.text-3;
                                 }
@@ -816,7 +816,7 @@ export component AppWindow inherits Window {
                                                     }
                                                 }
                                                 Text {
-                                                    text: @tr("On the strip");
+                                                    text: root.status.tone == "ok" ? @tr("On the strip") : @tr("Current page");
                                                     font-family: Theme.font;
                                                     font-size: Theme.size-small;
                                                     font-weight: 500;
@@ -858,7 +858,10 @@ export component AppWindow inherits Window {
                                         y: root.bezel;
                                         width: root.strip-w;
                                         height: root.strip-h;
-                                        source: row.live && root.connected ? root.frame : row.frame;
+                                        // The strip's own frame, except on the page being
+                                        // edited: there the outlines must sit on its
+                                        // widgets, not on an alarm or takeover covering them.
+                                        source: row.live && root.connected && (root.trying || !row.active) ? root.frame : row.frame;
                                         image-rendering: pixelated;
                                         accessible-role: none;
                                     }
@@ -911,6 +914,21 @@ export component AppWindow inherits Window {
                                                 self.focus();
                                             }
                                         }
+                                        // Reached by the keyboard: a ring round the
+                                        // whole strip, unlike the selection outline,
+                                        // which a click also gives.
+                                        property <bool> by-keys;
+                                        focus-gained(reason) => {
+                                            self.by-keys = reason == FocusReason.tab-navigation;
+                                        }
+                                        FocusRing {
+                                            x: -root.bezel - 4px;
+                                            y: -root.bezel - 4px;
+                                            width: root.strip-w + 2 * root.bezel + 8px;
+                                            height: root.strip-h + 2 * root.bezel + 8px;
+                                            radius: 13px;
+                                            shown: keys.has-focus && keys.by-keys;
+                                        }
                                         accessible-role: list;
                                         accessible-label: @tr("Widgets on {}. Left and right arrows select; with Control they move the widget, with Shift they resize it; Delete removes it.", row.name);
                                         key-pressed(event) => {
@@ -918,6 +936,7 @@ export component AppWindow inherits Window {
                                                 return reject;
                                             }
                                             if event.text == Key.LeftArrow || event.text == Key.RightArrow {
+                                                self.by-keys = true;
                                                 let step = event.text == Key.LeftArrow ? -1 : 1;
                                                 if event.modifiers.control {
                                                     root.move-step(step);
@@ -2468,7 +2487,9 @@ export component AppWindow inherits Window {
                         }
                     }
                     Hint {
-                        text: @tr("The strip dims further between these times, across midnight when the end is earlier.");
+                        text: root.pref-night
+                            ? @tr("The strip dims further between these times, across midnight when the end is earlier.")
+                            : @tr("None: the strip keeps its brightness all night. Dim at night sets hours when it dims further.");
                     }
                 }
             }

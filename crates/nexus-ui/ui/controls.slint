@@ -197,9 +197,9 @@ export component Segmented inherits Rectangle {
         for s[i] in root.options: Rectangle {
             property <bool> chosen: i == root.current;
             border-radius: Theme.r-control - 2px;
-            background: chosen ? Theme.raised : seg-touch.has-hover && root.enabled ? Theme.surface-2.darker(0.06) : transparent;
-            border-width: chosen && Theme.dark ? 1px : 0px;
-            border-color: Theme.raised-top.transparentize(0.4);
+            background: chosen ? (Theme.dark ? Theme.raised-top : Theme.raised) : seg-touch.has-hover && root.enabled ? Theme.surface-2.darker(0.06) : transparent;
+            border-width: chosen ? 1px : 0px;
+            border-color: Theme.dark ? Theme.text-3 : Theme.line-strong;
             drop-shadow-blur: chosen && !Theme.dark ? 3px : 0px;
             drop-shadow-color: #2a211b30;
             min-width: seg-row.preferred-width + 20px;
