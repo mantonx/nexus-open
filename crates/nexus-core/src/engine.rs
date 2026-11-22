@@ -139,6 +139,9 @@ pub struct Alarm {
     pub icon: char,
     /// It is a temperature: "too hot", and the fans are worth a look.
     pub hot: bool,
+    /// The reading is back under its limit; the alarm stays until it has
+    /// been for `ALARM_CLEARS` seconds, or OK.
+    pub under: bool,
     /// How many readings it holds, this one included. OK acknowledges all.
     pub count: usize,
     /// The OK key's pixels on the strip: a tap there acknowledges.
@@ -153,16 +156,25 @@ impl Alarm {
         } else {
             &self.label
         };
-        let (headline, detail) = if self.hot {
-            (
+        let (headline, detail) = match (self.hot, self.under) {
+            (true, false) => (
                 format!("{label} is too hot"),
                 format!("Over its {} limit · check the fans", self.limit),
-            )
-        } else {
-            (
+            ),
+            (false, false) => (
                 format!("{label} is too high"),
                 format!("Over its {} limit", self.limit),
-            )
+            ),
+            // The value shown is the reading now, so the words must not
+            // say it is over.
+            (true, true) => (
+                format!("{label} was too hot"),
+                format!("Back under its {} limit · check the fans", self.limit),
+            ),
+            (false, true) => (
+                format!("{label} was too high"),
+                format!("Back under its {} limit", self.limit),
+            ),
         };
         AlarmView {
             icon: self.icon,
@@ -465,6 +477,7 @@ impl Engine {
             limit: limit + &limit_unit,
             icon: watch.icon,
             hot: base == Unit::Celsius,
+            under: !watch.critical,
             count: self.alarm.len(),
             ok: alarm_ok(),
         })
@@ -2580,6 +2593,30 @@ mod tests {
         );
         e.handle(Input::Forget("cpu.temp".into()));
         assert_eq!(e.alarm(), None, "its source gone: no data, no alarm");
+    }
+
+    #[test]
+    fn the_alarm_says_when_the_reading_is_back_under() {
+        let mut e = alarmed();
+        reading(&mut e, 0.0, "cpu.temp", 95.0);
+        let words = |e: &Engine| e.alarm().map(|a| a.view().headline);
+        assert_eq!(words(&e).as_deref(), Some("CPU is too hot"));
+        reading(&mut e, 1.0, "cpu.temp", 74.0);
+        let view = e.alarm().expect("still up").view();
+        assert_eq!(
+            (
+                view.headline.as_str(),
+                view.detail.as_str(),
+                view.value.as_str()
+            ),
+            (
+                "CPU was too hot",
+                "Back under its 90° limit · check the fans",
+                "74°"
+            )
+        );
+        reading(&mut e, 2.0, "cpu.temp", 93.0);
+        assert_eq!(words(&e).as_deref(), Some("CPU is too hot"), "over again");
     }
 
     #[test]
