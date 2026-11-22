@@ -13,7 +13,10 @@ repo="$(cd "$here/../../.." && pwd)"
 out="$(mkdir -p "${1:-$repo/target/dist}" && cd "${1:-$repo/target/dist}" && pwd)"
 ver="$(sed -n 's/^pkgver=//p' "$here/PKGBUILD")"
 
-work="$(mktemp -d)"
+# Under target/, not /tmp: a release build with makepkg's debug info takes
+# several GB, more than a tmpfs /tmp may allow.
+mkdir -p "$repo/target"
+work="$(mktemp -d "$repo/target/arch-build.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 cp "$here/PKGBUILD" "$here/nexus-open.install" "$work/"
 git -C "$repo" archive --format=tar.gz --prefix="nexus-open-$ver/" \
