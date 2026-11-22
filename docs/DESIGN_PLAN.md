@@ -483,3 +483,10 @@ README clip (now of the new strip), release verification.
   `live-p6-empty-page`, `narrow-values`, `specimen-slider-seek`,
   `specimen-slider-seek-hours`, `specimen-media-hours`. Not yet judged
   by an isolated critique.
+- 2026-11-22 — The same rule for compact rate and weather cards,
+  provisional: laid out for "888 MB/s" and "888°", steps down the type
+  scale, then (rate) the arrow and unit stacked over a 20 px number.
+  The unit is not shortened: "12 kB" reads as an amount. Fixes the 106
+  px rate running "12 kB/s" off its card, and weather running "104°" off
+  at every compact width. Cost: default System network 32 to 20 px,
+  Home weather 40 to 32. Frames `live-p1-rate`, `overflow-sweep-*`.

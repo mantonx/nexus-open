@@ -409,6 +409,14 @@ fn live_pages(out: &mut Out) {
     let mut e = engine(c.clone(), &world, "Glance");
     track_at(&mut e, LONG_TRACK);
     out.save("live", "live-p1-compact-temps", shot(&mut e, &now, 1.0));
+    // The same page with a three-digit rate: "512 kB/s" in 106 px.
+    let busy = World {
+        down: 512_000.0,
+        ..world.clone()
+    };
+    let mut e = engine(c.clone(), &busy, "Glance");
+    track_at(&mut e, LONG_TRACK);
+    out.save("live", "live-p1-rate", shot(&mut e, &now, 1.0));
     let mut e = engine(c.clone(), &world, "Media");
     track_at(&mut e, LONG_TRACK);
     out.save("live", "live-p5-seek", shot(&mut e, &now, 1.0));
@@ -430,6 +438,51 @@ fn live_pages(out: &mut Out) {
     c.pages = Config::parse(&text).expect("a valid layout").pages;
     let mut e = engine(c, &world, "Narrow");
     out.save("live", "narrow-values", shot(&mut e, &now, 1.0));
+
+    // Every compact card that shows a number, at its worst value, in the
+    // zones a layout gives compact cards: nothing may run past its card.
+    let widths = [124, 112, 106, 102, 100, 96];
+    let worst = World {
+        cpu_load: 100.0,
+        mem: 100.0,
+        down: 999_000_000.0,
+        ..world.clone()
+    };
+    let rate = |w: u32| {
+        format!(
+            "[[page.widget]]\ntype = \"rate\"\nwidth = {w}\nlabel = \"Network\"\ndown = \"net.down\"\nup = \"net.up\"\n"
+        )
+    };
+    let load = |w: u32| value("CPU load", "cpu.load", w, "");
+    let mem = |w: u32| value("Memory", "mem.used", w, "warn = 85\ncrit = 95\n");
+    let wx = |w: u32| value("Weather", "weather.temp", w, "");
+    let kinds: [(&str, &dyn Fn(u32) -> String); 4] = [
+        ("rate", &rate),
+        ("load", &load),
+        ("memory", &mem),
+        ("weather", &wx),
+    ];
+    for (kind, widget) in kinds {
+        let mut text = row("Sweep");
+        for w in widths {
+            text += &widget(w);
+        }
+        let mut c = layout(None, true);
+        c.pages = Config::parse(&text).expect("a valid layout").pages;
+        let mut e = engine(c, &worst, "Sweep");
+        if kind == "weather" {
+            // 104 °F, the hottest three digits a forecast gives.
+            e.handle(Input::Signal(
+                "weather.temp".into(),
+                Value::Number(f(104.0), Unit::Celsius),
+            ));
+        }
+        out.save(
+            "live",
+            format!("overflow-sweep-{kind}"),
+            shot(&mut e, &now, 1.0),
+        );
+    }
 }
 
 fn default_pages(out: &mut Out) {

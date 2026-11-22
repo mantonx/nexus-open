@@ -695,6 +695,29 @@ const COMPACT_STEPS: [(TextStyle, f32); 6] = [
     (NUM_SECOND_SMALL, ICON_SMALL),
 ];
 
+/// Every unit a rate is shown in (`layout::format_rate`), for laying a
+/// rate card out for the widest.
+const RATE_UNITS: [&str; 5] = ["B/s", "kB/s", "MB/s", "GB/s", "TB/s"];
+
+/// The room a rate's arrow takes before its number, gap included.
+fn rate_arrow_w(icon: f32) -> f32 {
+    icon - 2.0
+}
+
+/// How a compact rate card is laid out (`Pen::rate_plan`).
+enum RatePlan {
+    /// "↓ 12 kB/s" on one line; `width` is the widest number and unit.
+    Line {
+        num: TextStyle,
+        icon: f32,
+        width: f32,
+    },
+    /// The arrow and unit above (`top` wide), the number under them.
+    Stacked { top: f32, num: TextStyle },
+    /// Not even that fits: the arrow alone.
+    Arrow,
+}
+
 /// How a compact value card names its reading and how big its numeral is,
 /// chosen from the card's width and the reading's widest value alone.
 struct CompactPlan {
@@ -1038,6 +1061,43 @@ impl Pen<'_> {
             // A card that cannot show a number still says what it would
             // show, with its icon.
             above: fits.then(|| name.map_or(Above::Icon, Above::Name)),
+        }
+    }
+
+    /// How a compact rate card fits "↓ 12 kB/s" in a card `w` wide: laid
+    /// out for the widest rate on its scale, three figures in its longest
+    /// unit ("888 MB/s"), never the rate now. One line at the largest of
+    /// `COMPACT_STEPS` that holds it; else stacked, the arrow and unit
+    /// above a `NUM_SECOND_SMALL` number; else the arrow alone.
+    fn rate_plan(&mut self, w: f32, txt: &str, unit: &str) -> RatePlan {
+        let room = w - 2.0 * PAD;
+        let units = RATE_UNITS.iter().copied().chain([unit]);
+        let widest = |pen: &mut Self, num: &TextStyle| {
+            let mut best = pen.num_unit_w(num, txt, unit, &LABEL);
+            for u in units.clone() {
+                best = best.max(pen.num_unit_w(num, "888", u, &LABEL));
+            }
+            best
+        };
+        for (num, icon) in COMPACT_STEPS {
+            let width = widest(self, &num);
+            if rate_arrow_w(icon) + width <= room {
+                return RatePlan::Line { num, icon, width };
+            }
+        }
+        let num = NUM_SECOND_SMALL;
+        let mut unit_w = 0.0f32;
+        for u in units.clone() {
+            unit_w = unit_w.max(self.measure(Face::Num, &LABEL, u));
+        }
+        let top = rate_arrow_w(ICON_SMALL) + unit_w;
+        let nw = self
+            .measure(Face::Num, &num, "888")
+            .max(self.measure(Face::Num, &num, txt));
+        if top <= room && nw <= room {
+            RatePlan::Stacked { top, num }
+        } else {
+            RatePlan::Arrow
         }
     }
 
@@ -1701,30 +1761,48 @@ impl Pen<'_> {
         let unit = if nodata { "" } else { down.unit.as_str() };
         match cls {
             Class::Compact => {
-                let ix = x + PAD + 8.0;
-                self.icon(
-                    true,
-                    icons::ARROW_DOWN,
-                    ICON_COMPACT,
-                    ix,
-                    fig_mid(&NUM_COMPACT, BASE_COMPACT),
-                    TEXT2,
-                );
-                let nx = x + PAD + 20.0;
-                let mut num = NUM_COMPACT;
-                if self.num_unit_w(&num, &txt(down), unit, &LABEL) > x + w - PAD - nx {
-                    num = NUM_COMPACT_TIGHT;
+                let down_txt = txt(down);
+                let plan = self.rate_plan(w, &down_txt, unit);
+                let arrow = |pen: &mut Self, size: f32, ax: f32, cy: f32| {
+                    pen.icon(
+                        true,
+                        icons::ARROW_DOWN,
+                        size,
+                        ax + size / 2.0 - 3.0,
+                        cy,
+                        TEXT2,
+                    );
+                };
+                match plan {
+                    // ↓ 12 kB/s on one line, sized for "888 MB/s".
+                    RatePlan::Line { num, icon, width } => {
+                        let ax = x + PAD;
+                        arrow(self, icon, ax, fig_mid(&num, BASE_COMPACT));
+                        let nx = ax + rate_arrow_w(icon);
+                        let room = x + w - PAD - nx;
+                        let nx = nx + ((room - width) / 2.0).max(0.0).floor();
+                        let (t, u) = (down_txt.as_str(), unit);
+                        self.num_unit(&num, t, u, &LABEL, nx, BASE_COMPACT, num_c, TEXT2);
+                    }
+                    // Too narrow for the number and its unit on one line:
+                    // the arrow and the unit above, the number under them.
+                    // The unit is never shortened: "12 kB" would read as an
+                    // amount, not a rate.
+                    RatePlan::Stacked { top, num } => {
+                        let tx = (x + (w - top) / 2.0).floor();
+                        let icon = ICON_SMALL;
+                        arrow(self, icon, tx, 20.0 - LABEL.size * 0.35);
+                        let ux = tx + rate_arrow_w(icon);
+                        let u = if unit.is_empty() { "" } else { unit };
+                        self.text(Face::Num, &LABEL, u, ux, 20.0, TEXT2);
+                        let nw = self.measure(Face::Num, &num, &down_txt);
+                        let nx = (x + (w - nw) / 2.0).floor();
+                        self.text(Face::Num, &num, &down_txt, nx, BASE_COMPACT, num_c);
+                    }
+                    RatePlan::Arrow => {
+                        arrow(self, ICON_SMALL, x + w / 2.0 - 5.0, CARD_Y + 15.0);
+                    }
                 }
-                self.num_unit(
-                    &num,
-                    &txt(down),
-                    unit,
-                    &LABEL,
-                    nx,
-                    BASE_COMPACT,
-                    num_c,
-                    TEXT2,
-                );
                 if let Some(b) = bar(down) {
                     self.bar(x + PAD, BAR_Y_COMPACT, w - 2.0 * PAD, BAR_H_BANDED, &b, &k);
                 }
@@ -1882,25 +1960,47 @@ impl Pen<'_> {
         let live = *avail == Avail::Live;
         match cls {
             Class::Compact => {
-                let tw = self.measure(Face::Num, &NUM_MEDIUM, t);
-                let total = ICON_MEDIUM + ICON_GAP + tw;
-                let x0 = x + ((w - total) / 2.0).max(PAD / 2.0);
-                self.icon(
-                    false,
-                    glyph,
-                    ICON_MEDIUM,
-                    x0 + ICON_MEDIUM / 2.0,
-                    fig_mid(&NUM_MEDIUM, BASE_MEDIUM),
-                    ic,
-                );
-                self.text(
-                    Face::Num,
-                    &NUM_MEDIUM,
-                    t,
-                    x0 + ICON_MEDIUM + ICON_GAP,
-                    BASE_MEDIUM,
-                    tc,
-                );
+                // Laid out for the widest temperature ("888°", "-88°"),
+                // never the one now: the largest step that holds it beside
+                // the icon, with half a pad at the sides as before; else
+                // the icon above a small number; else the icon alone.
+                let room = w - PAD;
+                let widest = |pen: &mut Self, num: &TextStyle| {
+                    ["888°", "-88°", t]
+                        .iter()
+                        .map(|v| pen.measure(Face::Num, num, v))
+                        .fold(0.0, f32::max)
+                };
+                let steps = [(NUM_MEDIUM, ICON_MEDIUM)].into_iter().chain(COMPACT_STEPS);
+                let mut line = None;
+                for (num, isz) in steps {
+                    let tw = widest(self, &num);
+                    if isz + ICON_GAP + tw <= room {
+                        line = Some((num, isz, tw));
+                        break;
+                    }
+                }
+                let cx = x + w / 2.0;
+                match line {
+                    Some((num, isz, tw)) => {
+                        let x0 = (x + (w - (isz + ICON_GAP + tw)) / 2.0).floor();
+                        let base = BASE_MEDIUM;
+                        self.icon(false, glyph, isz, x0 + isz / 2.0, fig_mid(&num, base), ic);
+                        self.text(Face::Num, &num, t, x0 + isz + ICON_GAP, base, tc);
+                    }
+                    None => {
+                        let num = NUM_SECOND_SMALL;
+                        let tw = widest(self, &num);
+                        if tw <= room {
+                            self.icon(false, glyph, ICON_SMALL, cx, CARD_Y + 11.0, ic);
+                            let nx = (x + (w - tw) / 2.0).floor();
+                            self.text(Face::Num, &num, t, nx, BASE_MEDIUM, tc);
+                        } else {
+                            let cy = CARD_Y + CARD_H / 2.0;
+                            self.icon(false, glyph, ICON_SMALL, cx, cy, ic);
+                        }
+                    }
+                }
             }
             Class::Medium => {
                 let x0 = x + PAD;
@@ -3039,6 +3139,33 @@ mod tests {
             let a = p.compact_plan(w, &temp("45°"), "45°", "");
             let b = p.compact_plan(w, &temp("212°"), "212°", "");
             assert_eq!((a.num, a.icon), (b.num, b.icon), "at {w}");
+        }
+    }
+
+    #[test]
+    fn a_compact_rate_fits_its_widest_or_stacks() {
+        let mut r = Renderer::new(Theme::default(), crate::fonts::FontChoice::default().load());
+        let mut c = Canvas::new(WIDTH, HEIGHT, CARD);
+        let mut p = r.pen(&mut c);
+        for zone in [96.0, 106.0, 112.0, 124.0, 128.0] {
+            let w = zone - 2.0 * CARD_INSET;
+            // The same plan whatever the rate now.
+            let a = p.rate_plan(w, "12", "kB/s");
+            let b = p.rate_plan(w, "999", "MB/s");
+            match (a, b) {
+                (
+                    RatePlan::Line { num, icon, width },
+                    RatePlan::Line {
+                        num: n2, icon: i2, ..
+                    },
+                ) => {
+                    assert_eq!((num, icon), (n2, i2), "at {zone}");
+                    assert!(rate_arrow_w(icon) + width <= w - 2.0 * PAD);
+                    assert!(num.size >= TEXT_FLOOR);
+                }
+                (RatePlan::Stacked { .. }, RatePlan::Stacked { .. }) => assert!(zone < 124.0),
+                _ => panic!("the plan changed with the rate at {zone}"),
+            }
         }
     }
 

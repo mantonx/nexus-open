@@ -338,8 +338,8 @@ card beside it (content centres in its room when it has spare width).
 | Value (temperature) | icon + 115°, at the largest step that holds the widest value ("212°") beside the icon: 32 with icon 22 from a 125 px zone, 28 / 22, 28 / 17, 26 / 17 (a 106 px zone: six widgets on a page), 22 / 17; narrower, the name ("CPU") above the numeral at 20; bar band below | icon + 115° at 36, name top right; bar band | icon 30 + 115° at 40; the name over the limit the reading is nearest ("limit 167°", the warning one; the critical one once past it); the bar band runs the **whole card** under them |
 | Value + second reading | as compact (second hidden) | Laid out for the widest both readings can be (three digits each, "212°" / "100°" and "100%", from the units alone, before the first reading), never for the values now: nothing goes or moves as they change. Icon + 115°, the second's own 17 px icon (a gauge for load) just before "6%" at the right; two bars in the band, split where the widest second's icon starts. Sizes step down until that fits: 36 / 26, 36 / 22, 32 / 22, 32 / 20 (a 204 px zone, the System page), 28 / 20 (a 200 px zone), the first's icon 22 from the third step | icon + 115° at 40, name; the second named on the numeral's baseline at the right ("load 6%" at 26); the first reading's bar runs the whole card, the second has none (a percent is its own scale) |
 | Load, memory | icon + 62%, sized for "100%" as the temperature is (32 / 22 at 128, 22 / 17 at 108); bar | icon + 62% at 36, name; bar | icon + 62% at 40, name over "limit 85%"; bar the whole card |
-| Network rate | ↓ + 12 kB/s at 32; log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
-| Weather | icon + 58° at 40 | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
+| Network rate | ↓ + 12 kB/s, sized for the widest rate on its scale ("888 MB/s"), at the largest step that fits on one line (20 / 17 at 124 px); narrower, ↓ and "MB/s" above the number at 20 (the 106 px zone); log bar | ↓12 kB/s at 32 + ↑3 at 26; two log bars. Down and up in different units: two rows, ↓48 MB/s and ↑310 kB/s at 20, each with its log bar beside it | ↓12 kB/s at 36 + ↑3 kB/s at 26; two log bars |
+| Weather | icon + 58°, sized for "888°": 40 / 26, then the value card's steps (32 / 22 at 124 px, 28 / 22 at 107), half a pad at the sides; narrower, the icon above a 20 px number | icon + 58° at 40 + "Cloudy" / "61° / 49°" | icon 30 + 58° at 50 + condition / high and low |
 | Media | play/pause key + elapsed + progress line | artwork + title / artist + a raised `MEDIA_KEY_W` 36 × 33 play/pause key at the right, `PAD` in from the card's edge, accent-filled (the whole card is the hit zone; the key says so) | artwork + title / artist + times + play/pause key; from 400 px prev and next too |
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
 | Key | icon (label from 96 px) | icon + label | icon + label + second line ("Hold for a new window") |
@@ -363,6 +363,17 @@ signal's short name ("CPU", "GPU load", "Memory"); where no number fits
 of its widest box, so "45°" and "212°" start at the same column. Frames:
 `live-p1-compact-temps` (the owner's page), `narrow-values` (one
 temperature at 125, 112, 106, 96, 88, 72 and 41 px).
+
+Compact rate and weather cards follow the same rule (provisional,
+2026-11-22). A rate is laid out for "888" in its longest unit ("MB/s",
+up to the scale's 1 GB/s); where that does not fit on one line even at
+20 / 17, the arrow and the unit go above the number. The unit is never
+shortened: "12 kB" (no "/s") would read as an amount, not a rate, so no
+shorter form is unambiguous. Weather is laid out for "888°" (a hot
+day in °F; "-88°" is narrower). Frames: `live-p1-rate` ("512 kB/s" in
+the owner's 106 px zone), `overflow-sweep-rate`, `-load`, `-memory` and
+`-weather` (each at its worst value in zones of 124, 112, 106, 102, 100
+and 96 px).
 
 ### The default layout
 
@@ -792,11 +803,13 @@ signal's base unit (°C).
     22 until it reached 100% (and then lost its icon); a compact media
     card in a 107 px zone has no room for "9:26" and shows only its
     progress line (before, the time ran into the card's padding, and
-    past an hour off the card). Not fixed here: a compact rate card in a
-    106 px zone runs "12 kB/s" past its right edge (no ellipsis, but
-    over the edge), so `live-p1-compact-temps` shows "8 kB/s", as the
-    owner's frame did. Ways out: wider zones for those widgets, or a
-    compact rate card laid out for "888 MB/s" as values now are.
+    past an hour off the card). Rate and weather, laid out the same
+    way: network on the default System page (124 px) is "12 kB/s" at
+    20 px, where it was 32 and ran off the card at "999 MB/s"; the
+    owner's 106 px rate stacks its unit over a 20 px number; weather on
+    Home (124 px) is 32 px, not 40, and in the owner's 107 px zone 28.
+    Ways out: wider zones for those widgets; or "kB" without "/s",
+    if Matt reads it as a rate.
 
 ## Shared identity
 
