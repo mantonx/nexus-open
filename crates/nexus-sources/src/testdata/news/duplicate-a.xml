@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Wire A</title>
+    <link>https://wire-a.example/</link>
+    <description>One of two feeds carrying the same story.</description>
+    <item>
+      <title>Comet visible tonight</title>
+      <link>https://wire-a.example/comet</link>
+      <guid isPermaLink="false">wire:comet</guid>
+      <pubDate>Fri, 20 Nov 2026 08:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Only in A</title>
+      <link>https://wire-a.example/only</link>
+      <pubDate>Fri, 20 Nov 2026 07:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="html">Example &lt;em&gt;Linux&lt;/em&gt; Log</title>
+  <id>urn:example:linux</id>
+  <updated>2026-11-20T10:00:00Z</updated>
+  <link rel="self" href="https://linux.example.org/atom.xml"/>
+  <entry>
+    <title type="html">Desktop 50 &lt;i&gt;beta&lt;/i&gt; is out</title>
+    <id>urn:example:linux:desktop-50</id>
+    <link rel="replies" href="https://linux.example.org/desktop-50#comments"/>
+    <link rel="alternate" href="https://linux.example.org/desktop-50"/>
+    <published>2026-11-20T09:00:00Z</published>
+    <updated>2026-11-20T10:00:00Z</updated>
+  </entry>
+  <entry>
+    <title>Package mirror moved</title>
+    <id>urn:example:linux:mirror</id>
+    <link href="https://linux.example.org/mirror"/>
+    <updated>2026-11-20T08:00:00Z</updated>
+  </entry>
+</feed>

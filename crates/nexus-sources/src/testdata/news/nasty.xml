@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Feed text is untrusted: every item here tries something. -->
+<rss version="2.0">
+  <channel>
+    <title>Nasty   &amp;   Co</title>
+    <link>https://nasty.example/</link>
+    <description>Hostile and sloppy feed text.</description>
+    <item>
+      <title>&lt;b&gt;Markets&lt;/b&gt; rise &amp;amp; fall</title>
+      <link>https://nasty.example/markets</link>
+      <pubDate>Fri, 20 Nov 2026 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>&amp;#8220;Quoted&amp;#8221; headline &amp;mdash; with entities</title>
+      <link> https://nasty.example/quoted </link>
+      <pubDate>Fri, 20 Nov 2026 08:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Invoice
+          &#x202E;gnp.exe&#x202C;   opened</title>
+      <link>https://nasty.example/bidi</link>
+      <pubDate>Fri, 20 Nov 2026 07:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Click me</title>
+      <link>javascript:alert(document.cookie)</link>
+      <pubDate>Fri, 20 Nov 2026 06:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Relative link</title>
+      <link>/relative/story</link>
+      <pubDate>Fri, 20 Nov 2026 06:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>&lt;br&gt;&#x200B;</title>
+      <link>https://nasty.example/empty</link>
+      <pubDate>Fri, 20 Nov 2026 06:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <link>https://nasty.example/no-title</link>
+    </item>
+    <item>
+      <title><![CDATA[No <i>date</i> at all]]></title>
+      <link>https://nasty.example/undated</link>
+    </item>
+  </channel>
+</rss>

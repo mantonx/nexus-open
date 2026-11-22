@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example World News</title>
+    <link>https://news.example.org/</link>
+    <description>A made-up feed for tests.</description>
+    <item>
+      <title>Bridge reopens after repairs - Example World News</title>
+      <link>https://news.example.org/bridge</link>
+      <guid isPermaLink="false">urn:example:bridge</guid>
+      <pubDate>Fri, 20 Nov 2026 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Library extends opening hours</title>
+      <link>https://news.example.org/library</link>
+      <pubDate>Thu, 19 Nov 2026 18:30:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>
