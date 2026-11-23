@@ -3,9 +3,9 @@
 // under the control), the same everywhere. Fields come from Rust
 // (inspector.rs, takeovers.rs), so a new setting is added there only.
 
-import { ListView } from "std-widgets.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
 import { Theme, Icon, Glyph } from "theme.slint";
-import { Button, TextField, Select, Segmented, Chip, Hint, Label, FocusRing } from "controls.slint";
+import { Button, IconButton, TextField, Select, Segmented, Chip, Hint, Label, FocusRing } from "controls.slint";
 
 /// One setting, as the form shows it.
 export struct Field {
@@ -48,24 +48,33 @@ export global Grid {
 }
 
 /// The searchable list of signals, opened from a signal field or "Add a
-/// reading". Human names first; the raw name as small text.
+/// reading", or the grid of the strip's icons. Human names only in the
+/// rows; the raw name a layout file uses is a small line at the foot, for
+/// the row under the pointer.
 export component Picker inherits Rectangle {
     in property <[PickRow]> rows;
     in property <string> title;
-    /// Lists the strip's icons instead of readings.
+    /// Lists the strip's icons, as a grid, instead of readings.
     in property <bool> icons;
     callback filter(string);
     callback pick(string);
     width: 0px;
     height: 0px;
 
+    property <int> hover: -1;
+    // The icon grid: tiles and columns.
+    property <length> tile: 46px;
+    property <length> gap: 6px;
+    property <int> cols: 7;
+
     public function show() {
+        root.hover = -1;
         popup.show();
     }
 
     popup := PopupWindow {
     close-policy: PopupClosePolicy.close-on-click-outside;
-    width: 380px;
+    width: root.icons ? root.cols * (root.tile + root.gap) - root.gap + 16px + 14px : 380px;
 
     Rectangle {
         background: Theme.surface;
@@ -85,6 +94,7 @@ export component Picker inherits Rectangle {
                     self.focus-input();
                 }
                 edited(text) => {
+                    root.hover = -1;
                     root.filter(text);
                 }
                 accepted => {
@@ -101,21 +111,23 @@ export component Picker inherits Rectangle {
                     reject
                 }
             }
-            ListView {
-                height: min(300px, max(48px, root.rows.length * 48px));
-                for r in root.rows: Rectangle {
-                    height: 48px;
+            if !root.icons: ListView {
+                height: min(300px, max(44px, root.rows.length * 44px));
+                for r[ri] in root.rows: Rectangle {
+                    height: 44px;
                     border-radius: Theme.r-control - 2px;
                     background: pick-touch.has-hover ? Theme.surface-2 : transparent;
                     accessible-role: button;
-                    accessible-label: r.name + ", " + r.value + ", " + r.id;
+                    accessible-label: r.name + ", " + r.value;
+                    accessible-description: r.id;
                     accessible-action-default => {
                         root.pick(r.id);
                         popup.close();
                     }
                     HorizontalLayout {
                         padding-left: 8px;
-                        padding-right: 10px;
+                        // Clear of the list's scroll bar.
+                        padding-right: 18px;
                         spacing: 10px;
                         Rectangle {
                             width: 30px;
@@ -131,24 +143,15 @@ export component Picker inherits Rectangle {
                                 }
                             }
                         }
-                        VerticalLayout {
-                            alignment: center;
+                        Text {
+                            text: r.name;
+                            font-family: Theme.font;
+                            font-size: Theme.size-body;
+                            font-weight: r.chosen ? 600 : 500;
+                            color: Theme.text;
+                            vertical-alignment: center;
                             horizontal-stretch: 1;
-                            Text {
-                                text: r.name;
-                                font-family: Theme.font;
-                                font-size: Theme.size-body;
-                                font-weight: r.chosen ? 600 : 500;
-                                color: Theme.text;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: r.id;
-                                font-family: Theme.font;
-                                font-size: 11px;
-                                color: Theme.text-3;
-                                overflow: elide;
-                            }
+                            overflow: elide;
                         }
                         Text {
                             text: r.value;
@@ -159,13 +162,62 @@ export component Picker inherits Rectangle {
                             max-width: 120px;
                             overflow: elide;
                         }
-                        if r.chosen: Icon {
-                            glyph: Glyph.check;
-                            color: Theme.act-line;
+                        Rectangle {
+                            width: 16px;
+                            if r.chosen: Icon {
+                                glyph: Glyph.check;
+                                color: Theme.act-line;
+                            }
                         }
                     }
                     pick-touch := TouchArea {
                         mouse-cursor: MouseCursor.pointer;
+                        changed has-hover => {
+                            if self.has-hover {
+                                root.hover = ri;
+                            }
+                        }
+                        clicked => {
+                            root.pick(r.id);
+                            popup.close();
+                        }
+                    }
+                }
+            }
+            if root.icons: ScrollView {
+                height: min(296px, max(root.tile, ceil(root.rows.length / root.cols) * (root.tile + root.gap) - root.gap));
+                content-height: ceil(root.rows.length / root.cols) * (root.tile + root.gap) - root.gap;
+                for r[ri] in root.rows: Rectangle {
+                    x: mod(ri, root.cols) * (root.tile + root.gap);
+                    y: floor(ri / root.cols) * (root.tile + root.gap);
+                    width: root.tile;
+                    height: root.tile;
+                    border-radius: Theme.r-control;
+                    background: r.chosen ? Theme.act-wash : tile-touch.has-hover ? Theme.surface-2 : transparent;
+                    border-width: r.chosen ? 2px : 1px;
+                    border-color: r.chosen ? Theme.act-line : tile-touch.has-hover ? Theme.line-strong : transparent;
+                    accessible-role: button;
+                    accessible-label: r.name;
+                    accessible-description: r.id;
+                    accessible-item-selectable: true;
+                    accessible-item-selected: r.chosen;
+                    accessible-action-default => {
+                        root.pick(r.id);
+                        popup.close();
+                    }
+                    Icon {
+                        glyph: r.icon;
+                        fill: true;
+                        font-size: 22px;
+                        color: r.chosen ? Theme.text : Theme.text-2;
+                    }
+                    tile-touch := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        changed has-hover => {
+                            if self.has-hover {
+                                root.hover = ri;
+                            }
+                        }
                         clicked => {
                             root.pick(r.id);
                             popup.close();
@@ -176,6 +228,39 @@ export component Picker inherits Rectangle {
             if root.rows.length == 0: Hint {
                 text: root.icons ? @tr("No icon by that name.") : @tr("Nothing matches. A reading appears here once a source publishes it.");
                 horizontal-alignment: center;
+            }
+            // The row under the pointer, named; its raw name, small, for a
+            // layout file or a script.
+            if root.rows.length > 0: Rectangle {
+                height: 1px;
+                background: Theme.line;
+            }
+            if root.rows.length > 0: HorizontalLayout {
+                height: 24px;
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 8px;
+                property <int> shown: root.hover >= 0 && root.hover < root.rows.length ? root.hover : -1;
+                Text {
+                    text: parent.shown >= 0 ? root.rows[parent.shown].name
+                        : root.icons ? @tr("Point at an icon to see its name") : @tr("Point at a reading for its name in a layout file");
+                    font-family: Theme.font;
+                    font-size: Theme.size-label;
+                    font-weight: parent.shown >= 0 ? 500 : 400;
+                    color: parent.shown >= 0 ? Theme.text-2 : Theme.text-3;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Text {
+                    text: parent.shown >= 0 ? root.rows[parent.shown].id : "";
+                    font-family: "monospace";
+                    font-size: 11px;
+                    color: Theme.text-3;
+                    vertical-alignment: center;
+                    horizontal-alignment: right;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
             }
         }
     }
@@ -194,6 +279,8 @@ export component FieldRow inherits HorizontalLayout {
     callback picker-filter(string);
     callback picked(string, string);
     callback remove-trigger(string);
+    /// The news widget's "Edit feeds…".
+    callback edit-feeds();
 
     spacing: 16px;
 
@@ -228,6 +315,101 @@ export component FieldRow inherits HorizontalLayout {
                 root.changed(root.field.key, text);
             }
         }
+        // A whole number in bounds: typed, stepped with the arrow keys (by
+        // 10 with Shift) or with the buttons, its range beside it.
+        if root.field.kind == "stepper": HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            property <int> lo: root.field.choices[0].to-float();
+            property <int> hi: root.field.choices[1].to-float();
+            property <int> now: number.text.to-float();
+            function step(by: int) {
+                let v = max(self.lo, min(self.hi, (number.text.is-float() ? self.now : root.field.value.to-float()) + by));
+                number.text = v;
+                root.changed(root.field.key, v);
+            }
+            IconButton {
+                icon: Glyph.minus;
+                label: @tr("{} narrower by 1", root.field.label);
+                enabled: root.enabled && parent.now > parent.lo;
+                clicked => {
+                    parent.step(-1);
+                }
+            }
+            number := TextField {
+                width: 96px;
+                text: root.field.value;
+                committed-value: root.field.value;
+                enabled: root.enabled;
+                label: @tr("{}, {} to {}", root.field.label, parent.lo, parent.hi);
+                input-type: InputType.number;
+                accepted(text) => {
+                    root.changed(root.field.key, text);
+                }
+                committed(text) => {
+                    root.changed(root.field.key, text);
+                }
+                key-pressed(event) => {
+                    if event.text == Key.UpArrow || event.text == Key.DownArrow {
+                        parent.step((event.text == Key.UpArrow ? 1 : -1) * (event.modifiers.shift ? 10 : 1));
+                        return accept;
+                    }
+                    reject
+                }
+            }
+            IconButton {
+                icon: Glyph.plus;
+                label: @tr("{} wider by 1", root.field.label);
+                enabled: root.enabled && parent.now < parent.hi;
+                clicked => {
+                    parent.step(1);
+                }
+            }
+            Text {
+                text: @tr("px, {} to {}", parent.lo, parent.hi);
+                font-family: Theme.font;
+                font-size: Theme.size-label;
+                color: Theme.text-3;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+        }
+        // The news feeds are Settings' (every news widget shares them):
+        // how many, and the way there.
+        if root.field.kind == "feeds": HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            Rectangle {
+                width: 28px;
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 7px;
+                    background: Theme.surface-2;
+                    Icon {
+                        glyph: Glyph.newspaper;
+                        fill: true;
+                    }
+                }
+            }
+            Text {
+                text: root.field.value == "No feeds yet" ? @tr("No feeds yet — add one") : root.field.shown;
+                font-family: Theme.font;
+                font-size: Theme.size-body;
+                font-weight: 500;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Button {
+                tier: root.field.value == "No feeds yet" ? "primary" : "default";
+                icon: Glyph.feed;
+                text: @tr("Edit feeds…");
+                label: @tr("Edit the news feeds, in Settings");
+                clicked => {
+                    root.edit-feeds();
+                }
+            }
+        }
         if root.field.kind == "choice": Select {
             options: root.field.choices;
             current: root.field.index;
@@ -254,7 +436,7 @@ export component FieldRow inherits HorizontalLayout {
             border-radius: Theme.r-control;
             background: sig-touch.has-hover && root.enabled ? Theme.raised.brighter(0.06) : Theme.raised;
             border-width: 1px;
-            border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
+            border-color: Theme.field-line;
             FocusRing {
                 width: parent.width + 8px;
                 height: parent.height + 8px;
@@ -264,7 +446,8 @@ export component FieldRow inherits HorizontalLayout {
             opacity: root.enabled ? 1 : 0.55;
             accessible-role: combobox;
             accessible-label: root.field.label;
-            accessible-value: root.field.shown + (root.field.reading != "" ? ", " + root.field.reading : "");
+            accessible-value: (root.field.value == "" && root.field.kind == "icon" ? @tr("The widget's own") : root.field.shown) + (root.field.reading != "" ? ", " + root.field.reading : "");
+            accessible-description: root.field.value;
             accessible-action-default => {
                 root.open-picker(root.field.key);
                 picker.show();
@@ -294,14 +477,7 @@ export component FieldRow inherits HorizontalLayout {
                         font-family: Theme.font;
                         font-size: Theme.size-body;
                         font-weight: 500;
-                        color: root.field.value == "" ? Theme.text-3 : Theme.text;
-                        overflow: elide;
-                    }
-                    if root.field.value != "": Text {
-                        text: root.field.value;
-                        font-family: Theme.font;
-                        font-size: 11px;
-                        color: Theme.text-3;
+                        color: root.field.value == "" && root.field.kind != "icon" ? Theme.text-3 : Theme.text;
                         overflow: elide;
                     }
                 }
@@ -403,7 +579,7 @@ export component FieldRow inherits HorizontalLayout {
             border-radius: Theme.r-control;
             background: Theme.dark ? Theme.ground : Theme.surface;
             border-width: 1px;
-            border-color: Theme.line-strong;
+            border-color: Theme.field-line;
             clip: true;
             note := TextInput {
                 x: 10px;

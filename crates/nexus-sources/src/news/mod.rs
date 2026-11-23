@@ -37,12 +37,14 @@ use nexus_core::signal::{Unit, Value};
 
 use crate::Reading;
 
+mod check;
 mod clean;
 mod fetch;
 mod parse;
 #[cfg(test)]
 mod tests;
 
+pub use check::{Checked, Problem, check as check_feed};
 pub use fetch::check_url;
 use fetch::{Fetched, Validators};
 use parse::Item;

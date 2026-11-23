@@ -34,6 +34,8 @@ pub struct Context {
     /// Temperatures shown and typed in °F.
     pub fahrenheit: bool,
     pub signals: HashMap<String, Reading>,
+    /// The news feeds, for a news widget's "Feeds" line.
+    pub feeds: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -51,6 +53,14 @@ pub enum Kind {
     Triggers,
     /// An icon's name, chosen from the picker of the strip's icons.
     Icon,
+    /// A whole number between two bounds, stepped by the arrow keys.
+    Stepper {
+        min: u32,
+        max: u32,
+    },
+    /// The news feeds: how many, and a way to Settings, where they are
+    /// edited (they are shared by every news widget).
+    Feeds,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -629,6 +639,15 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
         }
         _ => {}
     }
+    if ty == NEWS {
+        // Its value is Settings' feeds, not the widget's: set below.
+        add(
+            "feeds",
+            "Feeds",
+            Kind::Feeds,
+            "Every news widget shows headlines from the same feeds, one at a time.".into(),
+        );
+    }
     // Any widget may draw another icon than its own; a key's is above.
     if ty != KEY {
         add(
@@ -680,6 +699,9 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             }
             _ => {}
         }
+    }
+    if let Some(f) = out.iter_mut().find(|f| f.kind == Kind::Feeds) {
+        f.value = crate::news::count(&ctx.feeds);
     }
     out
 }
@@ -832,6 +854,7 @@ mod tests {
                 .to_vec(),
             fahrenheit: true,
             signals,
+            feeds: Vec::new(),
         }
     }
 
@@ -970,7 +993,15 @@ mod tests {
         };
         let v = flatten(&w, &ctx);
         let keys: Vec<String> = fields(&v, &ctx).into_iter().map(|f| f.key).collect();
-        assert_eq!(keys, ["width", "icon", "tap", "hold"]);
+        assert_eq!(keys, ["width", "feeds", "icon", "tap", "hold"]);
+        let feeds = fields(&v, &ctx)
+            .into_iter()
+            .find(|f| f.key == "feeds")
+            .unwrap();
+        assert_eq!(
+            (feeds.kind, feeds.value.as_str()),
+            (Kind::Feeds, "No feeds yet")
+        );
         let tap = fields(&v, &ctx)
             .into_iter()
             .find(|f| f.key == "tap")

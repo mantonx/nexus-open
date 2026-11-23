@@ -28,14 +28,15 @@ use crate::geometry::{self, STRIP};
 use crate::inspector::{self, Context, Field, Kind, Missing, Outcome, Reading, Values};
 use crate::layouts;
 use crate::names;
+use crate::news;
 use crate::settings;
 use crate::signals;
 use crate::simulate;
 use crate::takeovers;
 use crate::thumbs::{self, Done, Job};
 use crate::{
-    AppWindow, Field as FieldRow, LayoutRow, PickRow, SignalRow, Starter, StripRow, Tile, Trigger,
-    Zone,
+    AppWindow, FeedRow, Field as FieldRow, LayoutRow, PickRow, SignalRow, Starter, StripRow, Tile,
+    Trigger, Zone,
 };
 
 /// A takeover being edited is shown on the strip for this long, and asked
@@ -178,6 +179,12 @@ pub struct Editor {
     snap_x: Option<u32>,
     /// Whether the first-run choice was offered already.
     first_run_seen: bool,
+    /// Feeds' titles, from checking them when they were added.
+    feed_titles: HashMap<String, String>,
+    /// The latest feed check: its number (an older one's answer is
+    /// dropped), and an address that failed but may be added anyway.
+    feed_try: u64,
+    feed_pending: Option<String>,
 }
 
 pub type Shared = Rc<RefCell<Editor>>;
@@ -233,6 +240,9 @@ impl Editor {
             starters: Rc::new(VecModel::default()),
             snap_x: None,
             first_run_seen: crate::first_run::seen(),
+            feed_titles: HashMap::new(),
+            feed_try: 0,
+            feed_pending: None,
         }))
     }
 
@@ -321,6 +331,13 @@ impl Editor {
         on!(on_dismiss_first_run, |e| e.first_run_done());
         on!(on_set_pref, |e, key, value| e
             .set_pref(key.as_str(), value.as_str()));
+        on!(on_add_feed, |e, text| e.add_feed(text.as_str()));
+        on!(on_add_feed_anyway, |e| e.add_feed_anyway());
+        on!(on_remove_feed, |e, i| e.remove_feed(i as usize));
+        on!(on_move_feed, |e, from, to| e
+            .move_feed(from as usize, to as usize));
+        on!(on_news_choice, |e, key, i| e
+            .news_choice(key.as_str(), i as usize));
         app.on_import_layout(import_layout);
         app.on_export_layout(export_layout);
         on!(on_set_trying, |e, on| e.set_trying(on));
@@ -489,7 +506,11 @@ impl Editor {
                 chosen: now.is_empty(),
                 id: SharedString::new(),
                 name: "The widget's own".into(),
-                icon: SharedString::new(),
+                icon: self
+                    .own_icon()
+                    .map(|c| c.to_string())
+                    .unwrap_or_default()
+                    .into(),
                 value: SharedString::new(),
             };
             let rows: Vec<PickRow> = std::iter::once(own)
@@ -582,6 +603,12 @@ impl Editor {
     fn set_problem(&mut self, problem: String) {
         self.problem = problem;
         self.show();
+    }
+
+    /// The selected widget's own icon, as the window draws it.
+    fn own_icon(&self) -> Option<char> {
+        let i = self.selected_index()?;
+        self.widgets().get(i).map(widget_icon)
     }
 
     /// Index of the page on the strip in the layout.
@@ -1132,6 +1159,23 @@ impl Editor {
                 to + 1,
                 widgets.len()
             ),
+            // At the strip's end there is no grip: its edge there cannot
+            // move, and the grip would sit on the edge flag.
+            (_, Some(i)) if widths.iter().sum::<u32>() >= STRIP && i + 1 == widgets.len() => {
+                if i == 0 {
+                    format!(
+                        "{}, the whole strip. Make it narrower in Width below to put another beside it.",
+                        sized(i)
+                    )
+                } else {
+                    format!(
+                        "{}, {} of {}, to the strip's end. Drag it to move it; resize it in Width below.",
+                        sized(i),
+                        i + 1,
+                        widgets.len()
+                    )
+                }
+            }
             (_, Some(i)) => format!(
                 "{}, {} of {}. Drag it to move it; drag the grip on its right edge to resize.",
                 sized(i),
@@ -1200,6 +1244,12 @@ impl Editor {
             pages: layout.config.pages.iter().map(|p| p.name.clone()).collect(),
             fahrenheit: layout.config.settings.temperature == Temperature::Fahrenheit,
             signals: self.signals.clone(),
+            feeds: layout
+                .config
+                .news
+                .as_ref()
+                .map(|n| n.feeds.clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -1263,6 +1313,21 @@ impl Editor {
                 let mut values = inspector::flatten(&self.widgets()[i], &ctx);
                 values.extend(self.drafts.clone());
                 let mut fields = inspector::fields(&values, &ctx);
+                let (min, max) = geometry::width_bounds(&self.layout_widths(), i);
+                if let Some(width) = fields.iter_mut().find(|f| f.key == "width") {
+                    width.kind = Kind::Stepper { min, max };
+                    // The range is beside the field.
+                    width.help = if min == max {
+                        "Nothing beside it can give it room: make a neighbour narrower first."
+                            .into()
+                    } else {
+                        if i + 1 < self.layout_widths().len() {
+                            "The arrow keys step by 1, with Shift by 10. The widget on its right gives or takes the difference, as when the grip on the strip is dragged.".into()
+                        } else {
+                            "The arrow keys step by 1, with Shift by 10. It grows into the free room at the strip's end, and narrower leaves room there.".into()
+                        }
+                    };
+                }
                 fields.push(Field {
                     key: "note".into(),
                     label: "Note".into(),
@@ -1278,14 +1343,26 @@ impl Editor {
                 .map(|v| takeovers::fields(&v))
                 .unwrap_or_default(),
         };
+        let own = self.own_icon();
+        let make = |f: &Field| {
+            let mut r = row(f, &ctx);
+            // "The widget's own" shows the glyph it is.
+            if matches!(f.kind, Kind::Icon)
+                && f.value.trim().is_empty()
+                && let Some(c) = own
+            {
+                r.icon = c.to_string().into();
+            }
+            r
+        };
         let same_keys = fields.len() == self.shown.len()
             && fields.iter().zip(&self.shown).all(|(a, b)| a.key == b.key);
         if !same_keys {
             self.fields
-                .set_vec(fields.iter().map(|f| row(f, &ctx)).collect::<Vec<_>>());
+                .set_vec(fields.iter().map(make).collect::<Vec<_>>());
         } else {
             for (i, (new, old)) in fields.iter().zip(&self.shown).enumerate() {
-                let fresh = row(new, &ctx);
+                let fresh = make(new);
                 if self.fields.row_data(i).as_ref() == Some(&fresh) {
                     continue;
                 }
@@ -2230,7 +2307,7 @@ fn starter_about(name: &str) -> &'static str {
     }
 }
 
-/// Preferences.
+/// Settings.
 impl Editor {
     fn set_pref(&mut self, key: &str, value: &str) {
         let Some(l) = &self.layout else {
@@ -2250,8 +2327,9 @@ impl Editor {
         self.settings_changed(&k, &val);
     }
 
-    /// The Preferences sheet's values.
+    /// The Settings sheet's values.
     fn show_prefs(&self) {
+        self.show_news();
         let (Some(app), Some(l)) = (self.app.upgrade(), &self.layout) else {
             return;
         };
@@ -2278,6 +2356,155 @@ impl Editor {
                 .collect::<Vec<_>>(),
         )));
         app.set_pref_font(p.font as i32);
+    }
+}
+
+/// Settings, News: the feeds and how headlines show.
+impl Editor {
+    fn news(&self) -> nexus_core::config::NewsConfig {
+        news::current(self.layout.as_ref().and_then(|l| l.config.news.as_ref()))
+    }
+
+    fn send_news(&mut self, c: nexus_core::config::NewsConfig) {
+        let to = news::to_send(c);
+        if self.layout.as_ref().map(|l| &l.config.news) != Some(&to) {
+            self.send(Edit::SetNews { news: to });
+        }
+    }
+
+    /// The News section's values.
+    fn show_news(&self) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let c = self.news();
+        let rows: Vec<FeedRow> = c
+            .feeds
+            .iter()
+            .map(|url| FeedRow {
+                name: news::name(url, self.feed_titles.get(url).map(String::as_str)).into(),
+                address: url.as_str().into(),
+            })
+            .collect();
+        app.set_news_feeds(ModelRc::new(VecModel::from(rows)));
+        let rotate = news::rotate_index(&c);
+        let age = news::max_age_index(&c);
+        app.set_news_rotate(rotate.map_or(-1, |i| i as i32));
+        app.set_news_max_age(age.map_or(-1, |i| i as i32));
+        // A duration set in a layout file that is none of the choices: said
+        // under them, since no choice is shown as picked.
+        let note = |chosen: Option<usize>, d| match chosen {
+            Some(_) => String::new(),
+            None => format!("Now {}, from the layout file.", news::spoken(d)),
+        };
+        app.set_news_rotate_note(note(rotate, c.rotate).into());
+        app.set_news_age_note(note(age, c.max_age).into());
+    }
+
+    fn feed_result(&self, state: &str, title: &str, detail: &str, force: bool) {
+        if let Some(app) = self.app.upgrade() {
+            app.set_feed_state(state.into());
+            app.set_feed_title(title.into());
+            app.set_feed_detail(detail.into());
+            app.set_feed_force(force);
+        }
+    }
+
+    /// Add: the address is checked once, off the UI thread, and added if it
+    /// is a feed. Its title and newest headline, or why not, show under it.
+    fn add_feed(&mut self, typed: &str) {
+        let url = news::address(typed);
+        if url.is_empty() {
+            return;
+        }
+        self.feed_pending = None;
+        if self.news().feeds.iter().any(|f| f.trim() == url) {
+            self.feed_result("problem", "That feed is already in the list.", "", false);
+            return;
+        }
+        self.feed_try += 1;
+        let try_no = self.feed_try;
+        self.feed_result("checking", "Checking the feed…", &url, false);
+        let checked = url.clone();
+        let _ = thread::Builder::new()
+            .name("feed-check".into())
+            .spawn(move || {
+                let result = nexus_sources::news::check_feed(&checked);
+                let _ = slint::invoke_from_event_loop(move || {
+                    with_editor(|e| e.feed_checked(try_no, &checked, result));
+                });
+            });
+    }
+
+    fn feed_checked(
+        &mut self,
+        try_no: u64,
+        url: &str,
+        result: Result<nexus_sources::news::Checked, nexus_sources::news::Problem>,
+    ) {
+        if try_no != self.feed_try {
+            return; // a newer address was typed since
+        }
+        match result {
+            Ok(found) => {
+                self.feed_titles
+                    .insert(url.to_string(), found.title.clone());
+                let detail = match &found.newest {
+                    Some(h) => format!("Newest: {h}"),
+                    None => "It has no headlines yet; they show when it posts some.".into(),
+                };
+                self.feed_result("added", &format!("Added {}", found.title), &detail, false);
+                if let Some(c) = news::with_feed(&self.news(), url) {
+                    self.send_news(c);
+                }
+                if let Some(app) = self.app.upgrade() {
+                    app.set_feed_epoch(app.get_feed_epoch() + 1);
+                }
+            }
+            Err(p) => {
+                let (what, next, force) = news::problem(&p);
+                self.feed_pending = force.then(|| url.to_string());
+                self.feed_result("problem", &what, &next, force);
+            }
+        }
+    }
+
+    /// "Add anyway": a site that did not answer may only be down for now.
+    fn add_feed_anyway(&mut self) {
+        let Some(url) = self.feed_pending.take() else {
+            return;
+        };
+        if let Some(c) = news::with_feed(&self.news(), &url) {
+            self.send_news(c);
+        }
+        self.feed_result(
+            "added",
+            &format!("Added {}", news::name(&url, None)),
+            "Its headlines show once the site answers.",
+            false,
+        );
+        if let Some(app) = self.app.upgrade() {
+            app.set_feed_epoch(app.get_feed_epoch() + 1);
+        }
+    }
+
+    fn remove_feed(&mut self, index: usize) {
+        if let Some(c) = news::without_feed(&self.news(), index) {
+            self.feed_result("", "", "", false);
+            self.send_news(c);
+        }
+    }
+
+    fn move_feed(&mut self, from: usize, to: usize) {
+        if let Some(c) = news::moved_feed(&self.news(), from, to) {
+            self.send_news(c);
+        }
+    }
+
+    fn news_choice(&mut self, key: &str, index: usize) {
+        if let Some(c) = news::with_choice(&self.news(), key, index) {
+            self.send_news(c);
+        }
     }
 }
 
@@ -2424,6 +2651,8 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
         Kind::Note => ("note", Vec::new()),
         Kind::Triggers => ("triggers", Vec::new()),
         Kind::Icon => ("icon", Vec::new()),
+        Kind::Feeds => ("feeds", Vec::new()),
+        Kind::Stepper { min, max } => ("stepper", vec![min.to_string(), max.to_string()]),
         Kind::Choice(options) => ("choice", options.clone()),
         Kind::Segmented(options) => ("segmented", options.clone()),
     };
@@ -2451,6 +2680,12 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
             Some(glyph) => (icon_title(name), glyph.to_string(), String::new()),
             None => Default::default(),
         }
+    } else if matches!(f.kind, Kind::Feeds) {
+        (
+            f.value.clone(),
+            nexus_core::icons::NEWSPAPER.to_string(),
+            String::new(),
+        )
     } else {
         Default::default()
     };
@@ -2542,7 +2777,12 @@ pub fn signals(entries: Vec<SignalEntry>) {
     }
 }
 
-/// A new status from the poll, for the installed editor.
+/// Something that went wrong outside the editor (Help), shown where its
+/// problems are.
+pub fn problem(why: String) {
+    with_editor(|e| e.set_problem(why));
+}
+
 /// The daemon is reachable again. It may have restarted, a new version
 /// with more to say, while the store's revision stayed the same, so the
 /// layout is fetched again rather than waiting for a revision to move.

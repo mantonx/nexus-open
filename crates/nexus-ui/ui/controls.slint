@@ -362,7 +362,7 @@ export component TextField inherits Rectangle {
     border-radius: Theme.r-control;
     background: root.enabled ? (Theme.dark ? Theme.ground : Theme.surface) : Theme.surface-2;
     border-width: 1px;
-    border-color: Theme.line-strong;
+    border-color: Theme.field-line;
     horizontal-stretch: 1;
     min-width: 80px;
 
@@ -437,7 +437,7 @@ export component Select inherits Rectangle {
     border-radius: Theme.r-control;
     background: touch.has-hover && root.enabled ? Theme.raised.brighter(0.06) : Theme.raised;
     border-width: 1px;
-    border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
+    border-color: Theme.field-line;
     horizontal-stretch: 1;
     min-width: 120px;
     accessible-role: combobox;

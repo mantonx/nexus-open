@@ -19,6 +19,7 @@ mod i18n;
 mod inspector;
 mod layouts;
 mod names;
+mod news;
 mod settings;
 mod signals;
 mod simulate;
@@ -144,8 +145,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
 
     let (tx, rx) = mpsc::channel();
     let _ = RECHECK.set(tx);
-    app.on_check_again(recheck);
     app.on_start_service(start_service);
+    app.on_open_help(open_help);
     let weak = app.as_weak();
     app.on_open_log(move || {
         if let Some(app) = weak.upgrade() {
@@ -197,7 +198,15 @@ thread_local! {
     /// Why the last try to start the service failed, if it did.
     static START_FAILED: std::cell::RefCell<Option<String>> =
         const { std::cell::RefCell::new(None) };
+    /// A try to start it is under way: which one, so a later try's wait
+    /// is not ended by an earlier one's timer.
+    static STARTING: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    static START_TRIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
+
+/// How long a started service has to answer before the try counts as
+/// failed.
+const START_WAIT: Duration = Duration::from_secs(10);
 
 /// The user's accent, derived as the strip derives it, into the theme.
 pub(crate) fn set_accent(user: Option<nexus_core::theme::Rgb>) {
@@ -215,45 +224,83 @@ pub(crate) fn set_accent(user: Option<nexus_core::theme::Rgb>) {
 
 /// Puts the status chip right, from the latest status and checks.
 fn show_status(app: &AppWindow) {
+    // The service answers: whatever a try to start it said is over.
+    if LAST.with(|l| l.borrow().0.is_some()) {
+        STARTING.with(|s| s.set(None));
+        START_FAILED.with(|f| *f.borrow_mut() = None);
+    }
+    let starting = STARTING.with(std::cell::Cell::get).is_some();
     let view = LAST.with(|l| {
         let l = l.borrow();
         let view = status::view(l.0.as_ref(), &l.1);
-        // A try to start it that failed holds until the service answers.
+        // A try to start it shows until the service answers; one that
+        // failed holds until then too.
         match (&l.0, START_FAILED.with(|f| f.borrow().clone())) {
+            (None, _) if starting => status::starting(view),
+            (None, Some(why)) if why == status::NO_ANSWER => status::not_answering(view),
             (None, Some(why)) => status::did_not_start(view, &why),
             _ => view,
         }
     });
-    app.set_start_failure(
-        START_FAILED
-            .with(|f| f.borrow().clone())
-            .filter(|_| LAST.with(|l| l.borrow().0.is_none()))
-            .unwrap_or_default()
-            .into(),
-    );
     app.set_status(StatusView {
         tone: view.tone.into(),
+        icon: view.icon.into(),
         chip: view.chip.into(),
         headline: view.headline.into(),
         body: view.body.into(),
         start: view.start,
-        retry: view.retry,
         log: view.log,
+        away: view.away,
+        banner: view.banner.into(),
+        banner_body: view.banner_body.into(),
         detail: view.detail.into(),
     });
 }
 
-/// "Start the service": runs it off the UI thread, then checks again.
+/// "Start the service": shows "Starting…" at once, runs it off the UI
+/// thread, then waits for it to answer. A start that fails, or that runs
+/// but does not answer in `START_WAIT`, is shown as failed with why.
 fn start_service() {
-    let _ = thread::Builder::new().name("start".into()).spawn(|| {
+    let try_no = START_TRIES.with(|t| {
+        t.set(t.get() + 1);
+        t.get()
+    });
+    STARTING.with(|s| s.set(Some(try_no)));
+    // A new try replaces what the last one said.
+    START_FAILED.with(|f| *f.borrow_mut() = None);
+    with_app(show_status);
+    let _ = thread::Builder::new().name("start".into()).spawn(move || {
         let result = status::start();
         let _ = slint::invoke_from_event_loop(move || {
-            // A new try replaces what the last one said.
-            START_FAILED.with(|f| *f.borrow_mut() = result.err());
+            if STARTING.with(std::cell::Cell::get) != Some(try_no) {
+                return; // answered already, or a newer try
+            }
+            match result {
+                Err(why) => {
+                    STARTING.with(|s| s.set(None));
+                    START_FAILED.with(|f| *f.borrow_mut() = Some(why));
+                }
+                Ok(()) => slint::Timer::single_shot(START_WAIT, move || {
+                    if STARTING.with(std::cell::Cell::get) == Some(try_no) {
+                        STARTING.with(|s| s.set(None));
+                        START_FAILED.with(|f| *f.borrow_mut() = Some(status::NO_ANSWER.into()));
+                        with_app(show_status);
+                    }
+                }),
+            }
             with_app(show_status);
         });
         recheck();
     });
+}
+
+/// Help: the project's documentation, in the browser, opened the way a
+/// news link is (checked, one argument, no shell).
+fn open_help() {
+    let docs = format!("{}/tree/HEAD/docs", env!("CARGO_PKG_REPOSITORY"));
+    if let Err(why) = nexus_control::links::open(&docs) {
+        editor::problem(format!("Help could not be opened. {why}"));
+    }
 }
 
 /// Runs `f` with the window, on the UI thread.

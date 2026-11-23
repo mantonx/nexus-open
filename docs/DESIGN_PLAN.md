@@ -293,8 +293,8 @@ README clip (now of the new strip), release verification.
   `REDESIGN_PLAN.md` (device access limited to hidraw and NVIDIA) is wrong
   and needs correcting in Phase 5 (corrected 2026-11-22, `feat/packaging`).
 - 2026-11-22 — **The window's Appearance** (U5, at Matt's request): Match
-  the system (the default), Light or Dark, in Preferences under "This
-  window", applied live. It is kept in the window's own file,
+  the system (the default), Light or Dark, in Settings (then named
+  Preferences) under "This window", applied live. It is kept in the window's own file,
   `$XDG_CONFIG_HOME/nexus-open/window` (`appearance = "system"`), not in the
   layout or the store's settings, because it changes only the window: the
   strip stays dark whatever it says, it must not be exported with a
@@ -517,3 +517,82 @@ README clip (now of the new strip), release verification.
   The choices are: let the unit go under a larger number at under 18 px;
   widen the card (his layout has six 106 px cards); or accept the stack.
   Decide by looking at the strip.
+- 2026-11-22 — **The window's last round (U5), provisional (Claude; Matt to
+  overturn).** After the round-3 rescores (light 29/40, dark 28/40):
+  - "Preferences…" is now **Settings**, a sheet with three sections: Strip,
+    News and This window. It is as tall as the window allows (up to
+    700 px), so switching sections does not resize it.
+  - **News settings** (phase 2b in docs/design/news.md). The feeds are a
+    list: paste an address to add one, a bin to remove it, and up/down
+    arrows to reorder (shown only with two or more feeds). Adding checks
+    the address once, on a background thread, using the daemon's own
+    parsing. It shows the feed's title and newest headline, or why not in
+    plain words: what happened, then what to do. "Add anyway" is offered
+    only when the site may just be down (no answer, an error status).
+    "Show each for" is 8, 12 or 20 s and "Hide older than" is 1 day,
+    2 days or a week. A value set in a layout file that is none of these
+    is said in words under the choice. The privacy line reads "Nexus Open
+    fetches only the feeds you add." No presets are offered. A news
+    widget's editor shows the feed count, or "No feeds yet — add one",
+    with "Edit feeds…", which opens Settings at News. A feed's name in the
+    list is the title found when it was added, else its site's name: the
+    title is not stored, so after a restart the list shows site names.
+  - **Amber is a reading, never an app fault.** The app-state chips
+    (no strip, strip in use, stopped, starting) are neutral, with an icon
+    that says which. "Did not start" is critical in both the chip and the
+    banner, gives the cause in plain words, and offers "Open the log" and
+    "Try again". Start and Try again show "Starting…" until the service
+    answers. If it has not answered after ten seconds, that is the failure.
+  - "Without the strip" is no longer its own header control. The status
+    pill says it ("Running, no strip"), with the details in its popover.
+  - **1024×640.** The content column uses the window's full width. A strip
+    preview is 2× when 2× fits and 1× otherwise, centred and never cut.
+    At 1× the selection's caption is its own line above the buttons. The
+    key-hint row has more room above and below.
+  - Field borders use a new `field-line` token: 3.58:1 on the light panel,
+    and 3.41:1 and 3.69:1 on the two dark surfaces.
+  - **Icon picker.** A grid of the strip's icons. "The widget's own" shows
+    the widget's real glyph, in the field and as the first tile. No picker
+    shows a machine ID as primary text: the signal list shows names, and
+    the ID appears only in small type in the footer for the row under the
+    pointer, or in the accessible description.
+  - **The resize grip** is not drawn at the strip's right end: that edge
+    cannot move, and the grip would sit on the edge flag. So a full-width
+    widget or takeover has none. The caption and the Width help say how
+    such a widget resizes (in Width).
+  - **Width** is a number field with − and + buttons. The arrow keys step
+    it by 1, or by 10 with Shift. It shows its range ("px, 40 to 280").
+  - **Help** in the ⋯ menu opens the docs folder of the repository
+    (`CARGO_PKG_REPOSITORY/tree/HEAD/docs`) through the same safe opener as
+    news links. That opener moved to `nexus_control::links`.
+  - **About.** Slint's own badge has fixed-size small type, so it is kept
+    as it is. A legible sentence beside it says what Slint is and its
+    licence.
+  - Escape closes a sheet even when a field in it has focus. Focus stays
+    in Settings after a feed is removed, moved or added.
+- 2026-11-22 — **The window's closing fixes, provisional (Claude; Matt to
+  overturn).** After the round's rescores (light 30/40, dark 29/40):
+  - When the strip is not showing the layout but the service runs
+    (unplugged, held by another program, no access, needs a replug), the
+    previews dim and a neutral banner says why and what to do, ending
+    "You can keep editing: changes are saved, and the strip shows them
+    when it is back." The chip stays neutral.
+  - These states have no "Try again". The service retries the strip by
+    itself (every second at most) and the window follows within a second,
+    so the button did nothing the app was not already doing. The words now
+    say the app picks the strip up by itself. Program names are shown as
+    people know them ("Steam", not "steam").
+  - A start that ran but has not answered after ten seconds is its own
+    state, "Not answering", no longer "Did not start" with a sentence
+    saying it was started. While the service is down, the banner says
+    nothing here can be changed, and no sentence promises that a change
+    waits.
+  - The Settings sheet scrolls. A layout measures wrapped words as one
+    line, so its content reported less height than it drew (629 px
+    against about 690), was cut at the bottom and could not scroll. The
+    scroll area now allows for those lines, and the bottom fades while
+    there is more below.
+  - The selected widget has its own mark: a cream outline with a filled
+    corner tab, plus the accent grip where its edge can move. The page
+    keeps its single neutral line on the bezel. DESIGN.md, Shared
+    identity, lists the marks.

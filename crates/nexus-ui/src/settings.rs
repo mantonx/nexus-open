@@ -1,4 +1,4 @@
-//! The strip's own settings, as the Preferences sheet sets them:
+//! The strip's own settings, as Settings sets them:
 //! temperature unit, clock, accent, where the weather is for, and the
 //! strip's lettering.
 
@@ -154,7 +154,7 @@ fn weather(text: &str) -> Result<Option<Weather>, Missing> {
     }))
 }
 
-/// The preferences as the Preferences sheet shows them.
+/// The strip settings as Settings shows them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Prefs {
     pub fahrenheit: bool,
@@ -317,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn the_preferences_sheet_sets_each_setting() {
+    fn settings_set_each_setting() {
         let c = Config::default_layout();
         let mut v = flatten(&c);
         set(&mut v, "temperature", "f").unwrap();

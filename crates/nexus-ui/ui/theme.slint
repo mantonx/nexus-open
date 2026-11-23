@@ -44,6 +44,9 @@ export global Theme {
     out property <color> raised-top: dark ? #65564a : #ffffff;
     out property <color> line: dark ? #3a312b : #ddd0bf;
     out property <color> line-strong: dark ? #5a4d43 : #c4b39e;
+    /// The edge of a field (text, select, picker): 3:1 or better against
+    /// the panel it sits on, in both modes (WCAG 1.4.11).
+    out property <color> field-line: dark ? #7f7062 : #958170;
     // The bezel the strip sits in, darker than the walnut in both modes.
     out property <color> bezel: dark ? #0b0908 : #2a221d;
 
@@ -143,4 +146,16 @@ export global Glyph {
     out property <string> outside: "\u{e5de}";
     out property <string> help: "\u{e3e8}";
     out property <string> cards: "\u{e0f8}";
+    out property <string> newspaper: "\u{e344}";
+    out property <string> feed: "\u{e402}";
+    out property <string> up: "\u{e08e}";
+    out property <string> down: "\u{e03e}";
+    out property <string> minus: "\u{e32a}";
+    out property <string> fail: "\u{e4f8}";
+    out property <string> ok-circle: "\u{e184}";
+    out property <string> lock: "\u{e308}";
+    out property <string> wait: "\u{e2b8}";
+    out property <string> app: "\u{e5da}";
+    out property <string> save: "\u{e248}";
+    out property <string> book: "\u{e0e6}";
 }

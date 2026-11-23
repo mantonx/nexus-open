@@ -64,9 +64,46 @@ pub fn check_url(url: &str) -> Result<(), String> {
     }
 }
 
+/// Why a fetch failed, kept apart so the window can say it in its own
+/// words; `Display` gives the sentence the log uses.
+#[derive(Debug)]
+pub enum Failure {
+    /// Not an address that is fetched (see [`check_url`]).
+    Address(String),
+    /// No answer: no such host, refused, offline, timed out, or
+    /// redirected too often.
+    Net(ureq::Error),
+    /// The server answered with this status, not 2xx or 304.
+    Status(u16),
+    /// The body was larger than [`MAX_BODY`].
+    TooBig,
+    /// The body is not a feed that can be read.
+    Parse(String),
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Failure::Address(why) | Failure::Parse(why) => f.write_str(why),
+            Failure::Net(e) => f.write_str(&describe(e)),
+            Failure::Status(status) => write!(f, "the server answered {status}"),
+            Failure::TooBig => write!(f, "the feed is larger than {} MB", MAX_BODY / 1024 / 1024),
+        }
+    }
+}
+
 /// Fetches and reads one feed. Errors are sentences for the log.
 pub fn fetch(agent: &ureq::Agent, url: &str, sent: &Validators) -> Result<Fetched, String> {
-    check_url(url)?;
+    fetch_or_fail(agent, url, sent).map_err(|e| e.to_string())
+}
+
+/// [`fetch`], with why it failed as a [`Failure`].
+pub fn fetch_or_fail(
+    agent: &ureq::Agent,
+    url: &str,
+    sent: &Validators,
+) -> Result<Fetched, Failure> {
+    check_url(url).map_err(Failure::Address)?;
     let mut request = agent.get(url);
     if let Some(etag) = &sent.etag {
         request = request.header("If-None-Match", etag);
@@ -74,12 +111,12 @@ pub fn fetch(agent: &ureq::Agent, url: &str, sent: &Validators) -> Result<Fetche
     if let Some(date) = &sent.last_modified {
         request = request.header("If-Modified-Since", date);
     }
-    let mut response = request.call().map_err(|e| describe(&e))?;
+    let mut response = request.call().map_err(Failure::Net)?;
     let status = response.status().as_u16();
     match status {
         304 => return Ok(Fetched::NotModified),
         200..=299 => {}
-        _ => return Err(format!("the server answered {status}")),
+        _ => return Err(Failure::Status(status)),
     }
     let header = |name: &str| {
         response
@@ -95,8 +132,11 @@ pub fn fetch(agent: &ureq::Agent, url: &str, sent: &Validators) -> Result<Fetche
         .with_config()
         .limit(MAX_BODY)
         .read_to_vec()
-        .map_err(|e| describe(&e))?;
-    let feed = parse::parse(&body, url)?;
+        .map_err(|e| match e {
+            ureq::Error::BodyExceedsLimit(_) => Failure::TooBig,
+            other => Failure::Net(other),
+        })?;
+    let feed = parse::parse(&body, url).map_err(Failure::Parse)?;
     Ok(Fetched::Fresh {
         feed,
         etag,

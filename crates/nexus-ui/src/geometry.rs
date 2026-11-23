@@ -48,6 +48,20 @@ pub fn resize(widths: &[u32], edge: usize, delta: i32) -> Vec<u32> {
     out
 }
 
+/// The narrowest and widest widget `index` can be made by moving its right
+/// edge (as `resize` does): down to the minimum, up to what the widget on
+/// its right, or the empty strip, can give.
+pub fn width_bounds(widths: &[u32], index: usize) -> (u32, u32) {
+    let Some(&w) = widths.get(index) else {
+        return (MIN_WIDGET_WIDTH, STRIP);
+    };
+    let grow = match widths.get(index + 1) {
+        Some(&next) => next.saturating_sub(MIN_WIDGET_WIDTH),
+        None => STRIP.saturating_sub(widths.iter().sum()),
+    };
+    (MIN_WIDGET_WIDTH.min(w), w + grow)
+}
+
 /// Where widget `index` lands if dropped with its left edge at `left`
 /// (strip pixels). It passes a neighbour once its leading edge crosses
 /// that neighbour's middle: its right edge going right, its left edge
@@ -230,6 +244,29 @@ pub fn class(width: u32) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The width field shows the range a resize can reach.
+    #[test]
+    fn width_bounds_are_what_a_resize_can_reach() {
+        assert_eq!(width_bounds(&[200, 300, 100], 0), (40, 460));
+        assert_eq!(
+            width_bounds(&[200, 300, 100], 2),
+            (40, 140),
+            "into the free 40"
+        );
+        assert_eq!(
+            width_bounds(&[320, 320], 1),
+            (40, 320),
+            "nothing free at the end"
+        );
+        assert_eq!(
+            width_bounds(&[30, 100], 0),
+            (30, 90),
+            "already under the minimum"
+        );
+        let (_, max) = width_bounds(&[200, 300, 100], 0);
+        assert_eq!(resize(&[200, 300, 100], 0, 1000)[0], max);
+    }
 
     /// Add takes room only down to where each widget still reads.
     #[test]
