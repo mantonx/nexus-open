@@ -16,8 +16,9 @@ use std::time::Instant;
 
 use jiff::Zoned;
 use nexus_core::config::Config;
-use nexus_core::demo;
 use nexus_core::engine::{Engine, Input};
+use nexus_core::signal::{Unit, Value};
+use nexus_core::{demo, scenes};
 
 /// Frames timed per kind.
 const FRAMES: usize = 600;
@@ -76,7 +77,15 @@ fn main() -> ExitCode {
         t += 1.0;
     }
 
+    // The Home page with a track playing, its position moving on each
+    // second as the media source moves it: the media card draws its
+    // artwork on every update, the placeholder and then the player's.
+    let media = playing(&now, false);
+    let art = playing(&now, true);
+
     let ok = report("update", &mut update, UPDATE_BUDGET_US)
+        & report("media", &mut media.clone(), UPDATE_BUDGET_US)
+        & report("art", &mut art.clone(), UPDATE_BUDGET_US)
         & report("swipe", &mut swipe, SWIPE_BUDGET_US);
     if ok {
         ExitCode::SUCCESS
@@ -87,6 +96,48 @@ fn main() -> ExitCode {
 
 fn feed(engine: &mut Engine, t: f64) {
     for (name, value) in demo::readings(t) {
+        engine.handle(Input::Signal(name.into(), value));
+    }
+}
+
+/// Update times of the Home page with a track playing, drawing the
+/// player's artwork if `art`, else the placeholder.
+fn playing(now: &Zoned, art: bool) -> Vec<f64> {
+    let mut engine = Engine::new(Config::default_layout());
+    feed(&mut engine, 0.0);
+    play(&mut engine, 0.0);
+    if art {
+        engine.handle(Input::Art(scenes::test_art()));
+        engine.handle(Input::Signal(
+            "media.art".into(),
+            Value::Text("art-test".into()),
+        ));
+        assert!(engine.art().is_some());
+    }
+    engine.frame(now, 0.0);
+    let mut us = Vec::with_capacity(FRAMES);
+    for i in 0..FRAMES {
+        let t = i as f64;
+        feed(&mut engine, t);
+        play(&mut engine, t);
+        let start = Instant::now();
+        let frame = engine.frame(now, t);
+        us.push(start.elapsed().as_secs_f64() * 1e6);
+        assert!(frame.is_some(), "new readings draw a frame");
+    }
+    us
+}
+
+/// A track playing, `t` seconds in.
+fn play(engine: &mut Engine, t: f64) {
+    let text = |s: &str| Value::Text(s.into());
+    for (name, value) in [
+        ("media.title", text("Weird Fishes / Arpeggi")),
+        ("media.artist", text("Radiohead")),
+        ("media.status", text("playing")),
+        ("media.position", Value::Number(t % 318.0, Unit::None)),
+        ("media.length", Value::Number(318.0, Unit::None)),
+    ] {
         engine.handle(Input::Signal(name.into(), value));
     }
 }

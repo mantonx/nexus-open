@@ -237,6 +237,10 @@ pub fn write(config: &Config, notes: &Notes) -> String {
         header(&mut out, "", "[news]");
         keys(&mut out, news, &[]);
     }
+    if !config.media.is_default() {
+        header(&mut out, "", "[media]");
+        keys(&mut out, &config.media, &[]);
+    }
     for (i, page) in config.pages.iter().enumerate() {
         let n = notes.page(i);
         header(&mut out, &n.note, "[[page]]");

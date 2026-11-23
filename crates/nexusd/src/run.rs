@@ -9,12 +9,16 @@
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use jiff::Zoned;
-use nexus_control::{Export, Layout, LayoutEntry, PageTarget, Request, SignalEntry, Status};
+use nexus_control::{
+    ArtReply, Export, Layout, LayoutEntry, PageTarget, Request, SignalEntry, Status,
+};
+use nexus_core::art::Art;
 use nexus_core::config;
 use nexus_core::demo;
 use nexus_core::engine::{Engine, Input};
@@ -105,6 +109,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         last_frame: Instant::now(),
         weather: None,
         news: None,
+        media: None,
         effects: crate::actions::Effects::new(),
         sources,
         notifier: Notifier::from_env(),
@@ -120,7 +125,11 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         spawn_demo(publisher(tx));
     } else {
         nexus_sources::spawn_machine(publisher(tx.clone()));
-        nexus_sources::spawn_media(publisher(tx.clone()));
+        daemon.media = Some(nexus_sources::spawn_media(
+            publisher(tx.clone()),
+            art_sink(tx.clone()),
+            daemon.engine.config().media.album_art,
+        ));
         nexus_sources::spawn_volume(publisher(tx.clone()));
         let weather = nexus_sources::spawn_weather(publisher(tx.clone()));
         let _ = weather.send(daemon.engine.config().weather.clone());
@@ -167,6 +176,9 @@ struct Daemon {
     weather: Option<Sender<Option<config::Weather>>>,
     /// Tells the news source which feeds to read; `None` in demo mode.
     news: Option<nexus_sources::news::News>,
+    /// Tells the media source where artwork may come from; `None` in demo
+    /// mode.
+    media: Option<nexus_sources::Media>,
     /// The config's external source programs.
     sources: crate::sources::Sources,
     /// systemd's readiness and watchdog. Pinged from this thread, since it
@@ -544,6 +556,10 @@ impl Daemon {
             }
             // Handled by the connection thread before it gets here.
             Request::Frames => Err("frames is handled by the connection".into()),
+            Request::Art => {
+                let art = self.engine.art().map(|a| ArtReply::new(a));
+                serde_json::to_value(art).map_err(|e| e.to_string())
+            }
         }
     }
 
@@ -571,6 +587,11 @@ impl Daemon {
             && let Some(news) = &self.news
         {
             news.configure(config.news.clone());
+        }
+        if config.media != self.engine.config().media
+            && let Some(media) = &self.media
+        {
+            media.set_album_art(config.media.album_art);
         }
         self.sources.apply(&config.sources);
         if &config != self.engine.config() {
@@ -704,6 +725,12 @@ fn publisher(tx: Sender<Msg>) -> impl FnMut(Vec<Reading>) -> bool + Send + 'stat
             tx.send(Msg::Engine(input)).is_ok()
         })
     }
+}
+
+/// Hands the media source's artwork to the daemon thread, as `publisher`
+/// does readings.
+fn art_sink(tx: Sender<Msg>) -> impl FnMut(Arc<Art>) -> bool + Send + 'static {
+    move |art| tx.send(Msg::Engine(Input::Art(art))).is_ok()
 }
 
 fn spawn_demo(mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {

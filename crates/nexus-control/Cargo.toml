@@ -8,6 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+base64 = "0.23.1"
 dirs = "7.0.0"
 interprocess = "2.4.8"
 nexus-core = { path = "../nexus-core" }

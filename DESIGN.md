@@ -100,7 +100,7 @@ bars, dashed "set up" cards, a distinct "no data".
   outline for actions on keys (globe, folder, terminal) and for empty
   states.
 - Cream is data, the accent is touch, amber and red are trouble. Nothing
-  else has colour, except generated artwork.
+  else has colour, except artwork.
 - Plain words: "Nothing playing", "Add your town", "GPU is too hot".
 
 ## Colors
@@ -690,10 +690,27 @@ states. Icon sizes: `ICON_HERO` 30, `ICON_MEDIUM` 26, `ICON_COMPACT` 22,
 
 ### Artwork
 
-Album artwork when the player gives it; otherwise (and in every frame
-here) a generated placeholder: a warm two-colour sky, a sun and two soft
-hills, seeded by the title (`draw::art`). Never real artwork in mockups.
-Paused artwork is dimmed 55 % toward the card.
+Album artwork when the player gives it (`mpris:artUrl`, where the
+layout's `[media] album_art` allows it; docs/LAYOUT.md); otherwise a
+generated placeholder: a warm two-colour sky, a sun and two soft hills,
+seeded by the title (`draw::art`). The placeholder also shows while the
+artwork is on its way and whenever it cannot be read; the change to the
+artwork is instant (nothing on the strip fades in place).
+
+Artwork is prepared once per track (`nexus_core::art`), off the render
+thread, at exactly the sizes drawn: `ART` 33 px on medium and hero
+cards, `ART_SCENE` 35 px in the media scene and the now-playing
+takeover. The middle square of the image (a wide or tall one is cropped
+to it), scaled by area averaging in linear light, so fine detail
+becomes its true average tone and never moiré or a darkened edge. The
+corners are rounded as it is drawn, as the placeholder's: `ART_R` 7 px,
+8 in the scene. Paused artwork, real or generated, is dimmed 55 %
+toward the card. A compact card shows none.
+
+Never real artwork in mockups or frames: the frames with artwork
+(`specimen-media-art-playing`, `-paused`, `takeover-now-playing-art`,
+`-paused`) draw `art::test_card`, a two-colour geometric card with a
+checker, a diagonal, a ring and a border that make a scaling fault show.
 
 ## Layout format additions
 
@@ -713,6 +730,7 @@ All optional; existing layouts keep working unchanged.
 | `type = "key"` | widget | with `icon`, optional `label`, `sub`, `tap`, `hold` | The new key widget: runs `tap` (any existing action: `run`, `open`, `page`, `media`, `publish`); `hold` fires at 0.5 s |
 | `critical` | `[[takeover]]`-like rule, built in | – | The alarm needs no key: any widget with `crit` arms it |
 | `[news]` | top level | `feeds`, `rotate`, `max_age` | The feeds to read; see docs/LAYOUT.md |
+| `album_art` | `[media]` | `"all"` (default), `"local"`, `"off"` | Where the media widget's artwork may come from; `"all"` fetches covers from the player's image host. See docs/LAYOUT.md |
 | `type = "news"` | widget | optional `tap`, `hold` | One headline at a time; tap opens it, hold shows the next |
 | `news = "open"` / `"next"` | action | – | Open the headline showing; show the next one |
 

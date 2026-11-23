@@ -11,9 +11,11 @@
 //! more, or shows it bigger. Every size and colour comes from `theme`.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use tiny_skia::Path;
 
+use crate::art::Art;
 use crate::canvas::Canvas;
 use crate::config::MediaCommand;
 use crate::draw::{self, rrect_path};
@@ -108,6 +110,9 @@ pub struct Track {
     /// Seconds since the title last started its scroll, while it may still
     /// be scrolling; `None` at rest.
     pub marquee: Option<f32>,
+    /// The player's artwork, once it has arrived; until then, and when
+    /// there is none, the generated placeholder is drawn.
+    pub art: Option<Arc<Art>>,
 }
 
 impl Track {
@@ -2132,7 +2137,7 @@ impl Pen<'_> {
             }
             Class::Medium => {
                 let ax = x + PAD - 3.0;
-                draw::art(self.c, ax, art_y, ART, ART_R, &t.title, !t.playing);
+                self.artwork(ax, art_y, ART, ART_R, t);
                 // The whole card is play/pause; a raised key at its right,
                 // as the hero card has, says so. It sinks with the card.
                 let kx = x + w - PAD - MEDIA_KEY_W;
@@ -2168,7 +2173,7 @@ impl Pen<'_> {
             }
             Class::Hero => {
                 let ax = x + PAD - 3.0;
-                draw::art(self.c, ax, art_y, ART, ART_R, &t.title, !t.playing);
+                self.artwork(ax, art_y, ART, ART_R, t);
                 self.transport(zx, &keys, t.playing, press, ICON_KEY - 2.0);
                 let kx0 = zx + keys[0].span.start;
                 let tx = ax + ART + 10.0;
@@ -2270,7 +2275,7 @@ impl Pen<'_> {
     fn media_scene(&mut self, zx: f32, x: f32, w: f32, t: &Track, keys: &[MediaKey], press: Press) {
         let s = ART_SCENE;
         let ay = CARD_Y + (CARD_H - s) / 2.0;
-        draw::art(self.c, x + 4.0, ay, s, ART_R + 1.0, &t.title, !t.playing);
+        self.artwork(x + 4.0, ay, s, ART_R + 1.0, t);
         self.transport(zx, keys, t.playing, press, ICON_KEY);
         let kx0 = zx + keys[0].span.start;
         let tx = x + 4.0 + s + 12.0;
@@ -2315,6 +2320,19 @@ impl Pen<'_> {
             CARD,
             t.marquee,
         );
+    }
+
+    /// The track's artwork, or the placeholder seeded by its title when
+    /// the player gave none (or it has not arrived, or failed); dimmed
+    /// while paused.
+    fn artwork(&mut self, x: f32, y: f32, s: f32, r: f32, t: &Track) {
+        let drawn = t
+            .art
+            .as_deref()
+            .is_some_and(|a| draw::artwork(self.c, x, y, s, r, a, !t.playing));
+        if !drawn {
+            draw::art(self.c, x, y, s, r, &t.title, !t.playing);
+        }
     }
 
     /// A thin progress line with no thumb: information, not a control.

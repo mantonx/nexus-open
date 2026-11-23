@@ -43,6 +43,7 @@ pub fn system_page() -> Vec<Zone> {
         mono: 0.0,
         marquee: None,
         music: config.music_action(),
+        art: &[],
     };
     bind_page(&page.widgets, &ctx)
 }

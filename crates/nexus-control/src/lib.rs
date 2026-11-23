@@ -25,6 +25,9 @@
 //! layout                        the layout on the strip as data, with the
 //!                               IDs that edits name things by
 //! import {"name", "text", "activate"}  add a layout from TOML
+//! art                           the track's artwork as the strip draws it
+//!                               (`ArtReply`), or null; ask again when the
+//!                               `media.art` signal changes
 //! ```
 //!
 //! After `frames` and its reply, the connection carries only frames: each
@@ -36,8 +39,10 @@ pub mod links;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 
+use base64::Engine as _;
 use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{Listener, ListenerOptions, Name, Stream};
+use nexus_core::art::Art;
 use nexus_core::signal::{Unit, Value};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -79,6 +84,8 @@ pub enum Request {
     },
     /// Put the page back if a takeover covers it.
     EndTakeover,
+    /// The artwork the strip draws for the track.
+    Art,
 }
 
 /// The longest a takeover is shown on request. A window that asked and
@@ -167,6 +174,7 @@ impl Request {
             "redo" => Ok(Request::Redo),
             "layout" => Ok(Request::Layout),
             "end-takeover" => Ok(Request::EndTakeover),
+            "art" => Ok(Request::Art),
             "show-takeover" => {
                 let (seconds, name) = rest.split_once(' ').unwrap_or((rest, ""));
                 let seconds: f64 = seconds
@@ -249,7 +257,7 @@ impl Request {
             }
             "" => Err("empty request".into()),
             other => Err(format!(
-                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold, drag, frames, edit, undo, redo, export or import"
+                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold, drag, frames, edit, undo, redo, export, import or art"
             )),
         }
     }
@@ -291,6 +299,59 @@ pub struct SignalEntry {
     pub number: Option<f64>,
     #[serde(default)]
     pub unit: Option<String>,
+}
+
+/// The answer to `art`: the track's artwork, prepared as the strip draws
+/// it, so a window's previews (drawn by its own `Engine`) show the same
+/// pixels. `null` when the strip shows the placeholder.
+///
+/// To use it: when the `media.art` signal's value changes, request `art`;
+/// for a reply that is not null, give the window's engine
+/// `Input::Art(Arc::new(reply.to_art()?))` alongside the readings. Its
+/// key is `media.art`'s value, so the engine draws it exactly while the
+/// readings name it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArtReply {
+    /// The `media.art` value that names it.
+    pub key: String,
+    pub squares: Vec<ArtSquare>,
+}
+
+/// One prepared square of artwork.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArtSquare {
+    /// Pixels on a side; at most `nexus_core::art::MAX_SQUARE`.
+    pub size: u32,
+    /// `size`×`size` straight-alpha sRGB RGBA, row-major, base64.
+    pub rgba: String,
+}
+
+impl ArtReply {
+    pub fn new(art: &Art) -> ArtReply {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        ArtReply {
+            key: art.key().to_string(),
+            squares: art
+                .squares()
+                .map(|(size, rgba)| ArtSquare {
+                    size,
+                    rgba: b64.encode(rgba),
+                })
+                .collect(),
+        }
+    }
+
+    /// The artwork, ready for `Input::Art`; `None` if a square is not
+    /// what it says.
+    pub fn to_art(&self) -> Option<Art> {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let squares = self
+            .squares
+            .iter()
+            .map(|s| Some((s.size, b64.decode(&s.rgba).ok()?)))
+            .collect::<Option<Vec<_>>>()?;
+        Art::from_squares(self.key.clone(), squares)
+    }
 }
 
 /// Formats a reply line (without the newline).
@@ -561,6 +622,23 @@ mod tests {
                 .unwrap_err()
                 .contains("expected")
         );
+    }
+
+    #[test]
+    fn artwork_crosses_the_socket_intact() {
+        assert_eq!(Request::parse("art"), Ok(Request::Art));
+        let rgba = nexus_core::art::test_card(48, 40);
+        let art = Art::prepare("art-0123", 48, 40, &rgba).unwrap();
+        let reply = ArtReply::new(&art);
+        let line = serde_json::to_string(&reply).unwrap();
+        assert!(line.len() < 16_000, "small enough to send per track");
+        let back: ArtReply = serde_json::from_str(&line).unwrap();
+        let back = back.to_art().unwrap();
+        assert_eq!(back.key(), "art-0123");
+        assert!(back.squares().eq(art.squares()));
+        let mut bad = reply;
+        bad.squares[0].rgba = "AAAA".into();
+        assert!(bad.to_art().is_none());
     }
 
     #[test]

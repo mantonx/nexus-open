@@ -610,3 +610,38 @@ README clip (now of the new strip), release verification.
   - **P2:** the banner and the popover order their buttons differently.
   - **P2:** at 1024×640 the window splits into two grids.
   - **P2:** the widget editor shows every field at once.
+- 2026-11-22 — Real album artwork, provisional (Matt to overturn any of
+  it). The media source reads `mpris:artUrl`; `file://` (regular files
+  under 10 MB, not links), `data:` (base64, 2 MB) and `https://` /
+  `http://` (plain GET, shared user agent, 5 s, 5 MB) are read, anything
+  else ignored. The setting is `[media] album_art = "all" | "local" |
+  "off"`, default `"all"`. **Not under `[settings]`** as first asked:
+  the window's settings form builds `Settings` from its own fields, so a
+  field there would break its build and then be reset by every save;
+  `[media]` is its own column and `set-media` edit, as `[news]` is for
+  the same reason. Decoding: the `image` crate (PNG, JPEG, WebP only;
+  already in the build through Slint, so nothing new is compiled in),
+  4096 px a side, 80 MB. Prepared once per track at 33 and 35 px: centre
+  square, area averaging in linear light (it matches Pillow's BOX filter
+  exactly; tent and Lanczos3 were compared on the test card: tent is
+  softer, Lanczos rings at the border, and all three leave a faint beat
+  on a 4 px checker at 8.6:1). Cached by address, about four tracks
+  (112 kB). The engine gets the pixels with `Input::Art` and draws them
+  while `media.art` names their key, so signals stay numbers and text.
+  No fade: nothing on the strip fades in place, so the switch is
+  instant. The window's previews get the same pixels with the `art`
+  control request (`nexus_control::ArtReply`); not wired in the window
+  yet. Render cost (median update, Home page with a track playing, on
+  the shared dev machine): placeholder 264–310 µs, artwork 233–283 µs.
+  Frames: `specimen-media-art-playing`, `-paused`,
+  `takeover-now-playing-art`, `-paused`. Still undecided (PRODUCT.md):
+  whether the accent may follow the artwork.
+  Seen live on the UI rig (private bus, a fake MPRIS player): a
+  `file://` PNG, an `http://127.0.0.1` JPEG (fetched once, then from
+  the cache), a `data:` PNG, a link refused with one log line, and
+  `local` and `off` taking effect on the next track. Not yet on the
+  real panel, nor with a real player. Changed after review (Claude): a
+  `file://` cover behind a link is now read, because players keep covers
+  behind links and the daemon reads only what its user can. The file is
+  opened without blocking and checked once open, so a pipe or a device is
+  still refused, behind a link or not.

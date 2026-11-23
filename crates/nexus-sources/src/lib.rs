@@ -9,9 +9,12 @@
 //! Each source runs on its own thread and hands its readings to a callback,
 //! so this crate knows nothing about the daemon.
 
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use nexus_core::art::Art;
+use nexus_core::config::AlbumArt;
 use nexus_core::signal::Value;
 
 mod cpu_sensor;
@@ -20,6 +23,8 @@ mod gpu;
 mod machine;
 #[cfg(target_os = "linux")]
 mod media;
+#[cfg(target_os = "linux")]
+mod media_art;
 pub mod news;
 #[cfg(target_os = "linux")]
 mod volume;
@@ -70,11 +75,42 @@ pub fn set_volume(percent: u8) {
 /// Starts publishing the `media.*` signals from the system's media players.
 /// Linux only for now (MPRIS); elsewhere the media widget shows "Nothing
 /// playing".
-pub fn spawn_media(publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
+///
+/// The track's artwork, where `album_art` allows it, is loaded off this
+/// thread and the caller's, prepared once, and passed to `show_art` just
+/// before `media.art` names it (`nexus_core::engine::Input::Art`).
+pub fn spawn_media(
+    publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static,
+    show_art: impl FnMut(Arc<Art>) -> bool + Send + 'static,
+    album_art: AlbumArt,
+) -> Media {
     #[cfg(target_os = "linux")]
-    media::spawn(publish);
+    return Media {
+        wake: media::spawn(publish, show_art, album_art),
+    };
     #[cfg(not(target_os = "linux"))]
-    drop(publish);
+    {
+        drop((publish, show_art, album_art));
+        Media {}
+    }
+}
+
+/// The running media source.
+pub struct Media {
+    #[cfg(target_os = "linux")]
+    wake: Option<std::sync::mpsc::Sender<media::Wake>>,
+}
+
+impl Media {
+    /// Where artwork may come from now; the track's is looked at again.
+    pub fn set_album_art(&self, album_art: AlbumArt) {
+        #[cfg(target_os = "linux")]
+        if let Some(wake) = &self.wake {
+            let _ = wake.send(media::Wake::Policy(album_art));
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = album_art;
+    }
 }
 
 /// One reading: a signal name and its value.

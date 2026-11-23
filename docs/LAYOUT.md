@@ -206,6 +206,37 @@ type = "news"
 width = 512
 ```
 
+## `[media]`
+
+Optional.
+
+| Key         | Values                       | Default |
+| ----------- | ---------------------------- | ------- |
+| `album_art` | `"all"`, `"local"`, `"off"`  | `"all"` |
+
+The media widget shows the track's artwork where the player gives an
+address for it (MPRIS `mpris:artUrl`), and a generated picture
+otherwise: while the artwork is on its way, and whenever it cannot be
+read. `album_art` says where artwork may come from:
+
+- `"all"` also **fetches cover images from the player's image host**:
+  an `https://` or `http://` address is asked for once per track with a
+  plain GET, with Nexus Open's user agent and nothing else, at most
+  5 MB, giving up after 5 seconds. It is the address the player itself
+  fetched the picture from (a music service's image server, or the site
+  a browser is playing from), so that host learns your computer's
+  address and that this cover was asked for, as it did from the player.
+- `"local"` reads only images on this computer (`file://`: a regular
+  file under 10 MB, not a link) or inside the address itself (`data:`,
+  base64, up to 2 MB). Nothing is fetched.
+- `"off"`: always the generated picture.
+
+Any other kind of address is ignored. Images are PNG, JPEG or WebP, up
+to 4096 px a side. One that cannot be read leaves the generated
+picture, and a line in the log once per track that says why, with no
+query string or image data from the address. The last few covers are
+kept in memory, so going back to a track shows its cover at once.
+
 ## `[[page]]`
 
 One or more, shown in order; swipe to change page. Each has a unique
@@ -411,6 +442,7 @@ Signals are named readings, in base units. The built-in sources publish:
 | `volume.muted`                                           | 1 if muted, else 0 |
 | `media.title`, `media.artist`, `media.status`            | text              |
 | `media.position`, `media.length`                         | seconds           |
+| `media.art`                                              | text: which artwork the media widget draws (`art-` and a hash of its address), empty while it shows the generated picture |
 | `news.title`, `news.source`, `news.link`                 | text              |
 | `news.age`                                               | seconds since the headline was published |
 | `news.count`                                             | how many headlines are kept |

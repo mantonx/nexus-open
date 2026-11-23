@@ -45,6 +45,9 @@ pub struct Config {
     /// The news feeds. Without it, or with no feeds, nothing is fetched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub news: Option<NewsConfig>,
+    /// What the media widget may show of the player's: its artwork.
+    #[serde(default, skip_serializing_if = "MediaConfig::is_default")]
+    pub media: MediaConfig,
     /// Rows that briefly cover the strip when a signal changes.
     #[serde(rename = "takeover", default)]
     pub takeovers: Vec<Takeover>,
@@ -148,6 +151,53 @@ pub struct Weather {
     /// Coordinates in degrees. When given, the location is not looked up.
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+}
+
+/// The `[media]` section.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MediaConfig {
+    pub album_art: AlbumArt,
+}
+
+impl MediaConfig {
+    pub fn is_default(&self) -> bool {
+        *self == MediaConfig::default()
+    }
+}
+
+/// Where the media widget's artwork may come from. It is the address the
+/// player gives (MPRIS `mpris:artUrl`), so a web address is one the
+/// player itself has already fetched from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlbumArt {
+    /// Files on this computer and images inside the address (`file://`,
+    /// `data:`); nothing is fetched from the network.
+    Local,
+    /// Also `https://` and `http://`: fetched from the player's image
+    /// host with a plain GET.
+    #[default]
+    All,
+    /// Never; the generated placeholder always.
+    Off,
+}
+
+impl AlbumArt {
+    /// As written in a layout and stored: "local", "all" or "off".
+    pub fn name(self) -> &'static str {
+        match self {
+            AlbumArt::Local => "local",
+            AlbumArt::All => "all",
+            AlbumArt::Off => "off",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<AlbumArt> {
+        [AlbumArt::Local, AlbumArt::All, AlbumArt::Off]
+            .into_iter()
+            .find(|a| a.name() == name)
+    }
 }
 
 /// How long each headline shows by default.
@@ -1426,6 +1476,24 @@ mod tests {
         assert_eq!(duration::parse("2d"), Some(d(172_800)));
         assert_eq!(duration::parse(" 15 min "), Some(d(900)));
         assert_eq!(duration::parse("5 weeks"), None);
+    }
+
+    #[test]
+    fn album_art_is_all_unless_the_layout_says() {
+        let page = "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"clock\"\nwidth = 640\n";
+        assert_eq!(Config::parse(page).unwrap().media.album_art, AlbumArt::All);
+        for (name, want) in [
+            ("local", AlbumArt::Local),
+            ("all", AlbumArt::All),
+            ("off", AlbumArt::Off),
+        ] {
+            let c = Config::parse(&format!("[media]\nalbum_art = \"{name}\"\n{page}")).unwrap();
+            assert_eq!(c.media.album_art, want);
+            assert_eq!(AlbumArt::from_name(name), Some(want));
+        }
+        let err = Config::parse(&format!("[media]\nalbum_art = \"web\"\n{page}")).unwrap_err();
+        assert!(err.0.contains("local"), "{err}");
+        assert!(Config::parse(&format!("[media]\nart = \"off\"\n{page}")).is_err());
     }
 
     /// The News page docs/LAYOUT.md offers is the one the frames draw.

@@ -8,7 +8,10 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+base64 = "0.23.1"
 feed-rs = "3.0.0"
+# Artwork decoding: pure Rust, and only the formats covers come in.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 nexus-core = { path = "../nexus-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

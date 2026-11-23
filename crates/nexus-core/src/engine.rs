@@ -32,10 +32,12 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Zoned;
 
+use crate::art::Art;
 use crate::canvas::Canvas;
 use crate::config::{
     Action, Align, Config, MediaCommand, NewsCommand, SLIDER_VALUE, SliderControl, Widget,
@@ -98,6 +100,10 @@ pub enum Input {
     /// A signal's source is gone: its widgets show "—" until it is
     /// published again, which then counts as a first reading.
     Forget(String),
+    /// A track's artwork, prepared. Drawn while the `media.art` signal
+    /// holds its key; signals carry only numbers and text, so the pixels
+    /// come this way, once per track, and are never decoded here.
+    Art(Arc<Art>),
     /// A touch sample: finger down or not, panel x (0–639), and monotonic
     /// time in seconds.
     Touch { down: bool, x: f32, at: f64 },
@@ -386,7 +392,14 @@ pub struct Engine {
     /// The news article showing when the finger on the strip landed: what
     /// a `news = "open"` action opens.
     landing_link: Option<String>,
+    /// Artwork handed over with `Input::Art`, newest last: the track's
+    /// and at most a few before it, so a key that arrives just after its
+    /// pixels, or a track skipped back to, still finds them.
+    art: Vec<Arc<Art>>,
 }
+
+/// Artwork kept by the engine: what `media.art` names, and a few more.
+const ART_KEPT: usize = 3;
 
 impl Engine {
     pub fn new(config: Config) -> Self {
@@ -422,6 +435,7 @@ impl Engine {
             drawn_dim: 1.0,
             drawn_stale: false,
             landing_link: None,
+            art: Vec::new(),
         }
     }
 
@@ -437,6 +451,15 @@ impl Engine {
 
     pub fn signals(&self) -> &Signals {
         &self.signals
+    }
+
+    /// The artwork the `media.art` signal names, if the engine has it:
+    /// what the media widget draws for the track.
+    pub fn art(&self) -> Option<&Arc<Art>> {
+        let Some(Value::Text(key)) = self.signals.live("media.art") else {
+            return None;
+        };
+        self.art.iter().find(|a| !key.is_empty() && a.key() == key)
     }
 
     /// The theme frames are drawn with: the default one with the user's
@@ -617,6 +640,24 @@ impl Engine {
                 if self.alarm.contains(&name) {
                     self.alarm.retain(|s| *s != name);
                     self.alarm_changed();
+                }
+            }
+            Input::Art(art) => {
+                self.art.retain(|a| a.key() != art.key());
+                self.art.push(art);
+                if self.art.len() > ART_KEPT {
+                    // The oldest goes, unless it is the one on show.
+                    let shown = self.art().map(|a| a.key().to_string());
+                    if let Some(i) = self
+                        .art
+                        .iter()
+                        .position(|a| Some(a.key()) != shown.as_deref())
+                    {
+                        self.art.remove(i);
+                    }
+                }
+                if self.art().is_some() {
+                    self.dirty |= self.visible("media.art");
                 }
             }
             Input::Touch { down, x, at } => self.touch(down, x, at),
@@ -1101,6 +1142,7 @@ impl Engine {
             mono: self.now,
             marquee,
             music: self.config.music_action(),
+            art: &self.art,
         };
         let mut zones = bind_page(self.widgets(row), &ctx);
         for (zone, w) in zones.iter_mut().zip(self.widths(row)) {
@@ -1128,7 +1170,7 @@ impl Engine {
     fn part_at(&self, row: Row, zone: usize, x: f32) -> Option<(usize, bool)> {
         let widget = &self.widgets(row)[zone];
         if !matches!(widget, Widget::Media { .. })
-            || media(&self.signals, None) == WidgetView::Media(None)
+            || media(&self.signals, &[], None) == WidgetView::Media(None)
         {
             return None;
         }
@@ -3181,6 +3223,63 @@ mod tests {
         }
         assert!(e.frame(&at("16:17:05"), 0.0).is_some());
         e
+    }
+
+    #[test]
+    fn artwork_is_drawn_while_media_art_names_it() {
+        let mut e = media_row(&[200, 440]);
+        e.handle(Input::Signal(
+            "media.status".into(),
+            Value::Text("playing".into()),
+        ));
+        // Short enough not to scroll, so frames differ only by the art.
+        e.handle(Input::Signal(
+            "media.title".into(),
+            Value::Text("Fish".into()),
+        ));
+        let now = at("16:17:05");
+        let shot = |e: &mut Engine, t: f64| {
+            e.handle(Input::Redraw);
+            e.frame(&now, t).unwrap().rgba().to_vec()
+        };
+        let placeholder = shot(&mut e, 1.0);
+        let art = |key: &str| {
+            let rgba = crate::art::test_card(80, 60);
+            Arc::new(Art::prepare(key, 80, 60, &rgba).unwrap())
+        };
+        // The pixels alone change nothing: no signal names them yet.
+        e.handle(Input::Art(art("art-1")));
+        assert!(e.art().is_none());
+        assert_eq!(shot(&mut e, 2.0), placeholder);
+        // Named, they are drawn, in both cards.
+        e.handle(Input::Signal(
+            "media.art".into(),
+            Value::Text("art-1".into()),
+        ));
+        let drawn = shot(&mut e, 3.0);
+        assert_eq!(e.art().map(|a| a.key()), Some("art-1"));
+        assert_ne!(drawn, placeholder);
+        // Not the track's any more: the placeholder.
+        e.handle(Input::Signal(
+            "media.art".into(),
+            Value::Text(String::new()),
+        ));
+        assert_eq!(shot(&mut e, 4.0), placeholder);
+        // The name first, then the pixels: drawn as they arrive.
+        e.handle(Input::Signal(
+            "media.art".into(),
+            Value::Text("art-2".into()),
+        ));
+        assert_eq!(shot(&mut e, 5.0), placeholder);
+        e.handle(Input::Art(art("art-2")));
+        assert!(e.frame(&now, 6.0).is_some(), "arriving pixels redraw");
+        assert_eq!(shot(&mut e, 6.5), drawn, "same image");
+        // Only a few are kept, never dropping the one on show.
+        for i in 3..10 {
+            e.handle(Input::Art(art(&format!("art-{i}"))));
+        }
+        assert!(e.art.len() <= ART_KEPT);
+        assert_eq!(e.art().map(|a| a.key()), Some("art-2"));
     }
 
     /// The middle of each drawn target of a media widget `width` wide that

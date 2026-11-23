@@ -39,7 +39,7 @@ use crate::Reading;
 
 mod check;
 mod clean;
-mod fetch;
+pub(crate) mod fetch;
 mod parse;
 #[cfg(test)]
 mod tests;

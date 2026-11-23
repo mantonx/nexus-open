@@ -1,12 +1,13 @@
 //! Shapes for the widgets: rounded rectangles and their outlines, discs, a
-//! soft glow, fills clipped to a shape, and the generated artwork
-//! placeholder. All antialiased through tiny-skia onto the `Canvas`.
+//! soft glow, fills clipped to a shape, the player's artwork and the
+//! generated placeholder. All antialiased through tiny-skia onto the `Canvas`.
 
 use tiny_skia::{
-    Color, FillRule, GradientStop, LinearGradient, Mask, Paint, Path, PathBuilder, Point,
-    RadialGradient, SpreadMode, Stroke, StrokeDash, Transform,
+    Color, FillRule, GradientStop, LinearGradient, Mask, Paint, Path, PathBuilder, PixmapPaint,
+    Point, RadialGradient, SpreadMode, Stroke, StrokeDash, Transform,
 };
 
+use crate::art::Art;
 use crate::canvas::Canvas;
 use crate::theme::{CARD, Rgb};
 
@@ -142,6 +143,34 @@ pub fn glow(c: &mut Canvas, cx: f32, cy: f32, r: f32, colour_: Rgb, alpha: u8) {
         c.pixmap_mut()
             .fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
     }
+}
+
+/// The player's artwork, its square `s` pixels on a side at (`x`, `y`)
+/// (whole pixels, so the prepared pixels land unresampled), the corners
+/// rounded to `r` as the placeholder's are; dimmed toward the card for a
+/// paused track. False, drawing nothing, if it has no square that size.
+#[allow(clippy::too_many_arguments)]
+pub fn artwork(c: &mut Canvas, x: f32, y: f32, s: f32, r: f32, art: &Art, dim: bool) -> bool {
+    let Some(image) = art.pixmap(s as u32, dim) else {
+        return false;
+    };
+    let (x, y) = (x.round(), y.round());
+    let Some(clip_path) = rrect_path(x, y, s, s, r) else {
+        return false;
+    };
+    let Some(mut clip) = Mask::new(c.width(), c.height()) else {
+        return false;
+    };
+    clip.fill_path(&clip_path, FillRule::Winding, true, Transform::identity());
+    c.pixmap_mut().draw_pixmap(
+        x as i32,
+        y as i32,
+        image,
+        &PixmapPaint::default(),
+        Transform::identity(),
+        Some(&clip),
+    );
+    true
 }
 
 /// Artwork when the player gives none: a warm two-colour sky, a sun and

@@ -198,4 +198,9 @@ DROP TABLE action;
 ALTER TABLE action_4 RENAME TO action;
 CREATE INDEX action_target ON action(target_page);
 "#,
+    // 5: where the media widget's artwork may come from (`[media]`).
+    r#"
+ALTER TABLE settings ADD COLUMN album_art TEXT NOT NULL DEFAULT 'all'
+  CHECK (album_art IN ('local', 'all', 'off'));
+"#,
 ];
