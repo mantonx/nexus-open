@@ -155,6 +155,9 @@ pub struct Editor {
     /// confirms it.
     committed: HashMap<String, String>,
     signals: HashMap<String, Reading>,
+    /// The `media.art` value the artwork was last asked for, so the
+    /// daemon is asked once per track, not once a second.
+    art_key: Option<String>,
 
     /// The Signals drawer's rows, updated in place.
     signal_rows: Rc<VecModel<SignalRow>>,
@@ -226,6 +229,7 @@ impl Editor {
             draft_hint: String::new(),
             committed: HashMap::new(),
             signals: HashMap::new(),
+            art_key: None,
             signal_rows: Rc::new(VecModel::default()),
             picking: None,
             pick_filter: String::new(),
@@ -362,6 +366,8 @@ impl Editor {
             if !connected {
                 self.drag = Drag::None;
                 self.preview = None;
+                // A daemon that comes back may have other artwork.
+                self.art_key = None;
             }
             self.show();
         }
@@ -455,7 +461,34 @@ impl Editor {
         }
         self.show_signals();
         self.show_picks();
+        self.fetch_art();
         self.draw_layout();
+    }
+
+    /// When `media.art` names new artwork, asks the daemon for its pixels,
+    /// off the UI thread; they reach the pictures with `Job::Art`.
+    fn fetch_art(&mut self) {
+        let key = match self.signals.get("media.art") {
+            Some(r) if !r.text.is_empty() => r.text.clone(),
+            _ => return,
+        };
+        if self.art_key.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        self.art_key = Some(key);
+        let Some(jobs) = self.thumbs.clone() else {
+            return;
+        };
+        let app = self.app.clone();
+        let _ = thread::Builder::new().name("art".into()).spawn(move || {
+            let Some(art) = fetch_art() else {
+                return;
+            };
+            if jobs.send(Job::Art(std::sync::Arc::new(art))).is_ok() {
+                // Drawn again, now with the artwork.
+                let _ = app.upgrade_in_event_loop(|_| with_editor(Editor::draw_layout));
+            }
+        });
     }
 
     /// Puts the Signals drawer's rows in the window, in place while the
@@ -549,7 +582,7 @@ impl Editor {
                 ids.push(known.into());
             }
         }
-        ids.retain(|id| names::matches(id, &self.pick_filter));
+        ids.retain(|id| !names::hidden(id) && names::matches(id, &self.pick_filter));
         ids.sort_by_key(|id| names::order(id));
         let rows: Vec<PickRow> = ids
             .into_iter()
@@ -2313,6 +2346,18 @@ impl Editor {
         let Some(l) = &self.layout else {
             return;
         };
+        // Album covers are the `[media]` section, its own edit: the
+        // settings form knows nothing of it, so it cannot reset it.
+        if key == ALBUM_ART {
+            let Some(album_art) = value.parse().ok().and_then(album_art_choice) else {
+                return;
+            };
+            if l.config.media.album_art != album_art {
+                let media = nexus_core::config::MediaConfig { album_art };
+                self.send(Edit::SetMedia { media });
+            }
+            return;
+        }
         let mut v = settings::flatten(&l.config);
         if settings::set(&mut v, key, value).is_none() {
             return;
@@ -2356,7 +2401,27 @@ impl Editor {
                 .collect::<Vec<_>>(),
         )));
         app.set_pref_font(p.font as i32);
+        app.set_pref_album_art(album_art_index(l.config.media.album_art) as i32);
     }
+}
+
+/// Settings' album covers: what `set-pref` is called with.
+const ALBUM_ART: &str = "album-art";
+
+/// The album cover choices in the order Settings lists them: the
+/// player's covers wherever they are, only those on this computer, none.
+const ALBUM_ART_CHOICES: [nexus_core::config::AlbumArt; 3] = [
+    nexus_core::config::AlbumArt::All,
+    nexus_core::config::AlbumArt::Local,
+    nexus_core::config::AlbumArt::Off,
+];
+
+fn album_art_choice(index: usize) -> Option<nexus_core::config::AlbumArt> {
+    ALBUM_ART_CHOICES.get(index).copied()
+}
+
+fn album_art_index(a: nexus_core::config::AlbumArt) -> usize {
+    ALBUM_ART_CHOICES.iter().position(|c| *c == a).unwrap_or(0)
 }
 
 /// Settings, News: the feeds and how headlines show.
@@ -2819,6 +2884,19 @@ fn with_editor(f: impl FnOnce(&mut Editor)) {
     });
 }
 
+/// The track's artwork as the strip draws it; `None` when the strip shows
+/// the placeholder (a null reply) or the daemon cannot answer.
+fn fetch_art() -> Option<nexus_core::art::Art> {
+    let mut client = Client::connect().ok()?;
+    let data = client.request("art").ok()?.ok()?;
+    if data.is_null() {
+        return None;
+    }
+    serde_json::from_value::<nexus_control::ArtReply>(data)
+        .ok()?
+        .to_art()
+}
+
 /// Asks for the layout; `None` if the daemon cannot answer.
 fn fetch() -> Option<Layout> {
     let mut client = Client::connect().ok()?;
@@ -2847,6 +2925,18 @@ mod tests {
         assert!(!keep(&Failure::Lost, "import {}"));
         assert!(!keep(&Failure::Lost, "undo"));
         assert!(!keep(&Failure::Refused("no".into()), "edit {}"));
+    }
+
+    #[test]
+    fn album_cover_choices_round_trip_in_settings_order() {
+        use nexus_core::config::AlbumArt;
+        assert_eq!(album_art_choice(0), Some(AlbumArt::All));
+        assert_eq!(album_art_choice(1), Some(AlbumArt::Local));
+        assert_eq!(album_art_choice(2), Some(AlbumArt::Off));
+        assert_eq!(album_art_choice(3), None);
+        for a in [AlbumArt::All, AlbumArt::Local, AlbumArt::Off] {
+            assert_eq!(album_art_choice(album_art_index(a)), Some(a));
+        }
     }
 
     #[test]

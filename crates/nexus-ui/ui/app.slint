@@ -332,6 +332,8 @@ export component AppWindow inherits Window {
     in property <string> pref-night-to;
     in property <[string]> fonts;
     in property <int> pref-font;
+    /// Album covers: 0 the player's, 1 only on this computer, 2 never.
+    in property <int> pref-album-art;
     in property <string> log-text;
     /// Settings, News: the feeds, the chosen timings (-1: one set in a
     /// file, said in the note), and the last feed check: "" (none),
@@ -2724,6 +2726,31 @@ export component AppWindow inherits Window {
                             text: root.pref-night
                                 ? @tr("The strip dims further between these times, across midnight when the end is earlier.")
                                 : @tr("None: the strip keeps its brightness all night. Dim at night sets hours when it dims further.");
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Album covers");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        Select {
+                            options: [@tr("Use album covers from your player"), @tr("Only covers stored on this computer"), @tr("Never show covers")];
+                            current: root.pref-album-art;
+                            label: @tr("Album covers");
+                            chose(i) => {
+                                root.set-pref("album-art", i);
+                            }
+                        }
+                        Hint {
+                            text: @tr("The first fetches a cover from your player's image host when the player keeps it online.");
                         }
                     }
                 }

@@ -6,12 +6,15 @@
 //!
 //! The engine loads its fonts once, on its own thread; a request is
 //! answered with RGBA rows, 640×48 each, turned into images on the UI
-//! thread.
+//! thread. The track's artwork comes from the daemon as the strip draws
+//! it (`Job::Art`), so a media widget here shows the same cover.
 
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use jiff::Zoned;
+use nexus_core::art::Art;
 use nexus_core::config::{Config, Page, Widget};
 use nexus_core::engine::{Engine, Input};
 use nexus_core::signal::{Unit, Value};
@@ -40,6 +43,9 @@ pub enum Job {
         configs: Vec<Config>,
         readings: Vec<(String, Value)>,
     },
+    /// The track's artwork, as the daemon prepared it: drawn from now on
+    /// wherever `media.art` in the readings names it. Draws nothing.
+    Art(Arc<Art>),
 }
 
 pub enum Done {
@@ -63,6 +69,7 @@ pub fn start(done: impl Fn(Done) + Send + 'static) -> Sender<Job> {
 
 fn run(jobs: &Receiver<Job>, done: impl Fn(Done)) {
     let mut drawer: Option<Drawer> = None;
+    let mut art: Option<Arc<Art>> = None;
     while let Ok(first) = jobs.recv() {
         let mut pending = vec![first];
         pending.extend(jobs.try_iter());
@@ -74,12 +81,16 @@ fn run(jobs: &Receiver<Job>, done: impl Fn(Done)) {
             if matches!(job, Job::Layout { .. }) && Some(i) != newest {
                 continue;
             }
-            handle(&mut drawer, job, &done);
+            if let Job::Art(a) = job {
+                art = Some(a);
+                continue;
+            }
+            handle(&mut drawer, job, art.as_ref(), &done);
         }
     }
 }
 
-fn handle(drawer: &mut Option<Drawer>, job: Job, done: &impl Fn(Done)) {
+fn handle(drawer: &mut Option<Drawer>, job: Job, art: Option<&Arc<Art>>, done: &impl Fn(Done)) {
     match job {
         Job::Layout {
             config,
@@ -87,7 +98,7 @@ fn handle(drawer: &mut Option<Drawer>, job: Job, done: &impl Fn(Done)) {
             epoch,
         } => {
             let d = Drawer::for_config(drawer, *config);
-            d.readings(&readings);
+            d.readings(&readings, art);
             let pages = (0..d.engine.config().pages.len())
                 .map(|i| d.page(i))
                 .collect();
@@ -119,7 +130,7 @@ fn handle(drawer: &mut Option<Drawer>, job: Job, done: &impl Fn(Done)) {
                 }];
                 c.takeovers.clear();
                 let d = Drawer::for_config(drawer, c);
-                d.readings(&readings);
+                d.readings(&readings, art);
                 out.push(d.page(0));
             }
             done(Done::Widgets(out));
@@ -128,11 +139,12 @@ fn handle(drawer: &mut Option<Drawer>, job: Job, done: &impl Fn(Done)) {
             let mut out = Vec::new();
             for c in configs {
                 let d = Drawer::for_config(drawer, c);
-                d.readings(&readings);
+                d.readings(&readings, art);
                 out.push(d.page(0));
             }
             done(Done::Starters(out));
         }
+        Job::Art(_) => {}
     }
 }
 
@@ -158,7 +170,12 @@ impl Drawer {
         slot.as_mut().expect("just set")
     }
 
-    fn readings(&mut self, readings: &[(String, Value)]) {
+    /// The readings, and the artwork beside them: the engine draws it
+    /// while `media.art` names it, as the daemon's does.
+    fn readings(&mut self, readings: &[(String, Value)], art: Option<&Arc<Art>>) {
+        if let Some(art) = art {
+            self.engine.handle(Input::Art(Arc::clone(art)));
+        }
         for (name, value) in readings {
             self.engine
                 .handle(Input::Signal(name.clone(), value.clone()));
@@ -282,5 +299,40 @@ mod tests {
             }
             _ => panic!("wrong answer"),
         }
+    }
+
+    /// The pictures show the track's artwork once the daemon has sent it,
+    /// exactly where `media.art` names it, as the strip does.
+    #[test]
+    fn artwork_reaches_the_pictures() {
+        let (tx, rx) = mpsc::channel();
+        let jobs = start(move |d| {
+            let _ = tx.send(d);
+        });
+        let mut readings = with_demo(Vec::new());
+        readings.extend([
+            ("media.title".to_string(), Value::Text("Song".into())),
+            ("media.status".to_string(), Value::Text("playing".into())),
+            ("media.art".to_string(), Value::Text("art-test".into())),
+        ]);
+        let layout = |epoch| Job::Layout {
+            config: Box::new(Config::default_layout()),
+            readings: readings.clone(),
+            epoch,
+        };
+        let pages = |d: Done| match d {
+            Done::Layout { pages, .. } => pages,
+            _ => panic!("wrong answer"),
+        };
+        jobs.send(layout(1)).unwrap();
+        let without = pages(rx.recv().unwrap());
+        let rgba = nexus_core::art::test_card(80, 60);
+        let art = Art::prepare("art-test", 80, 60, &rgba).unwrap();
+        jobs.send(Job::Art(Arc::new(art))).unwrap();
+        jobs.send(layout(2)).unwrap();
+        let with = pages(rx.recv().unwrap());
+        // The Music page: no clock on it, so only the artwork can differ.
+        assert_eq!(Config::default_layout().pages[1].name, "Music");
+        assert_ne!(without[1], with[1], "the media card shows the art");
     }
 }
