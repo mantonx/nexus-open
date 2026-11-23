@@ -547,4 +547,8 @@ README clip (now of the new strip), release verification.
   `file://` PNG, an `http://127.0.0.1` JPEG (fetched once, then from
   the cache), a `data:` PNG, a link refused with one log line, and
   `local` and `off` taking effect on the next track. Not yet on the
-  real panel, nor with a real player.
+  real panel, nor with a real player. Changed after review (Claude): a
+  `file://` cover behind a link is now read, because players keep covers
+  behind links and the daemon reads only what its user can. The file is
+  opened without blocking and checked once open, so a pipe or a device is
+  still refused, behind a link or not.

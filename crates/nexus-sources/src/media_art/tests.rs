@@ -268,14 +268,25 @@ fn a_cut_off_jpeg_is_an_error_or_a_picture_never_a_crash() {
 }
 
 #[test]
-fn a_link_a_directory_or_a_huge_file_is_not_read() {
+fn a_directory_a_pipe_or_a_huge_file_is_not_read_but_a_link_is() {
     let d = dir("hostile");
     let real = d.join("real.png");
     std::fs::write(&real, encoded(image::ImageFormat::Png)).unwrap();
+    // Players keep covers behind links; a link to a picture is read.
     let link = d.join("link.png");
     std::os::unix::fs::symlink(&real, &link).unwrap();
-    let err = load(&file_url(&link), AlbumArt::All, &agent()).unwrap_err();
-    assert!(err.contains("regular file"), "{err}");
+    assert!(load(&file_url(&link), AlbumArt::All, &agent()).is_ok());
+    // A pipe with no writer must not block the source.
+    let fifo = d.join("fifo.png");
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+    if made.is_ok_and(|s| s.success()) {
+        let err = load(&file_url(&fifo), AlbumArt::All, &agent()).unwrap_err();
+        assert!(err.contains("regular file"), "{err}");
+        let link = d.join("fifo-link.png");
+        std::os::unix::fs::symlink(&fifo, &link).unwrap();
+        let err = load(&file_url(&link), AlbumArt::All, &agent()).unwrap_err();
+        assert!(err.contains("regular file"), "{err}");
+    }
     let err = load(&file_url(&d), AlbumArt::All, &agent()).unwrap_err();
     assert!(err.contains("regular file"), "{err}");
     let big = d.join("big.png");

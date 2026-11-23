@@ -144,17 +144,21 @@ fn read_file(url: &str) -> Result<Vec<u8>, String> {
         _ => return Err("the file is on another computer".into()),
     };
     let path = PathBuf::from(percent_decode(&path)?);
-    // The address itself, not what a link there leads to: a link is not
-    // a regular file, and nor is a pipe or a device, which could block
-    // the read forever or never end.
-    let meta = std::fs::symlink_metadata(&path).map_err(|e| format!("cannot read it: {e}"))?;
+    // Only a regular file is read: a pipe or a device could block the
+    // read forever or never end. The file is opened without blocking and
+    // then checked, so what is checked is what is read, even if the path
+    // changes in between. Links are followed: players keep their covers
+    // behind them, and the daemon can read only what its user can.
+    let file = open_nonblocking(&path).map_err(|e| format!("cannot read it: {e}"))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| format!("cannot read it: {e}"))?;
     if !meta.file_type().is_file() {
         return Err("it is not a regular file".into());
     }
     if meta.len() > MAX_FILE {
         return Err(format!("the file is larger than {} MB", MAX_FILE >> 20));
     }
-    let file = File::open(&path).map_err(|e| format!("cannot read it: {e}"))?;
     let mut bytes = Vec::new();
     file.take(MAX_FILE + 1)
         .read_to_end(&mut bytes)
@@ -163,6 +167,21 @@ fn read_file(url: &str) -> Result<Vec<u8>, String> {
         return Err(format!("the file is larger than {} MB", MAX_FILE >> 20));
     }
     Ok(bytes)
+}
+
+/// Opens `path` for reading. On Unix with `O_NONBLOCK`, so opening a pipe
+/// with no writer returns at once instead of waiting for one; the flag
+/// does nothing to reads from a regular file.
+fn open_nonblocking(path: &std::path::Path) -> std::io::Result<File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        const O_NONBLOCK: i32 = 0o4000;
+        options.custom_flags(O_NONBLOCK);
+    }
+    options.open(path)
 }
 
 /// "%20" and the like, to bytes; a path need not be UTF-8, but this one
