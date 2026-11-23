@@ -570,3 +570,29 @@ README clip (now of the new strip), release verification.
     licence.
   - Escape closes a sheet even when a field in it has focus. Focus stays
     in Settings after a feed is removed, moved or added.
+- 2026-11-22 — **The window's closing fixes, provisional (Claude; Matt to
+  overturn).** After the round's rescores (light 30/40, dark 29/40):
+  - When the strip is not showing the layout but the service runs
+    (unplugged, held by another program, no access, needs a replug), the
+    previews dim and a neutral banner says why and what to do, ending
+    "You can keep editing: changes are saved, and the strip shows them
+    when it is back." The chip stays neutral.
+  - These states have no "Try again". The service retries the strip by
+    itself (every second at most) and the window follows within a second,
+    so the button did nothing the app was not already doing. The words now
+    say the app picks the strip up by itself. Program names are shown as
+    people know them ("Steam", not "steam").
+  - A start that ran but has not answered after ten seconds is its own
+    state, "Not answering", no longer "Did not start" with a sentence
+    saying it was started. While the service is down, the banner says
+    nothing here can be changed, and no sentence promises that a change
+    waits.
+  - The Settings sheet scrolls. A layout measures wrapped words as one
+    line, so its content reported less height than it drew (629 px
+    against about 690), was cut at the bottom and could not scroll. The
+    scroll area now allows for those lines, and the bottom fades while
+    there is more below.
+  - The selected widget has its own mark: a cream outline with a filled
+    corner tab, plus the accent grip where its edge can move. The page
+    keeps its single neutral line on the bezel. DESIGN.md, Shared
+    identity, lists the marks.
