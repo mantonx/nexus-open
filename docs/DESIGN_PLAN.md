@@ -645,3 +645,30 @@ README clip (now of the new strip), release verification.
   behind links and the daemon reads only what its user can. The file is
   opened without blocking and checked once open, so a pipe or a device is
   still refused, behind a link or not.
+- 2026-11-22 — Switching layouts from the strip, provisional (Matt to
+  overturn any of it). Matt wanted up and down swipes to switch layouts;
+  the strip senses no vertical position (`docs/USB_PROTOCOL.md`), so
+  **hold, then slide** stands in. A finger held within 24 px of where it
+  landed for 0.5 s arms; moving 24 px from there opens a full-strip
+  picker of the store's layouts (cards in name order, centred on the
+  current one, the highlighted one accent-filled); one card per 72 px of
+  travel, stopping at the ends; lifting switches, lifting on the current
+  one cancels. Only with two or more layouts; never from a slider; never
+  over the alarm, which closes it if it rises. The switch is the window's
+  own `Edit::Activate` request, so the window follows and it is undoable.
+  After it, the new layout from its first page, its name shown for 1 s
+  between takeover fades (`DESIGN.md`, Layout picker).
+  Behaviour changes that came with it: **a long press now fires on the
+  lift**, not at 0.5 s with the finger down (the fill completes at 0.5 s
+  and stays full; sliding away cancels it); a press that wanders 24 px
+  before 0.5 s is no longer a hold (lifted later it does nothing; before,
+  "still" meant only short of the 45–58 px swipe threshold, which let a
+  slow swipe count as a hold); and resting half a second then swiping no
+  longer changes page (it is a hold-then-slide). The fill's "flash on
+  fire" in `DESIGN.md` was never drawn and is gone from it.
+  Proof: synthesised traces (`swipe-slow`, `pick-right-two`,
+  `pick-back-cancel`, `hold-key-lift`, `pick-from-key`,
+  `pick-on-slider`) replayed by the recognizer and the engine, with
+  Matt's recorded taps, swipes and lift bounces; frames `picker-*`,
+  `layout-name*`. Not yet tried on the real strip: whether 24 px and
+  72 px feel right under a finger is the first thing to check.
