@@ -596,3 +596,17 @@ README clip (now of the new strip), release verification.
     corner tab, plus the accent grip where its edge can move. The page
     keeps its single neutral line on the bezel. DESIGN.md, Shared
     identity, lists the marks.
+- 2026-11-22 — **U5 met:** the final isolated reviews scored the window
+  31/40 (light) and 30/40 (dark), against a target of 30. `feat/window-final`
+  is merged. It adds the news feed settings (in Settings, renamed from
+  Preferences; each feed is checked when added), neutral app-state chips, a
+  critical failed start, the strip-away banner, a selection corner tab, and
+  more. It is installed on Matt's machine; the store is still at schema 4,
+  integrity ok. Still open from those reviews, for a short follow-up with
+  the album-art wiring:
+  - **P1:** a failed start leaves someone who never opens a terminal no
+    way forward.
+  - **P2:** with editing blocked, the editor still looks editable.
+  - **P2:** the banner and the popover order their buttons differently.
+  - **P2:** at 1024×640 the window splits into two grids.
+  - **P2:** the widget editor shows every field at once.
