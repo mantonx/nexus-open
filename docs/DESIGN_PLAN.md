@@ -517,3 +517,29 @@ README clip (now of the new strip), release verification.
   The choices are: let the unit go under a larger number at under 18 px;
   widen the card (his layout has six 106 px cards); or accept the stack.
   Decide by looking at the strip.
+- 2026-11-22 — Real album artwork, provisional (Matt to overturn any of
+  it). The media source reads `mpris:artUrl`; `file://` (regular files
+  under 10 MB, not links), `data:` (base64, 2 MB) and `https://` /
+  `http://` (plain GET, shared user agent, 5 s, 5 MB) are read, anything
+  else ignored. The setting is `[media] album_art = "all" | "local" |
+  "off"`, default `"all"`. **Not under `[settings]`** as first asked:
+  the window's settings form builds `Settings` from its own fields, so a
+  field there would break its build and then be reset by every save;
+  `[media]` is its own column and `set-media` edit, as `[news]` is for
+  the same reason. Decoding: the `image` crate (PNG, JPEG, WebP only;
+  already in the build through Slint, so nothing new is compiled in),
+  4096 px a side, 80 MB. Prepared once per track at 33 and 35 px: centre
+  square, area averaging in linear light (it matches Pillow's BOX filter
+  exactly; tent and Lanczos3 were compared on the test card: tent is
+  softer, Lanczos rings at the border, and all three leave a faint beat
+  on a 4 px checker at 8.6:1). Cached by address, about four tracks
+  (112 kB). The engine gets the pixels with `Input::Art` and draws them
+  while `media.art` names their key, so signals stay numbers and text.
+  No fade: nothing on the strip fades in place, so the switch is
+  instant. The window's previews get the same pixels with the `art`
+  control request (`nexus_control::ArtReply`); not wired in the window
+  yet. Render cost (median update, Home page with a track playing, on
+  the shared dev machine): placeholder 264–310 µs, artwork 233–283 µs.
+  Frames: `specimen-media-art-playing`, `-paused`,
+  `takeover-now-playing-art`, `-paused`. Still undecided (PRODUCT.md):
+  whether the accent may follow the artwork.

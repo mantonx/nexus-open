@@ -1478,6 +1478,24 @@ mod tests {
         assert_eq!(duration::parse("5 weeks"), None);
     }
 
+    #[test]
+    fn album_art_is_all_unless_the_layout_says() {
+        let page = "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"clock\"\nwidth = 640\n";
+        assert_eq!(Config::parse(page).unwrap().media.album_art, AlbumArt::All);
+        for (name, want) in [
+            ("local", AlbumArt::Local),
+            ("all", AlbumArt::All),
+            ("off", AlbumArt::Off),
+        ] {
+            let c = Config::parse(&format!("[media]\nalbum_art = \"{name}\"\n{page}")).unwrap();
+            assert_eq!(c.media.album_art, want);
+            assert_eq!(AlbumArt::from_name(name), Some(want));
+        }
+        let err = Config::parse(&format!("[media]\nalbum_art = \"web\"\n{page}")).unwrap_err();
+        assert!(err.0.contains("local"), "{err}");
+        assert!(Config::parse(&format!("[media]\nart = \"off\"\n{page}")).is_err());
+    }
+
     /// The News page docs/LAYOUT.md offers is the one the frames draw.
     #[test]
     fn the_layout_reference_offers_the_news_page() {
