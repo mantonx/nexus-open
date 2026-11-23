@@ -104,11 +104,21 @@ Byte  Meaning
 0     Report ID (0x01)
 1     Report type (0x02)
 2     Touch marker (0x21 when touch data is present)
-3–4   Unknown — not read
+3–4   Always 0x00 0x00 (measured; see below)
 5     Touch state: 0 = not touching, non-zero = finger down
 6     X position, low byte  (raw range 0–486)
 7     X position, high byte
+8–9   A copy of bytes 6–7
+10–   Zero
 ```
+
+**There is no vertical axis.** Measured on 2026-11-22 by recording every
+raw report (read-only, beside the daemon) while a finger swiped up and
+down, rested at the top and bottom edges, and swiped left and right.
+Across 381 reports, bytes 3–4 were always zero, bytes 8–9 always equalled
+bytes 6–7, and bytes 10–31 were always zero. A vertical swipe arrives as a
+contact of about 0.1 s at one X, the same as a tap, so up and down cannot be
+told apart and a vertical swipe over a key presses it.
 
 The raw X coordinate ranges from 0 to 486 (observed device maximum) and is
 normalized to screen pixels (0–639) by `HIDTouchReader`. The reader
