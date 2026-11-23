@@ -2735,6 +2735,7 @@ pub fn describe(w: &Widget) -> String {
         Widget::Clock { .. } => "Clock".into(),
         Widget::Media { .. } => "Now playing".into(),
         Widget::News { .. } => "News".into(),
+        Widget::Forecast { .. } => "Forecast".into(),
         Widget::Key { icon, label, .. } => label
             .iter()
             .chain(icon)
@@ -2761,6 +2762,7 @@ fn widget_icon(w: &Widget) -> char {
         Widget::Rate { .. } => names::icon::DOWN,
         Widget::Slider { .. } => names::icon::SLIDERS,
         Widget::News { .. } => nexus_core::icons::NEWSPAPER,
+        Widget::Forecast { .. } => nexus_core::icons::CLOUD,
     }
 }
 

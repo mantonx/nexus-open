@@ -12,6 +12,7 @@ pub mod demo;
 pub(crate) mod draw;
 pub mod engine;
 pub mod fonts;
+pub mod forecast;
 pub mod gesture;
 pub mod icons;
 pub mod layout;

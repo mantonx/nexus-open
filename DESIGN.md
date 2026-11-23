@@ -344,6 +344,7 @@ card beside it (content centres in its room when it has spare width).
 | Slider (volume) | icon + "40%" at 20; full-width track and thumb | icon + 40% at 32 + track and thumb | icon + 40% at 50 + track with 0–100 ticks |
 | Key | icon (label from 96 px) | icon + label | icon + label + second line ("Hold for a new window") |
 | News | the whole card a key: newspaper `ICON_KEY` 22 in the accent + the headline's age ("12 min") at `TITLE` 20, centred; no headline, which would be two words at this width | the whole card a key: the headline alone, over two lines at `LABEL` 18 in TEXT (baselines `NEWS_BASE1` 23.5 and `NEWS_BASE2` 41.5), as many whole words as fit on the first, the second cut by `fit`; one line with nothing under it is centred (`NEWS_BASE_ONE` 33). About 30 characters at 200 px | the same two lines; after the headline's end on line two, `NEWS_FROM_GAP` 12 px on, the newspaper at `ICON_SMALL` 17 in the accent + "Harbour Gazette · 12 min" in TEXT2, when it fits there; else left out. About 60 characters at 320 px, 80 at 440, 100 at 512 |
+| Forecast | the next change's icon + its time ("15:00", "6 PM") or word ("Dry") at the largest of 26 / 22, 22 / 22, 22 / 17, 20 / 17 (figure / icon) that holds the widest time; narrower, the icon above a 20 px time; else the icon alone. The same for every `show` | `hours` / `days`: as many fixed columns as fit (two hours or one day at 200 px); `next`: icon 26 + the sentence at `TITLE` 20 on one line when it fits, else "Rain from" (`BODY`) over "15:00" (`LABEL`) | `hours` / `days`: three to seven columns; `next`: icon 30 + the sentence at `TITLE_BIG` 26, centred. See Forecast below |
 
 Frames: `specimen-*.png` draws every widget in zones of 128, 200 and
 312 px (cards of 124, 196 and 308) in each state.
@@ -374,6 +375,80 @@ day in °F; "-88°" is narrower). Frames: `live-p1-rate` ("512 kB/s" in
 the owner's 106 px zone), `overflow-sweep-rate`, `-load`, `-memory` and
 `-weather` (each at its worst value in zones of 124, 112, 106, 102, 100
 and 96 px).
+
+### Forecast (provisional, 2026-11-22, Matt to choose by looking)
+
+The `forecast` widget shows the weather to come from the one Open-Meteo
+request the weather card uses (`nexus_core::forecast`). `show` picks one
+of three designs; all three share the weather card's states (no data:
+the cloud with a slash and "No forecast yet"; lost or 45 minutes old:
+the cloud with a slash and "Forecast from 9:30", in TEXT3, the old
+hours left out because they are past; not set up: "Weather / Add your
+town"). It is information: flat card, no accent, a tap does nothing
+unless the layout gives it a `tap`, and there is no long press, since
+no widget changes its own settings by touch.
+
+- **`next` (the default).** The next notable change in the next 12
+  hours, in words: "Rain from 15:00", "Clearing by 18:00", "Snow
+  tonight", "Dry all day". Icon 30 and the sentence at `TITLE_BIG` 26,
+  centred, at hero; at medium the icon 26 and the sentence at `TITLE`
+  on one line when it fits, else two 18 px lines. The time follows the
+  clock setting and is never cut.
+- **`hours`.** One column every three hours, at the clock's 3-hour marks
+  (12:00, 15:00 …), eight published: the hour (`LABEL`, TEXT2) over the
+  condition icon (17) and the temperature (`NUM_SECOND_SMALL` 20, TEXT).
+  Every column is the same width, laid out for the widest hour ("88:00"
+  or "88 PM") and temperature ("888°" in °F, "-88°" in °C), each line
+  centred in it, and as many as fit are spread over the card: 2 at 200
+  px, 3 at 320, 5 at 440, 7 at 640.
+- **`days`.** The five days after today, one column each: the short day
+  name and the icon, over the high (TEXT) and the low (TEXT2), both at
+  20. Today is skipped: the weather card beside it already has today's
+  high and low. 1 at 200 px, 2 at 320, 3 at 440, 5 at 640.
+
+**Rain chance is a gauge, not a figure.** From 30 % (`RAIN_SHOWN`) a
+column carries a pill `FORECAST_GAUGE_W` 4 px wide at its left, 30 px
+tall, filled from the bottom on a fixed 0–100 % scale, in FILL on
+TRACK, like every bar here. Its lane is kept in every column, so a
+column does not move when rain comes. A figure ("60%") did not fit: an
+hour and "100%" side by side need about 108 px a column, which leaves 2
+columns at 320 and 1 at 200, where the gauge leaves 3 and 2; and a
+third line does not fit in 41 px. Read together across the columns the
+gauges draw where the rain is and how likely, at a glance.
+
+**Why `next` is the default.** From the seat it is the one that reads
+at once: one fact, at 26 px (the hours and days are 18–20 px figures,
+seven pairs of them at 640), and it answers the question a glance at the
+weather asks ("do I need a coat later?") without adding anything up.
+It is also the calmest: it changes a few times a day, not every 15
+minutes. It works at every width, down to the icon and "15:00" in a
+106 px zone. Hours and days stay one `show` away for those who plan.
+Provisional: Matt to choose by looking at the frames below, or at the
+whole sheet (`cargo run -p nexus-core --example forecast_sheet -- DIR`
+writes every variant at 200, 320, 440 and 640 px, and on Home, at 3×).
+
+**The rule for the next change** (`forecast::next_change`), hour by
+hour over the next 12 hours. An hour is wet when its WMO code says
+something falls (drizzle, rain, snow, storms) at a chance of 30 % or
+more. Dry now: the first wet hour is the change, "{Rain} from 15:00",
+or "{Snow} tonight" when it is day now (06:00 to 17:59, by the clock,
+not sunset) and that hour is night; no wet hour, "Dry all day" (by day) or "Dry tonight". Wet now:
+the first dry hour followed by another dry hour (or ending the window)
+is "Clearing by 18:00", so one dry hour between showers is not
+clearing; none, "{Rain} all day" or "all night". The source publishes
+it as a key ("rain-from") and the hour; the words are made on the
+strip, in `forecast::Change::words`, the one place to translate them,
+with the time as the clock setting writes it.
+
+An hour column's icon is the worst weather that falls in its three hours
+(so rain at 13:00 shows on the 12:00 column), else the weather at its
+hour; its rain chance is the highest of the three.
+
+Frames: `forecast-hours`, `-days`, `-next` (128, 200 and 312 px: the
+compact form in the 128), `-hours-wide`, `-days-wide`, `-next-wide`
+(640), `forecast-compact` and `-compact-12h` (128 down to 62 px),
+`forecast-home-*` (beside the clock and the weather on Home),
+`forecast-not-set-up`, `-no-data`, `-lost`.
 
 ### The default layout
 
@@ -657,7 +732,7 @@ something settling), except where noted.
 ### Icons
 
 **Phosphor** 2.1.2 (MIT, `@phosphor-icons/web`), two weights subset into
-`assets/fonts/Phosphor-Fill.ttf` and `Phosphor-Bold.ttf` (67 glyphs,
+`assets/fonts/Phosphor-Fill.ttf` and `Phosphor-Bold.ttf` (70 glyphs,
 `pyftsubset`; licence in `assets/fonts/licenses/Phosphor-LICENSE.txt`).
 Phosphor's rounded joins and terminals match Rubik; Font Awesome (still
 bundled for the shipped widgets) is blockier and is not used here.
@@ -671,6 +746,7 @@ bundled for the shipped widgets) is blockier and is not used here.
 | arrow-down / arrow-up | U+E03E / U+E08E | Bold | Network down / up |
 | cloud (and cloud-sun, cloud-rain, cloud-moon, sun, moon) | U+E1AA, E540, E1B4, E53E, E472, E330 | Fill | Weather condition |
 | cloud-slash | U+E1B6 | Fill | Weather with no data or stale |
+| cloud-snow, cloud-lightning, cloud-fog | U+E1B8, E1B2, E53C | Fill | Snow, storms and fog (WMO 71–77 and 85–86, 95–99, 45 and 48). Drawn for the weather only: a layout cannot name them until the window's own subset has them (`icons::WEATHER_ONLY`) |
 | speaker-high / speaker-low / speaker-x | U+E44A / E44C / E45C | Fill | Volume; muted |
 | play / pause / skip-back / skip-forward | U+E3D0 / E39E / E5A4 / E5A6 | Fill | Transport |
 | music-note | U+E33C | Bold | Nothing playing |
@@ -732,6 +808,7 @@ All optional; existing layouts keep working unchanged.
 | `[news]` | top level | `feeds`, `rotate`, `max_age` | The feeds to read; see docs/LAYOUT.md |
 | `album_art` | `[media]` | `"all"` (default), `"local"`, `"off"` | Where the media widget's artwork may come from; `"all"` fetches covers from the player's image host. See docs/LAYOUT.md |
 | `type = "news"` | widget | optional `tap`, `hold` | One headline at a time; tap opens it, hold shows the next |
+| `type = "forecast"` | widget | optional `show` (`"next"`, the default; `"hours"`; `"days"`), `tap`, `hold` | The weather to come (Forecast) |
 | `news = "open"` / `"next"` | action | – | Open the headline showing; show the next one |
 
 `graph = "area" | "line"` on existing `value` widgets is accepted and drawn
@@ -773,8 +850,9 @@ signal's base unit (°C).
 6. **The Desk page** shows the same two things as Home (clock, weather),
    bigger and with more detail. It passes "not stretched", narrowly.
 7. Whether the alarm should also sound or notify the desktop (not drawn).
-8. Weather conditions beyond "cloudy" are mapped to Phosphor icons but not
-   drawn in frames.
+8. Weather conditions beyond "cloudy" are mapped to Phosphor icons. Rain,
+   snow and storms are now drawn in the forecast frames (2026-11-22);
+   fog is not.
 9. **Accents near amber.** The isolated review (25/36) read a marigold
    slider beside a warning card as "a second warning". Settled in U3: a
    hue in the band 15°–105° moves to its nearer end (see Colour), and the
@@ -828,6 +906,10 @@ signal's base unit (°C).
     Home (124 px) is 32 px, not 40, and in the owner's 107 px zone 28.
     Ways out: wider zones for those widgets; or "kB" without "/s",
     if Matt reads it as a rate.
+18. **The forecast's default `show`** is `next` (provisional,
+    2026-11-22, Matt to choose by looking; see Forecast). Hours and
+    days are one setting away; the forecast is not on the default
+    layout.
 
 ## Shared identity
 

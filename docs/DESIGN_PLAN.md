@@ -645,3 +645,23 @@ README clip (now of the new strip), release verification.
   behind links and the daemon reads only what its user can. The file is
   opened without blocking and checked once open, so a pipe or a device is
   still refused, behind a link or not.
+- 2026-11-22 — **Forecast (provisional, Matt to choose by looking).**
+  The weather request now also asks for the hourly and daily forecast,
+  still one request every 15 minutes. A `forecast` widget shows it with
+  `show = "next"`, `"hours"` or `"days"`, and the default is **`next`**:
+  the next change in words ("Rain from 15:00", "Clearing by 18:00",
+  "Snow tonight", "Dry all day") at 26 px. It is one fact that reads at
+  once from the seat; the hours and days are 20 px figures, seven pairs
+  of them at 640 px. Choices made with it, also provisional:
+  - Hours run every three hours on the clock's 3-hour marks, so eight
+    columns cover a day. The next change reads every hour, so nothing
+    between the columns is missed.
+  - Days skip today, because the weather card has it.
+  - Rain shows from 30 % as a fill gauge, not a figure. A figure cost
+    a column at every width.
+  - A tap and a long press do nothing. No widget cycles its own
+    setting, so none is started here.
+  - The forecast is not on the default layout; LAYOUT.md has an
+    example.
+  The frames are `tests/frames/forecast-*`. DESIGN.md, Forecast, has
+  the rules.
