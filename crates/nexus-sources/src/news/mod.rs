@@ -38,7 +38,7 @@ use nexus_core::signal::{Unit, Value};
 use crate::Reading;
 
 mod clean;
-mod fetch;
+pub(crate) mod fetch;
 mod parse;
 #[cfg(test)]
 mod tests;

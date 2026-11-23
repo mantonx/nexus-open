@@ -6,19 +6,26 @@
 //! reads every player afresh. Players do not announce their position as it
 //! advances, so while a track plays the state thread moves the position on
 //! by itself once a second, from the last position a player reported.
+//!
+//! The track's artwork (`mpris:artUrl`) is loaded on a thread of its own
+//! (`media_art`); the state thread hands it on, then names it in
+//! `media.art`.
 
 use std::collections::HashMap;
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::Arc;
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use nexus_core::config::MediaCommand;
+use nexus_core::art::Art;
+use nexus_core::config::{AlbumArt, MediaCommand};
 use nexus_core::signal::{Unit, Value};
 use zbus::blocking::{Connection, MessageIterator, fdo::DBusProxy};
 use zbus::zvariant::{OwnedValue, Value as Variant};
 use zbus::{MatchRule, message::Type};
 
 use crate::Reading;
+use crate::media_art::{self, Artwork};
 
 const PREFIX: &str = "org.mpris.MediaPlayer2.";
 const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
@@ -42,6 +49,18 @@ pub struct Track {
     /// The player's ID for the track (`mpris:trackid`), needed to seek to
     /// an absolute position.
     pub id: Option<String>,
+    /// Where the player says the track's artwork is (`mpris:artUrl`).
+    pub art_url: Option<String>,
+}
+
+/// What wakes the state thread.
+pub enum Wake {
+    /// A player appeared, went, changed or seeked.
+    Players,
+    /// The loader's answer for an artwork address.
+    Art(String, Option<Art>),
+    /// `album_art` changed.
+    Policy(AlbumArt),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -72,25 +91,46 @@ impl Status {
 
 /// Starts watching media players. Does nothing if there is no session bus
 /// (a headless machine); that is not an error worth more than a line.
-pub fn spawn(mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
+/// Artwork goes to `show_art` before `media.art` names it. The sender
+/// returned takes `Wake::Policy` when `album_art` changes.
+pub fn spawn(
+    mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static,
+    mut show_art: impl FnMut(Arc<Art>) -> bool + Send + 'static,
+    policy: AlbumArt,
+) -> Option<Sender<Wake>> {
     let conn = match Connection::session() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("nexusd: media: no session bus ({e}); media will not show");
-            return;
+            return None;
         }
     };
-    let (wake, woken) = mpsc::channel::<()>();
-    if let Err(e) = listen(&conn, wake) {
+    let (wake, woken) = mpsc::channel::<Wake>();
+    if let Err(e) = listen(&conn, wake.clone()) {
         eprintln!("nexusd: media: cannot watch players ({e}); media will not show");
-        return;
+        return None;
     }
+    let answers = wake.clone();
+    let loader = media_art::spawn_loader(move |url, art| answers.send(Wake::Art(url, art)).is_ok());
     thread::Builder::new()
         .name("media-source".into())
         .spawn(move || {
+            let mut artwork = Artwork::new(policy, loader);
             let mut current: Option<Track> = None;
             let mut read_at = Instant::now();
             let mut published = false;
+            // Hands an artwork change on: the pixels, then their name.
+            let mut hand_on =
+                |update: media_art::Update, publish: &mut dyn FnMut(Vec<Reading>) -> bool| {
+                    if let Some(art) = update.art
+                        && !show_art(art)
+                    {
+                        return false;
+                    }
+                    update
+                        .key
+                        .is_none_or(|key| publish(vec![("media.art", Value::Text(key))]))
+                };
             loop {
                 let fresh = read_all(&conn);
                 let next = choose(&fresh, current.as_ref().map(|t| t.player.as_str()));
@@ -102,6 +142,10 @@ pub fn spawn(mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
                         return;
                     }
                 }
+                let url = current.as_ref().and_then(|t| t.art_url.as_deref());
+                if !hand_on(artwork.track(url), &mut publish) {
+                    return;
+                }
                 // Sleep until a player changes, ticking the position meanwhile.
                 loop {
                     let playing = current
@@ -112,12 +156,8 @@ pub fn spawn(mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
                     } else {
                         woken.recv().map_err(|_| RecvTimeoutError::Disconnected)
                     };
-                    match event {
-                        Ok(()) => {
-                            // A change often arrives as a burst; read once.
-                            while woken.try_recv().is_ok() {}
-                            break;
-                        }
+                    let wake = match event {
+                        Ok(wake) => wake,
                         Err(RecvTimeoutError::Timeout) => {
                             if let Some(t) = &current {
                                 let position = advanced(t, read_at.elapsed());
@@ -126,13 +166,37 @@ pub fn spawn(mut publish: impl FnMut(Vec<Reading>) -> bool + Send + 'static) {
                                     return;
                                 }
                             }
+                            continue;
                         }
                         Err(RecvTimeoutError::Disconnected) => return,
+                    };
+                    // A change often arrives as a burst; read players once.
+                    let mut players = false;
+                    for wake in std::iter::once(wake).chain(woken.try_iter()) {
+                        let update = match wake {
+                            Wake::Players => {
+                                players = true;
+                                continue;
+                            }
+                            Wake::Art(url, art) => artwork.arrived(&url, art),
+                            Wake::Policy(policy) => {
+                                artwork.set_policy(policy);
+                                let url = current.as_ref().and_then(|t| t.art_url.as_deref());
+                                artwork.track(url)
+                            }
+                        };
+                        if !hand_on(update, &mut publish) {
+                            return;
+                        }
+                    }
+                    if players {
+                        break;
                     }
                 }
             }
         })
         .expect("spawning a thread");
+    Some(wake)
 }
 
 /// Sends a play/pause, next, previous or stop to the player the media
@@ -184,7 +248,7 @@ pub fn seek(seconds: f64) {
 
 /// Wakes `wake` on every player event: a player starting or quitting, a
 /// property change, a seek.
-fn listen(conn: &Connection, wake: mpsc::Sender<()>) -> zbus::Result<()> {
+fn listen(conn: &Connection, wake: Sender<Wake>) -> zbus::Result<()> {
     let bus = DBusProxy::new(conn)?;
     let rules = [
         MatchRule::builder()
@@ -221,7 +285,7 @@ fn listen(conn: &Connection, wake: mpsc::Sender<()>) -> zbus::Result<()> {
                 if matches!(
                     member,
                     Some("PropertiesChanged" | "Seeked" | "NameOwnerChanged")
-                ) && wake.send(()).is_err()
+                ) && wake.send(Wake::Players).is_err()
                 {
                     return;
                 }
@@ -280,6 +344,9 @@ fn read_player(conn: &Connection, name: &str) -> Option<Track> {
             Variant::ObjectPath(p) => Some(p.to_string()),
             other => text(other),
         }),
+        art_url: meta_get("mpris:artUrl")
+            .and_then(text)
+            .filter(|u| !u.trim().is_empty()),
     })
 }
 
