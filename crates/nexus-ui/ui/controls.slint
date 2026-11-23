@@ -228,14 +228,14 @@ export component Segmented inherits Rectangle {
                 if root.icons[i] != "": Icon {
                     glyph: root.icons[i];
                     font-size: 15px;
-                    color: chosen ? Theme.text : Theme.text-3;
+                    color: !root.enabled ? Theme.text-off : chosen ? Theme.text : Theme.text-3;
                 }
                 Text {
                     text: s;
                     font-family: Theme.font;
                     font-size: root.small ? Theme.size-label : Theme.size-body;
                     font-weight: chosen ? 600 : 500;
-                    color: chosen ? Theme.text : Theme.text-2;
+                    color: !root.enabled ? Theme.text-off : chosen ? Theme.text : Theme.text-2;
                     vertical-alignment: center;
                 }
             }
@@ -360,9 +360,11 @@ export component TextField inherits Rectangle {
 
     height: Theme.control-h;
     border-radius: Theme.r-control;
-    background: root.enabled ? (Theme.dark ? Theme.ground : Theme.surface) : Theme.surface-2;
+    // Disabled: flat, a faint edge and dimmed words, so it reads as not
+    // editable before it is clicked (text-off is 3:1 or better).
+    background: root.enabled ? (Theme.dark ? Theme.ground : Theme.surface) : transparent;
     border-width: 1px;
-    border-color: Theme.field-line;
+    border-color: root.enabled ? Theme.field-line : Theme.line;
     horizontal-stretch: 1;
     min-width: 80px;
 
@@ -383,7 +385,7 @@ export component TextField inherits Rectangle {
                 vertical-alignment: center;
                 font-family: Theme.font;
                 font-size: Theme.size-body;
-                color: Theme.text;
+                color: root.enabled ? Theme.text : Theme.text-off;
                 selection-background-color: Theme.act-wash;
                 selection-foreground-color: Theme.text;
                 enabled: root.enabled;
@@ -409,7 +411,7 @@ export component TextField inherits Rectangle {
                 text: root.placeholder;
                 font-family: Theme.font;
                 font-size: Theme.size-body;
-                color: Theme.text-3;
+                color: root.enabled ? Theme.text-3 : Theme.text-off;
                 vertical-alignment: center;
                 x: 0;
                 height: parent.height;
@@ -435,9 +437,9 @@ export component Select inherits Rectangle {
 
     height: Theme.control-h;
     border-radius: Theme.r-control;
-    background: touch.has-hover && root.enabled ? Theme.raised.brighter(0.06) : Theme.raised;
+    background: !root.enabled ? transparent : touch.has-hover ? Theme.raised.brighter(0.06) : Theme.raised;
     border-width: 1px;
-    border-color: Theme.field-line;
+    border-color: root.enabled ? Theme.field-line : Theme.line;
     horizontal-stretch: 1;
     min-width: 120px;
     accessible-role: combobox;
@@ -455,7 +457,7 @@ export component Select inherits Rectangle {
             text: root.current >= 0 ? root.options[root.current] : @tr("Choose…");
             font-family: Theme.font;
             font-size: Theme.size-body;
-            color: root.current >= 0 ? Theme.text : Theme.text-3;
+            color: !root.enabled ? Theme.text-off : root.current >= 0 ? Theme.text : Theme.text-3;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
@@ -624,19 +626,20 @@ export component MenuDivider inherits Rectangle {
 /// A keyboard key, for showing shortcuts.
 export component KeyCap inherits Rectangle {
     in property <string> text;
+    in property <bool> enabled: true;
     height: 20px;
     min-width: cap.preferred-width + 10px;
     border-radius: 5px;
-    background: Theme.surface-2;
+    background: root.enabled ? Theme.surface-2 : transparent;
     border-width: 1px;
-    border-color: Theme.line-strong;
+    border-color: root.enabled ? Theme.line-strong : Theme.line;
     accessible-role: none;
     cap := Text {
         text: root.text;
         font-family: Theme.font;
         font-size: 11px;
         font-weight: 500;
-        color: Theme.text-2;
+        color: root.enabled ? Theme.text-2 : Theme.text-off;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -646,16 +649,18 @@ export component KeyCap inherits Rectangle {
 export component Shortcut inherits HorizontalLayout {
     in property <[string]> keys;
     in property <string> does;
+    in property <bool> enabled: true;
     spacing: 3px;
     accessible-role: text;
     for k in root.keys: KeyCap {
         text: k;
+        enabled: root.enabled;
     }
     Text {
         text: " " + root.does;
         font-family: Theme.font;
         font-size: Theme.size-small;
-        color: Theme.text-3;
+        color: root.enabled ? Theme.text-3 : Theme.text-off;
         vertical-alignment: center;
     }
 }

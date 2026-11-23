@@ -88,8 +88,12 @@ export struct StatusView {
     chip: string,
     headline: string,
     body: string,
-    start: bool,
-    log: bool,
+    /// What can be done, in order, the first the main one: "start",
+    /// "retry", "run-here", "report" or "log". The banner and the chip's
+    /// popover show the same buttons in this order.
+    actions: [string],
+    /// The daemon runs as this window's child: the banner says so.
+    here: bool,
     away: bool,
     banner: string,
     banner-body: string,
@@ -244,6 +248,64 @@ component Mark inherits Rectangle {
         height: parent.height * 0.4;
         border-radius: self.height / 2;
         background: Theme.act;
+    }
+}
+
+/// The status's actions: their words, icons and what a screen reader says.
+global StatusAction {
+    public pure function text(a: string) -> string {
+        return a == "start" ? @tr("Start the service")
+            : a == "retry" ? @tr("Try again")
+            : a == "run-here" ? @tr("Run it from this window for now")
+            : a == "report" ? @tr("Report the problem")
+            : @tr("Open the log");
+    }
+    public pure function icon(a: string) -> string {
+        return a == "start" ? Glyph.power
+            : a == "retry" ? Glyph.retry
+            : a == "run-here" ? Glyph.play
+            : a == "report" ? Glyph.export
+            : Glyph.log;
+    }
+    public pure function label(a: string) -> string {
+        return a == "retry" ? @tr("Try to start the service again")
+            : a == "run-here" ? @tr("Run the service from this window until you quit it")
+            : a == "report" ? @tr("Report the problem: copies the diagnostics and opens the page for a new report in your browser")
+            : "";
+    }
+}
+
+/// The status's buttons, the same in the banner and the chip's popover:
+/// in the given order, the first the main one. Three do not fit on one
+/// line in a narrow column, so then the main one has its own.
+component StatusActions inherits VerticalLayout {
+    in property <[string]> actions;
+    callback act(string);
+    spacing: 8px;
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        for a[i] in root.actions.length <= 2 ? root.actions : [root.actions[0]]: Button {
+            tier: i == 0 ? "primary" : "default";
+            icon: StatusAction.icon(a);
+            text: StatusAction.text(a);
+            label: StatusAction.label(a);
+            clicked => {
+                root.act(a);
+            }
+        }
+    }
+    if root.actions.length > 2: HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        for a in [root.actions[1], root.actions[2]]: Button {
+            icon: StatusAction.icon(a);
+            text: StatusAction.text(a);
+            label: StatusAction.label(a);
+            clicked => {
+                root.act(a);
+            }
+        }
     }
 }
 
@@ -416,7 +478,22 @@ export component AppWindow inherits Window {
     /// The pictures are not what the strip shows: the service is down, or
     /// the strip is away. Dimmed, under a banner that says why.
     property <bool> not-live: !root.connected || root.status.away;
+    /// Why nothing in the editor can be changed now, in one line, said in
+    /// the editor itself (and not again under the strip); empty while it
+    /// can be.
+    property <string> blocked-why: root.editable || root.trying || root.panel-kind == "new-takeover" ? ""
+        : !root.connected ? (root.status.tone == "starting" ? @tr("Nothing here can be changed until the service answers.")
+            : root.status.tone == "failed" ? @tr("Nothing here can be changed until the service runs: the banner above says what to do.")
+            : @tr("Nothing here can be changed until the service runs: Start the service, above."))
+        : root.caption;
     callback start-service();
+    /// "Run it from this window for now": the daemon as the window's child.
+    callback run-here();
+    /// "Report the problem": opens the issue page (the diagnostics are
+    /// copied here first).
+    callback report-problem();
+    /// What Report did: the page is opening, or where it is.
+    in property <string> report-note;
     callback open-log();
     callback open-help();
     callback add-feed(string);
@@ -448,10 +525,10 @@ export component AppWindow inherits Window {
     property <length> strip-w: 640 * unit;
     property <length> strip-h: 48 * unit;
     property <length> strip-col: strip-w + 2 * bezel;
-    /// The content column: as wide as the strip at 2x; at 1x, the whole
-    /// width, so the settings and captions use it (the strips stay at
-    /// exactly 1x, centred in it).
-    property <length> column-w: zoom == 2 ? strip-col : max(strip-col, board.visible-width - 2 * board-pad);
+    /// The content column: exactly as wide as the strip, at 2x and at 1x,
+    /// so the strips, their captions, the toolbar and the settings share
+    /// one left edge, centred together in a wide window.
+    property <length> column-w: strip-col;
 
     public function show-sheet(name: string) {
         root.sheet = name;
@@ -485,6 +562,20 @@ export component AppWindow inherits Window {
         clip.copy();
         clip.clear-selection();
         root.copied = true;
+    }
+
+    function act(a: string) {
+        if a == "start" || a == "retry" {
+            root.start-service();
+        } else if a == "run-here" {
+            root.run-here();
+        } else if a == "report" {
+            root.copy-diagnostics();
+            root.report-problem();
+        } else if a == "log" {
+            root.open-log();
+            root.show-sheet("log");
+        }
     }
     Timer {
         interval: 2s;
@@ -728,7 +819,7 @@ export component AppWindow inherits Window {
                             // only a start that failed is critical. The words
                             // come from status.rs, so the chip's popover and
                             // this banner tell one story.
-                            if root.not-live && root.status.banner != "": offline := Rectangle {
+                            if (root.not-live || root.status.here) && root.status.banner != "": offline := Rectangle {
                                 property <bool> failed: root.status.tone == "failed";
                                 height: offline-row.preferred-height + 20px;
                                 border-radius: Theme.r-surface;
@@ -739,11 +830,15 @@ export component AppWindow inherits Window {
                                     padding: 10px;
                                     padding-left: 14px;
                                     spacing: 12px;
-                                    Icon {
-                                        glyph: root.status-glyph;
-                                        fill: true;
-                                        color: offline.failed ? Theme.crit : Theme.text-2;
-                                        font-size: 18px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        padding-top: 1px;
+                                        Icon {
+                                            glyph: root.status-glyph;
+                                            fill: true;
+                                            color: offline.failed ? Theme.crit : Theme.text-2;
+                                            font-size: 18px;
+                                        }
                                     }
                                     VerticalLayout {
                                         alignment: center;
@@ -766,32 +861,48 @@ export component AppWindow inherits Window {
                                             wrap: word-wrap;
                                             accessible-role: text;
                                         }
-                                    }
-                                    // Neutral keys, never the accent, on a banner.
-                                    if root.status.log && !root.connected: VerticalLayout {
-                                        alignment: center;
-                                        Button {
-                                            tier: "default";
-                                            icon: Glyph.log;
-                                            text: @tr("Open the log");
-                                            clicked => {
-                                                root.open-log();
-                                                root.show-sheet("log");
+                                        // Starting: nothing to press, so a moving
+                                        // mark says it is under way.
+                                        if root.status.tone == "starting": HorizontalLayout {
+                                            padding-top: 6px;
+                                            Rectangle {
+                                                height: 3px;
+                                                width: 240px;
+                                                border-radius: 1.5px;
+                                                background: Theme.line-strong;
+                                                clip: true;
+                                                accessible-role: progress-indicator;
+                                                accessible-label: @tr("Waiting for the service to answer");
+                                                Rectangle {
+                                                    property <float> t: mod(animation-tick() / 1ms, 1600) / 1600;
+                                                    width: parent.width * 0.35;
+                                                    x: (parent.width + self.width) * self.t - self.width;
+                                                    border-radius: 1.5px;
+                                                    background: Theme.text-2;
+                                                }
+                                            }
+                                            // Room after it, so the words keep the width.
+                                            Rectangle {
+                                                horizontal-stretch: 1;
                                             }
                                         }
-                                    }
-                                    if root.status.start || root.status.tone == "starting": VerticalLayout {
-                                        alignment: center;
-                                        Button {
-                                            tier: "default";
-                                            icon: root.status.tone == "starting" ? Glyph.wait : root.status.tone == "failed" ? Glyph.retry : Glyph.power;
-                                            text: root.status.tone == "starting" ? @tr("Starting…")
-                                                : root.status.tone == "failed" ? @tr("Try again") : @tr("Start the service");
-                                            enabled: root.status.tone != "starting";
-                                            label: root.status.tone == "failed" ? @tr("Try to start the service again") : "";
-                                            clicked => {
-                                                root.start-service();
+                                        // One order everywhere, the first the main
+                                        // one: the chip's popover shows the same.
+                                        // Under the words, so they wrap at any width.
+                                        if root.status.actions.length > 0: StatusActions {
+                                            padding-top: 6px;
+                                            actions: root.status.actions;
+                                            act(a) => {
+                                                root.act(a);
                                             }
+                                        }
+                                        if root.report-note != "": Text {
+                                            text: root.report-note;
+                                            font-family: Theme.font;
+                                            font-size: Theme.size-label;
+                                            color: Theme.text-2;
+                                            wrap: word-wrap;
+                                            accessible-role: text;
                                         }
                                     }
                                 }
@@ -1272,7 +1383,7 @@ export component AppWindow inherits Window {
                                     padding-top: 8px;
                                     padding-bottom: 8px;
                                     spacing: 4px;
-                                    if root.zoom == 1: Text {
+                                    if root.zoom == 1 && root.blocked-why == "": Text {
                                         text: root.problem != "" && root.connected ? root.problem : root.caption;
                                         font-family: Theme.font;
                                         font-size: Theme.size-label;
@@ -1285,7 +1396,7 @@ export component AppWindow inherits Window {
                                         spacing: 8px;
                                         min-height: 34px;
                                         if root.zoom == 2: Text {
-                                            text: root.problem != "" && root.connected ? root.problem : root.caption;
+                                            text: root.blocked-why != "" ? "" : root.problem != "" && root.connected ? root.problem : root.caption;
                                             font-family: Theme.font;
                                             font-size: Theme.size-label;
                                             color: root.problem != "" && root.connected ? Theme.crit : Theme.text-2;
@@ -1303,7 +1414,7 @@ export component AppWindow inherits Window {
                                             alignment: end;
                                             // Back from a widget to what holds it: the
                                             // page's name, or the takeover's triggers.
-                                            if root.selected >= 0: Button {
+                                            if root.selected >= 0 && root.editable: Button {
                                                 tier: "quiet";
                                                 icon: row.kind == "page" ? Glyph.sliders : Glyph.cards;
                                                 text: row.kind == "page" ? @tr("Page settings") : @tr("Takeover settings");
@@ -1325,7 +1436,7 @@ export component AppWindow inherits Window {
                                             Button {
                                                 tier: "primary";
                                                 icon: Glyph.plus;
-                                                text: root.selected >= 0 ? @tr("Add after") : @tr("Add");
+                                                text: root.selected >= 0 && root.editable ? @tr("Add after") : @tr("Add");
                                                 enabled: root.editable && root.can-add;
                                                 label: root.can-add ? @tr("Add a widget to {}", row.name) : root.add-reason;
                                                 clicked => {
@@ -1426,6 +1537,27 @@ export component AppWindow inherits Window {
                                                     }
                                                 }
                                             }
+                                            // Blocked: one line saying why, where the eye is.
+                                            if root.blocked-why != "": HorizontalLayout {
+                                                spacing: 8px;
+                                                Icon {
+                                                    glyph: Glyph.lock;
+                                                    fill: true;
+                                                    color: Theme.text-2;
+                                                    font-size: 15px;
+                                                }
+                                                Text {
+                                                    text: root.blocked-why;
+                                                    font-family: Theme.font;
+                                                    font-size: Theme.size-body;
+                                                    font-weight: 500;
+                                                    color: Theme.text-2;
+                                                    vertical-alignment: center;
+                                                    horizontal-stretch: 1;
+                                                    wrap: word-wrap;
+                                                    accessible-role: text;
+                                                }
+                                            }
                                             // The page's own setting: its name.
                                             if root.panel-kind == "page": HorizontalLayout {
                                                 spacing: 16px;
@@ -1454,7 +1586,7 @@ export component AppWindow inherits Window {
                                                             root.rename-page(text);
                                                         }
                                                     }
-                                                    Hint {
+                                                    if root.editable: Hint {
                                                         text: @tr("Click a widget on the strip above to change it, or Add to put a new one on this page.");
                                                     }
                                                 }
@@ -1517,25 +1649,30 @@ export component AppWindow inherits Window {
                                                 spacing: 16px;
                                                 Icon {
                                                     glyph: Glyph.keyboard;
-                                                    color: Theme.text-3;
+                                                    color: root.editable ? Theme.text-3 : Theme.text-off;
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["←", "→"];
                                                     does: @tr("select");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Ctrl", "← →"];
                                                     does: @tr("move");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Shift", "← →"];
                                                     does: @tr("resize");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Delete"];
                                                     does: @tr("remove");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Ctrl", "Z"];
                                                     does: @tr("undo");
                                                 }
@@ -1918,27 +2055,39 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                     accessible-role: text;
                 }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    if root.status.start: Button {
-                        tier: "primary";
-                        icon: root.status.tone == "failed" ? Glyph.retry : Glyph.power;
-                        text: root.status.tone == "failed" ? @tr("Try again") : @tr("Start the service");
-                        clicked => {
-                            root.start-service();
-                        }
+                if root.status.tone == "starting": Rectangle {
+                    height: 3px;
+                    border-radius: 1.5px;
+                    background: Theme.line;
+                    clip: true;
+                    accessible-role: progress-indicator;
+                    accessible-label: @tr("Waiting for the service to answer");
+                    Rectangle {
+                        property <float> t: mod(animation-tick() / 1ms, 1600) / 1600;
+                        width: parent.width * 0.35;
+                        x: (parent.width + self.width) * self.t - self.width;
+                        border-radius: 1.5px;
+                        background: Theme.text-2;
                     }
-                    if root.status.log: Button {
-                        icon: Glyph.log;
-                        text: @tr("Open the log");
-                        clicked => {
-                            root.open-log();
-                            root.show-sheet("log");
+                }
+                // The same buttons as the banner, in the same order.
+                if root.status.actions.length > 0: StatusActions {
+                    actions: root.status.actions;
+                    act(a) => {
+                        root.act(a);
+                        if a == "log" {
                             // Last: closing first would end this handler.
                             status-menu.close();
                         }
                     }
+                }
+                if root.report-note != "": Text {
+                    text: root.report-note;
+                    font-family: Theme.font;
+                    font-size: Theme.size-label;
+                    color: Theme.text-2;
+                    wrap: word-wrap;
+                    accessible-role: text;
                 }
                 HorizontalLayout {
                     alignment: start;

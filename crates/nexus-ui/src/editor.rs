@@ -147,6 +147,9 @@ pub struct Editor {
     shown: Vec<Field>,
     /// What `shown` belongs to.
     fields_for: Option<Form>,
+    /// "Limits and scale", opened or closed by hand for this form; `None`
+    /// until then (open when something in it is set).
+    limits_open: Option<bool>,
     /// Inspector values not sent yet (see `inspector::apply`), and why.
     drafts: Values,
     draft_hint: String,
@@ -225,6 +228,7 @@ impl Editor {
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
+            limits_open: None,
             drafts: Values::new(),
             draft_hint: String::new(),
             committed: HashMap::new(),
@@ -1326,6 +1330,7 @@ impl Editor {
         };
         if form != self.fields_for {
             self.fields_for = form;
+            self.limits_open = None;
             self.drafts.clear();
             self.draft_hint.clear();
             self.committed.clear();
@@ -1353,12 +1358,10 @@ impl Editor {
                     width.help = if min == max {
                         "Nothing beside it can give it room: make a neighbour narrower first."
                             .into()
+                    } else if i + 1 < self.layout_widths().len() {
+                        "The widget on its right gives or takes the room.".into()
                     } else {
-                        if i + 1 < self.layout_widths().len() {
-                            "The arrow keys step by 1, with Shift by 10. The widget on its right gives or takes the difference, as when the grip on the strip is dragged.".into()
-                        } else {
-                            "The arrow keys step by 1, with Shift by 10. It grows into the free room at the strip's end, and narrower leaves room there.".into()
-                        }
+                        "It takes or leaves free room at the strip's end.".into()
                     };
                 }
                 fields.push(Field {
@@ -1366,10 +1369,9 @@ impl Editor {
                     label: "Note".into(),
                     kind: Kind::Note,
                     value: self.note(i),
-                    help: "For you: kept with the widget, and shown as a comment in an exported layout."
-                        .into(),
+                    help: "For you: kept with the widget, and in an exported layout.".into(),
                 });
-                fields
+                inspector::group_limits(fields, self.limits_open)
             }
             None => self
                 .takeover_values()
@@ -1990,6 +1992,15 @@ impl Editor {
 impl Editor {
     /// A choice field's option was picked, by its position in the list.
     fn field_chosen(&mut self, key: &str, index: i32) {
+        if key == inspector::LIMITS {
+            let open = self
+                .shown
+                .iter()
+                .any(|f| f.key == inspector::LIMITS && f.value == "open");
+            self.limits_open = Some(!open);
+            self.show_fields();
+            return;
+        }
         let option = self
             .shown
             .iter()
@@ -2717,6 +2728,7 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
         Kind::Triggers => ("triggers", Vec::new()),
         Kind::Icon => ("icon", Vec::new()),
         Kind::Feeds => ("feeds", Vec::new()),
+        Kind::Disclosure => ("disclosure", Vec::new()),
         Kind::Stepper { min, max } => ("stepper", vec![min.to_string(), max.to_string()]),
         Kind::Choice(options) => ("choice", options.clone()),
         Kind::Segmented(options) => ("segmented", options.clone()),

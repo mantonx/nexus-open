@@ -4,7 +4,11 @@
 //! extra detail for those who want it.
 //!
 //! "Start the service" and "Open the log" run `systemctl` and
-//! `journalctl` on the user's `nexusd.service`. The commands are built
+//! `journalctl` on the user's `nexusd.service`; a start first clears a
+//! failed state (`reset-failed`), which is what stops systemd from
+//! starting a service that failed too often. When starting it fails
+//! twice, the window offers to run the daemon itself for the session
+//! (`here`), and to report the problem with the diagnostics. The commands are built
 //! here, apart from running them, so tests check what would run; and
 //! `NEXUS_UI_SERVICE_STUB` (for the capture rig and tests only) puts a
 //! harmless program in front of them, so a test never touches the real
@@ -40,11 +44,16 @@ pub struct View {
     pub chip: String,
     pub headline: String,
     pub body: String,
-    /// Which fixes apply. There is no "Try again" for the strip: the
-    /// service retries it by itself (every second at most) and the window
-    /// follows within a second, so such a button would do nothing.
-    pub start: bool,
-    pub log: bool,
+    /// What can be done, in the order shown, the first the main one:
+    /// "start", "retry", "run-here", "report" or "log". The banner and the
+    /// chip's popover show the same, in this order. There is no "Try
+    /// again" for the strip: the service retries it by itself (every
+    /// second at most) and the window follows within a second, so such a
+    /// button would do nothing.
+    pub actions: Vec<&'static str>,
+    /// The daemon runs as this window's child: the banner says so even
+    /// while the pictures are live.
+    pub here: bool,
     /// The strip is not showing this layout, though the service runs: the
     /// pictures are dimmed and the banner says why. Editing still works.
     pub away: bool,
@@ -74,8 +83,7 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
             chip: "Not running".into(),
             headline: "The service is not running".into(),
             body: STOPPED.into(),
-            start: true,
-            log: true,
+            actions: vec!["start", "log"],
             banner: "The service is not running, so nothing here can be changed and these pictures are not live.".into(),
             banner_body: "Your layouts are safe. Start the service to carry on.".into(),
             detail: fix_of("daemon"),
@@ -91,7 +99,7 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
             body: format!(
                 "The strip shows the default layout, and nothing changed here is kept, because the file that holds your layouts cannot be used: {e}. The log may say more."
             ),
-            log: true,
+            actions: vec!["log"],
             detail: fix_of("store"),
             ..View::default()
         };
@@ -221,7 +229,7 @@ fn device_view(why: &str, fix: &str) -> View {
         "The strip cannot be used",
         format!("{body}. Nexus Open keeps trying by itself; the log may say more."),
     );
-    v.log = true;
+    v.actions = vec!["log"];
     v
 }
 
@@ -293,6 +301,14 @@ pub fn start_command(installed: bool, exe: &Path) -> Vec<String> {
     }
 }
 
+/// What clears the service's failed state before a start: systemd will
+/// not start a service again that failed too often until it is cleared.
+pub fn reset_command() -> Vec<String> {
+    ["systemctl", "--user", "reset-failed", UNIT]
+        .map(String::from)
+        .to_vec()
+}
+
 /// What "Open the log" runs: the service's recent log, as text.
 pub fn log_command() -> Vec<String> {
     [
@@ -328,6 +344,17 @@ fn stub() -> Option<String> {
 pub fn start() -> Result<(), String> {
     let installed = installed();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if installed {
+        // Its answer does not matter: a service that has not failed has
+        // nothing to clear, and the start says what is wrong.
+        let reset = stubbed(reset_command(), stub());
+        let _ = Command::new(&reset[0])
+            .args(&reset[1..])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
     let argv = stubbed(start_command(installed, &exe), stub());
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..])
@@ -350,8 +377,19 @@ pub fn start() -> Result<(), String> {
     }
 }
 
-/// The service's recent log, or why there is none.
+/// The service's recent log, or why there is none, and what the daemon
+/// run from this window wrote, if it ran.
 pub fn log() -> String {
+    let service = service_log();
+    let here = crate::here::output();
+    if here.is_empty() {
+        service
+    } else {
+        format!("{service}\n\nRun from this window:\n{here}")
+    }
+}
+
+fn service_log() -> String {
     let argv = stubbed(log_command(), stub());
     match Command::new(&argv[0]).args(&argv[1..]).output() {
         Ok(out) if out.status.success() => {
@@ -384,49 +422,143 @@ fn could_not_run(e: &std::io::Error) -> String {
 }
 
 /// The stopped view after a try to start it failed: the one real fault
-/// here, so it is shown critical, chip and banner alike, with the reason
-/// and the log as the next step.
-pub fn did_not_start(mut v: View, why: &str) -> View {
-    v.tone = "failed";
-    v.icon = "fail";
-    v.chip = "Did not start".into();
-    v.headline = "The service did not start".into();
-    v.body = format!("{why} The log may say more. Your layouts are safe.");
-    v.banner = "The service did not start, so nothing here can be changed.".into();
-    v.banner_body = v.body.clone();
-    v.log = true;
-    v.start = true;
-    v
+/// here, so it is shown critical, chip and banner alike, with the reason.
+/// `tries` is how many tries have failed: after the first, Try again;
+/// after more, starting it again is not the way forward, so the window
+/// offers to run it itself and to report the problem.
+pub fn did_not_start(v: View, why: &str, tries: u32) -> View {
+    failed(
+        v,
+        "Did not start",
+        "The service did not start",
+        &format!("{why} The log may say more."),
+        tries,
+    )
 }
 
 /// A start that ran, but the service has not answered since: not the
 /// same story as one that did not start, so not the same words.
-pub fn not_answering(mut v: View) -> View {
+pub fn not_answering(v: View, tries: u32) -> View {
+    failed(
+        v,
+        "Not answering",
+        "The service is not answering",
+        "It was started ten seconds ago and has not answered. The log may say why.",
+        tries,
+    )
+}
+
+fn failed(mut v: View, chip: &str, headline: &str, why: &str, tries: u32) -> View {
     v.tone = "failed";
     v.icon = "fail";
-    v.chip = "Not answering".into();
-    v.headline = "The service is not answering".into();
-    v.body = "It was started ten seconds ago and has not answered. The log may say why. Your layouts are safe.".into();
-    v.banner = "The service is not answering, so nothing here can be changed.".into();
+    v.chip = chip.into();
+    v.headline = headline.into();
+    v.banner = format!("{headline}, so nothing here can be changed.");
+    if tries < 2 {
+        v.body = format!("{why} Your layouts are safe.");
+        v.actions = vec!["retry", "log"];
+    } else {
+        v.body = format!(
+            "{why} Starting it again did not help. This window can run it for now: the strip works until you quit the window. Report the problem too, so it can be fixed. Your layouts are safe."
+        );
+        v.actions = vec!["run-here", "report", "log"];
+    }
     v.banner_body = v.body.clone();
-    v.log = true;
-    v.start = true;
+    v.detail = failed_detail(installed());
+    v
+}
+
+/// The fix as commands after a failed start, for those who use a
+/// terminal: clear the failure, start it, read why.
+pub fn failed_detail(installed: bool) -> String {
+    if installed {
+        "systemctl --user reset-failed nexusd\nsystemctl --user start nexusd\nWhy it stopped: journalctl --user -u nexusd -e".into()
+    } else {
+        "nexusd run".into()
+    }
+}
+
+/// The daemon run from this window stopped, or could not start: the end
+/// of what the window can do. What is left is the report.
+pub fn here_failed(mut v: View, why: &str) -> View {
+    v.tone = "failed";
+    v.icon = "fail";
+    v.chip = "Did not start".into();
+    v.headline = "It did not run from this window either".into();
+    v.body = format!(
+        "{why} Report the problem: Nexus Open copies the diagnostics for you to paste into it. Your layouts are safe."
+    );
+    v.banner = "The service did not start, so nothing here can be changed.".into();
+    v.banner_body = v.body.clone();
+    v.actions = vec!["report", "log"];
+    v.detail = failed_detail(installed());
+    v
+}
+
+/// The service answers, and it is the daemon this window runs: the strip
+/// works, for as long as the window does. Said in a banner, as the pictures
+/// are live.
+pub fn from_window(mut v: View) -> View {
+    let note = "The service did not start, so this window runs it for now: the strip works until you quit the window (closed to the tray, it keeps running). Report the problem, so the service can be fixed.";
+    v.here = true;
+    if v.away {
+        // The strip's own problem leads; this is said after it.
+        v.body = format!("{} {note}", v.body);
+        v.banner_body = format!("{}\n{note}", v.banner_body);
+    } else {
+        v.tone = "note";
+        v.icon = "info";
+        v.chip = "Running from this window".into();
+        v.headline = "Running from this window for now".into();
+        v.body = note.into();
+        v.banner = v.headline.clone();
+        v.banner_body = note.into();
+    }
+    v.actions = vec!["report", "log"];
+    v.detail = failed_detail(installed());
     v
 }
 
 /// The stopped view while a try to start it is under way: never the same
 /// as stopped, so a press of Start or Try again always shows it was heard.
+/// The chip says "Starting…"; the banner says what it waits for, with a
+/// moving mark instead of a button, as there is nothing to press.
 pub fn starting(mut v: View) -> View {
     v.tone = "starting";
     v.icon = "wait";
     v.chip = "Starting…".into();
-    v.headline = "Starting the service…".into();
-    v.body = "This takes a few seconds. The pictures come back to life when it answers.".into();
-    v.banner = "Starting the service…".into();
-    v.banner_body = "The pictures come back to life when it answers.".into();
-    v.start = false;
-    v.log = false;
+    v.headline = "Waiting for the service to answer".into();
+    v.body = "This takes a few seconds. The pictures come back to life when it answers. Your layouts are safe.".into();
+    v.banner = "Waiting for the service to answer, so nothing here can be changed yet.".into();
+    v.banner_body =
+        "This takes a few seconds. The pictures come back to life when it answers.".into();
+    v.actions = Vec::new();
     v
+}
+
+/// Report the problem: the project's page for a new issue, in the
+/// browser, opened through the same checked opener as Help (or the stub,
+/// in the rig). The window copies the diagnostics as it does this.
+pub fn report() -> Result<(), String> {
+    let url = report_address();
+    if let Some(stub) = stub().filter(|s| !s.is_empty()) {
+        let checked = nexus_control::links::checked_link(&url).map_err(String::from)?;
+        let argv = stubbed(
+            nexus_control::links::link_opener(&checked, std::env::consts::OS),
+            Some(stub),
+        );
+        return Command::new(&argv[0])
+            .args(&argv[1..])
+            .status()
+            .map(drop)
+            .map_err(|e| e.to_string());
+    }
+    nexus_control::links::open(&url)
+}
+
+/// Where a problem is reported.
+pub fn report_address() -> String {
+    format!("{}/issues/new", env!("CARGO_PKG_REPOSITORY"))
 }
 
 /// What a start that ran but has not answered is recorded as (shown by
@@ -465,7 +597,7 @@ mod tests {
     fn a_stopped_daemon_offers_to_start_it() {
         let v = view(None, &[]);
         assert_eq!(v.tone, "stopped");
-        assert!(v.start && v.log);
+        assert_eq!(v.actions, ["start", "log"]);
         assert!(!v.body.contains("systemctl"), "{}", v.body);
     }
 
@@ -477,7 +609,10 @@ mod tests {
         );
         assert_eq!(v.chip, "Strip in use");
         assert_eq!(v.headline, "Steam is using the strip");
-        assert!(v.away && !v.start, "dimmed, with nothing to press");
+        assert!(
+            v.away && v.actions.is_empty(),
+            "dimmed, with nothing to press"
+        );
         assert!(v.banner_body.contains("keep editing"), "{}", v.banner_body);
         let old = view(
             Some(&status(Some("the strip is in use by nexus-open (pid 9)"))),
@@ -513,13 +648,68 @@ mod tests {
             assert_eq!(v.tone, "app", "{why}");
         }
         assert_eq!(view(Some(&status(Some("no permission"))), &[]).icon, "lock");
-        let failed = did_not_start(view(None, &[]), "No reason.");
+        let failed = did_not_start(view(None, &[]), "No reason.", 1);
         assert_eq!((failed.tone, failed.icon), ("failed", "fail"));
-        assert!(failed.log && failed.start);
+        assert_eq!(failed.actions, ["retry", "log"]);
         let starting = starting(view(None, &[]));
         assert_eq!(starting.tone, "starting");
         assert_ne!(starting.chip, view(None, &[]).chip);
-        assert!(!starting.start, "nothing to press twice while it starts");
+        assert!(
+            starting.actions.is_empty(),
+            "nothing to press twice while it starts"
+        );
+        // "Starting…" is the chip's alone.
+        for words in [
+            &starting.headline,
+            &starting.body,
+            &starting.banner,
+            &starting.banner_body,
+        ] {
+            assert!(!words.contains("Starting"), "{words}");
+        }
+    }
+
+    /// The way forward never needs a terminal: Try again once; after
+    /// that, run it from this window, or report it.
+    #[test]
+    fn a_start_that_keeps_failing_offers_a_way_without_a_terminal() {
+        let once = not_answering(view(None, &[]), 1);
+        assert_eq!(once.actions[0], "retry");
+        let twice = not_answering(view(None, &[]), 2);
+        assert_eq!(twice.actions, ["run-here", "report", "log"]);
+        assert!(twice.body.contains("run it for now"), "{}", twice.body);
+        let again = did_not_start(view(None, &[]), "No reason.", 3);
+        assert_eq!(again.actions[0], "run-here");
+        let gone = here_failed(view(None, &[]), "It stopped.");
+        assert_eq!(gone.actions, ["report", "log"]);
+        for v in [&once, &twice, &again, &gone] {
+            assert_eq!(v.body, v.banner_body, "one story");
+            for word in ["systemctl", "journalctl", "terminal"] {
+                assert!(!v.body.contains(word), "{}", v.body);
+            }
+        }
+        assert!(failed_detail(true).starts_with("systemctl --user reset-failed nexusd\n"));
+        assert!(report_address().ends_with("/issues/new"));
+        assert!(nexus_control::links::checked_link(&report_address()).is_ok());
+    }
+
+    #[test]
+    fn running_from_the_window_says_so_with_live_pictures() {
+        let v = from_window(view(Some(&status(None)), &[]));
+        assert!(v.here && !v.away);
+        assert_eq!(v.tone, "note");
+        assert!(
+            v.banner_body.contains("until you quit the window"),
+            "{}",
+            v.banner_body
+        );
+        assert_eq!(v.actions, ["report", "log"]);
+        let away = from_window(view(
+            Some(&status(Some("no iCUE Nexus found; is it plugged in?"))),
+            &[],
+        ));
+        assert_eq!(away.chip, "No strip", "the strip's own problem leads");
+        assert!(away.here && away.banner_body.contains("this window runs it"));
     }
 
     #[test]
@@ -534,7 +724,7 @@ mod tests {
         let v = view(Some(&status(None)), &[]);
         assert_eq!(v.tone, "ok");
         assert_eq!(v.chip, "Strip connected");
-        assert!(!v.start && !v.away && v.banner.is_empty());
+        assert!(v.actions.is_empty() && !v.away && v.banner.is_empty());
     }
 
     #[test]
@@ -559,6 +749,10 @@ mod tests {
             ["systemctl", "--user", "start", "nexusd.service"]
         );
         assert_eq!(start_command(false, exe), ["/usr/bin/nexusd", "run"]);
+        assert_eq!(
+            reset_command(),
+            ["systemctl", "--user", "reset-failed", "nexusd.service"]
+        );
         assert_eq!(
             log_command()[..4],
             ["journalctl", "--user", "-u", "nexusd.service"]

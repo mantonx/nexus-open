@@ -335,7 +335,7 @@ fn start_fix() -> String {
             || Path::new("/usr/lib/systemd/user/nexusd.service").exists();
         if installed {
             return "Start its service: systemctl --user start nexusd\n\
-                    If it stops again, its log says why: journalctl --user -u nexusd -e"
+                    Why it stopped: journalctl --user -u nexusd -e"
                 .into();
         }
     }

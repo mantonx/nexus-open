@@ -61,6 +61,9 @@ pub enum Kind {
     /// The news feeds: how many, and a way to Settings, where they are
     /// edited (they are shared by every news widget).
     Feeds,
+    /// A heading that opens and closes the fields after it ("Limits and
+    /// scale"): its value is "open" or "closed", its help what is set.
+    Disclosure,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -530,7 +533,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 "scale_from",
                 "Bar starts at",
                 Kind::Number,
-                format!("The empty bar's value{unit}. Both empty: the signal's usual scale."),
+                format!("The empty bar's value{unit}. Both empty: the usual scale."),
             );
             add(
                 "scale_to",
@@ -542,13 +545,13 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 "warn",
                 "Warn at",
                 Kind::Number,
-                format!("Shown amber from this value{unit}. Empty: never."),
+                format!("Amber from this value{unit}. Empty: never."),
             );
             add(
                 "crit",
                 "Critical at",
                 Kind::Number,
-                format!("Shown red from this value{unit}. Empty: never."),
+                format!("Red from this value{unit}. Empty: never."),
             );
             add(
                 "second",
@@ -706,6 +709,75 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
     out
 }
 
+/// The key of the "Limits and scale" heading.
+pub const LIMITS: &str = "limits";
+/// What "Limits and scale" holds: what most people never change.
+const LIMIT_KEYS: [&str; 5] = ["scale_from", "scale_to", "warn", "crit", "note"];
+
+/// A reading's fields with its bar scale, warning limits and note folded
+/// under one "Limits and scale" heading, after the signal. `open` is the
+/// person's choice; by default it is open only when one of them is set.
+/// Fields of other widgets are returned as they are.
+pub fn group_limits(fields: Vec<Field>, open: Option<bool>) -> Vec<Field> {
+    if !fields.iter().any(|f| f.key == "scale_from") {
+        return fields;
+    }
+    let (limits, mut rest): (Vec<Field>, Vec<Field>) = fields
+        .into_iter()
+        .partition(|f| LIMIT_KEYS.contains(&f.key.as_str()));
+    let set = |k: &str| {
+        limits
+            .iter()
+            .find(|f| f.key == k)
+            .map(|f| f.value.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    let mut said = Vec::new();
+    if let Some(w) = set("warn") {
+        said.push(format!("amber from {w}"));
+    }
+    if let Some(c) = set("crit") {
+        said.push(format!("red from {c}"));
+    }
+    match (set("scale_from"), set("scale_to")) {
+        (None, None) => {}
+        (from, to) => said.push(format!(
+            "bar {} to {}",
+            from.as_deref().unwrap_or("usual"),
+            to.as_deref().unwrap_or("usual")
+        )),
+    }
+    if set("note").is_some() {
+        said.push("a note".into());
+    }
+    let open = open.unwrap_or(!said.is_empty());
+    let mut summary = said.join(", ");
+    if let Some(first) = summary.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    let header = Field {
+        key: LIMITS.into(),
+        label: "Limits and scale".into(),
+        kind: Kind::Disclosure,
+        value: if open { "open" } else { "closed" }.into(),
+        help: if summary.is_empty() {
+            "None set: the usual scale, and no warning".into()
+        } else {
+            summary
+        },
+    };
+    let at = rest
+        .iter()
+        .position(|f| f.key == "signal")
+        .map_or(rest.len(), |i| i + 1);
+    let mut folded = vec![header];
+    if open {
+        folded.extend(limits);
+    }
+    rest.splice(at..at, folded);
+    rest
+}
+
 /// One field changed: what to do about it. `drafts` are values not yet
 /// sent, laid over the widget's own.
 pub fn apply(widget: &Widget, drafts: &Values, key: &str, value: &str, ctx: &Context) -> Outcome {
@@ -837,6 +909,49 @@ fn split(command: &str) -> Result<Vec<String>, Missing> {
 mod tests {
     use super::*;
     use nexus_core::config::Config;
+
+    fn reading(warn: &str) -> Vec<Field> {
+        let v = Values::from([
+            ("type".into(), READING.into()),
+            ("signal".into(), "cpu.temp".into()),
+            ("warn".into(), warn.into()),
+        ]);
+        let mut f = fields(&v, &ctx());
+        f.push(Field {
+            key: "note".into(),
+            label: "Note".into(),
+            kind: Kind::Note,
+            value: String::new(),
+            help: String::new(),
+        });
+        f
+    }
+
+    #[test]
+    fn limits_and_scale_fold_away_after_the_signal() {
+        let keys = |f: &[Field]| f.iter().map(|f| f.key.clone()).collect::<Vec<_>>();
+        // Nothing set: closed, and saying so.
+        let closed = group_limits(reading(""), None);
+        let k = keys(&closed);
+        assert_eq!(&k[..4], ["width", "label", "signal", LIMITS]);
+        for hidden in ["scale_from", "scale_to", "warn", "crit", "note"] {
+            assert!(!k.iter().any(|x| x == hidden), "{hidden}");
+        }
+        assert_eq!(closed[3].value, "closed");
+        // A limit set: open by default, the fields right under the heading.
+        let open = group_limits(reading("167"), None);
+        assert_eq!(open[3].value, "open");
+        assert_eq!(
+            &keys(&open)[3..9],
+            [LIMITS, "scale_from", "scale_to", "warn", "crit", "note"]
+        );
+        assert!(open[3].help.contains("167"), "{}", open[3].help);
+        // The person's choice wins.
+        assert_eq!(group_limits(reading("167"), Some(false))[3].value, "closed");
+        // Another widget is left as it is.
+        let key = fields(&Values::from([("type".into(), KEY.into())]), &ctx());
+        assert_eq!(keys(&group_limits(key.clone(), None)), keys(&key));
+    }
 
     fn ctx() -> Context {
         let mut signals = HashMap::new();

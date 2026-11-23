@@ -11,8 +11,9 @@ import { Button, IconButton, TextField, Select, Segmented, Chip, Hint, Label, Fo
 export struct Field {
     key: string,
     label: string,
-    /// "text", "number", "choice", "segmented", "note", "signal" or
-    /// "triggers".
+    /// "text", "number", "choice", "segmented", "note", "signal",
+    /// "triggers", or "disclosure" (a heading that opens and closes the
+    /// fields after it: value "open" or "closed", help what is set).
     kind: string,
     value: string,
     /// For a choice: the options, and which one is `value` (-1 if none).
@@ -284,7 +285,78 @@ export component FieldRow inherits HorizontalLayout {
 
     spacing: 16px;
 
-    Text {
+    // "Limits and scale": a heading across the form that opens and closes
+    // the fields under it, saying what is set while closed.
+    if root.field.kind == "disclosure": disclosure := Rectangle {
+        property <bool> open: root.field.value == "open";
+        height: 36px;
+        horizontal-stretch: 1;
+        border-radius: Theme.r-control;
+        background: dis-touch.has-hover && root.enabled ? Theme.surface-2 : transparent;
+        accessible-role: button;
+        accessible-label: root.field.label;
+        accessible-description: root.field.help;
+        accessible-expandable: true;
+        accessible-expanded: self.open;
+        accessible-action-default => {
+            root.chose(root.field.key, 0);
+        }
+        HorizontalLayout {
+            padding-left: 4px;
+            spacing: 8px;
+            Icon {
+                glyph: disclosure.open ? Glyph.caret-down : Glyph.caret-right;
+                font-size: 14px;
+                color: root.enabled ? Theme.text-2 : Theme.text-off;
+            }
+            Text {
+                text: root.field.label;
+                font-family: Theme.font;
+                font-size: Theme.size-body;
+                font-weight: 600;
+                color: root.enabled ? Theme.text-2 : Theme.text-off;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.field.help;
+                font-family: Theme.font;
+                font-size: Theme.size-label;
+                color: root.enabled ? Theme.text-3 : Theme.text-off;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+        }
+        dis-touch := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => {
+                dis-focus.focus();
+                root.chose(root.field.key, 0);
+            }
+        }
+        dis-focus := FocusScope {
+            property <bool> by-keys;
+            focus-gained(reason) => {
+                self.by-keys = reason == FocusReason.tab-navigation;
+            }
+            focus-on-click: false;
+            key-pressed(event) => {
+                if event.text == " " || event.text == Key.Return {
+                    root.chose(root.field.key, 0);
+                    return accept;
+                }
+                reject
+            }
+        }
+        FocusRing {
+            width: parent.width + 8px;
+            height: parent.height + 8px;
+            radius: Theme.r-control;
+            shown: dis-focus.has-focus && dis-focus.by-keys;
+        }
+    }
+
+    if root.field.kind != "disclosure": Text {
         text: root.field.label;
         width: Grid.label;
         y: 9px;
@@ -292,12 +364,12 @@ export component FieldRow inherits HorizontalLayout {
         font-family: Theme.font;
         font-size: Theme.size-body;
         font-weight: 500;
-        color: Theme.text-2;
+        color: root.enabled ? Theme.text-2 : Theme.text-off;
         wrap: word-wrap;
         accessible-role: none;
     }
 
-    VerticalLayout {
+    if root.field.kind != "disclosure": VerticalLayout {
         spacing: 4px;
         horizontal-stretch: 1;
         max-width: Grid.control-max;
@@ -369,7 +441,7 @@ export component FieldRow inherits HorizontalLayout {
                 text: @tr("px, {} to {}", parent.lo, parent.hi);
                 font-family: Theme.font;
                 font-size: Theme.size-label;
-                color: Theme.text-3;
+                color: root.enabled ? Theme.text-3 : Theme.text-off;
                 vertical-alignment: center;
                 accessible-role: none;
             }
@@ -402,6 +474,7 @@ export component FieldRow inherits HorizontalLayout {
             }
             Button {
                 tier: root.field.value == "No feeds yet" ? "primary" : "default";
+                enabled: root.enabled;
                 icon: Glyph.feed;
                 text: @tr("Edit feeds…");
                 label: @tr("Edit the news feeds, in Settings");
@@ -434,16 +507,15 @@ export component FieldRow inherits HorizontalLayout {
         if root.field.kind == "signal" || root.field.kind == "icon": signal-button := Rectangle {
             height: 44px;
             border-radius: Theme.r-control;
-            background: sig-touch.has-hover && root.enabled ? Theme.raised.brighter(0.06) : Theme.raised;
+            background: !root.enabled ? transparent : sig-touch.has-hover ? Theme.raised.brighter(0.06) : Theme.raised;
             border-width: 1px;
-            border-color: Theme.field-line;
+            border-color: root.enabled ? Theme.field-line : Theme.line;
             FocusRing {
                 width: parent.width + 8px;
                 height: parent.height + 8px;
                 radius: Theme.r-control;
                 shown: sig-focus.has-focus && sig-focus.by-keys;
             }
-            opacity: root.enabled ? 1 : 0.55;
             accessible-role: combobox;
             accessible-label: root.field.label;
             accessible-value: (root.field.value == "" && root.field.kind == "icon" ? @tr("The widget's own") : root.field.shown) + (root.field.reading != "" ? ", " + root.field.reading : "");
@@ -477,7 +549,7 @@ export component FieldRow inherits HorizontalLayout {
                         font-family: Theme.font;
                         font-size: Theme.size-body;
                         font-weight: 500;
-                        color: root.field.value == "" && root.field.kind != "icon" ? Theme.text-3 : Theme.text;
+                        color: !root.enabled ? Theme.text-off : root.field.value == "" && root.field.kind != "icon" ? Theme.text-3 : Theme.text;
                         overflow: elide;
                     }
                 }
@@ -485,7 +557,7 @@ export component FieldRow inherits HorizontalLayout {
                     text: root.field.reading;
                     font-family: Theme.font;
                     font-size: Theme.size-label;
-                    color: Theme.text-2;
+                    color: root.enabled ? Theme.text-2 : Theme.text-off;
                     vertical-alignment: center;
                 }
                 Icon {
@@ -577,9 +649,9 @@ export component FieldRow inherits HorizontalLayout {
         if root.field.kind == "note": Rectangle {
             height: 64px;
             border-radius: Theme.r-control;
-            background: Theme.dark ? Theme.ground : Theme.surface;
+            background: !root.enabled ? transparent : Theme.dark ? Theme.ground : Theme.surface;
             border-width: 1px;
-            border-color: Theme.field-line;
+            border-color: root.enabled ? Theme.field-line : Theme.line;
             clip: true;
             note := TextInput {
                 x: 10px;
@@ -591,7 +663,7 @@ export component FieldRow inherits HorizontalLayout {
                 single-line: false;
                 font-family: Theme.font;
                 font-size: Theme.size-body;
-                color: Theme.text;
+                color: root.enabled ? Theme.text : Theme.text-off;
                 enabled: root.enabled;
                 accessible-label: root.field.label;
                 changed has-focus => {
