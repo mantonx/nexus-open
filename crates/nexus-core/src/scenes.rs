@@ -8,8 +8,11 @@
 //! The readings are the reference's: a Sunday at 10:53, in °F, on a
 //! machine whose CPU idles at 115°.
 
+use std::sync::Arc;
+
 use jiff::Zoned;
 
+use crate::art::{self, Art};
 use crate::canvas::Canvas;
 use crate::config::{Align, Config, Night, Temperature, Weather};
 use crate::engine::{Engine, Input};
@@ -100,6 +103,22 @@ fn track(playing: bool) -> Vec<(&'static str, Value)> {
         ("media.position", Value::Number(97.0, Unit::None)),
         ("media.length", Value::Number(318.0, Unit::None)),
     ]
+}
+
+/// Stand-in artwork for frames: `art::test_card`, wider than tall so the
+/// centre crop shows, never a real cover.
+pub fn test_art() -> Arc<Art> {
+    let (w, h) = (360, 300);
+    Arc::new(Art::prepare("art-test", w, h, &art::test_card(w, h)).expect("a test card"))
+}
+
+/// The engine given `test_art` and told it is the track's.
+fn with_art(e: &mut Engine) {
+    e.handle(Input::Art(test_art()));
+    e.handle(Input::Signal(
+        "media.art".into(),
+        Value::Text("art-test".into()),
+    ));
 }
 
 /// A headline, as the news source publishes it.
@@ -541,6 +560,28 @@ fn takeovers(out: &mut Out) {
     let mut e = engine(layout(None, true), &music(), "Home");
     show(&mut e);
     out.save("takeover", "takeover-now-playing", shot(&mut e, &now, 1.0));
+
+    // The same with the player's artwork, playing and paused.
+    let mut e = engine(layout(None, true), &music(), "Home");
+    with_art(&mut e);
+    show(&mut e);
+    out.save(
+        "takeover",
+        "takeover-now-playing-art",
+        shot(&mut e, &now, 1.0),
+    );
+    let paused = World {
+        track: Some(false),
+        ..music()
+    };
+    let mut e = engine(layout(None, true), &paused, "Home");
+    with_art(&mut e);
+    show(&mut e);
+    out.save(
+        "takeover",
+        "takeover-now-playing-art-paused",
+        shot(&mut e, &now, 1.0),
+    );
 
     let world = World {
         track: Some(false),
@@ -1090,6 +1131,30 @@ fn specimens(out: &mut Out) {
         Finger::None,
         same,
     );
+    // The player's artwork in place of the placeholder (compact cards
+    // show none), playing and paused.
+    let art = test_art();
+    let with_art = |v: &mut WidgetView| {
+        if let WidgetView::Media(Some(t)) = v {
+            t.art = Some(Arc::clone(&art));
+        }
+    };
+    for (name, s) in [
+        ("media-art-playing", &playing),
+        ("media-art-paused", &paused),
+    ] {
+        specimen(
+            out,
+            r,
+            name,
+            &media,
+            s,
+            true,
+            1000.0,
+            Finger::None,
+            with_art,
+        );
+    }
 
     let key = format!(
         "[[page.widget]]\ntype = \"key\"\nwidth = {w}\nicon = \"globe-simple\"\nlabel = \"Browser\"\nsub = \"Hold for a new window\"\ntap = {{ open = \"https://duckduckgo.com\" }}\n"

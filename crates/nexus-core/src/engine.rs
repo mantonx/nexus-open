@@ -3225,6 +3225,63 @@ mod tests {
         e
     }
 
+    #[test]
+    fn artwork_is_drawn_while_media_art_names_it() {
+        let mut e = media_row(&[200, 440]);
+        e.handle(Input::Signal(
+            "media.status".into(),
+            Value::Text("playing".into()),
+        ));
+        // Short enough not to scroll, so frames differ only by the art.
+        e.handle(Input::Signal(
+            "media.title".into(),
+            Value::Text("Fish".into()),
+        ));
+        let now = at("16:17:05");
+        let shot = |e: &mut Engine, t: f64| {
+            e.handle(Input::Redraw);
+            e.frame(&now, t).unwrap().rgba().to_vec()
+        };
+        let placeholder = shot(&mut e, 1.0);
+        let art = |key: &str| {
+            let rgba = crate::art::test_card(80, 60);
+            Arc::new(Art::prepare(key, 80, 60, &rgba).unwrap())
+        };
+        // The pixels alone change nothing: no signal names them yet.
+        e.handle(Input::Art(art("art-1")));
+        assert!(e.art().is_none());
+        assert_eq!(shot(&mut e, 2.0), placeholder);
+        // Named, they are drawn, in both cards.
+        e.handle(Input::Signal(
+            "media.art".into(),
+            Value::Text("art-1".into()),
+        ));
+        let drawn = shot(&mut e, 3.0);
+        assert_eq!(e.art().map(|a| a.key()), Some("art-1"));
+        assert_ne!(drawn, placeholder);
+        // Not the track's any more: the placeholder.
+        e.handle(Input::Signal(
+            "media.art".into(),
+            Value::Text(String::new()),
+        ));
+        assert_eq!(shot(&mut e, 4.0), placeholder);
+        // The name first, then the pixels: drawn as they arrive.
+        e.handle(Input::Signal(
+            "media.art".into(),
+            Value::Text("art-2".into()),
+        ));
+        assert_eq!(shot(&mut e, 5.0), placeholder);
+        e.handle(Input::Art(art("art-2")));
+        assert!(e.frame(&now, 6.0).is_some(), "arriving pixels redraw");
+        assert_eq!(shot(&mut e, 6.5), drawn, "same image");
+        // Only a few are kept, never dropping the one on show.
+        for i in 3..10 {
+            e.handle(Input::Art(art(&format!("art-{i}"))));
+        }
+        assert!(e.art.len() <= ART_KEPT);
+        assert_eq!(e.art().map(|a| a.key()), Some("art-2"));
+    }
+
     /// The middle of each drawn target of a media widget `width` wide that
     /// starts at `x0`.
     fn key_centres(x0: f32, width: u32) -> Vec<f32> {

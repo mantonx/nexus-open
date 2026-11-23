@@ -273,16 +273,18 @@ fn area_average(rgba: &[u8], crop: &Crop, size: u32) -> Vec<u8> {
 }
 
 /// A test card for artwork: bold two-colour shapes that show any scaling
-/// fault. Quarters of a 4-pixel checker beside solid quarters (a checker
-/// must average to an even mid tone, not a dark one: linear light), a
-/// thick diagonal (stair-steps or a blur), a ring (lopsidedness), and a
-/// one-pixel frame in a third colour (a crop or an off-by-one at the
-/// edge). Never real artwork. `width`×`height` straight-alpha RGBA; make
-/// it wider than tall to see the centre crop.
+/// fault. Two quarters of a 4-pixel checker beside two solid ones (a
+/// checker must come out an even mid tone, not a dark one: linear
+/// light, and without moiré), a thick diagonal across the solid quarters
+/// (stair-steps or a blur), a ring (lopsidedness), and a cream border 4 %
+/// wide (the crop, and an off-by-one at an edge). Never real artwork.
+/// `width`×`height` straight-alpha RGBA; make it wider than tall to see
+/// the centre crop: what it cuts away is green.
 pub fn test_card(width: u32, height: u32) -> Vec<u8> {
     const A: [u8; 3] = [0xf2, 0x6b, 0x3a];
     const B: [u8; 3] = [0x1d, 0x3f, 0x8a];
     const EDGE: [u8; 3] = [0xff, 0xf3, 0xc4];
+    const CUT: [u8; 3] = [0x3a, 0xa8, 0x5c];
     let side = width.min(height) as f32;
     let (x0, y0) = ((width as f32 - side) / 2.0, (height as f32 - side) / 2.0);
     let mut out = Vec::with_capacity((width * height * 4) as usize);
@@ -291,10 +293,10 @@ pub fn test_card(width: u32, height: u32) -> Vec<u8> {
             // Square coordinates, 0–1 across the part kept.
             let (u, v) = ((x as f32 + 0.5 - x0) / side, (y as f32 + 0.5 - y0) / side);
             let inside = (0.0..1.0).contains(&u) && (0.0..1.0).contains(&v);
+            let border = u.min(v).min(1.0 - u).min(1.0 - v) < 0.04;
             let rgb = if !inside {
-                // What the crop cuts away: a third colour, so it shows.
-                [0x3a, 0xa8, 0x5c]
-            } else if x == x0 as u32 || y == y0 as u32 {
+                CUT
+            } else if border {
                 EDGE
             } else {
                 let checker = (x / 4 + y / 4) % 2 == 0;
@@ -304,10 +306,9 @@ pub fn test_card(width: u32, height: u32) -> Vec<u8> {
                     (false, true) => false,
                 };
                 let r = ((u - 0.5).powi(2) + (v - 0.5).powi(2)).sqrt();
-                let ring = (0.30..0.38).contains(&r);
-                let diagonal = (u - v).abs() < 0.06;
-                let first = quarter != (ring || diagonal);
-                if first { A } else { B }
+                let ring = (0.27..0.35).contains(&r);
+                let diagonal = (u + v - 1.0).abs() < 0.09;
+                if quarter != (ring || diagonal) { A } else { B }
             };
             out.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
         }
