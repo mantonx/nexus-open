@@ -161,7 +161,9 @@ a warning or critical card stays bright even at night.
 
 Optional. Without it there is no weather. Weather comes from
 Open-Meteo, which is sent this place (or the coordinates) and nothing
-else, every 15 minutes. With no new forecast for 45 minutes, the weather
+else, every 15 minutes. The same request brings the weather now, the
+hourly forecast for the next day and the daily one for the next five,
+in local time. With no new forecast for 45 minutes, the weather
 widget shows the last one dimmed, with the time it is from.
 
 | Key                      | Value                                                        |
@@ -228,6 +230,7 @@ the name of an icon (below) to draw instead of the one it would choose.
 | `slider` | `label`, `controls`; optional `signal`                                   | A bar to drag                                                |
 | `key`    | optional `icon`, `label`, `sub`                                          | A control to press; nothing live. `sub` is a second line under the label on a key 300 px or wider |
 | `news`   | none                                                                     | The headline showing, over two lines; on a hero card where it is from and how old it is (`Harbour Gazette · 12 min`) after it, when there is room |
+| `forecast` | optional `show`: `"next"` (the default), `"hours"` or `"days"`         | The weather to come: the next change in words, a column every three hours, or the next five days |
 
 How much a widget shows depends on its width: up to 149 px it is
 compact (the reading alone), up to 299 px medium (with its label, or a
@@ -272,6 +275,51 @@ yet"; with every feed failing and nothing new enough left, the last
 headline stays, dimmed, marked with a broken link, its age still
 growing. Neither of those can be tapped. News never covers the strip: a takeover cannot be
 raised by a `news.` signal.
+
+A forecast widget shows the weather to come, from the `[weather]`
+request:
+
+- `show = "next"` (the default) says the next change in the next 12
+  hours: "Rain from 15:00", "Clearing by 18:00", "Snow tonight", "Dry
+  all day". Rain, drizzle, snow or storms at a chance of 30 % or more
+  counts; a single dry hour between showers is not clearing.
+- `show = "hours"` shows a column every three hours (12:00, 15:00 …):
+  the hour, the condition and the temperature.
+- `show = "days"` shows the five days after today: the day, the
+  condition, the high and the low.
+
+Columns are all one width and as many as fit are shown: about two
+hours or one day at 200 px, seven hours or five days at 640. From a 30 %
+chance of rain or snow a column has a thin gauge at its left, filled as
+far as the chance. A compact forecast shows the next change's icon and
+its time, or "Dry". Times follow the `clock` setting and temperatures
+the `temperature` one. Without `[weather]` it says how to add a town;
+with no new forecast for 45 minutes it shows only the time the last one
+is from, since its hours have gone by. A tap and a long press do nothing
+unless you give it a `tap` or `hold`.
+
+The forecast is not on the default layout. A page with it beside the
+clock and the weather now:
+
+```toml
+[[page]]
+name = "Weather"
+
+[[page.widget]]
+type = "clock"
+width = 196
+
+[[page.widget]]
+type = "value"
+label = "Weather"
+signal = "weather.temp"
+width = 124
+
+[[page.widget]]
+type = "forecast"
+show = "next"
+width = 320
+```
 
 Icons: `activity`, `arrow-down`, `arrow-fat-down`, `arrow-fat-up`,
 `arrow-up`, `arrows-left-right`, `bell`, `browser`, `calculator`,
@@ -406,6 +454,10 @@ Signals are named readings, in base units. The built-in sources publish:
 | `weather.code`                                           | WMO weather code  |
 | `weather.condition`                                      | text, as "Cloudy" |
 | `weather.day`                                            | 1 by day, else 0  |
+| `weather.h1` … `weather.h8`, each `.hour`, `.temp`, `.code`, `.rain`, `.day` | every three hours from the next 3-hour mark: the hour (0–23), °C, WMO code, the highest chance of rain in its three hours (percent), 1 by day |
+| `weather.d1` … `weather.d5`, each `.day`, `.high`, `.low`, `.code`, `.rain` | the five days after today: `"mon"` … `"sun"`, °C, °C, WMO code, the day's highest chance of rain (percent) |
+| `weather.next`                                           | the next change in 12 hours, as a key: `rain-from`, `snow-tonight`, `clearing`, `rain-all-day`, `dry-all-night` … (`drizzle`, `rain`, `snow`, `storms`) |
+| `weather.next.at`, `weather.next.code`, `weather.next.day` | the hour it happens (0–23; none for "all day"), its WMO code, 1 by day |
 | `net.down`, `net.up`                                     | bytes per second  |
 | `volume.level`                                           | percent           |
 | `volume.muted`                                           | 1 if muted, else 0 |
