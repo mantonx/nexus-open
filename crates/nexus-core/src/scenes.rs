@@ -229,6 +229,7 @@ pub fn frames(accents: &[(&str, Rgb)]) -> Vec<Frame> {
     news_page(&mut out);
     live_pages(&mut out);
     specimens(&mut out);
+    layout_switch(&mut out);
     for (name, rgb) in accents {
         scenes(
             &mut out,
@@ -1274,4 +1275,110 @@ fn news_specimens(out: &mut Out, r: &mut Renderer, signals: &ToSignals) {
         Finger::None,
         same,
     );
+}
+
+/// A still finger at `from` past the long press, then a slide to `to` and
+/// a rest there, from monotonic time `t`, with the finger still down.
+/// Returns the time after the last sample.
+fn hold_slide(e: &mut Engine, mut t: f64, from: f32, to: f32) -> f64 {
+    let mut touch = |x: f32, t: &mut f64| {
+        e.handle(Input::Touch {
+            down: true,
+            x,
+            at: *t,
+        });
+        *t += 0.01;
+    };
+    for _ in 0..70 {
+        touch(from, &mut t);
+    }
+    for i in 1..=30 {
+        touch(from + (to - from) * i as f32 / 30.0, &mut t);
+    }
+    for _ in 0..40 {
+        touch(to, &mut t);
+    }
+    t
+}
+
+/// The layout picker (`DESIGN.md`, Layout picker) and the new layout's
+/// name after a switch from the strip.
+fn layout_switch(out: &mut Out) {
+    const GROUP: &str = "layout-switch";
+    let now = demo::sample_time();
+    let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let on_home = |list: &[String], current: usize| {
+        let mut e = engine(layout(None, true), &idle(), "Home");
+        e.handle(Input::Layouts {
+            names: list.to_vec(),
+            current: Some(current),
+        });
+        e
+    };
+
+    // Opening: held on Home, slid just past the threshold.
+    let three = names(&["Desk", "Gaming", "Night"]);
+    let mut e = on_home(&three, 1);
+    let t = hold_slide(&mut e, 10.0, 300.0, 330.0);
+    out.save(GROUP, "picker-open", shot(&mut e, &now, t));
+
+    // Mid-slide on each card of five, from the middle one; the first and
+    // the last are the ends, where it stops.
+    let mut r = Renderer::new(Theme::default(), crate::fonts::FontChoice::default().load());
+    let five = names(&["Desk", "Gaming", "Movies", "Night", "Work"]);
+    for selected in 0..five.len() {
+        let canvas = r.render_picker(&five, 2, selected);
+        out.save(GROUP, format!("picker-select-{selected}"), canvas);
+    }
+    out.save(
+        GROUP,
+        "picker-two",
+        r.render_picker(&names(&["Desk", "Gaming"]), 0, 1),
+    );
+    let long = names(&["Desk", "Late-night streaming with chat", "Night"]);
+    out.save(GROUP, "picker-long-name", r.render_picker(&long, 0, 1));
+    // Nine layouts: more than fit, so the row scrolls with the selection.
+    let nine = names(&[
+        "Coding", "Desk", "Focus", "Gaming", "Home", "Movies", "Music", "Night", "Work",
+    ]);
+    for (name, selected) in [("many", 4), ("many-scrolled", 7), ("many-end", 8)] {
+        out.save(
+            GROUP,
+            format!("picker-{name}"),
+            r.render_picker(&nine, 4, selected),
+        );
+    }
+
+    // After the switch: the new layout's first page under its name, as
+    // it fades in, and standing.
+    let fade_in = f64::from(crate::theme::MS_TAKEOVER_IN) / 1000.0;
+    for (name, list, to, at) in [
+        ("layout-name", three.clone(), 2, fade_in + 0.4),
+        ("layout-name-fading-in", three.clone(), 2, fade_in / 2.0),
+        ("layout-name-long", long.clone(), 1, fade_in + 0.4),
+    ] {
+        let mut e = on_home(&list, 0);
+        e.handle(Input::ShowPage(2));
+        let x = 300.0 + 24.0 + 72.0 * to as f32 + 6.0;
+        let t = hold_slide(&mut e, 10.0, 300.0, x);
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: t,
+        });
+        let asked = e.take_effects();
+        assert_eq!(
+            asked,
+            [crate::engine::Effect::SwitchLayout(list[to].clone())],
+            "{name}"
+        );
+        // What the daemon does: the new layout, then the list.
+        e.handle(Input::Config(Box::new(layout(None, true))));
+        e.handle(Input::Layouts {
+            names: list.clone(),
+            current: Some(to),
+        });
+        e.frame(&now, t);
+        out.save(GROUP, name, shot(&mut e, &now, t + at));
+    }
 }

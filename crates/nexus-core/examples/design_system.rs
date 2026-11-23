@@ -159,6 +159,7 @@ fn main() {
         ("takeover", "takeovers"),
         ("specimen", "specimens"),
         ("accents", "accents"),
+        ("layout-switch", "layout-switch"),
     ] {
         let in_group: Vec<&Frame> = frames.iter().filter(|f| f.group == group).collect();
         let list: Vec<(String, &Canvas)> = in_group
