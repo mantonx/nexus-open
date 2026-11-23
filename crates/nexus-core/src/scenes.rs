@@ -208,6 +208,7 @@ pub fn frames(accents: &[(&str, Rgb)]) -> Vec<Frame> {
     default_pages(&mut out);
     takeovers(&mut out);
     news_page(&mut out);
+    forecast_frames(&mut out);
     live_pages(&mut out);
     specimens(&mut out);
     for (name, rgb) in accents {
@@ -1208,4 +1209,349 @@ fn news_specimens(out: &mut Out, r: &mut Renderer, signals: &ToSignals) {
         Finger::None,
         same,
     );
+}
+
+// ---------------------------------------------------------------- forecast
+
+/// One generated forecast: the weather now, eight three-hour columns,
+/// five days and the next change, with the units and clock it is shown
+/// in. Never a live fetch.
+pub struct Outlook {
+    pub name: &'static str,
+    temperature: Temperature,
+    clock: crate::config::ClockFormat,
+    /// °C, WMO code, condition, high, low.
+    now: (f64, f64, &'static str, f64, f64),
+    /// Hour of the day, °C, WMO code, chance of rain, day.
+    hours: [(u8, f64, f64, f64, bool); 8],
+    /// Day key, high and low °C, WMO code, chance of rain.
+    days: [(&'static str, f64, f64, f64, f64); 5],
+    next: crate::forecast::Change,
+    /// The deciding hour's WMO code and day flag: the next change's icon.
+    next_icon: (f64, bool),
+}
+
+impl Outlook {
+    fn signals(&self) -> Vec<(&'static str, Value)> {
+        use crate::forecast::{self, DAYS, HOURS};
+        let n = |v: f64| Value::Number(v, Unit::None);
+        let c = |v: f64| Value::Number(v, Unit::Celsius);
+        let p = |v: f64| Value::Number(v, Unit::Percent);
+        let b = |v: bool| n(f64::from(u8::from(v)));
+        let (temp, code, cond, high, low) = self.now;
+        let mut s = vec![
+            ("weather.temp", c(temp)),
+            ("weather.code", n(code)),
+            ("weather.condition", Value::Text(cond.into())),
+            ("weather.high", c(high)),
+            ("weather.low", c(low)),
+            ("weather.day", n(1.0)),
+            (forecast::NEXT, Value::Text(self.next.key())),
+            (forecast::NEXT_CODE, n(self.next_icon.0)),
+            (forecast::NEXT_DAY, b(self.next_icon.1)),
+        ];
+        if let Some(at) = self.next.at() {
+            s.push((forecast::NEXT_AT, n(at.into())));
+        }
+        for (names, (hour, t, code, rain, day)) in HOURS.iter().zip(self.hours) {
+            s.extend([
+                (names.hour, n(hour.into())),
+                (names.temp, c(t)),
+                (names.code, n(code)),
+                (names.rain, p(rain)),
+                (names.day, b(day)),
+            ]);
+        }
+        for (names, (key, hi, lo, code, rain)) in DAYS.iter().zip(self.days) {
+            s.extend([
+                (names.day, Value::Text(key.into())),
+                (names.high, c(hi)),
+                (names.low, c(lo)),
+                (names.code, n(code)),
+                (names.rain, p(rain)),
+            ]);
+        }
+        s
+    }
+}
+
+/// The generated forecasts the variants are drawn with, for a Sunday at
+/// 10:53: a dry day (°F, 12 h), a rainy afternoon (°C, 24 h), a cold week
+/// with snow tonight (°C, 12 h), and rain now that clears (°F, 24 h).
+pub fn outlooks() -> Vec<Outlook> {
+    use crate::config::ClockFormat::{H12, H24};
+    use crate::forecast::{Change, Wet};
+    vec![
+        Outlook {
+            name: "dry-day",
+            temperature: Temperature::Fahrenheit,
+            clock: H12,
+            now: (f(52.0), 1.0, "Mostly clear", f(57.0), f(41.0)),
+            hours: [
+                (12, f(56.0), 1.0, 0.0, true),
+                (15, f(57.0), 2.0, 5.0, true),
+                (18, f(50.0), 1.0, 0.0, false),
+                (21, f(46.0), 0.0, 0.0, false),
+                (0, f(44.0), 0.0, 0.0, false),
+                (3, f(42.0), 0.0, 0.0, false),
+                (6, f(41.0), 1.0, 0.0, false),
+                (9, f(47.0), 0.0, 0.0, true),
+            ],
+            days: [
+                ("mon", f(58.0), f(43.0), 2.0, 10.0),
+                ("tue", f(61.0), f(47.0), 3.0, 20.0),
+                ("wed", f(55.0), f(44.0), 61.0, 45.0),
+                ("thu", f(49.0), f(38.0), 3.0, 20.0),
+                ("fri", f(52.0), f(40.0), 1.0, 0.0),
+            ],
+            next: Change::Dry { night: false },
+            next_icon: (1.0, true),
+        },
+        Outlook {
+            name: "rainy-afternoon",
+            temperature: Temperature::Celsius,
+            clock: H24,
+            now: (12.0, 3.0, "Cloudy", 14.0, 7.0),
+            hours: [
+                (12, 13.0, 3.0, 25.0, true),
+                (15, 12.0, 63.0, 85.0, true),
+                (18, 10.0, 61.0, 60.0, false),
+                (21, 9.0, 3.0, 20.0, false),
+                (0, 8.0, 2.0, 10.0, false),
+                (3, 7.0, 1.0, 0.0, false),
+                (6, 6.0, 2.0, 5.0, false),
+                (9, 9.0, 3.0, 15.0, true),
+            ],
+            days: [
+                ("mon", 11.0, 5.0, 3.0, 20.0),
+                ("tue", 9.0, 4.0, 61.0, 65.0),
+                ("wed", 7.0, 2.0, 80.0, 40.0),
+                ("thu", 8.0, 3.0, 2.0, 10.0),
+                ("fri", 10.0, 4.0, 3.0, 20.0),
+            ],
+            next: Change::Starts {
+                wet: Wet::Rain,
+                at: 15,
+            },
+            next_icon: (63.0, true),
+        },
+        Outlook {
+            name: "snow-week",
+            temperature: Temperature::Celsius,
+            clock: H12,
+            now: (-3.0, 3.0, "Cloudy", -1.0, -7.0),
+            hours: [
+                (12, -2.0, 3.0, 20.0, true),
+                (15, -2.0, 3.0, 30.0, true),
+                (18, -4.0, 71.0, 60.0, false),
+                (21, -5.0, 73.0, 80.0, false),
+                (0, -6.0, 75.0, 85.0, false),
+                (3, -7.0, 73.0, 70.0, false),
+                (6, -8.0, 71.0, 40.0, false),
+                (9, -6.0, 3.0, 20.0, true),
+            ],
+            days: [
+                ("mon", -4.0, -11.0, 73.0, 80.0),
+                ("tue", -6.0, -14.0, 3.0, 20.0),
+                ("wed", -9.0, -17.0, 0.0, 0.0),
+                ("thu", -5.0, -12.0, 71.0, 55.0),
+                ("fri", -1.0, -8.0, 85.0, 60.0),
+            ],
+            next: Change::Tonight {
+                wet: Wet::Snow,
+                at: 18,
+            },
+            next_icon: (71.0, false),
+        },
+        Outlook {
+            name: "rain-now",
+            temperature: Temperature::Fahrenheit,
+            clock: H24,
+            now: (f(47.0), 63.0, "Rain", f(50.0), f(41.0)),
+            hours: [
+                (12, f(48.0), 63.0, 90.0, true),
+                (15, f(49.0), 61.0, 70.0, true),
+                (18, f(46.0), 2.0, 20.0, false),
+                (21, f(44.0), 1.0, 10.0, false),
+                (0, f(43.0), 0.0, 0.0, false),
+                (3, f(42.0), 0.0, 0.0, false),
+                (6, f(41.0), 1.0, 0.0, false),
+                (9, f(45.0), 2.0, 10.0, true),
+            ],
+            days: [
+                ("mon", f(52.0), f(40.0), 2.0, 10.0),
+                ("tue", f(55.0), f(43.0), 3.0, 15.0),
+                ("wed", f(50.0), f(39.0), 95.0, 70.0),
+                ("thu", f(45.0), f(34.0), 45.0, 10.0),
+                ("fri", f(44.0), f(33.0), 1.0, 0.0),
+            ],
+            next: Change::Clears { at: 17 },
+            next_icon: (2.0, false),
+        },
+    ]
+}
+
+/// The three ways a forecast widget shows.
+pub const FORECAST_SHOWS: [&str; 3] = ["hours", "days", "next"];
+
+/// A forecast widget's TOML.
+fn forecast_widget(show: &str, width: u32) -> String {
+    format!("[[page.widget]]\ntype = \"forecast\"\nwidth = {width}\nshow = \"{show}\"\n")
+}
+
+/// A page of `widgets` (TOML) on the default layout, in the outlook's
+/// units and clock, with its readings in: drawn by the engine, as the
+/// strip would draw it.
+fn outlook_frame(o: &Outlook, widgets: &str, set_up: bool) -> Canvas {
+    let now = demo::sample_time();
+    let mut c = layout(None, set_up);
+    c.settings.temperature = o.temperature;
+    c.settings.clock = o.clock;
+    let text = format!("[[page]]\nname = \"F\"\n{widgets}");
+    c.pages = Config::parse(&text).expect("a valid layout").pages;
+    let world = World {
+        weather: false,
+        ..idle()
+    };
+    let mut e = engine(c, &world, "F");
+    if set_up {
+        for (name, value) in o.signals() {
+            e.handle(Input::Signal(name.into(), value));
+        }
+    }
+    shot(&mut e, &now, 1.0)
+}
+
+/// The rows the variants are drawn in: every medium and hero width a
+/// layout is likely to give (200, 320, 440, 640) and the compact one.
+const VARIANT_ROWS: [&[u32]; 3] = [&[200, 440], &[320, 128, 192], &[640]];
+
+/// Every variant in every outlook at 200, 320, 440 and 640 px (and a
+/// compact 128 and a medium 192), for the comparison sheet; and each
+/// variant on a Home page beside the clock and the weather now.
+pub fn forecast_sheets() -> (Vec<Frame>, Vec<Frame>) {
+    let mut variants = Vec::new();
+    let mut home = Vec::new();
+    for show in FORECAST_SHOWS {
+        for o in outlooks() {
+            for widths in VARIANT_ROWS {
+                let widgets: String = widths.iter().map(|w| forecast_widget(show, *w)).collect();
+                let label: Vec<String> = widths.iter().map(u32::to_string).collect();
+                variants.push(Frame {
+                    group: "forecast-variants",
+                    name: format!("{show} · {} · {}", o.name, label.join(" + ")),
+                    canvas: outlook_frame(&o, &widgets, true),
+                });
+            }
+            home.push(Frame {
+                group: "forecast-home",
+                name: format!("home · {show} · {}", o.name),
+                canvas: outlook_frame(&o, &home_page(show), true),
+            });
+        }
+    }
+    (variants, home)
+}
+
+/// Home with a forecast: the clock, the weather now, and the forecast in
+/// the 320 px the CPU and media cards had.
+fn home_page(show: &str) -> String {
+    let (_, widgets) = FORECAST_PAGE.split_once("\n\n").expect("a page");
+    widgets.replace("show = \"next\"", &format!("show = \"{show}\""))
+}
+
+/// The example forecast page in docs/LAYOUT.md: the forecast beside the
+/// clock and the weather now, as `forecast-home-next` draws it.
+pub const FORECAST_PAGE: &str = r#"[[page]]
+name = "Weather"
+
+[[page.widget]]
+type = "clock"
+width = 196
+
+[[page.widget]]
+type = "value"
+label = "Weather"
+signal = "weather.temp"
+width = 124
+
+[[page.widget]]
+type = "forecast"
+show = "next"
+width = 320
+"#;
+
+/// The forecast's checked-in frames: each variant at the specimen widths
+/// (its compact form in the 128 px zone) and across the strip, the compact
+/// form down to the narrowest zones, the states the weather card shares,
+/// and each variant on Home.
+fn forecast_frames(out: &mut Out) {
+    let all = outlooks();
+    let rainy = &all[1];
+    let snow = &all[2];
+    let specimen_row = |show: &str| -> String {
+        SPECIMEN_WIDTHS
+            .iter()
+            .map(|w| forecast_widget(show, *w))
+            .collect()
+    };
+    for show in FORECAST_SHOWS {
+        let name = format!("forecast-{show}");
+        out.save(
+            "forecast",
+            &name,
+            outlook_frame(rainy, &specimen_row(show), true),
+        );
+        let wide = forecast_widget(show, 640);
+        out.save(
+            "forecast",
+            format!("{name}-wide"),
+            outlook_frame(snow, &wide, true),
+        );
+        let home = format!("forecast-home-{show}");
+        out.save(
+            "forecast",
+            home,
+            outlook_frame(rainy, &home_page(show), true),
+        );
+    }
+    // The compact form in every zone a layout may give it, widest first.
+    let compact: String = [128, 112, 106, 96, 72, 64, 62]
+        .iter()
+        .map(|w| forecast_widget("hours", *w))
+        .collect();
+    out.save(
+        "forecast",
+        "forecast-compact",
+        outlook_frame(rainy, &compact, true),
+    );
+    out.save(
+        "forecast",
+        "forecast-compact-12h",
+        outlook_frame(snow, &compact, true),
+    );
+    // The weather card's states: not set up, no forecast yet, and lost.
+    let row = specimen_row("next");
+    out.save(
+        "forecast",
+        "forecast-not-set-up",
+        outlook_frame(rainy, &row, false),
+    );
+    let now = demo::sample_time();
+    let mut c = layout(None, true);
+    let text = format!("[[page]]\nname = \"F\"\n{row}");
+    c.pages = Config::parse(&text).expect("a valid layout").pages;
+    let world = World {
+        weather: false,
+        ..idle()
+    };
+    let mut e = engine(c.clone(), &world, "F");
+    out.save("forecast", "forecast-no-data", shot(&mut e, &now, 1.0));
+    let mut e = engine(c, &world, "F");
+    for (name, value) in rainy.signals() {
+        e.handle(Input::Signal(name.into(), value));
+    }
+    // Twelve minutes after the last forecast came, the source stopped.
+    e.handle(Input::Forget("weather.temp".into()));
+    out.save("forecast", "forecast-lost", shot(&mut e, &now, 1.0));
 }

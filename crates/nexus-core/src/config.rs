@@ -483,6 +483,21 @@ pub enum Widget {
         #[serde(default)]
         hold: Option<Action>,
     },
+    /// The weather to come, from the `weather.h*`, `weather.d*` and
+    /// `weather.next` signals: the next hours, the next days, or the next
+    /// change in words. It is information: a tap does nothing unless
+    /// `tap` says.
+    Forecast {
+        width: u32,
+        #[serde(default)]
+        show: ForecastShow,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+        #[serde(default)]
+        tap: Option<Action>,
+        #[serde(default)]
+        hold: Option<Action>,
+    },
     /// A control to press: an icon and a label. It shows nothing live.
     Key {
         width: u32,
@@ -511,6 +526,7 @@ impl Widget {
             | Widget::Value { width, .. }
             | Widget::Rate { width, .. }
             | Widget::News { width, .. }
+            | Widget::Forecast { width, .. }
             | Widget::Key { width, .. } => *width,
         }
     }
@@ -524,6 +540,7 @@ impl Widget {
             | Widget::Value { width, .. }
             | Widget::Rate { width, .. }
             | Widget::News { width, .. }
+            | Widget::Forecast { width, .. }
             | Widget::Key { width, .. } => *width = new,
         }
         self
@@ -538,6 +555,7 @@ impl Widget {
             | Widget::Value { tap, .. }
             | Widget::Rate { tap, .. }
             | Widget::News { tap, .. }
+            | Widget::Forecast { tap, .. }
             | Widget::Key { tap, .. } => tap.as_ref(),
         }
     }
@@ -551,6 +569,7 @@ impl Widget {
             | Widget::Value { icon, .. }
             | Widget::Rate { icon, .. }
             | Widget::News { icon, .. }
+            | Widget::Forecast { icon, .. }
             | Widget::Key { icon, .. } => icon.as_deref(),
         }
     }
@@ -564,9 +583,24 @@ impl Widget {
             | Widget::Value { hold, .. }
             | Widget::Rate { hold, .. }
             | Widget::News { hold, .. }
+            | Widget::Forecast { hold, .. }
             | Widget::Key { hold, .. } => hold.as_ref(),
         }
     }
+}
+
+/// What a forecast widget shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ForecastShow {
+    /// The next hours, one column every three hours.
+    Hours,
+    /// The days after today, one column each.
+    Days,
+    /// The next change in the weather, in words: "Rain from 15:00".
+    /// The default (provisional, `DESIGN.md`).
+    #[default]
+    Next,
 }
 
 /// What a tap or a long press on a widget does. Written as a one-key table:
@@ -1436,6 +1470,37 @@ mod tests {
             page.contains(&format!("```toml\n{}```", crate::scenes::NEWS_PAGE)),
             "docs/LAYOUT.md has the News page of scenes::NEWS_PAGE"
         );
+    }
+
+    /// The forecast page docs/LAYOUT.md offers is the one the frames draw.
+    #[test]
+    fn the_layout_reference_offers_the_forecast_page() {
+        let page = include_str!("../../../docs/LAYOUT.md").replace("\r\n", "\n");
+        assert!(
+            page.contains(&format!("```toml\n{}```", crate::scenes::FORECAST_PAGE)),
+            "docs/LAYOUT.md has the page of scenes::FORECAST_PAGE"
+        );
+    }
+
+    /// A forecast shows the next change unless told otherwise.
+    #[test]
+    fn a_forecast_shows_the_next_change_by_default() {
+        let shows = |extra: &str| {
+            let text = format!(
+                "[[page]]\nname = \"W\"\n[[page.widget]]\ntype = \"forecast\"\nwidth = 320\n{extra}"
+            );
+            match &Config::parse(&text).expect("valid").pages[0].widgets[0] {
+                Widget::Forecast { show, .. } => *show,
+                other => panic!("not a forecast: {other:?}"),
+            }
+        };
+        assert_eq!(shows(""), ForecastShow::Next);
+        assert_eq!(shows("show = \"hours\""), ForecastShow::Hours);
+        assert_eq!(shows("show = \"days\""), ForecastShow::Days);
+        assert!(Config::parse(
+            "[[page]]\nname = \"W\"\n[[page.widget]]\ntype = \"forecast\"\nwidth = 320\nshow = \"weeks\"\n"
+        )
+        .is_err());
     }
 
     /// docs/LAYOUT.md's examples are real: each complete one parses.

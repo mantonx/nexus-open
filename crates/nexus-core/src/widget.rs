@@ -190,6 +190,8 @@ pub enum WidgetView {
         age: String,
         avail: Avail,
     },
+    /// The weather to come (`ForecastView`).
+    Forecast(Box<ForecastView>),
     /// A control to press.
     Key {
         icon: Option<char>,
@@ -1364,6 +1366,7 @@ impl Pen<'_> {
                 age,
                 avail,
             } => self.news(x, w, cls, *icon, headline, source, age, avail, press),
+            WidgetView::Forecast(f) => self.forecast(x, w, cls, f, press),
             WidgetView::Key {
                 icon,
                 label,
@@ -3085,6 +3088,379 @@ struct SliderLook<'a> {
     fraction: Option<f32>,
     held: bool,
     muted: bool,
+}
+
+// ---------------------------------------------------------------- forecast
+
+/// One column of a forecast: an hour, or a day.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForecastColumn {
+    /// "15:00", "3 PM", "Mon".
+    pub label: String,
+    pub icon: char,
+    /// The temperature at the hour, or the day's high: "48°".
+    pub temp: String,
+    /// The day's low: "39°".
+    pub low: Option<String>,
+    /// The chance of rain, 0–1, when it is at least `forecast::RAIN_SHOWN`.
+    pub rain: Option<f32>,
+}
+
+/// The next change in the weather, worded (`forecast::Change::words`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForecastNext {
+    pub icon: char,
+    /// "Rain from", "Snow", "Clearing by".
+    pub head: String,
+    /// "15:00", "tonight", "all day".
+    pub tail: String,
+    /// What a compact card says: "15:00", or "Dry".
+    pub short: String,
+}
+
+/// What a forecast widget shows. Columns are laid out for the widest
+/// label and temperature they can have (`label_widest`, `temp_widest`),
+/// never the ones now, so nothing moves as the forecast changes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForecastView {
+    pub show: crate::config::ForecastShow,
+    /// The hours, or the days, as `show` says; empty for `Next`.
+    pub columns: Vec<ForecastColumn>,
+    /// Also the compact card of every kind.
+    pub next: Option<ForecastNext>,
+    /// Every label a column can have at its widest: "88:00", or the day
+    /// names.
+    pub label_widest: Vec<String>,
+    /// The widest temperature in the unit shown: "888°", "-88°".
+    pub temp_widest: String,
+    /// Every short a compact card can say: the widest times and words.
+    pub short_widest: Vec<String>,
+    pub avail: Avail,
+}
+
+impl Pen<'_> {
+    /// The forecast widget: columns of hours or days, or the next change
+    /// in words; at compact width always the next change's icon and time.
+    fn forecast(&mut self, x: f32, w: f32, cls: Class, f: &ForecastView, press: Press) {
+        use crate::config::ForecastShow;
+        let at = match &f.avail {
+            Avail::NotSetUp => {
+                let pin = icons::MAP_PIN_PLUS;
+                self.setup_prompt(x, w, cls, pin, "Weather", "Add your town", "Weather");
+                return;
+            }
+            Avail::Lost(at) => Some(at.as_str()),
+            _ => None,
+        };
+        self.card(x, w, CARD, press);
+        if let Some(at) = at {
+            // As the weather card: the cloud with a slash, and the time the
+            // forecast is from. An old forecast's hours are past, so they
+            // are not shown.
+            let hero = format!("Forecast from {at}");
+            self.forecast_quiet(x, w, cls, (&hero, "Forecast", &format!("from {at}")), at);
+            return;
+        }
+        let drawn = f.avail == Avail::Live
+            && match (cls, f.show, &f.next) {
+                (Class::Compact, _, Some(n)) => {
+                    self.forecast_compact(x, w, n, &f.short_widest);
+                    true
+                }
+                (Class::Compact, _, None) => false,
+                (_, ForecastShow::Next, Some(n)) => {
+                    self.forecast_next(x, w, cls, n);
+                    true
+                }
+                (_, ForecastShow::Next, None) => false,
+                _ if f.columns.is_empty() => false,
+                (_, show, next) => {
+                    let days = show == ForecastShow::Days;
+                    // Not even one column fits: the compact form.
+                    self.forecast_columns(x, w, f, days)
+                        || next.as_ref().is_some_and(|n| {
+                            self.forecast_compact(x, w, n, &f.short_widest);
+                            true
+                        })
+                }
+            };
+        if !drawn {
+            let words = "No forecast yet";
+            self.forecast_quiet(x, w, cls, (words, words, ""), DASHES);
+        }
+    }
+
+    /// No forecast to show: the cloud with a slash and plain words, as the
+    /// weather card says it. `words` is the hero line and the medium's two
+    /// lines; `short` is what a compact card shows beside the icon.
+    fn forecast_quiet(
+        &mut self,
+        x: f32,
+        w: f32,
+        cls: Class,
+        words: (&str, &str, &str),
+        short: &str,
+    ) {
+        let glyph = icons::CLOUD_SLASH;
+        let mid = CARD_Y + CARD_H / 2.0;
+        match cls {
+            Class::Compact => {
+                let s = NUM_SECOND_SMALL;
+                let tw = self.measure(Face::Num, &s, short);
+                let total = ICON_SMALL + ICON_GAP + tw;
+                if total <= w - PAD {
+                    let x0 = (x + (w - total) / 2.0).floor();
+                    let base = (mid + s.size * 0.35).round();
+                    self.icon(false, glyph, ICON_SMALL, x0 + ICON_SMALL / 2.0, mid, TEXT3);
+                    self.text(
+                        Face::Num,
+                        &s,
+                        short,
+                        x0 + ICON_SMALL + ICON_GAP,
+                        base,
+                        TEXT3,
+                    );
+                } else {
+                    self.icon(false, glyph, ICON_SMALL, x + w / 2.0, mid, TEXT3);
+                }
+            }
+            Class::Medium => {
+                let x0 = x + PAD;
+                self.icon(
+                    false,
+                    glyph,
+                    ICON_MEDIUM,
+                    x0 + ICON_MEDIUM / 2.0,
+                    mid,
+                    TEXT3,
+                );
+                let dx = x0 + ICON_MEDIUM + 8.0;
+                let room = x + w - PAD - dx;
+                let (l1, l2) = (words.1, words.2);
+                if l2.is_empty() {
+                    let l1 = self.fit(Face::Word, &BODY, l1, room);
+                    self.text(Face::Word, &BODY, &l1, dx, 32.0, TEXT2);
+                } else {
+                    let l1 = self.fit(Face::Word, &BODY, l1, room);
+                    self.text(Face::Word, &BODY, &l1, dx, BASE_LINE1, TEXT3);
+                    let l2 = self.high_low(l2, room);
+                    self.text(Face::Word, &BODY, &l2, dx, BASE_LINE2 - 1.0, TEXT3);
+                }
+            }
+            Class::Hero => {
+                let x0 = x + PAD + 4.0;
+                self.icon(false, glyph, ICON_HERO, x0 + ICON_HERO / 2.0, mid, TEXT3);
+                let dx = x0 + ICON_HERO + 10.0;
+                let room = x + w - PAD - dx;
+                // "Forecast from 9:30" whole, or "No forecast yet" fitted.
+                let line = if self.measure(Face::Word, &TITLE, words.0) <= room {
+                    words.0.to_string()
+                } else {
+                    self.fit(Face::Word, &TITLE, "No forecast", room)
+                };
+                let c = if words.2.is_empty() { TEXT2 } else { TEXT3 };
+                self.text(Face::Word, &TITLE, &line, dx, 33.0, c);
+            }
+        }
+    }
+
+    /// A compact forecast: the next change's icon and its time ("15:00")
+    /// or word ("Dry"), at the largest step that holds the widest of them
+    /// all beside the icon; narrower, the icon above a small one; else
+    /// the icon alone.
+    fn forecast_compact(&mut self, x: f32, w: f32, n: &ForecastNext, widest: &[String]) {
+        let room = w - PAD;
+        let face = if n.short.chars().any(|c| c.is_ascii_digit()) {
+            Face::Num
+        } else {
+            Face::Word
+        };
+        let wide = |pen: &mut Self, s: &TextStyle| {
+            widest
+                .iter()
+                .chain([&n.short])
+                .map(|t| {
+                    let a = pen.measure(Face::Num, s, t);
+                    a.max(pen.measure(Face::Word, s, t))
+                })
+                .fold(0.0, f32::max)
+        };
+        let steps = [
+            (NUM_SECOND, ICON_COMPACT),
+            (NUM_SECOND_TIGHT, ICON_COMPACT),
+            (NUM_SECOND_TIGHT, ICON_SMALL),
+            (NUM_SECOND_SMALL, ICON_SMALL),
+        ];
+        let mid = CARD_Y + CARD_H / 2.0;
+        for (s, isz) in steps {
+            let tw = wide(self, &s);
+            if isz + ICON_GAP + tw <= room {
+                let x0 = (x + (w - (isz + ICON_GAP + tw)) / 2.0).floor();
+                let base = (mid + s.size * 0.35).round();
+                let cy = fig_mid(&s, base);
+                self.icon(false, n.icon, isz, x0 + isz / 2.0, cy, TEXT2);
+                self.text(face, &s, &n.short, x0 + isz + ICON_GAP, base, TEXT);
+                return;
+            }
+        }
+        let s = NUM_SECOND_SMALL;
+        let cx = x + w / 2.0;
+        if wide(self, &s) <= room {
+            self.icon(false, n.icon, ICON_SMALL, cx, CARD_Y + 9.5, TEXT2);
+            self.text_c(face, &s, &n.short, cx, BASE_LINE2, TEXT);
+        } else {
+            self.icon(false, n.icon, ICON_SMALL, cx, mid, TEXT2);
+        }
+    }
+
+    /// The next change in words: on a hero card one line, the icon and the
+    /// sentence centred; on a medium card the icon and two lines ("Rain
+    /// from" / "15:00"). The time is never cut.
+    fn forecast_next(&mut self, x: f32, w: f32, cls: Class, n: &ForecastNext) {
+        let mid = CARD_Y + CARD_H / 2.0;
+        let tail_face = if n.tail.chars().any(|c| c.is_ascii_digit()) {
+            Face::Num
+        } else {
+            Face::Word
+        };
+        if cls == Class::Hero {
+            let room = w - 2.0 * PAD;
+            let gap = 10.0;
+            for s in [TITLE_BIG, TITLE] {
+                let hw = self.measure(Face::Word, &s, &n.head);
+                let space = self.measure(Face::Word, &s, " ");
+                let tw = self.measure(tail_face, &s, &n.tail);
+                let total = ICON_HERO + gap + hw + space + tw;
+                if total <= room || s == TITLE {
+                    let x0 = (x + ((w - total) / 2.0).max(PAD)).round();
+                    let base = (mid + s.size * 0.35).round();
+                    let cy = base - s.size * 0.35;
+                    self.icon(false, n.icon, ICON_HERO, x0 + ICON_HERO / 2.0, cy, TEXT2);
+                    let tx = x0 + ICON_HERO + gap;
+                    let head = self.fit(Face::Word, &s, &n.head, x + w - PAD - tx - space - tw);
+                    let hw = self.text(Face::Word, &s, &head, tx, base, TEXT);
+                    self.text(tail_face, &s, &n.tail, tx + hw + space, base, TEXT);
+                    return;
+                }
+            }
+        }
+        // Medium: the sentence on one line at `TITLE` when it fits ("Dry
+        // all day"), centred as a news card's single line; else two lines
+        // at the strip's smallest size, as the weather card's words ("Rain
+        // from" / "15:00"): a larger first line would touch the second.
+        let x0 = x + PAD;
+        self.icon(
+            false,
+            n.icon,
+            ICON_MEDIUM,
+            x0 + ICON_MEDIUM / 2.0,
+            mid,
+            TEXT2,
+        );
+        let dx = x0 + ICON_MEDIUM + 8.0;
+        let room = x + w - PAD - dx;
+        let space = self.measure(Face::Word, &TITLE, " ");
+        let hw = self.measure(Face::Word, &TITLE, &n.head);
+        if hw + space + self.measure(tail_face, &TITLE, &n.tail) <= room {
+            let base = (mid + TITLE.size * 0.35).round();
+            self.text(Face::Word, &TITLE, &n.head, dx, base, TEXT);
+            self.text(tail_face, &TITLE, &n.tail, dx + hw + space, base, TEXT);
+            return;
+        }
+        let head = self.fit(Face::Word, &BODY, &n.head, room);
+        self.text(Face::Word, &BODY, &head, dx, FORECAST_BASE1, TEXT);
+        if self.measure(tail_face, &LABEL, &n.tail) <= room {
+            self.text(tail_face, &LABEL, &n.tail, dx, BASE_LINE2 - 1.0, TEXT);
+        }
+    }
+
+    /// Columns of hours or days, each the same width whatever it holds:
+    /// as many as fit, spread over the card. False when not even one
+    /// fits, so the caller draws the compact form.
+    fn forecast_columns(&mut self, x: f32, w: f32, f: &ForecastView, days: bool) -> bool {
+        let label_face = if days { Face::Word } else { Face::Num };
+        let (num, low_st) = (NUM_SECOND_SMALL, NUM_SECOND_SMALL);
+        let widest = |pen: &mut Self, face: Face, s: &TextStyle, texts: &[&str]| {
+            texts
+                .iter()
+                .map(|t| pen.measure(face, s, t))
+                .fold(0.0, f32::max)
+        };
+        let mut labels: Vec<&str> = f.label_widest.iter().map(String::as_str).collect();
+        labels.extend(f.columns.iter().map(|c| c.label.as_str()));
+        let mut temps: Vec<&str> = vec![f.temp_widest.as_str()];
+        temps.extend(f.columns.iter().map(|c| c.temp.as_str()));
+        let mut lows: Vec<&str> = vec![f.temp_widest.as_str()];
+        lows.extend(f.columns.iter().filter_map(|c| c.low.as_deref()));
+        let label_w = widest(self, label_face, &LABEL, &labels);
+        let temp_w = widest(self, Face::Num, &num, &temps);
+        let content_w = if days {
+            let low_w = widest(self, Face::Num, &low_st, &lows);
+            (label_w + ICON_GAP + ICON_SMALL).max(temp_w + FORECAST_LOW_GAP + low_w)
+        } else {
+            label_w.max(ICON_SMALL + FORECAST_ICON_GAP + temp_w)
+        };
+        let block = FORECAST_GAUGE_W + FORECAST_GAUGE_GAP + content_w;
+        let inner = w - 2.0 * PAD;
+        let fit = ((inner + FORECAST_COL_GAP) / (block + FORECAST_COL_GAP)).floor() as usize;
+        let n = fit.min(f.columns.len());
+        if n == 0 {
+            return false;
+        }
+        let slot = inner / n as f32;
+        let base1 = FORECAST_BASE1;
+        let row1_mid = base1 - LABEL.size * 0.35;
+        let base2 = BASE_LINE2 - 1.0;
+        for (i, col) in f.columns.iter().take(n).enumerate() {
+            let bx = (x + PAD + i as f32 * slot + (slot - block) / 2.0).round();
+            if let Some(rain) = col.rain {
+                self.rain_gauge(bx, rain);
+            }
+            // Each line centred in the column's fixed box: the box never
+            // moves, and the words in it sit together.
+            let cx = bx + FORECAST_GAUGE_W + FORECAST_GAUGE_GAP;
+            let centred = |row: f32| (cx + (content_w - row) / 2.0).round();
+            let lw = self.measure(label_face, &LABEL, &col.label);
+            let tw = self.measure(Face::Num, &num, &col.temp);
+            if days {
+                let x1 = centred(lw + ICON_GAP + ICON_SMALL);
+                self.text(label_face, &LABEL, &col.label, x1, base1, TEXT2);
+                let ix = x1 + lw + ICON_GAP + ICON_SMALL / 2.0;
+                self.icon(false, col.icon, ICON_SMALL, ix, row1_mid, TEXT2);
+                let low = col.low.as_deref().unwrap_or_default();
+                let low_w = self.measure(Face::Num, &low_st, low);
+                let x2 = centred(tw + FORECAST_LOW_GAP + low_w);
+                self.text(Face::Num, &num, &col.temp, x2, base2, TEXT);
+                let lx = x2 + tw + FORECAST_LOW_GAP;
+                self.text(Face::Num, &low_st, low, lx, base2, TEXT2);
+            } else {
+                self.text(label_face, &LABEL, &col.label, centred(lw), base1, TEXT2);
+                let x2 = centred(ICON_SMALL + FORECAST_ICON_GAP + tw);
+                let cy = fig_mid(&num, base2);
+                self.icon(
+                    false,
+                    col.icon,
+                    ICON_SMALL,
+                    x2 + ICON_SMALL / 2.0,
+                    cy,
+                    TEXT2,
+                );
+                let tx = x2 + ICON_SMALL + FORECAST_ICON_GAP;
+                self.text(Face::Num, &num, &col.temp, tx, base2, TEXT);
+            }
+        }
+        true
+    }
+
+    /// A column's chance of rain: a pill gauge filled from the bottom, on
+    /// a fixed 0–100 % scale.
+    fn rain_gauge(&mut self, x: f32, rain: f32) {
+        let (y, h, gw) = (FORECAST_GAUGE_Y, FORECAST_GAUGE_H, FORECAST_GAUGE_W);
+        let r = gw / 2.0;
+        self.rrect(x, y, gw, h, r, TRACK);
+        let fh = (h * rain.clamp(0.0, 1.0)).max(gw);
+        self.rrect(x, y + h - fh, gw, fh, r, FILL);
+    }
 }
 
 #[cfg(test)]

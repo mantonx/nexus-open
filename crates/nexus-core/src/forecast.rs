@@ -348,6 +348,16 @@ pub fn hour_widest(clock: ClockFormat) -> Vec<String> {
     }
 }
 
+/// What a compact card is laid out for: the widest time, and "Dry". A
+/// wider word ("Storms", for storms all day) is laid out for when it
+/// shows; with the time at 20 px in a 106 px zone it would otherwise
+/// push every time above its icon.
+pub fn short_widest(clock: ClockFormat) -> Vec<String> {
+    let mut out = hour_widest(clock);
+    out.push("Dry".into());
+    out
+}
+
 const DAY_KEYS: [(&str, &str); 7] = [
     ("mon", "Mon"),
     ("tue", "Tue"),

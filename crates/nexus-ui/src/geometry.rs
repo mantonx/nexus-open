@@ -169,7 +169,7 @@ pub fn readable(w: &Widget) -> u32 {
         Widget::Value { .. } | Widget::Rate { .. } | Widget::Clock { .. } => 72,
         Widget::Slider { .. } => 80,
         // A headline, like a title, needs room for some of its words.
-        Widget::Media { .. } | Widget::News { .. } => 120,
+        Widget::Media { .. } | Widget::News { .. } | Widget::Forecast { .. } => 120,
     }
 }
 
