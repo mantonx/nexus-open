@@ -108,7 +108,14 @@ enum Command {
     Hold { x: f32 },
     /// Drag along the strip from one x to another (0–639): a swipe, or a
     /// slide on a slider.
-    Drag { from: f32, to: f32 },
+    Drag {
+        from: f32,
+        to: f32,
+        /// Hold still at the start past the long press first: a
+        /// hold-then-slide, which switches layout as the layout picker does.
+        #[arg(long)]
+        hold: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -198,7 +205,9 @@ fn main() -> ExitCode {
         Command::Publish { signal, value } => format!("publish {signal} {}", value.join(" ")),
         Command::Tap { x } => format!("tap {x}"),
         Command::Hold { x } => format!("hold {x}"),
-        Command::Drag { from, to } => format!("drag {from} {to}"),
+        Command::Drag { from, to, hold } => {
+            format!("{} {from} {to}", if *hold { "hold-drag" } else { "drag" })
+        }
     };
     let mut client = match Client::connect() {
         Ok(c) => c,

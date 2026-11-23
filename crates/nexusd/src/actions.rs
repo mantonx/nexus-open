@@ -53,6 +53,9 @@ impl Effects {
                     .spawn(move || nexus_sources::media_seek(seconds));
             }
             Effect::Run(argv) => self.slider.set(argv),
+            // The daemon does this itself, through the store it owns
+            // (`run.rs`); it never gets here.
+            Effect::SwitchLayout(_) => {}
         }
     }
 }

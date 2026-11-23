@@ -19,6 +19,15 @@
 //! (its OK key, or a swipe) or the reading has been back under for
 //! `ALARM_CLEARS` seconds.
 //!
+//! A long press arms at its threshold and acts when the finger lifts. If
+//! the armed finger slides instead, the layout picker covers the strip:
+//! the store's layouts (`Input::Layouts`) as cards, the selection moving
+//! one card per `PICKER_STEP` of travel. Lifting asks the caller to switch
+//! (`Effect::SwitchLayout`); when the new layout and list come back, its
+//! first page is shown with its name over it for a moment. The picker
+//! never opens from a slider (sliders take their touches before the
+//! recognizer), nor over the alarm, which closes it if it rises.
+//!
 //! Frames are finished here: page markers along the top, takeovers fading
 //! in and out, the strip dimmed when idle or at night (never a warning or
 //! critical card), and the alarm's slow breathing. `animating` says when
@@ -65,6 +74,13 @@ const DAMPING: f32 = 36.0;
 /// How far a finger on a slider moves before the value follows it, in
 /// pixels: the jitter of a finger resting on it never sets anything.
 const SLIDER_SLOP: f32 = 4.0;
+
+/// The layout picker moves its selection one card per this much finger
+/// travel, from where it opened: about 14 mm on the panel. Each card
+/// gets the same span, centred on it, so the current layout (the cancel)
+/// is the 72 px around the opening point, and from a hold in the middle
+/// of the strip four cards are in reach each way.
+pub const PICKER_STEP: f32 = 72.0;
 
 /// A partial takeover's width moves to the nearest card edge of the page
 /// under it when that is within this share of its width.
@@ -125,6 +141,13 @@ pub enum Input {
     Acknowledge,
     /// The device came back; it needs the whole picture again.
     Redraw,
+    /// The store's layouts by name, in its order, and the index of the one
+    /// on the strip: what the layout picker offers. Sent at start and after
+    /// every change to the store. Until it comes, the picker never opens.
+    Layouts {
+        names: Vec<String>,
+        current: Option<usize>,
+    },
 }
 
 /// Something for the caller to do. The engine never touches processes,
@@ -144,6 +167,10 @@ pub enum Effect {
     /// caller opens it only if it is a plain `http(s)` address, and never
     /// through a shell.
     OpenLink(String),
+    /// Put the layout with this name on the strip, as the settings window
+    /// does: chosen with the layout picker. The engine follows when the
+    /// new layout and `Input::Layouts` come back.
+    SwitchLayout(String),
 }
 
 /// The critical alarm, as the renderer needs it.
@@ -208,13 +235,79 @@ impl Alarm {
 }
 
 /// A long press on its way: the zone under the finger, whose hold action
-/// fires when `progress` reaches 1.
+/// is armed when `progress` reaches 1 and fires when the finger lifts
+/// there.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hold {
     /// The zone's pixels on the strip.
     pub zone: Range<u32>,
-    /// 0 when the finger lands, 1 at the threshold.
+    /// 0 when the finger lands, 1 at the threshold and while armed.
     pub progress: f32,
+}
+
+/// The layout picker, open while a hold-then-slide is under way: the
+/// layouts as they were when it opened.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Picker {
+    pub names: Vec<String>,
+    /// The layout on the strip: lifting on it changes nothing.
+    pub current: usize,
+    /// The layout lifting the finger switches to.
+    pub selected: usize,
+}
+
+/// The new layout's name, shown for a moment after a switch from the
+/// strip, from monotonic time `start`: it fades in as a takeover does,
+/// stays `MS_LAYOUT_NAME`, and fades out over the layout's first page.
+#[derive(Clone, Debug, PartialEq)]
+struct Named {
+    name: String,
+    start: f64,
+}
+
+impl Named {
+    fn times() -> (f64, f64, f64) {
+        let s = |ms: u32| f64::from(ms) / 1000.0;
+        (
+            s(theme::MS_TAKEOVER_IN),
+            s(theme::MS_LAYOUT_NAME),
+            s(theme::MS_TAKEOVER_OUT),
+        )
+    }
+
+    /// How opaque it is at `now`, 0–1, and how far below its place it
+    /// still is as it rises in; `None` once it is gone.
+    fn look(&self, now: f64) -> Option<(f32, f32)> {
+        let (fade_in, stay, fade_out) = Self::times();
+        let t = now - self.start;
+        let ease = |k: f64| {
+            let k = k.clamp(0.0, 1.0) as f32;
+            1.0 - (1.0 - k) * (1.0 - k)
+        };
+        if t < fade_in {
+            let k = ease(t / fade_in);
+            Some((k, (1.0 - k) * theme::TAKEOVER_RISE))
+        } else if t < fade_in + stay {
+            Some((1.0, 0.0))
+        } else if t < fade_in + stay + fade_out {
+            Some((1.0 - ease((t - fade_in - stay) / fade_out), 0.0))
+        } else {
+            None
+        }
+    }
+
+    /// Fading in or out, rather than standing still or gone.
+    fn moving(&self, now: f64) -> bool {
+        let (fade_in, stay, _) = Self::times();
+        let t = now - self.start;
+        self.look(now).is_some() && !(fade_in..fade_in + stay).contains(&t)
+    }
+
+    /// When it starts to fade out.
+    fn fades_at(&self) -> f64 {
+        let (fade_in, stay, _) = Self::times();
+        self.start + fade_in + stay
+    }
 }
 
 /// A row of widgets that can fill the strip.
@@ -396,6 +489,16 @@ pub struct Engine {
     /// and at most a few before it, so a key that arrives just after its
     /// pixels, or a track skipped back to, still finds them.
     art: Vec<Arc<Art>>,
+    /// The store's layouts and the one on the strip (`Input::Layouts`).
+    layouts: Vec<String>,
+    layout: Option<usize>,
+    /// The layout picker, while a hold-then-slide is under way.
+    picker: Option<Picker>,
+    /// The layout the picker asked for, until `Input::Layouts` says it is
+    /// on the strip.
+    switching: Option<String>,
+    /// The new layout's name after a switch from the strip.
+    named: Option<Named>,
 }
 
 /// Artwork kept by the engine: what `media.art` names, and a few more.
@@ -436,6 +539,11 @@ impl Engine {
             drawn_stale: false,
             landing_link: None,
             art: Vec::new(),
+            layouts: Vec::new(),
+            layout: None,
+            picker: None,
+            switching: None,
+            named: None,
         }
     }
 
@@ -526,8 +634,14 @@ impl Engine {
         })
     }
 
-    /// The long press under the finger, while one is on its way to firing
-    /// an action. Measured at the latest time the engine has seen.
+    /// The layout picker, while it is open.
+    pub fn picker(&self) -> Option<&Picker> {
+        self.picker.as_ref()
+    }
+
+    /// The long press under the finger, while one is on its way or armed
+    /// and waiting for the lift. Measured at the latest time the engine
+    /// has seen.
     pub fn hold(&self) -> Option<Hold> {
         if self.ignoring || !self.alarm.is_empty() || self.motion != Motion::Still {
             return None;
@@ -546,12 +660,14 @@ impl Engine {
     }
 
     /// True while frames are due as fast as the device takes them: a page
-    /// springing into place, a long press filling, a takeover fading in or
-    /// out, a long title scrolling.
+    /// springing into place, a long press filling (not once it is full), a
+    /// takeover or a layout's name fading in or out, a long title
+    /// scrolling.
     pub fn animating(&self) -> bool {
         matches!(self.motion, Motion::Settle { .. })
-            || self.hold().is_some()
+            || self.hold().is_some_and(|h| h.progress < 1.0)
             || self.fade.is_some()
+            || self.named.as_ref().is_some_and(|n| n.moving(self.now))
             || (self.marquee_at.is_some() && self.alarm.is_empty())
     }
 
@@ -570,7 +686,11 @@ impl Engine {
     /// reading on some page is at warning or worse, or something has come
     /// up over the page.
     pub fn brightness(&self, now: &Zoned) -> f32 {
-        if !self.alarm.is_empty() || self.cover.is_some() {
+        if !self.alarm.is_empty()
+            || self.cover.is_some()
+            || self.picker.is_some()
+            || self.named.is_some()
+        {
             return 1.0;
         }
         let settings = &self.config.settings;
@@ -593,11 +713,20 @@ impl Engine {
 
     /// Moves the engine's clock to `mono` (monotonic seconds, the touch
     /// clock) and fires what is due by then: a long press held to its
-    /// threshold, an alarm whose reading has been back under long enough.
+    /// threshold arms, an alarm whose reading has been back under long
+    /// enough goes, a layout's name that has faded out goes.
     /// `frame` and touches do this too; the daemon calls it on every wake.
     pub fn tick(&mut self, mono: f64) {
         self.now = self.now.max(mono);
         self.expire_alarm();
+        if self
+            .named
+            .as_ref()
+            .is_some_and(|n| n.look(self.now).is_none())
+        {
+            self.named = None;
+            self.dirty = true;
+        }
         if let Some(gesture) = self.gestures.tick(self.now) {
             self.gesture(gesture);
         }
@@ -691,6 +820,22 @@ impl Engine {
             Input::EndTakeover => self.fade_out(),
             Input::Acknowledge => self.acknowledge(),
             Input::Redraw => self.dirty = true,
+            Input::Layouts { names, current } => {
+                let now_on = current.and_then(|i| names.get(i));
+                let switched = self.switching.take().filter(|n| Some(n) == now_on);
+                self.layouts = names;
+                self.layout = current;
+                // The switch the picker asked for is done: the new layout
+                // from its first page, its name shown for a moment.
+                if let Some(name) = switched {
+                    self.go_to(0);
+                    self.named = Some(Named {
+                        name,
+                        start: self.now,
+                    });
+                    self.dirty = true;
+                }
+            }
         }
     }
 
@@ -721,6 +866,15 @@ impl Engine {
         }
         if self.breathed_at.take().is_some() {
             self.dirty = true;
+        }
+        // The picker covers the whole strip, page markers too.
+        if let Some(p) = &self.picker {
+            if !self.dirty {
+                return None;
+            }
+            self.dirty = false;
+            self.drawn_minute = None;
+            return Some(self.renderer.render_picker(&p.names, p.current, p.selected));
         }
         if let Some(cover) = self.cover {
             let seconds = self.cover_seconds(&cover);
@@ -800,6 +954,14 @@ impl Engine {
                 page
             }
         };
+        if let Some((name, (alpha, rise))) = self
+            .named
+            .as_ref()
+            .and_then(|n| Some((n.name.clone(), n.look(self.now)?)))
+        {
+            let top = self.renderer.render_layout_name(&name);
+            canvas.blend_from(&top, 0, rise.round() as i32, alpha);
+        }
         let markers = self.markers();
         self.renderer.draw_markers(&mut canvas, &markers, dim);
         if !moving {
@@ -855,10 +1017,18 @@ impl Engine {
         if let Some(c) = self.cover.filter(|_| !touching) {
             sooner(after(c.until.unwrap_or(mono + self.cover_seconds(&c))));
         }
-        if self.hold().is_some()
+        // A still finger arms at the threshold, hold action or not: a slide
+        // after it is a hold-then-slide, not a swipe.
+        if !self.gestures.armed()
             && let Some((_, start)) = self.gestures.holding()
         {
             sooner(after(start + LONG_PRESS));
+        }
+        // A layout's name standing still: its fade out is next.
+        if let Some(n) = &self.named
+            && n.fades_at() > mono
+        {
+            sooner(after(n.fades_at()));
         }
         for signal in &self.alarm {
             if let Some(since) = self.watches.get(signal).and_then(|w| w.below_since) {
@@ -899,6 +1069,9 @@ impl Engine {
                 && self.slider_at(x).is_some());
         if on_slider {
             self.slide_touch(down, x, at);
+            if self.slide.is_some_and(|s| at - s.start >= MIN_TAP) {
+                self.end_name();
+            }
             if !down {
                 self.touch_start = None;
             }
@@ -914,14 +1087,21 @@ impl Engine {
             };
         }
         let gesture = self.gestures.update(down, x, at);
+        if landing && self.gestures.pressed() {
+            self.end_name();
+        }
         // Light the zone as soon as the finger lands, so the strip
-        // answers before the gesture is known; a swipe turns it off.
+        // answers before the gesture is known; a swipe or a slide turns it
+        // off.
         let mut pressed = match () {
             _ if !self.gestures.pressed() => None,
             _ if landing && self.motion == Motion::Still => self.lit_at(x),
             _ => self.pressed,
         };
-        if matches!(gesture, Some(Gesture::Drag { .. })) {
+        if matches!(
+            gesture,
+            Some(Gesture::Drag { .. } | Gesture::HoldDrag { .. })
+        ) {
             pressed = None;
         }
         if pressed != self.pressed {
@@ -946,7 +1126,9 @@ impl Engine {
         if !self.alarm.is_empty() {
             let ok = alarm_ok().start;
             match gesture {
-                Gesture::Drag { .. } => {
+                // A hold-then-slide is a swipe here: it never opens the
+                // picker over the alarm.
+                Gesture::Drag { .. } | Gesture::HoldDrag { .. } => {
                     self.acknowledge();
                     self.ignoring = true;
                 }
@@ -1004,6 +1186,10 @@ impl Engine {
                     self.act(action);
                 }
             }
+            // The hold fill is full and stays so: its action waits for the
+            // lift, and sliding away instead opens the picker.
+            Gesture::Armed { .. } => self.dirty = true,
+            // On the lift, so it fires once however long the finger stayed.
             Gesture::LongPress { x } => {
                 // A transport key held is a slow tap; the whole card as
                 // play/pause keeps the widget's own long press.
@@ -1012,16 +1198,77 @@ impl Engine {
                     _ => self.widget_at(x).and_then(|w| self.hold_of(w)).cloned(),
                 };
                 if let Some(action) = action {
-                    // It has fired: the zone goes dark, and lifting or
-                    // moving the finger now does nothing more.
-                    self.ignoring = self.gestures.pressed();
-                    if self.pressed.is_some() {
-                        self.pressed = None;
-                        self.dirty = true;
-                    }
                     self.act(action);
                 }
             }
+            Gesture::HoldDrag { dx } => self.pick(dx),
+            Gesture::HoldRelease { dx } => {
+                self.pick(dx);
+                self.picked();
+            }
+        }
+    }
+
+    /// A hold-then-slide moved: opens the layout picker on the first move,
+    /// then moves its selection one card per `PICKER_STEP` of travel from
+    /// there, stopping at the ends. The hold's own action is off. With
+    /// fewer than two layouts the rest of the touch does nothing.
+    fn pick(&mut self, dx: f32) {
+        if self.picker.is_none() {
+            self.pressed = None;
+            self.dirty = true;
+            let current = self.layout.filter(|_| self.layouts.len() >= 2);
+            let Some(current) = current else {
+                self.ignoring = true;
+                return;
+            };
+            // It takes the whole strip: a takeover goes, a moving page
+            // lands, a layout's name still showing goes.
+            self.uncover();
+            if let Motion::Settle { .. } = self.motion {
+                self.finish_settle();
+            }
+            self.motion = Motion::Still;
+            self.snapshots.clear();
+            self.named = None;
+            self.picker = Some(Picker {
+                names: self.layouts.clone(),
+                current,
+                selected: current,
+            });
+        }
+        let Some(p) = self.picker.as_mut() else {
+            return;
+        };
+        let steps = (dx / PICKER_STEP).round() as isize;
+        let selected = p
+            .current
+            .saturating_add_signed(steps)
+            .min(p.names.len() - 1);
+        if selected != p.selected {
+            p.selected = selected;
+            self.dirty = true;
+        }
+    }
+
+    /// The finger lifted on the picker: the highlighted layout goes on the
+    /// strip, unless it is the one there already.
+    fn picked(&mut self) {
+        let Some(p) = self.picker.take() else {
+            return;
+        };
+        self.dirty = true;
+        if p.selected != p.current {
+            let name = p.names[p.selected].clone();
+            self.switching = Some(name.clone());
+            self.effects.push(Effect::SwitchLayout(name));
+        }
+    }
+
+    /// The layout's name after a switch goes at once.
+    fn end_name(&mut self) {
+        if self.named.take().is_some() {
+            self.dirty = true;
         }
     }
 
@@ -1341,6 +1588,9 @@ impl Engine {
         self.snapshots.clear();
         self.slide = None;
         self.pressed = None;
+        // The picker closes without switching.
+        self.picker = None;
+        self.named = None;
         self.ignoring |= touching;
         self.dirty = true;
     }
@@ -2614,11 +2864,12 @@ mod tests {
         ));
     }
 
-    // Hold at the threshold.
+    // Hold: armed at the threshold, fired on the lift.
 
     #[test]
-    fn a_hold_fires_once_at_the_threshold_and_not_on_release() {
+    fn a_hold_arms_at_the_threshold_and_fires_once_on_the_lift() {
         let mut e = tappable();
+        let now = at("16:17:05");
         let run = || vec![Effect::Act(Action::Run(vec!["pavucontrol".into()]))];
         let mut t = 10.0;
         while t < 10.49 {
@@ -2638,14 +2889,20 @@ mod tests {
             x: 150.0,
             at: 10.5,
         });
-        assert_eq!(e.take_effects(), run(), "at the threshold, finger down");
-        assert_eq!(e.hold(), None, "it has fired");
-        trace(&mut e, &[(10.6, 150.0), (10.8, 150.0)], 11.0);
-        assert!(e.take_effects().is_empty(), "the release does nothing more");
+        assert!(e.take_effects().is_empty(), "armed, not fired");
+        let hold = e.hold().expect("armed: the fill stays full");
+        assert_eq!(hold.progress, 1.0);
+        assert!(e.frame(&now, 10.5).is_some(), "drawn full");
+        assert!(!e.animating(), "a full fill needs no more frames");
+        // A long hold: nothing until the lift, then the action once.
+        trace(&mut e, &[(11.0, 150.0), (12.5, 150.0)], 13.0);
+        assert_eq!(e.take_effects(), run(), "on the lift");
+        assert!(e.take_effects().is_empty(), "once");
+        assert_eq!(e.hold(), None);
     }
 
     #[test]
-    fn a_hold_fires_without_a_sample_at_the_threshold() {
+    fn a_hold_arms_without_a_sample_at_the_threshold() {
         let mut e = tappable();
         let now = at("16:17:05");
         e.handle(Input::Touch {
@@ -2659,10 +2916,33 @@ mod tests {
         assert!(e.animating(), "the fill is drawn as it grows");
         assert_eq!(e.next_wait(&now, 10.25), Some(Duration::ZERO));
         e.tick(10.5);
+        assert!(e.take_effects().is_empty());
+        assert_eq!(e.hold().map(|h| h.progress), Some(1.0));
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: 11.0,
+        });
         assert_eq!(
             e.take_effects(),
             [Effect::Act(Action::Run(vec!["pavucontrol".into()]))]
         );
+    }
+
+    #[test]
+    fn a_still_finger_wakes_the_engine_at_the_threshold_even_with_no_hold_action() {
+        // On the reading: nothing fills, but the press must arm on time, so
+        // a slide after it is a hold-then-slide and not a swipe.
+        let mut e = tappable();
+        let now = at("16:17:05");
+        e.handle(Input::Touch {
+            down: true,
+            x: 250.0,
+            at: 10.0,
+        });
+        assert_eq!(e.hold(), None);
+        let wait = e.next_wait(&now, 10.1).expect("a wake-up");
+        assert!((wait.as_secs_f64() - 0.4).abs() < 1e-6, "{wait:?}");
     }
 
     #[test]
@@ -2678,15 +2958,17 @@ mod tests {
     }
 
     #[test]
-    fn after_a_hold_fires_the_finger_cannot_swipe_but_elsewhere_it_can() {
+    fn a_held_finger_that_slides_away_never_holds_nor_swipes() {
+        // With one layout there is no picker: the slide does nothing.
         let mut e = tappable();
         let mut points: Vec<(f64, f32)> =
             (0..60).map(|i| (10.0 + i as f64 * 0.01, 150.0)).collect();
         points.extend((0..30).map(|i| (10.6 + i as f64 * 0.01, 150.0 - i as f32 * 5.0)));
         trace(&mut e, &points, 10.9);
-        assert_eq!(e.take_effects().len(), 1, "the hold, once");
-        assert_eq!(e.page(), 0, "the drag after it is nothing");
-        // On the reading, with no hold action, resting first is no loss.
+        assert!(e.take_effects().is_empty(), "sliding away cancels the hold");
+        assert_eq!(e.page(), 0, "and is no swipe");
+        // On the reading, with no hold action: the same. (Before
+        // 2026-11-22, resting first and then swiping changed page.)
         let mut points: Vec<(f64, f32)> =
             (0..60).map(|i| (20.0 + i as f64 * 0.002, 250.0)).collect();
         points.extend((0..100).map(|i| (20.6 + i as f64 * 0.002, 250.0 - i as f32 * 2.5)));
@@ -2696,7 +2978,8 @@ mod tests {
             t += 1.0 / 60.0;
             e.frame(&at("16:17:05"), t);
         }
-        assert_eq!(e.page(), 1, "swiped");
+        assert_eq!(e.page(), 0, "not swiped");
+        assert!(e.take_effects().is_empty());
     }
 
     // The critical alarm.
@@ -3511,5 +3794,370 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.0.contains("news never takes over"), "{e}");
+    }
+
+    // The layout picker, driven by the traces in tests/traces.
+
+    const LAYOUTS: [&str; 3] = ["Desk", "Gaming", "Night"];
+
+    /// Page Home: a key with a tap and a hold (0–159), a CPU reading with
+    /// a crit (160–319), a volume slider (320–479) and a clock (480–639).
+    /// Page Two: a clock.
+    fn switchable_config() -> Config {
+        Config::parse(
+            r#"
+            [[page]]
+            name = "Home"
+            [[page.widget]]
+            type = "key"
+            width = 160
+            icon = "play"
+            tap = { media = "play-pause" }
+            hold = { run = ["notify-send", "held"] }
+            [[page.widget]]
+            type = "value"
+            width = 160
+            label = "CPU"
+            signal = "cpu.temp"
+            crit = 90
+            [[page.widget]]
+            type = "slider"
+            width = 160
+            label = "Volume"
+            controls = "volume"
+            [[page.widget]]
+            type = "clock"
+            width = 160
+
+            [[page]]
+            name = "Two"
+            [[page.widget]]
+            type = "clock"
+            width = 640
+            "#,
+        )
+        .unwrap()
+    }
+
+    fn layouts(e: &mut Engine, names: &[&str], current: usize) {
+        e.handle(Input::Layouts {
+            names: names.iter().map(|n| n.to_string()).collect(),
+            current: Some(current),
+        });
+    }
+
+    fn switchable(names: &[&str], current: usize) -> Engine {
+        let mut e = Engine::new(switchable_config());
+        layouts(&mut e, names, current);
+        volume(&mut e, 40.0);
+        e
+    }
+
+    fn load_trace(text: &str) -> Vec<(f64, bool, f32)> {
+        text.lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .map(|l| {
+                let f: Vec<&str> = l.split_whitespace().collect();
+                (f[0].parse().unwrap(), f[1] == "1", f[2].parse().unwrap())
+            })
+            .collect()
+    }
+
+    const PICK_RIGHT_TWO: &str = include_str!("../tests/traces/pick-right-two.trace");
+    const PICK_BACK_CANCEL: &str = include_str!("../tests/traces/pick-back-cancel.trace");
+    const PICK_FROM_KEY: &str = include_str!("../tests/traces/pick-from-key.trace");
+    const PICK_ON_SLIDER: &str = include_str!("../tests/traces/pick-on-slider.trace");
+    const HOLD_KEY_LIFT: &str = include_str!("../tests/traces/hold-key-lift.trace");
+
+    /// What a replay saw: each picker state while it was open, in order,
+    /// and each effect with the time of the sample that made it.
+    #[derive(Default)]
+    struct Replay {
+        pickers: Vec<Picker>,
+        effects: Vec<(f64, Effect)>,
+    }
+
+    impl Replay {
+        fn selections(&self) -> Vec<usize> {
+            self.pickers.iter().map(|p| p.selected).collect()
+        }
+
+        fn switches(&self) -> Vec<&str> {
+            self.effects
+                .iter()
+                .filter_map(|(_, fx)| match fx {
+                    Effect::SwitchLayout(name) => Some(name.as_str()),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// Replays a trace from `t0`, calling `before` with each sample's time
+    /// first. A switch is carried out as the daemon does: the new layout,
+    /// then the list saying it is on the strip.
+    fn replay(
+        e: &mut Engine,
+        text: &str,
+        t0: f64,
+        mut before: impl FnMut(&mut Engine, f64),
+    ) -> Replay {
+        let mut out = Replay::default();
+        for (t, down, x) in load_trace(text) {
+            let at = t0 + t;
+            before(e, at);
+            e.handle(Input::Touch { down, x, at });
+            if let Some(p) = e.picker()
+                && out.pickers.last() != Some(p)
+            {
+                out.pickers.push(p.clone());
+            }
+            for fx in e.take_effects() {
+                if let Effect::SwitchLayout(name) = &fx {
+                    let i = e.layouts.iter().position(|n| n == name).unwrap();
+                    let names = e.layouts.clone();
+                    e.handle(Input::Config(Box::new(switchable_config())));
+                    e.handle(Input::Layouts {
+                        names,
+                        current: Some(i),
+                    });
+                }
+                out.effects.push((at, fx));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn hold_then_slide_right_two_cards_switches_to_that_layout_from_its_first_page() {
+        let mut e = switchable(&LAYOUTS, 0);
+        e.handle(Input::ShowPage(1));
+        let r = replay(&mut e, PICK_RIGHT_TWO, 10.0, |_, _| {});
+        assert_eq!(
+            r.selections(),
+            [0, 1, 2],
+            "opens on the current, then one card at a time"
+        );
+        assert_eq!(r.pickers[0].names, LAYOUTS);
+        assert_eq!(r.switches(), ["Night"]);
+        assert_eq!(r.effects.len(), 1, "and nothing else");
+        assert_eq!(e.picker(), None, "closed on the lift");
+        assert_eq!(e.layout, Some(2));
+        assert_eq!(e.page(), 0, "the new layout from its first page");
+        assert_eq!(e.named.as_ref().map(|n| n.name.as_str()), Some("Night"));
+    }
+
+    #[test]
+    fn sliding_back_to_the_current_layout_and_lifting_cancels() {
+        let mut e = switchable(&LAYOUTS, 0);
+        let r = replay(&mut e, PICK_BACK_CANCEL, 10.0, |_, _| {});
+        assert_eq!(r.selections(), [0, 1, 2, 1, 0], "out two and back");
+        assert!(r.effects.is_empty(), "{:?}", r.effects);
+        assert_eq!(
+            (e.picker(), e.layout, e.named.is_none()),
+            (None, Some(0), true)
+        );
+    }
+
+    #[test]
+    fn a_held_key_fires_its_hold_once_on_the_lift_and_never_opens_the_picker() {
+        let mut e = switchable(&LAYOUTS, 0);
+        let lift = 10.0 + load_trace(HOLD_KEY_LIFT).last().unwrap().0;
+        let r = replay(&mut e, HOLD_KEY_LIFT, 10.0, |_, _| {});
+        assert_eq!(
+            r.effects,
+            [(
+                lift,
+                Effect::Act(Action::Run(vec!["notify-send".into(), "held".into()]))
+            )]
+        );
+        assert!(r.pickers.is_empty());
+    }
+
+    #[test]
+    fn a_held_key_slid_away_does_not_fire_and_opens_the_picker() {
+        let mut e = switchable(&LAYOUTS, 0);
+        let r = replay(&mut e, PICK_FROM_KEY, 10.0, |_, _| {});
+        assert_eq!(r.selections(), [0, 1]);
+        assert_eq!(r.switches(), ["Gaming"]);
+        assert!(
+            !r.effects.iter().any(|(_, fx)| matches!(fx, Effect::Act(_))),
+            "{:?}",
+            r.effects
+        );
+    }
+
+    #[test]
+    fn a_slider_held_then_slid_moves_and_never_opens_the_picker() {
+        let mut e = switchable(&LAYOUTS, 0);
+        let r = replay(&mut e, PICK_ON_SLIDER, 10.0, |_, _| {});
+        assert!(r.pickers.is_empty());
+        let levels: Vec<u8> = r
+            .effects
+            .iter()
+            .map(|(_, fx)| match fx {
+                Effect::Volume(v) => *v,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        // 60 px on a 140 px bar from 40 %.
+        assert_eq!(levels.last(), Some(&83), "{levels:?}");
+    }
+
+    #[test]
+    fn with_one_layout_a_hold_then_slide_ends_quietly() {
+        for names in [&["Desk"][..], &[]] {
+            let mut e = Engine::new(switchable_config());
+            if !names.is_empty() {
+                layouts(&mut e, names, 0);
+            }
+            e.handle(Input::ShowPage(1));
+            let r = replay(&mut e, PICK_RIGHT_TWO, 10.0, |_, _| {});
+            assert!(r.pickers.is_empty() && r.effects.is_empty());
+            assert_eq!(e.page(), 1, "and no swipe");
+            assert_eq!(e.hold(), None);
+        }
+    }
+
+    #[test]
+    fn the_alarm_rising_closes_the_picker_without_switching() {
+        let mut e = switchable(&LAYOUTS, 0);
+        let mut raised = false;
+        let r = replay(&mut e, PICK_RIGHT_TWO, 10.0, |e, at| {
+            if at >= 10.95 && !raised {
+                raised = true;
+                assert!(e.picker().is_some(), "open when the alarm rises");
+                reading(e, at, "cpu.temp", 95.0);
+                assert_eq!(e.picker(), None, "closed at once");
+            }
+        });
+        assert!(raised && !r.pickers.is_empty());
+        assert!(r.switches().is_empty(), "{:?}", r.effects);
+        assert!(e.alarm().is_some(), "the alarm stays up");
+        assert_eq!(e.layout, Some(0));
+    }
+
+    #[test]
+    fn while_the_alarm_is_up_the_picker_never_opens() {
+        let mut e = switchable(&LAYOUTS, 0);
+        reading(&mut e, 5.0, "cpu.temp", 95.0);
+        let r = replay(&mut e, PICK_RIGHT_TWO, 10.0, |_, _| {});
+        assert!(r.pickers.is_empty() && r.switches().is_empty());
+        // Sliding on the alarm puts it away, as a swipe does.
+        assert_eq!(e.alarm(), None);
+    }
+
+    #[test]
+    fn swipes_taps_and_brushes_never_open_the_picker() {
+        for (name, text) in [
+            (
+                "swipe-matt",
+                include_str!("../tests/traces/swipe-matt.trace"),
+            ),
+            (
+                "swipe-slow",
+                include_str!("../tests/traces/swipe-slow.trace"),
+            ),
+            ("tap-matt", include_str!("../tests/traces/tap-matt.trace")),
+            (
+                "brush-lift-bounce",
+                include_str!("../tests/traces/brush-lift-bounce.trace"),
+            ),
+        ] {
+            let mut e = switchable(&LAYOUTS, 1);
+            let r = replay(&mut e, text, 10.0, |e, at| e.tick(at));
+            assert!(r.pickers.is_empty(), "{name}");
+            assert!(r.switches().is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_picker_covers_the_strip_and_the_new_name_fades_over_the_page() {
+        let now = at("16:17:05");
+        let mut e = switchable(&LAYOUTS, 0);
+        let page = e.frame(&now, 9.0).expect("first frame");
+        let mut picker_frames = 0;
+        let r = replay(&mut e, PICK_RIGHT_TWO, 10.0, |e, at| {
+            if e.picker().is_some() && e.frame(&now, at).is_some() {
+                picker_frames += 1;
+            }
+        });
+        assert_eq!(r.switches(), ["Night"]);
+        assert!(
+            (1..=4).contains(&picker_frames),
+            "drawn as it opens and as the selection moves, not every sample: {picker_frames}"
+        );
+        let lift = e.now;
+        assert!(e.animating(), "the name fades in");
+        let (fade_in, stay, fade_out) = Named::times();
+        let shown = e.frame(&now, lift + fade_in + 0.1).expect("drawn");
+        assert_ne!(
+            pixel(&shown, 320, 30),
+            pixel(&page, 320, 30),
+            "the name covers the page"
+        );
+        assert_eq!(e.brightness(&now), 1.0);
+        assert!(!e.animating(), "standing still");
+        let wait = e.next_wait(&now, lift + fade_in + 0.1).unwrap();
+        assert!((wait.as_secs_f64() - (stay - 0.1)).abs() < 1e-3, "{wait:?}");
+        // A lift bounce just after does not end it.
+        e.handle(Input::Touch {
+            down: true,
+            x: 470.0,
+            at: lift + 0.01,
+        });
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: lift + 0.02,
+        });
+        assert!(e.named.is_some());
+        e.tick(lift + fade_in + stay + fade_out + 0.01);
+        assert!(e.named.is_none(), "gone after its time");
+        let after = e.frame(&now, lift + 2.0).expect("the page again");
+        assert_eq!(pixel(&after, 320, 30), pixel(&page, 320, 30));
+    }
+
+    #[test]
+    fn a_touch_on_the_new_layout_ends_its_name() {
+        let mut e = switchable(&LAYOUTS, 0);
+        replay(&mut e, PICK_RIGHT_TWO, 10.0, |_, _| {});
+        assert!(e.named.is_some());
+        let t = e.now + 0.5;
+        trace(&mut e, &[(t, 600.0), (t + 0.05, 600.0)], t + 0.1);
+        assert!(e.named.is_none());
+    }
+
+    #[test]
+    fn a_switch_from_the_window_moves_no_page_and_shows_no_name() {
+        let mut e = switchable(&LAYOUTS, 0);
+        e.handle(Input::ShowPage(1));
+        e.handle(Input::Config(Box::new(switchable_config())));
+        layouts(&mut e, &LAYOUTS, 2);
+        assert_eq!((e.page(), e.named.is_none()), (1, true));
+    }
+
+    #[test]
+    fn the_selection_stops_at_the_ends() {
+        let mut e = switchable(&LAYOUTS, 1);
+        // Held at 300, then 400 px left: far past the first card.
+        let mut points: Vec<(f64, f32)> =
+            (0..70).map(|i| (10.0 + i as f64 * 0.01, 300.0)).collect();
+        points.extend((0..40).map(|i| (10.7 + i as f64 * 0.01, 300.0 - i as f32 * 7.0)));
+        points.extend((0..40).map(|i| (11.1 + i as f64 * 0.01, 20.0)));
+        for &(at, x) in &points {
+            e.handle(Input::Touch { down: true, x, at });
+        }
+        assert_eq!(
+            e.picker().map(|p| p.selected),
+            Some(0),
+            "the first, not wrapped"
+        );
+        e.handle(Input::Touch {
+            down: false,
+            x: 0.0,
+            at: 11.6,
+        });
+        assert_eq!(e.take_effects(), [Effect::SwitchLayout("Desk".into())]);
     }
 }

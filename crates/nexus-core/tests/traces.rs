@@ -3,11 +3,17 @@
 //! by the file's first word, and must produce exactly that:
 //!
 //! - `tap-*`: one tap and nothing else
-//! - `hold-*`: one long press and nothing else
-//! - `swipe-*`: drags ending in one release, and no tap
+//! - `hold-*`: a hold that arms and fires once, on the lift
+//! - `swipe-*`: drags ending in one release, and no tap, no hold and
+//!   no hold-then-slide (a swipe never holds still for half a second)
+//! - `pick-*`: a hold-then-slide (the layout picker): armed, then
+//!   slid, then lifted, and never a long press, a tap or a swipe
 //! - `brush-*`: nothing at all (an accidental touch while typing)
 //!
-//! A file may hold several touches of its kind; each must match.
+//! A file may hold several touches of its kind; each must match. Files
+//! whose header says "synthesised" were written by hand for the layout
+//! picker (2026-11-22); the others are Matt's recordings. The engine
+//! replays the picker's traces too (`engine.rs`, the layout picker).
 
 use std::fs;
 use std::path::Path;
@@ -61,11 +67,35 @@ fn recorded_touches_mean_what_they_are_named() {
         for (i, gestures) in touches(&load(&path)).iter().enumerate() {
             let ok = match kind.as_str() {
                 "tap" => matches!(gestures[..], [Gesture::Tap { .. }]),
-                "hold" => matches!(gestures[..], [Gesture::LongPress { .. }]),
+                "hold" => matches!(
+                    gestures[..],
+                    [Gesture::Armed { .. }, Gesture::LongPress { .. }]
+                        | [Gesture::LongPress { .. }]
+                ),
                 "swipe" => {
                     matches!(gestures.last(), Some(Gesture::Release { .. }))
-                        && !gestures.iter().any(|g| matches!(g, Gesture::Tap { .. }))
+                        && !gestures.iter().any(|g| {
+                            matches!(
+                                g,
+                                Gesture::Tap { .. }
+                                    | Gesture::Armed { .. }
+                                    | Gesture::LongPress { .. }
+                                    | Gesture::HoldDrag { .. }
+                                    | Gesture::HoldRelease { .. }
+                            )
+                        })
                 }
+                "pick" => match &gestures[..] {
+                    [
+                        Gesture::Armed { .. },
+                        slid @ ..,
+                        Gesture::HoldRelease { .. },
+                    ] => {
+                        !slid.is_empty()
+                            && slid.iter().all(|g| matches!(g, Gesture::HoldDrag { .. }))
+                    }
+                    _ => false,
+                },
                 "brush" => gestures.is_empty(),
                 other => panic!("{name}: unknown kind {other:?}"),
             };
