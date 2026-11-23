@@ -487,6 +487,27 @@ pub const EDGE_FLAG_W: f32 = 4.0;
 pub const EDGE_FLAG_Y: f32 = 13.0;
 pub const EDGE_FLAG_H: f32 = 28.0;
 
+// ---------------------------------------------------------------- forecast
+
+/// The least space between two forecast columns.
+pub const FORECAST_COL_GAP: f32 = 8.0;
+/// Between a column's icon and its temperature.
+pub const FORECAST_ICON_GAP: f32 = 4.0;
+/// A column's first line (its hour or day): a row above `BASE_LINE1`, so
+/// it clears the 20 px figures under it.
+pub const FORECAST_BASE1: f32 = 23.0;
+/// Between a day's high and its low.
+pub const FORECAST_LOW_GAP: f32 = 7.0;
+/// The rain gauge at a column's left: a pill `FORECAST_GAUGE_W` wide
+/// from row `FORECAST_GAUGE_Y`, `FORECAST_GAUGE_H` tall, filled from the
+/// bottom by the chance of rain on a fixed 0–100 % scale; drawn only from
+/// `forecast::RAIN_SHOWN`. Its lane is kept in every column, so a column
+/// does not move when rain comes.
+pub const FORECAST_GAUGE_W: f32 = 4.0;
+pub const FORECAST_GAUGE_GAP: f32 = 5.0;
+pub const FORECAST_GAUGE_Y: f32 = 12.0;
+pub const FORECAST_GAUGE_H: f32 = 30.0;
+
 // ---------------------------------------------------------------- scales
 
 /// Temperatures share one fixed scale, in °C (86–212 °F).

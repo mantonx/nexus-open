@@ -12,11 +12,17 @@ use std::sync::Arc;
 use jiff::{SignedDuration, Zoned};
 
 use crate::art::Art;
-use crate::config::{Action, ClockFormat, Settings, SliderControl, Temperature, Widget};
+use crate::config::{
+    Action, ClockFormat, ForecastShow, Settings, SliderControl, Temperature, Widget,
+};
+use crate::forecast::{self, Change};
 use crate::icons;
 use crate::signal::{Signals, Unit, Value};
 use crate::theme::{NET_HI, NET_LO, TEMP_HI, TEMP_LO};
-use crate::widget::{Avail, Bar, Reading, Severity, Track, WidgetView, Zone};
+use crate::widget::{
+    Avail, Bar, ForecastColumn, ForecastNext, ForecastView, Reading, Severity, Track, WidgetView,
+    Zone,
+};
 
 /// Shown where a number has not arrived yet. Calm, not an error.
 pub const NO_DATA: &str = "––";
@@ -128,6 +134,7 @@ pub fn signals_used(widgets: &[Widget]) -> impl Iterator<Item = &str> {
         }
         Widget::Rate { down, up, .. } => vec![down.as_str(), up.as_str()],
         Widget::News { .. } => NEWS_SIGNALS.to_vec(),
+        Widget::Forecast { .. } => forecast_signals(),
         Widget::Key { .. } => vec![],
     })
 }
@@ -463,6 +470,7 @@ fn bind_widget(widget: &Widget, ctx: &Bind) -> WidgetView {
             set_up: tap.is_some() || hold.is_some(),
         },
         Widget::News { .. } => news(widget, ctx),
+        Widget::Forecast { show, .. } => forecast(widget, *show, ctx),
         Widget::Rate { down, up, .. } => {
             let r = |name: &str, signal: &str| {
                 reading(ctx, name, signal, None, None, None, Unit::BytesPerSecond)
@@ -483,15 +491,7 @@ fn weather(widget: &Widget, ctx: &Bind) -> WidgetView {
     };
     let degrees = |c: f64| format!("{:.0}°", to_display(c, ctx.settings.temperature));
     let temp = number("weather.temp");
-    let stale = s
-        .heard_at("weather.temp")
-        .filter(|at| ctx.mono - at > WEATHER_STALE);
-    let avail = match (temp, s.lost_at("weather.temp").or(stale)) {
-        (None, _) if !ctx.weather => Avail::NotSetUp,
-        (None, _) => Avail::NoData,
-        (Some(_), Some(at)) => Avail::Lost(wall_time(ctx, at)),
-        (Some(_), None) => Avail::Live,
-    };
+    let avail = weather_avail(ctx);
     let condition = match s.get("weather.condition") {
         Some(Value::Text(t)) => t.clone(),
         _ => String::new(),
@@ -507,6 +507,115 @@ fn weather(widget: &Widget, ctx: &Bind) -> WidgetView {
         high_low,
         avail,
     }
+}
+
+/// Whether the weather is there to show, for the weather and forecast
+/// widgets alike: not set up, no reading yet, lost (or older than
+/// `WEATHER_STALE`, with the time it is from), or live. The source sends
+/// `weather.temp` with every answer, so it stands for the whole forecast.
+fn weather_avail(ctx: &Bind) -> Avail {
+    let s = ctx.signals;
+    let temp = matches!(s.get("weather.temp"), Some(Value::Number(..)));
+    let stale = s
+        .heard_at("weather.temp")
+        .filter(|at| ctx.mono - at > WEATHER_STALE);
+    match (temp, s.lost_at("weather.temp").or(stale)) {
+        (false, _) if !ctx.weather => Avail::NotSetUp,
+        (false, _) => Avail::NoData,
+        (true, Some(at)) => Avail::Lost(wall_time(ctx, at)),
+        (true, None) => Avail::Live,
+    }
+}
+
+/// The signals a forecast widget reads: `weather.temp`, for whether the
+/// weather is there at all, and the forecast's.
+fn forecast_signals() -> Vec<&'static str> {
+    let mut used = vec!["weather.temp"];
+    used.extend(forecast::signals());
+    used
+}
+
+/// The forecast widget's view: the hours or days `show` asks for, as
+/// many as there are in order, and the next change in words. Times follow
+/// the clock setting and temperatures the unit; each column is laid out
+/// for the widest it can hold.
+fn forecast(widget: &Widget, show: ForecastShow, ctx: &Bind) -> WidgetView {
+    let s = ctx.signals;
+    let number = |name: &str| match s.get(name) {
+        Some(Value::Number(n, _)) => Some(*n),
+        _ => None,
+    };
+    let text = |name: &str| match s.get(name) {
+        Some(Value::Text(t)) => Some(t.trim().to_string()),
+        _ => None,
+    };
+    let unit = ctx.settings.temperature;
+    let clock = ctx.settings.clock;
+    let degrees = |c: f64| format!("{:.0}°", to_display(c, unit));
+    let rain = |name: &str| {
+        number(name)
+            .filter(|r| *r >= forecast::RAIN_SHOWN)
+            .map(|r| (r / 100.0) as f32)
+    };
+    let hour = |n: f64| (n.round().clamp(0.0, 23.0)) as u8;
+    let columns: Vec<ForecastColumn> = match show {
+        ForecastShow::Hours => forecast::HOURS
+            .iter()
+            .map_while(|h| {
+                let day = number(h.day).is_none_or(|d| d != 0.0);
+                Some(ForecastColumn {
+                    label: forecast::hour_text(hour(number(h.hour)?), clock),
+                    icon: icons::for_weather(number(h.code), day),
+                    temp: degrees(number(h.temp)?),
+                    low: None,
+                    rain: rain(h.rain),
+                })
+            })
+            .collect(),
+        ForecastShow::Days => forecast::DAYS
+            .iter()
+            .map_while(|d| {
+                Some(ForecastColumn {
+                    label: forecast::day_name(&text(d.day)?)?.to_string(),
+                    icon: icons::for_weather(number(d.code), true),
+                    temp: degrees(number(d.high)?),
+                    low: Some(degrees(number(d.low)?)),
+                    rain: rain(d.rain),
+                })
+            })
+            .collect(),
+        ForecastShow::Next => Vec::new(),
+    };
+    let next = text(forecast::NEXT).and_then(|key| {
+        let change = Change::from_key(&key, number(forecast::NEXT_AT).map(hour))?;
+        let day = number(forecast::NEXT_DAY).is_none_or(|d| d != 0.0);
+        let (head, tail) = change.words(clock);
+        Some(ForecastNext {
+            icon: icon_of(widget, icons::for_weather(number(forecast::NEXT_CODE), day)),
+            head,
+            tail,
+            short: change.short(clock),
+        })
+    });
+    let label_widest = match show {
+        ForecastShow::Hours => forecast::hour_widest(clock),
+        ForecastShow::Days => forecast::day_names().map(String::from).collect(),
+        ForecastShow::Next => Vec::new(),
+    };
+    // A hot day in °F, or a hard frost in °C.
+    let temp_widest = match unit {
+        Temperature::Fahrenheit => "888°",
+        Temperature::Celsius => "-88°",
+    };
+    WidgetView::Forecast(Box::new(ForecastView {
+        show,
+        columns,
+        next,
+        label_widest,
+        temp_widest: temp_widest.into(),
+        short_widest: forecast::short_widest(clock),
+        avail: weather_avail(ctx),
+    }))
 }
 
 fn news(widget: &Widget, ctx: &Bind) -> WidgetView {

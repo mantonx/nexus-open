@@ -150,6 +150,7 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
         Widget::News { .. } => put("type", NEWS),
+        Widget::Forecast { .. } => put("type", "Forecast"),
         Widget::Key { label, sub, .. } => {
             put("type", KEY);
             put("label", label.as_deref().unwrap_or_default());
