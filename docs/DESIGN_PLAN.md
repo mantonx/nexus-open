@@ -543,3 +543,8 @@ README clip (now of the new strip), release verification.
   Frames: `specimen-media-art-playing`, `-paused`,
   `takeover-now-playing-art`, `-paused`. Still undecided (PRODUCT.md):
   whether the accent may follow the artwork.
+  Seen live on the UI rig (private bus, a fake MPRIS player): a
+  `file://` PNG, an `http://127.0.0.1` JPEG (fetched once, then from
+  the cache), a `data:` PNG, a link refused with one log line, and
+  `local` and `off` taking effect on the next track. Not yet on the
+  real panel, nor with a real player.
