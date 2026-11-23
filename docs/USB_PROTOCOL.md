@@ -115,7 +115,7 @@ Byte  Meaning
 **There is no vertical axis.** Measured on 2026-11-22 by recording every
 raw report (read-only, beside the daemon) while a finger swiped up and
 down, rested at the top and bottom edges, and swiped left and right.
-Across 381 reports, bytes 3–4 were always zero, bytes 8–9 always equalled
+Across 665 reports, bytes 3–4 were always zero, bytes 8–9 always equalled
 bytes 6–7, and bytes 10–31 were always zero. A vertical swipe arrives as a
 contact of about 0.1 s at one X, the same as a tap, so up and down cannot be
 told apart and a vertical swipe over a key presses it.
