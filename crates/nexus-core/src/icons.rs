@@ -3,7 +3,7 @@
 //! share code points, so an icon is a `char` plus the weight to draw it in.
 //!
 //! Layouts name icons by Phosphor's names (`icon = "fan"`); `NAMES` is
-//! every icon the bundled subset has.
+//! every icon the bundled subset has but the `WEATHER_ONLY` ones.
 
 /// Phosphor code points, by role.
 pub const CPU: char = '\u{e610}';
@@ -17,6 +17,9 @@ pub const CLOUD_SUN: char = '\u{e540}';
 pub const CLOUD_MOON: char = '\u{e53e}';
 pub const CLOUD_RAIN: char = '\u{e1b4}';
 pub const CLOUD_SLASH: char = '\u{e1b6}';
+pub const CLOUD_SNOW: char = '\u{e1b8}';
+pub const CLOUD_LIGHTNING: char = '\u{e1b2}';
+pub const CLOUD_FOG: char = '\u{e53c}';
 pub const SUN: char = '\u{e472}';
 pub const MOON: char = '\u{e330}';
 pub const SPEAKER_HIGH: char = '\u{e44a}';
@@ -35,6 +38,11 @@ pub const ARROW_UP: char = '\u{e08e}';
 pub const WARNING: char = '\u{e4e0}';
 pub const ARROWS: char = '\u{e0a0}';
 pub const NEWSPAPER: char = '\u{e344}';
+
+/// Icons the strip draws for the weather but a layout cannot name yet:
+/// the settings window lists every name in its own Phosphor subset,
+/// which does not have these, so naming them waits for that subset.
+pub const WEATHER_ONLY: [char; 3] = [CLOUD_SNOW, CLOUD_LIGHTNING, CLOUD_FOG];
 
 /// Every icon a layout can name, with its code point.
 pub const NAMES: [(&str, char); 67] = [
@@ -152,7 +160,10 @@ pub fn for_weather(code: Option<f64>, day: bool) -> char {
                 CLOUD_MOON
             }
         }
-        Some(51..=67 | 80..=82 | 95..=99) => CLOUD_RAIN,
+        Some(45 | 48) => CLOUD_FOG,
+        Some(51..=67 | 80..=82) => CLOUD_RAIN,
+        Some(71..=77 | 85 | 86) => CLOUD_SNOW,
+        Some(95..=99) => CLOUD_LIGHTNING,
         _ => CLOUD,
     }
 }
@@ -170,6 +181,10 @@ mod tests {
             assert!(fonts.icon_bold.covers(c), "bold lacks {name}");
             assert_eq!(by_name(name), Some(c));
         }
+        for c in WEATHER_ONLY {
+            assert!(fonts.icon.covers(c), "fill lacks U+{:04X}", c as u32);
+            assert!(fonts.icon_bold.covers(c), "bold lacks U+{:04X}", c as u32);
+        }
         assert_eq!(by_name("unicorn"), None);
     }
 
@@ -183,5 +198,8 @@ mod tests {
         assert_eq!(for_signal("mode"), ACTIVITY);
         assert_eq!(for_weather(Some(0.0), false), MOON);
         assert_eq!(for_weather(Some(63.0), true), CLOUD_RAIN);
+        assert_eq!(for_weather(Some(73.0), true), CLOUD_SNOW);
+        assert_eq!(for_weather(Some(95.0), false), CLOUD_LIGHTNING);
+        assert_eq!(for_weather(Some(45.0), true), CLOUD_FOG);
     }
 }
