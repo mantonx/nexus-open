@@ -780,3 +780,14 @@ README clip (now of the new strip), release verification.
   shows no pages (it has never read them); reading the store directly
   would fix that. The strip's own forecast card still asks for a town
   under "Weather" (crates/nexus-core/src/widget.rs, left alone).
+- 2026-11-25 — Window follow-up merged at 29/40 light and 29/40 dark,
+  under the 30 target (rounds: 28/28, 29/29, 29/29, each scored by fresh
+  isolated reviewers). Stopped after round three rather than iterate;
+  the scores are recorded as they came. Both reviewers' next fixes, open:
+  a primary "Restart the service" in the not-answering state with plainer
+  copy; the inspector beside the pages at wide sizes (a sticky right
+  column), not under them; fields drawn dark and bordered so they no
+  longer look like buttons; banners sized to their content with a
+  readable measure; the status popover anchored to its chip; a short
+  "Back" confirmation when the service returns. The strip's forecast
+  card now asks for a town under "Forecast", matching the window.

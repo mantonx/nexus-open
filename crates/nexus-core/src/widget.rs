@@ -3250,7 +3250,7 @@ impl Pen<'_> {
         let at = match &f.avail {
             Avail::NotSetUp => {
                 let pin = icons::MAP_PIN_PLUS;
-                self.setup_prompt(x, w, cls, pin, "Weather", "Add your town", "Weather");
+                self.setup_prompt(x, w, cls, pin, "Forecast", "Add your town", "Forecast");
                 return;
             }
             Avail::Lost(at) => Some(at.as_str()),
