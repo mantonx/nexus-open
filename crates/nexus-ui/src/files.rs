@@ -2,21 +2,23 @@
 
 use std::path::Path;
 
-use nexus_core::config::Config;
+use nexus_core::config::{Config, MediaConfig};
 use nexus_store::Notes;
 
 /// Larger than any real layout by far; a bigger file is not one.
 const MAX_BYTES: u64 = 1 << 20;
 
 /// The text of a layout file: its pages and takeovers, and the strip
-/// settings. Not where the weather is for, the news feeds, nor the
-/// sources: a layout file is made to be shared, and those say where the
-/// user lives, what they read (a private feed's address can carry a key)
-/// and what is in their home directory. Import ignores them anyway.
+/// settings. Not where the weather is for, the news feeds, whether album
+/// covers may be fetched, nor the sources: a layout file is made to be
+/// shared, and those say where the user lives, what they read (a private
+/// feed's address can carry a key), what this computer may fetch, and what
+/// is in their home directory. Import ignores them anyway.
 pub fn export_text(config: &Config, notes: &Notes) -> String {
     let mut shared = config.clone();
     shared.weather = None;
     shared.news = None;
+    shared.media = MediaConfig::default();
     shared.sources.clear();
     nexus_store::text::write(&shared, notes)
 }
@@ -89,6 +91,20 @@ mod tests {
         assert!(!text.contains("secret-key"), "{text}");
         let (back, _) = nexus_store::text::parse(&text).unwrap();
         assert_eq!(back.news, None);
+    }
+
+    #[test]
+    fn an_export_leaves_out_the_album_cover_choice() {
+        use nexus_core::config::AlbumArt;
+        let mut config = Config::default_layout();
+        config.media = MediaConfig {
+            album_art: AlbumArt::Off,
+        };
+        let text = export_text(&config, &Notes::default());
+        assert!(!text.contains("[media]"), "{text}");
+        assert!(!text.contains("album_art"), "{text}");
+        let (back, _) = nexus_store::text::parse(&text).unwrap();
+        assert_eq!(back.media, MediaConfig::default());
     }
 
     #[test]

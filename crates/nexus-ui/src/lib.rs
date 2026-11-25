@@ -15,6 +15,7 @@ mod files;
 mod first_run;
 mod gallery;
 mod geometry;
+mod here;
 mod i18n;
 mod inspector;
 mod layouts;
@@ -106,6 +107,9 @@ pub fn run() -> Result<(), slint::PlatformError> {
         _ => appearance::load(),
     };
     app.global::<Theme>().set_forced(chosen.index());
+    if let Some(mono) = monospace_family() {
+        app.global::<Theme>().set_mono(mono.into());
+    }
     app.invoke_apply_scheme();
     let weak = app.as_weak();
     app.on_set_appearance(move |i| {
@@ -145,7 +149,9 @@ pub fn run() -> Result<(), slint::PlatformError> {
 
     let (tx, rx) = mpsc::channel();
     let _ = RECHECK.set(tx);
-    app.on_start_service(start_service);
+    app.on_start_service(|| start_service(How::Service));
+    app.on_run_here(|| start_service(How::Here));
+    app.on_report_problem(report_problem);
     app.on_open_help(open_help);
     let weak = app.as_weak();
     app.on_open_log(move || {
@@ -184,6 +190,8 @@ pub fn run() -> Result<(), slint::PlatformError> {
     // Not `app.run()`: that returns once the window is hidden, and hidden
     // in the tray the window must keep running.
     let ran = slint::run_event_loop_until_quit();
+    // A daemon run from this window stops with it.
+    here::stop();
     nexus_control::ui_unlisten();
     let _ = app.hide();
     ran
@@ -202,6 +210,19 @@ thread_local! {
     /// is not ended by an earlier one's timer.
     static STARTING: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
     static START_TRIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Tries to start the service that failed since it last answered.
+    static FAILED_TRIES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Running it from this window was refused or failed to start: why.
+    static HERE_FAILED: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// How "start" starts it: the service, or the daemon as this window's
+/// child for the session (`here`).
+#[derive(Clone, Copy, PartialEq)]
+enum How {
+    Service,
+    Here,
 }
 
 /// How long a started service has to answer before the try counts as
@@ -224,43 +245,89 @@ pub(crate) fn set_accent(user: Option<nexus_core::theme::Rgb>) {
 
 /// Puts the status chip right, from the latest status and checks.
 fn show_status(app: &AppWindow) {
-    // The service answers: whatever a try to start it said is over.
+    let here = here::state();
+    // The service answers: whatever a try to start it said is over. Unless
+    // it is the daemon this window runs: the service is still down then.
     if LAST.with(|l| l.borrow().0.is_some()) {
         STARTING.with(|s| s.set(None));
         START_FAILED.with(|f| *f.borrow_mut() = None);
+        if here != here::State::Running {
+            FAILED_TRIES.with(|t| t.set(0));
+            HERE_FAILED.with(|f| *f.borrow_mut() = None);
+        }
     }
     let starting = STARTING.with(std::cell::Cell::get).is_some();
+    let tries = FAILED_TRIES.with(std::cell::Cell::get);
+    let here_failed = HERE_FAILED.with(|f| f.borrow().clone()).or(match &here {
+        here::State::Stopped(why) => Some(why.clone()),
+        _ => None,
+    });
     let view = LAST.with(|l| {
         let l = l.borrow();
         let view = status::view(l.0.as_ref(), &l.1);
         // A try to start it shows until the service answers; one that
         // failed holds until then too.
         match (&l.0, START_FAILED.with(|f| f.borrow().clone())) {
+            (Some(_), _) if here == here::State::Running => status::from_window(view),
             (None, _) if starting => status::starting(view),
-            (None, Some(why)) if why == status::NO_ANSWER => status::not_answering(view),
-            (None, Some(why)) => status::did_not_start(view, &why),
+            (None, _) if here_failed.is_some() => {
+                status::here_failed(view, here_failed.as_deref().unwrap_or_default())
+            }
+            (None, Some(why)) if why == status::NO_ANSWER => status::not_answering(view, tries),
+            (None, Some(why)) => status::did_not_start(view, &why, tries),
             _ => view,
         }
     });
+    // What Report did is said only while Report is offered.
+    if !view.actions.contains(&"report") {
+        app.set_report_note(SharedString::new());
+    }
     app.set_status(StatusView {
         tone: view.tone.into(),
         icon: view.icon.into(),
         chip: view.chip.into(),
         headline: view.headline.into(),
         body: view.body.into(),
-        start: view.start,
-        log: view.log,
+        actions: ModelRc::new(VecModel::from(
+            view.actions
+                .iter()
+                .map(|a| SharedString::from(*a))
+                .collect::<Vec<_>>(),
+        )),
+        here: view.here,
         away: view.away,
         banner: view.banner.into(),
         banner_body: view.banner_body.into(),
         detail: view.detail.into(),
+        commands: ModelRc::new(VecModel::from(
+            view.commands
+                .into_iter()
+                .map(|(does, line)| TermLine {
+                    does: does.into(),
+                    line: line.into(),
+                })
+                .collect::<Vec<_>>(),
+        )),
     });
 }
 
-/// "Start the service": shows "Starting…" at once, runs it off the UI
-/// thread, then waits for it to answer. A start that fails, or that runs
-/// but does not answer in `START_WAIT`, is shown as failed with why.
-fn start_service() {
+/// The desktop's monospace family, as fontconfig names it: Slint takes
+/// a family's name, not the generic "monospace".
+fn monospace_family() -> Option<String> {
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{family[0]}", "monospace"])
+        .output()
+        .ok()?;
+    let name = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (out.status.success() && !name.is_empty()).then_some(name)
+}
+
+/// "Start the service" (or "Run it from this window for now"): shows
+/// "Starting…" at once, runs it off the UI thread, then waits for it to
+/// answer. A start that fails, or that runs but does not answer in
+/// `START_WAIT`, is shown as failed with why, and counted: after two, the
+/// window offers to run it itself.
+fn start_service(how: How) {
     let try_no = START_TRIES.with(|t| {
         t.set(t.get() + 1);
         t.get()
@@ -268,22 +335,40 @@ fn start_service() {
     STARTING.with(|s| s.set(Some(try_no)));
     // A new try replaces what the last one said.
     START_FAILED.with(|f| *f.borrow_mut() = None);
+    HERE_FAILED.with(|f| *f.borrow_mut() = None);
     with_app(show_status);
     let _ = thread::Builder::new().name("start".into()).spawn(move || {
-        let result = status::start();
+        let result = match how {
+            How::Service => status::start(),
+            How::Here => here::start(),
+        };
         let _ = slint::invoke_from_event_loop(move || {
             if STARTING.with(std::cell::Cell::get) != Some(try_no) {
                 return; // answered already, or a newer try
             }
-            match result {
-                Err(why) => {
-                    STARTING.with(|s| s.set(None));
-                    START_FAILED.with(|f| *f.borrow_mut() = Some(why));
+            let failed = move |why: String| {
+                STARTING.with(|s| s.set(None));
+                match how {
+                    How::Service => {
+                        FAILED_TRIES.with(|t| t.set(t.get() + 1));
+                        START_FAILED.with(|f| *f.borrow_mut() = Some(why));
+                    }
+                    How::Here => HERE_FAILED.with(|f| *f.borrow_mut() = Some(why)),
                 }
+            };
+            match result {
+                Err(why) => failed(why),
                 Ok(()) => slint::Timer::single_shot(START_WAIT, move || {
                     if STARTING.with(std::cell::Cell::get) == Some(try_no) {
-                        STARTING.with(|s| s.set(None));
-                        START_FAILED.with(|f| *f.borrow_mut() = Some(status::NO_ANSWER.into()));
+                        // Run here, it may have stopped already: that says why.
+                        let why = match (how, here::state()) {
+                            (How::Here, here::State::Stopped(why)) => why,
+                            (How::Here, _) => {
+                                "It was started ten seconds ago and has not answered.".into()
+                            }
+                            (How::Service, _) => status::NO_ANSWER.into(),
+                        };
+                        failed(why);
                         with_app(show_status);
                     }
                 }),
@@ -292,6 +377,20 @@ fn start_service() {
         });
         recheck();
     });
+}
+
+/// "Report the problem": the project's page for a new issue, in the
+/// browser. The window has already copied the diagnostics; this says so,
+/// or where to go if the browser could not be opened.
+fn report_problem() {
+    let note = match status::report() {
+        Ok(()) => "Your browser is opening the page for a new report. The diagnostics are copied: paste them into it.".to_string(),
+        Err(why) => format!(
+            "The browser could not be opened ({why}). The page for a new report is {}. The diagnostics are copied: paste them into it.",
+            status::report_address()
+        ),
+    };
+    with_app(|app| app.set_report_note(note.into()));
 }
 
 /// Help: the project's documentation, in the browser, opened the way a

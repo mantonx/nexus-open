@@ -79,6 +79,11 @@ enum Command {
         /// still shows every frame.
         #[arg(long)]
         no_device: bool,
+        /// Stop when standard input closes. The settings window runs the
+        /// daemon this way ("Run it from this window for now"), so it
+        /// stops with the window, however the window ends.
+        #[arg(long, hide = true)]
+        until_stdin_closes: bool,
     },
     /// Open the settings window.
     Ui,
@@ -115,11 +120,17 @@ fn main() -> ExitCode {
             db,
             demo,
             no_device,
-        } => run::run(run::Options {
-            db,
-            demo,
-            no_device,
-        }),
+            until_stdin_closes,
+        } => {
+            if until_stdin_closes {
+                stop_when_stdin_closes();
+            }
+            run::run(run::Options {
+                db,
+                demo,
+                no_device,
+            })
+        }
         Command::Ui => nexus_ui::run().map_err(Into::into),
         Command::Trace { out, seconds } => trace(&out, seconds),
     };
@@ -130,6 +141,16 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Exits once standard input reaches its end: the settings window that
+/// started this daemon holds the other end, and it closes when the window
+/// ends, even if the window is killed.
+fn stop_when_stdin_closes() {
+    let _ = std::thread::Builder::new().name("stdin".into()).spawn(|| {
+        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+        std::process::exit(0);
+    });
 }
 
 /// `nexusd preview`: picks what to show, or with `--out` writes the card to

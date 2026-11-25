@@ -13,7 +13,7 @@
 
 import { AboutSlint, ScrollView, Palette, ListView } from "std-widgets.slint";
 import { Theme, Icon, Glyph } from "theme.slint";
-import { Button, IconButton, Segmented, Chip, TextField, Select, MenuRow, MenuDivider, KeyCap, Shortcut, Label, Hint, Heading, FocusRing } from "controls.slint";
+import { Button, IconButton, Segmented, Chip, TextField, Select, MenuRow, MenuDivider, KeyCap, Shortcut, Label, Hint, Heading, FocusRing, Waiting } from "controls.slint";
 import { Field, FieldRow, PickRow, Trigger, Grid } from "form.slint";
 
 export { Theme, Field, PickRow, Trigger }
@@ -81,6 +81,12 @@ export struct Starter {
     image: image,
 }
 
+/// A command to type, and what it does.
+export struct TermLine {
+    does: string,
+    line: string,
+}
+
 /// The header's status: see status.rs.
 export struct StatusView {
     tone: string,
@@ -88,13 +94,21 @@ export struct StatusView {
     chip: string,
     headline: string,
     body: string,
-    start: bool,
-    log: bool,
+    /// What can be done, in order, the first the main one: "start",
+    /// "retry", "run-here", "report" or "log". The banner and the chip's
+    /// popover show the same buttons in this order.
+    actions: [string],
+    /// The daemon runs as this window's child: the banner says so.
+    here: bool,
     away: bool,
     banner: string,
     banner-body: string,
+    /// What the checks found, in words, when no banner says it.
     detail: string,
+    /// The fix as terminal commands: only those that fit this state.
+    commands: [TermLine],
 }
+
 
 /// A news feed in Settings: its name (its title, else its site) and
 /// address.
@@ -247,6 +261,64 @@ component Mark inherits Rectangle {
     }
 }
 
+/// The status's actions: their words, icons and what a screen reader says.
+global StatusAction {
+    public pure function text(a: string) -> string {
+        return a == "start" ? @tr("Start the service")
+            : a == "retry" ? @tr("Try again")
+            : a == "run-here" ? @tr("Run it from this window for now")
+            : a == "report" ? @tr("Report the problem")
+            : @tr("Open the log");
+    }
+    public pure function icon(a: string) -> string {
+        return a == "start" ? Glyph.power
+            : a == "retry" ? Glyph.retry
+            : a == "run-here" ? Glyph.play
+            : a == "report" ? Glyph.export
+            : Glyph.log;
+    }
+    public pure function label(a: string) -> string {
+        return a == "retry" ? @tr("Try to start the service again")
+            : a == "run-here" ? @tr("Run the service from this window until you quit it")
+            : a == "report" ? @tr("Report the problem: copies the diagnostics and opens the page for a new report in your browser")
+            : "";
+    }
+}
+
+/// The status's buttons, the same in the banner and the chip's popover:
+/// in the given order, the first the main one. Three do not fit on one
+/// line in a narrow column, so then the main one has its own.
+component StatusActions inherits VerticalLayout {
+    in property <[string]> actions;
+    callback act(string);
+    spacing: 8px;
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        for a[i] in root.actions.length <= 2 ? root.actions : [root.actions[0]]: Button {
+            tier: i == 0 ? "primary" : "default";
+            icon: StatusAction.icon(a);
+            text: StatusAction.text(a);
+            label: StatusAction.label(a);
+            clicked => {
+                root.act(a);
+            }
+        }
+    }
+    if root.actions.length > 2: HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+        for a in [root.actions[1], root.actions[2]]: Button {
+            icon: StatusAction.icon(a);
+            text: StatusAction.text(a);
+            label: StatusAction.label(a);
+            clicked => {
+                root.act(a);
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: @tr("Nexus Open");
     icon: @image-url("../assets/icon.png");
@@ -332,6 +404,8 @@ export component AppWindow inherits Window {
     in property <string> pref-night-to;
     in property <[string]> fonts;
     in property <int> pref-font;
+    /// Album covers: 0 the player's, 1 only on this computer, 2 never.
+    in property <int> pref-album-art;
     in property <string> log-text;
     /// Settings, News: the feeds, the chosen timings (-1: one set in a
     /// file, said in the note), and the last feed check: "" (none),
@@ -414,7 +488,22 @@ export component AppWindow inherits Window {
     /// The pictures are not what the strip shows: the service is down, or
     /// the strip is away. Dimmed, under a banner that says why.
     property <bool> not-live: !root.connected || root.status.away;
+    /// Why nothing in the editor can be changed now, in one line, said in
+    /// the editor itself (and not again under the strip); empty while it
+    /// can be.
+    property <string> blocked-why: root.editable || root.trying || root.panel-kind == "new-takeover" ? ""
+        : !root.connected ? (root.status.tone == "starting" ? @tr("Nothing here can be changed until the service answers.")
+            : root.status.tone == "failed" ? @tr("Nothing here can be changed until the service runs: the banner above says what to do.")
+            : @tr("Nothing here can be changed until the service runs: Start the service, above."))
+        : root.caption;
     callback start-service();
+    /// "Run it from this window for now": the daemon as the window's child.
+    callback run-here();
+    /// "Report the problem": opens the issue page (the diagnostics are
+    /// copied here first).
+    callback report-problem();
+    /// What Report did: the page is opening, or where it is.
+    in property <string> report-note;
     callback open-log();
     callback open-help();
     callback add-feed(string);
@@ -430,7 +519,18 @@ export component AppWindow inherits Window {
     in-out property <string> sheet;
     /// Settings' section: 0 the strip, 1 news, 2 this window.
     in-out property <int> settings-tab;
+    /// The form's example of the selected widget (see FieldRow).
+    in property <image> example;
+    in property <int> example-width;
+    in property <string> example-note;
+    /// Settings opens with the town's field focused (from a weather
+    /// widget that has none).
+    property <bool> focus-town;
     property <bool> copied;
+    /// The status popover's command just copied, or -1.
+    property <int> copied-line: -1;
+    /// The banner's height, for the popover to open under it.
+    property <length> banner-h;
     /// Pages being reordered by their grip: from and to, or -1.
     property <int> reorder-from: -1;
     property <int> reorder-to: -1;
@@ -446,10 +546,19 @@ export component AppWindow inherits Window {
     property <length> strip-w: 640 * unit;
     property <length> strip-h: 48 * unit;
     property <length> strip-col: strip-w + 2 * bezel;
-    /// The content column: as wide as the strip at 2x; at 1x, the whole
-    /// width, so the settings and captions use it (the strips stay at
-    /// exactly 1x, centred in it).
+    /// The content column. At 2x exactly as wide as the strip, so the
+    /// strips, their captions, the toolbar and the settings share one left
+    /// edge, centred together in a wide window. At 1x the window is small:
+    /// the column then takes all of its width, the strips at its left.
     property <length> column-w: zoom == 2 ? strip-col : max(strip-col, board.visible-width - 2 * board-pad);
+    /// The settings card: as wide as its form (or the widget's example),
+    /// never wider, so no half of it is left empty.
+    property <length> card-w: min(column-w, 36px + Grid.label + 16px + max(Grid.control-max, root.example-width * root.unit + 8px));
+    /// A banner's line: about 70 characters of body text.
+    property <length> measure: 520px;
+    /// The banner under the header is up: the chip's popover then opens
+    /// under it, and does not say it again.
+    property <bool> banner-up: (root.not-live || root.status.here) && root.status.banner != "";
 
     public function show-sheet(name: string) {
         root.sheet = name;
@@ -484,11 +593,43 @@ export component AppWindow inherits Window {
         clip.clear-selection();
         root.copied = true;
     }
+    // One command from the status popover, the same way.
+    line-clip := TextInput {
+        visible: false;
+    }
+    function copy-line(line: string, i: int) {
+        line-clip.text = line;
+        line-clip.select-all();
+        line-clip.copy();
+        line-clip.clear-selection();
+        root.copied-line = i;
+    }
+
+    function act(a: string) {
+        if a == "start" || a == "retry" {
+            root.start-service();
+        } else if a == "run-here" {
+            root.run-here();
+        } else if a == "report" {
+            root.copy-diagnostics();
+            root.report-problem();
+        } else if a == "log" {
+            root.open-log();
+            root.show-sheet("log");
+        }
+    }
     Timer {
         interval: 2s;
         running: root.copied;
         triggered => {
             root.copied = false;
+        }
+    }
+    Timer {
+        interval: 2s;
+        running: root.copied-line >= 0;
+        triggered => {
+            root.copied-line = -1;
         }
     }
 
@@ -587,12 +728,16 @@ export component AppWindow inherits Window {
                     Rectangle {
                         horizontal-stretch: 1;
                     }
-                    // The status chip.
-                    VerticalLayout {
-                        alignment: center;
+                    // The status: one fixed slot. Only its colour, icon and
+                    // word change with the state; its shape never does, and
+                    // its right edge stays put, so the header never moves.
+                    status-slot := Rectangle {
+                        width: 180px;
                         status-chip := Rectangle {
                             height: 32px;
-                            width: max(168px, chip-row.preferred-width);
+                            y: (parent.height - self.height) / 2;
+                            width: min(parent.width, chip-row.preferred-width);
+                            x: parent.width - self.width;
                             border-radius: 16px;
                             // A failed start is the one real fault: critical.
                             // What the app cannot do yet (no strip, in use, no
@@ -600,11 +745,7 @@ export component AppWindow inherits Window {
                             // amber: amber means a reading.
                             property <bool> failed: root.status.tone == "failed";
                             property <bool> attention: root.status.tone == "app" || root.status.tone == "stopped" || root.status.tone == "starting";
-                            background: failed ? Theme.crit-surface
-                                : attention ? (chip-touch.has-hover ? Theme.surface-2.darker(0.04) : Theme.surface-2)
-                                : chip-touch.has-hover ? Theme.surface-2 : transparent;
-                            border-width: failed || attention ? 1px : 0px;
-                            border-color: failed ? Theme.crit.transparentize(0.4) : Theme.line-strong;
+                            background: chip-touch.has-hover ? Theme.surface-2 : transparent;
                             accessible-role: button;
                             accessible-label: @tr("Status: {}. Opens the details and fixes.", root.status.chip);
                             accessible-action-default => {
@@ -621,6 +762,7 @@ export component AppWindow inherits Window {
                                 }
                                 Text {
                                     text: root.status.chip == "" ? @tr("Checking…") : root.status.chip;
+                                    overflow: elide;
                                     font-family: Theme.font;
                                     font-size: Theme.size-label;
                                     font-weight: status-chip.failed || status-chip.attention ? 600 : 500;
@@ -668,7 +810,7 @@ export component AppWindow inherits Window {
                         Button {
                             tier: "quiet";
                             fit: false;
-                            min-width: 170px;
+                            min-width: 110px;
                             preferred-width: 230px;
                             max-width: 230px;
                             icon: Glyph.undo;
@@ -688,6 +830,17 @@ export component AppWindow inherits Window {
                             enabled: root.connected && root.redo-label != "";
                             clicked => {
                                 root.redo();
+                            }
+                        }
+                    }
+                    // Settings in sight, not only in the menu.
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: Glyph.gear;
+                            label: @tr("Settings: the town for the weather, the accent, the strip's lettering");
+                            clicked => {
+                                root.show-settings(0);
                             }
                         }
                     }
@@ -726,9 +879,15 @@ export component AppWindow inherits Window {
                             // only a start that failed is critical. The words
                             // come from status.rs, so the chip's popover and
                             // this banner tell one story.
-                            if root.not-live && root.status.banner != "": offline := Rectangle {
+                            if root.banner-up: offline := Rectangle {
                                 property <bool> failed: root.status.tone == "failed";
                                 height: offline-row.preferred-height + 20px;
+                                init => {
+                                    root.banner-h = self.height;
+                                }
+                                changed height => {
+                                    root.banner-h = self.height;
+                                }
                                 border-radius: Theme.r-surface;
                                 background: failed ? Theme.crit-surface : Theme.surface;
                                 border-width: 1px;
@@ -737,58 +896,83 @@ export component AppWindow inherits Window {
                                     padding: 10px;
                                     padding-left: 14px;
                                     spacing: 12px;
-                                    Icon {
-                                        glyph: root.status-glyph;
-                                        fill: true;
-                                        color: offline.failed ? Theme.crit : Theme.text-2;
-                                        font-size: 18px;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        padding-top: 1px;
+                                        Icon {
+                                            glyph: root.status-glyph;
+                                            fill: true;
+                                            color: offline.failed ? Theme.crit : Theme.text-2;
+                                            font-size: 18px;
+                                        }
                                     }
                                     VerticalLayout {
-                                        alignment: center;
+                                        alignment: start;
                                         spacing: 4px;
                                         horizontal-stretch: 1;
-                                        Text {
-                                            text: root.status.banner;
-                                            font-family: Theme.font;
-                                            font-size: Theme.size-body;
-                                            font-weight: 600;
-                                            color: offline.failed ? Theme.crit : Theme.text;
-                                            wrap: word-wrap;
-                                            accessible-role: text;
-                                        }
-                                        Text {
-                                            text: root.status.banner-body;
-                                            font-family: Theme.font;
-                                            font-size: Theme.size-body;
-                                            color: Theme.text-2;
-                                            wrap: word-wrap;
-                                            accessible-role: text;
-                                        }
-                                    }
-                                    // Neutral keys, never the accent, on a banner.
-                                    if root.status.log && !root.connected: VerticalLayout {
-                                        alignment: center;
-                                        Button {
-                                            tier: "default";
-                                            icon: Glyph.log;
-                                            text: @tr("Open the log");
-                                            clicked => {
-                                                root.open-log();
-                                                root.show-sheet("log");
+                                        // A measure of about 70 characters: the
+                                        // words keep it, the room after them is
+                                        // left empty.
+                                        HorizontalLayout {
+                                            Text {
+                                                text: root.status.banner;
+                                                horizontal-stretch: 0;
+                                                preferred-width: root.measure;
+                                                max-width: root.measure;
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-body;
+                                                font-weight: 600;
+                                                color: offline.failed ? Theme.crit : Theme.text;
+                                                wrap: word-wrap;
+                                                accessible-role: text;
+                                            }
+                                            Rectangle {
+                                                horizontal-stretch: 1;
                                             }
                                         }
-                                    }
-                                    if root.status.start || root.status.tone == "starting": VerticalLayout {
-                                        alignment: center;
-                                        Button {
-                                            tier: "default";
-                                            icon: root.status.tone == "starting" ? Glyph.wait : root.status.tone == "failed" ? Glyph.retry : Glyph.power;
-                                            text: root.status.tone == "starting" ? @tr("Starting…")
-                                                : root.status.tone == "failed" ? @tr("Try again") : @tr("Start the service");
-                                            enabled: root.status.tone != "starting";
-                                            label: root.status.tone == "failed" ? @tr("Try to start the service again") : "";
-                                            clicked => {
-                                                root.start-service();
+                                        // Two lines, always: the banner keeps its
+                                        // height through one problem. After Report,
+                                        // what it did takes their place.
+                                        HorizontalLayout {
+                                            Text {
+                                                text: root.report-note != "" ? root.report-note : root.status.banner-body;
+                                                horizontal-stretch: 0;
+                                                preferred-width: root.measure;
+                                                max-width: root.measure;
+                                                min-height: 2 * 18px;
+                                                max-height: 2 * 18px;
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-body;
+                                                color: Theme.text-2;
+                                                wrap: word-wrap;
+                                                overflow: elide;
+                                                accessible-role: text;
+                                            }
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                            }
+                                        }
+                                        // One row, the same height in every state:
+                                        // the buttons, or while starting a moving
+                                        // mark, as there is nothing to press.
+                                        HorizontalLayout {
+                                            padding-top: 6px;
+                                            height: Theme.control-h + 6px;
+                                            spacing: 8px;
+                                            alignment: start;
+                                            if root.status.tone == "starting": Waiting {
+                                                label: @tr("Waiting for the service to answer");
+                                            }
+                                            // One order everywhere, the first the
+                                            // main one.
+                                            for a[i] in root.status.actions: Button {
+                                                tier: i == 0 ? "primary" : "default";
+                                                icon: StatusAction.icon(a);
+                                                text: StatusAction.text(a);
+                                                label: StatusAction.label(a);
+                                                clicked => {
+                                                    root.act(a);
+                                                }
                                             }
                                         }
                                     }
@@ -857,10 +1041,10 @@ export component AppWindow inherits Window {
                                     background: Theme.act-line;
                                 }
 
-                                // The name and the strip, as one: at 1x they are
-                                // centred in the column, which the settings use.
+                                // The name and the strip, as one, at the
+                                // column's left edge.
                                 HorizontalLayout {
-                                    alignment: center;
+                                    alignment: start;
                                     VerticalLayout {
                                         width: root.strip-col;
                                     // Name line.
@@ -1266,11 +1450,16 @@ export component AppWindow inherits Window {
                                 // Under the strip being edited: what is happening,
                                 // and what can be done to it. At 1x the words get
                                 // their own line above the buttons, so none is cut.
-                                if row.active: VerticalLayout {
+                                // As wide as the strip, so its buttons end
+                                // where the strip does.
+                                if row.active: HorizontalLayout {
+                                    alignment: start;
+                                VerticalLayout {
+                                    width: root.strip-col;
                                     padding-top: 8px;
                                     padding-bottom: 8px;
                                     spacing: 4px;
-                                    if root.zoom == 1: Text {
+                                    if root.zoom == 1 && root.blocked-why == "": Text {
                                         text: root.problem != "" && root.connected ? root.problem : root.caption;
                                         font-family: Theme.font;
                                         font-size: Theme.size-label;
@@ -1283,7 +1472,7 @@ export component AppWindow inherits Window {
                                         spacing: 8px;
                                         min-height: 34px;
                                         if root.zoom == 2: Text {
-                                            text: root.problem != "" && root.connected ? root.problem : root.caption;
+                                            text: root.blocked-why != "" ? "" : root.problem != "" && root.connected ? root.problem : root.caption;
                                             font-family: Theme.font;
                                             font-size: Theme.size-label;
                                             color: root.problem != "" && root.connected ? Theme.crit : Theme.text-2;
@@ -1301,7 +1490,7 @@ export component AppWindow inherits Window {
                                             alignment: end;
                                             // Back from a widget to what holds it: the
                                             // page's name, or the takeover's triggers.
-                                            if root.selected >= 0: Button {
+                                            if root.selected >= 0 && root.editable: Button {
                                                 tier: "quiet";
                                                 icon: row.kind == "page" ? Glyph.sliders : Glyph.cards;
                                                 text: row.kind == "page" ? @tr("Page settings") : @tr("Takeover settings");
@@ -1323,7 +1512,7 @@ export component AppWindow inherits Window {
                                             Button {
                                                 tier: "primary";
                                                 icon: Glyph.plus;
-                                                text: root.selected >= 0 ? @tr("Add after") : @tr("Add");
+                                                text: root.selected >= 0 && root.editable ? @tr("Add after") : @tr("Add");
                                                 enabled: root.editable && root.can-add;
                                                 label: root.can-add ? @tr("Add a widget to {}", row.name) : root.add-reason;
                                                 clicked => {
@@ -1334,21 +1523,25 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
+                                }
                                 if row.active && !root.can-add && !root.trying && root.editable: Hint {
+                                    max-width: root.strip-col;
                                     text: root.add-reason;
                                     horizontal-alignment: right;
                                 }
 
                                 // The settings, attached to the strip.
-                                if row.active && !root.trying: panel := Rectangle {
-                                    property <length> most: max(220px, board.visible-height - root.strip-h - 2 * root.bezel - 34px - 50px - 32px);
-                                    height: min(panel-body.preferred-height, self.most);
+                                // It grows with its form; the page scrolls,
+                                // never the card.
+                                if row.active && !root.trying: HorizontalLayout {
+                                    alignment: start;
+                                    panel := Rectangle {
+                                    width: root.card-w;
+                                    height: panel-body.preferred-height;
                                     border-radius: Theme.r-surface;
                                     background: Theme.surface;
                                     border-width: 1px;
                                     border-color: Theme.line;
-                                    clip: true;
-                                    panel-scroll := ScrollView {
                                         panel-body := VerticalLayout {
                                             padding: 18px;
                                             padding-top: 14px;
@@ -1424,6 +1617,27 @@ export component AppWindow inherits Window {
                                                     }
                                                 }
                                             }
+                                            // Blocked: one line saying why, where the eye is.
+                                            if root.blocked-why != "": HorizontalLayout {
+                                                spacing: 8px;
+                                                Icon {
+                                                    glyph: Glyph.lock;
+                                                    fill: true;
+                                                    color: Theme.text-2;
+                                                    font-size: 15px;
+                                                }
+                                                Text {
+                                                    text: root.blocked-why;
+                                                    font-family: Theme.font;
+                                                    font-size: Theme.size-body;
+                                                    font-weight: 500;
+                                                    color: Theme.text-2;
+                                                    vertical-alignment: center;
+                                                    horizontal-stretch: 1;
+                                                    wrap: word-wrap;
+                                                    accessible-role: text;
+                                                }
+                                            }
                                             // The page's own setting: its name.
                                             if root.panel-kind == "page": HorizontalLayout {
                                                 spacing: 16px;
@@ -1452,13 +1666,17 @@ export component AppWindow inherits Window {
                                                             root.rename-page(text);
                                                         }
                                                     }
-                                                    Hint {
+                                                    if root.editable: Hint {
                                                         text: @tr("Click a widget on the strip above to change it, or Add to put a new one on this page.");
                                                     }
                                                 }
                                             }
                                             for field in root.fields: FieldRow {
                                                 field: field;
+                                                example: root.example;
+                                                example-width: root.example-width;
+                                                example-note: root.example-note;
+                                                unit: root.unit;
                                                 enabled: root.editable || root.panel-kind == "new-takeover";
                                                 picks: root.picks;
                                                 triggers: root.triggers;
@@ -1482,6 +1700,10 @@ export component AppWindow inherits Window {
                                                 }
                                                 edit-feeds => {
                                                     root.show-settings(1);
+                                                }
+                                                edit-town => {
+                                                    root.focus-town = true;
+                                                    root.show-settings(0);
                                                 }
                                             }
                                             if root.draft-hint != "": HorizontalLayout {
@@ -1516,24 +1738,30 @@ export component AppWindow inherits Window {
                                                 Icon {
                                                     glyph: Glyph.keyboard;
                                                     color: Theme.text-3;
+                                                    opacity: root.editable ? 1 : 0.4;
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["←", "→"];
                                                     does: @tr("select");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Ctrl", "← →"];
                                                     does: @tr("move");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Shift", "← →"];
                                                     does: @tr("resize");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Delete"];
                                                     does: @tr("remove");
                                                 }
                                                 Shortcut {
+                                                    enabled: root.editable;
                                                     keys: ["Ctrl", "Z"];
                                                     does: @tr("undo");
                                                 }
@@ -1572,7 +1800,9 @@ export component AppWindow inherits Window {
                                     text: @tr("Takeovers");
                                 }
                                 Hint {
-                                    text: @tr("A takeover covers the page for a few seconds when a reading changes: the track, the volume. None yet.");
+                                    text: root.rows.length == 0 && !root.connected
+                                        ? @tr("A takeover covers the page for a few seconds when a reading changes. Yours show here once the service answers.")
+                                        : @tr("A takeover covers the page for a few seconds when a reading changes: the track, the volume. None yet.");
                                 }
                             }
                             HorizontalLayout {
@@ -1887,7 +2117,11 @@ export component AppWindow inherits Window {
 
     status-menu := PopupWindow {
         x: max(8px, status-chip.absolute-position.x - root.absolute-position.x + status-chip.width - self.width);
-        y: header.height - 6px;
+        // With a banner up, it opens under the banner, never over it:
+        // the banner says what is wrong and what to do; this adds only
+        // the commands and the diagnostics.
+        y: root.banner-up ? max(header.height - 6px, header.height + 12px + root.banner-h + board.content-y + 8px)
+            : header.height - 6px;
         width: 440px;
         close-policy: PopupClosePolicy.close-on-click-outside;
         Rectangle {
@@ -1900,7 +2134,7 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 18px;
                 spacing: 10px;
-                Text {
+                if !root.banner-up: Text {
                     text: root.status.headline;
                     font-family: Theme.font;
                     font-size: Theme.size-title;
@@ -1909,32 +2143,94 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                     accessible-role: text;
                 }
-                Text {
+                if !root.banner-up: Text {
                     text: root.status.body;
                     font-family: Theme.font;
                     color: Theme.text-2;
                     wrap: word-wrap;
                     accessible-role: text;
                 }
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    if root.status.start: Button {
-                        tier: "primary";
-                        icon: root.status.tone == "failed" ? Glyph.retry : Glyph.power;
-                        text: root.status.tone == "failed" ? @tr("Try again") : @tr("Start the service");
-                        clicked => {
-                            root.start-service();
-                        }
-                    }
-                    if root.status.log: Button {
-                        icon: Glyph.log;
-                        text: @tr("Open the log");
-                        clicked => {
-                            root.open-log();
-                            root.show-sheet("log");
+                if !root.banner-up && root.status.tone == "starting": Waiting {
+                    label: @tr("Waiting for the service to answer");
+                }
+                // The banner's buttons, when there is no banner: one
+                // primary on screen at a time.
+                if !root.banner-up && root.status.actions.length > 0: StatusActions {
+                    actions: root.status.actions;
+                    act(a) => {
+                        root.act(a);
+                        if a == "log" {
                             // Last: closing first would end this handler.
                             status-menu.close();
+                        }
+                    }
+                }
+                if !root.banner-up && root.report-note != "": Text {
+                    text: root.report-note;
+                    font-family: Theme.font;
+                    font-size: Theme.size-label;
+                    color: Theme.text-2;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+                if !root.banner-up && root.status.detail != "": Hint {
+                    text: root.status.detail;
+                }
+                // Only the commands that fit this state, one to a line,
+                // each copied on its own.
+                if root.status.commands.length > 0: VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: @tr("In a terminal");
+                        font-family: Theme.font;
+                        font-size: Theme.size-label;
+                        font-weight: 600;
+                        color: Theme.text-2;
+                        accessible-role: text;
+                    }
+                    for c[ci] in root.status.commands: VerticalLayout {
+                        spacing: 3px;
+                        if c.does != "": Text {
+                            text: c.does;
+                            font-family: Theme.font;
+                            font-size: Theme.size-small;
+                            color: Theme.text-3;
+                            accessible-role: text;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 6px;
+                                background: Theme.surface-2;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    padding-top: 6px;
+                                    padding-bottom: 6px;
+                                    TextInput {
+                                        text: c.line;
+                                        read-only: true;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        font-family: Theme.mono;
+                                        font-size: 12px;
+                                        color: Theme.text;
+                                        vertical-alignment: center;
+                                        accessible-label: c.does != "" ? c.does : @tr("Command");
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    icon: root.copied-line == ci ? Glyph.check : Glyph.copy;
+                                    label: root.copied-line == ci ? @tr("Copied") : @tr("Copy: {}", c.line);
+                                    clicked => {
+                                        root.copy-line(c.line, ci);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1948,33 +2244,6 @@ export component AppWindow inherits Window {
                         enabled: root.diagnostics != "";
                         clicked => {
                             root.copy-diagnostics();
-                        }
-                    }
-                }
-                if root.status.detail != "": VerticalLayout {
-                    spacing: 4px;
-                    Hint {
-                        text: @tr("For those who use a terminal:");
-                    }
-                    Rectangle {
-                        border-radius: 8px;
-                        background: Theme.surface-2;
-                        // Sized by its words, so a long command wraps
-                        // inside rather than running out of the box.
-                        VerticalLayout {
-                            padding: 8px;
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            TextInput {
-                                text: root.status.detail;
-                                read-only: true;
-                                single-line: false;
-                                wrap: word-wrap;
-                                font-family: "monospace";
-                                font-size: 12px;
-                                color: Theme.text-2;
-                                accessible-label: @tr("The fix as commands");
-                            }
                         }
                     }
                 }
@@ -2259,7 +2528,7 @@ export component AppWindow inherits Window {
 
     if root.sheet == "settings": settings-sheet := Sheet {
         title: @tr("Settings");
-        subtitle: root.settings-tab == 0 ? @tr("For every layout: they show on the strip at once, and undo takes them back.")
+        subtitle: root.settings-tab == 0 ? @tr("These apply to every layout. Changes show on the strip at once; Undo takes them back.")
             : root.settings-tab == 1 ? @tr("Headlines on news widgets. Undo takes a change back.")
             : @tr("Only this window: the strip and undo leave these alone.");
         sheet-width: 700px;
@@ -2588,6 +2857,12 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         spacing: 4px;
                         for item in [{ v: root.pref-weather, epoch: root.resets }]: TextField {
+                            init => {
+                                if root.focus-town {
+                                    root.focus-town = false;
+                                    self.focus-input();
+                                }
+                            }
                             text: item.v;
                             committed-value: item.v;
                             placeholder: @tr("Your town, as in: Lyon, France");
@@ -2724,6 +2999,31 @@ export component AppWindow inherits Window {
                             text: root.pref-night
                                 ? @tr("The strip dims further between these times, across midnight when the end is earlier.")
                                 : @tr("None: the strip keeps its brightness all night. Dim at night sets hours when it dims further.");
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 16px;
+                    Label {
+                        text: @tr("Album covers");
+                        width: Grid.label;
+                        y: 8px;
+                        vertical-alignment: top;
+                        color: Theme.text-2;
+                        font-weight: 500;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        Select {
+                            options: [@tr("Use album covers from your player"), @tr("Only covers stored on this computer"), @tr("Never show covers")];
+                            current: root.pref-album-art;
+                            label: @tr("Album covers");
+                            chose(i) => {
+                                root.set-pref("album-art", i);
+                            }
+                        }
+                        Hint {
+                            text: @tr("Covers from your player may be fetched from its image host, when the player keeps them online.");
                         }
                     }
                 }
@@ -3045,7 +3345,7 @@ export component AppWindow inherits Window {
                     read-only: true;
                     single-line: false;
                     wrap: word-wrap;
-                    font-family: "monospace";
+                    font-family: Theme.mono;
                     font-size: 12px;
                     color: Theme.text-2;
                     accessible-label: @tr("The service's log");

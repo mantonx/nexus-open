@@ -147,6 +147,11 @@ pub struct Editor {
     shown: Vec<Field>,
     /// What `shown` belongs to.
     fields_for: Option<Form>,
+    /// "Limits and scale", opened or closed by hand for this form; `None`
+    /// until then (open when something in it is set).
+    limits_open: Option<bool>,
+    /// The widget the form's example picture is of, while it has one.
+    example_for: Option<Widget>,
     /// Inspector values not sent yet (see `inspector::apply`), and why.
     drafts: Values,
     draft_hint: String,
@@ -155,6 +160,9 @@ pub struct Editor {
     /// confirms it.
     committed: HashMap<String, String>,
     signals: HashMap<String, Reading>,
+    /// The `media.art` value the artwork was last asked for, so the
+    /// daemon is asked once per track, not once a second.
+    art_key: Option<String>,
 
     /// The Signals drawer's rows, updated in place.
     signal_rows: Rc<VecModel<SignalRow>>,
@@ -222,10 +230,13 @@ impl Editor {
             fields: Rc::new(VecModel::default()),
             shown: Vec::new(),
             fields_for: None,
+            limits_open: None,
+            example_for: None,
             drafts: Values::new(),
             draft_hint: String::new(),
             committed: HashMap::new(),
             signals: HashMap::new(),
+            art_key: None,
             signal_rows: Rc::new(VecModel::default()),
             picking: None,
             pick_filter: String::new(),
@@ -362,6 +373,8 @@ impl Editor {
             if !connected {
                 self.drag = Drag::None;
                 self.preview = None;
+                // A daemon that comes back may have other artwork.
+                self.art_key = None;
             }
             self.show();
         }
@@ -455,7 +468,34 @@ impl Editor {
         }
         self.show_signals();
         self.show_picks();
+        self.fetch_art();
         self.draw_layout();
+    }
+
+    /// When `media.art` names new artwork, asks the daemon for its pixels,
+    /// off the UI thread; they reach the pictures with `Job::Art`.
+    fn fetch_art(&mut self) {
+        let key = match self.signals.get("media.art") {
+            Some(r) if !r.text.is_empty() => r.text.clone(),
+            _ => return,
+        };
+        if self.art_key.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        self.art_key = Some(key);
+        let Some(jobs) = self.thumbs.clone() else {
+            return;
+        };
+        let app = self.app.clone();
+        let _ = thread::Builder::new().name("art".into()).spawn(move || {
+            let Some(art) = fetch_art() else {
+                return;
+            };
+            if jobs.send(Job::Art(std::sync::Arc::new(art))).is_ok() {
+                // Drawn again, now with the artwork.
+                let _ = app.upgrade_in_event_loop(|_| with_editor(Editor::draw_layout));
+            }
+        });
     }
 
     /// Puts the Signals drawer's rows in the window, in place while the
@@ -549,7 +589,7 @@ impl Editor {
                 ids.push(known.into());
             }
         }
-        ids.retain(|id| names::matches(id, &self.pick_filter));
+        ids.retain(|id| !names::hidden(id) && names::matches(id, &self.pick_filter));
         ids.sort_by_key(|id| names::order(id));
         let rows: Vec<PickRow> = ids
             .into_iter()
@@ -1159,30 +1199,22 @@ impl Editor {
                 to + 1,
                 widgets.len()
             ),
-            // At the strip's end there is no grip: its edge there cannot
+            // What it is, its size and place are the form's title, just
+            // below: here only what can be done on the strip itself. At
+            // the strip's end there is no grip: its edge there cannot
             // move, and the grip would sit on the edge flag.
             (_, Some(i)) if widths.iter().sum::<u32>() >= STRIP && i + 1 == widgets.len() => {
                 if i == 0 {
-                    format!(
-                        "{}, the whole strip. Make it narrower in Width below to put another beside it.",
-                        sized(i)
-                    )
+                    "It fills the strip. Make it narrower in Width below to put another beside it."
+                        .into()
                 } else {
-                    format!(
-                        "{}, {} of {}, to the strip's end. Drag it to move it; resize it in Width below.",
-                        sized(i),
-                        i + 1,
-                        widgets.len()
-                    )
+                    "It runs to the strip's end. Drag it to move it; resize it in Width below."
+                        .into()
                 }
             }
-            (_, Some(i)) => format!(
-                "{}, {} of {}. Drag it to move it; drag the grip on its right edge to resize.",
-                sized(i),
-                i + 1,
-                widgets.len()
-            ),
-            _ => "Click a widget to change it.".into(),
+            (_, Some(_)) => "Drag it to move it; drag the grip on its right edge to resize.".into(),
+            // The page's settings below say how to pick one.
+            _ => String::new(),
         }
     }
 }
@@ -1250,6 +1282,7 @@ impl Editor {
                 .as_ref()
                 .map(|n| n.feeds.clone())
                 .unwrap_or_default(),
+            town: layout.config.weather.is_some(),
         }
     }
 
@@ -1286,6 +1319,7 @@ impl Editor {
     /// whose new value is the one just sent from it.
     fn show_fields(&mut self) {
         let selected = self.selected_index().filter(|_| self.editable());
+        self.show_example(selected);
         let form = match selected {
             Some(i) => self.widget_ids().get(i).copied().map(Form::Widget),
             None if self.adding.is_some() => Some(Form::NewTakeover),
@@ -1293,6 +1327,7 @@ impl Editor {
         };
         if form != self.fields_for {
             self.fields_for = form;
+            self.limits_open = None;
             self.drafts.clear();
             self.draft_hint.clear();
             self.committed.clear();
@@ -1320,12 +1355,10 @@ impl Editor {
                     width.help = if min == max {
                         "Nothing beside it can give it room: make a neighbour narrower first."
                             .into()
+                    } else if i + 1 < self.layout_widths().len() {
+                        "The widget on its right gives or takes the room.".into()
                     } else {
-                        if i + 1 < self.layout_widths().len() {
-                            "The arrow keys step by 1, with Shift by 10. The widget on its right gives or takes the difference, as when the grip on the strip is dragged.".into()
-                        } else {
-                            "The arrow keys step by 1, with Shift by 10. It grows into the free room at the strip's end, and narrower leaves room there.".into()
-                        }
+                        "It takes or leaves free room at the strip's end.".into()
                     };
                 }
                 fields.push(Field {
@@ -1333,10 +1366,9 @@ impl Editor {
                     label: "Note".into(),
                     kind: Kind::Note,
                     value: self.note(i),
-                    help: "For you: kept with the widget, and shown as a comment in an exported layout."
-                        .into(),
+                    help: "For you: kept with the widget, and in an exported layout.".into(),
                 });
-                fields
+                inspector::group_limits(fields, self.limits_open)
             }
             None => self
                 .takeover_values()
@@ -1399,7 +1431,12 @@ impl Editor {
                     "widget",
                     describe(w),
                     widget_icon(w).to_string(),
-                    format!("{}, {width} px", geometry::class(width)),
+                    format!(
+                        "{}, {width} px, {} of {}",
+                        geometry::class(width),
+                        i + 1,
+                        self.widgets().len()
+                    ),
                 )
             }
             (Some(Form::NewTakeover), _) => (
@@ -1543,7 +1580,7 @@ impl Editor {
             );
             app.set_gallery_note(
                 format!(
-                    "{at}; the widgets already there make room for it. Pictures use your readings."
+                    "{at}; the widgets already there make room for it. Pictures use your readings, or examples where you have none yet."
                 )
                 .into(),
             );
@@ -1957,14 +1994,21 @@ impl Editor {
 impl Editor {
     /// A choice field's option was picked, by its position in the list.
     fn field_chosen(&mut self, key: &str, index: i32) {
+        if key == inspector::LIMITS {
+            let open = self
+                .shown
+                .iter()
+                .any(|f| f.key == inspector::LIMITS && f.value == "open");
+            self.limits_open = Some(!open);
+            self.show_fields();
+            return;
+        }
         let option = self
             .shown
             .iter()
             .find(|f| f.key == key)
-            .and_then(|f| match &f.kind {
-                Kind::Choice(options) => options.get(usize::try_from(index).ok()?).cloned(),
-                _ => None,
-            });
+            .and_then(|f| f.kind.option(index))
+            .map(str::to_owned);
         if let Some(option) = option {
             self.field_changed(key, &option);
         }
@@ -2160,6 +2204,45 @@ impl Editor {
         });
     }
 
+    /// A forecast with nothing real to show yet (no town, or the weather
+    /// has not come in): an example of it under its Show choice, drawn
+    /// with made-up weather and said to be, so each choice can be judged
+    /// by looking.
+    fn show_example(&mut self, selected: Option<usize>) {
+        let readings = self.readings();
+        let widget = selected
+            .and_then(|i| self.widgets().get(i).cloned())
+            .filter(|w| matches!(w, Widget::Forecast { .. }))
+            .filter(|_| !thumbs::has_forecast(&readings));
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let Some(widget) = widget else {
+            self.example_for = None;
+            app.set_example_note(SharedString::new());
+            return;
+        };
+        if self.example_for.as_ref() == Some(&widget) {
+            return;
+        }
+        let (Some(jobs), Some(l)) = (&self.thumbs, &self.layout) else {
+            return;
+        };
+        let note = if l.config.weather.is_some() {
+            "Example, with made-up weather: yours shows once it comes in."
+        } else {
+            // The Town row above says there is no town.
+            "Example, with made-up weather."
+        };
+        let _ = jobs.send(Job::Example {
+            widget: Box::new(widget.clone()),
+            config: Box::new(l.config.clone()),
+            readings: thumbs::with_demo(readings),
+        });
+        self.example_for = Some(widget);
+        app.set_example_note(crate::i18n::shown(note).into());
+    }
+
     /// Pictures arrived from `thumbs`.
     pub fn pictures(&mut self, done: Done) {
         let image = |px: &[u8], w: u32| {
@@ -2190,6 +2273,13 @@ impl Editor {
                         tile.image = image(&cropped, w);
                         self.tiles.set_row_data(i, tile);
                     }
+                }
+            }
+            Done::Example(px) => {
+                if let (Some(w), Some(app)) = (&self.example_for, self.app.upgrade()) {
+                    let (cropped, width) = thumbs::crop(&px, w.width());
+                    app.set_example(image(&cropped, width));
+                    app.set_example_width(width as i32);
                 }
             }
             Done::Starters(list) => {
@@ -2313,6 +2403,18 @@ impl Editor {
         let Some(l) = &self.layout else {
             return;
         };
+        // Album covers are the `[media]` section, its own edit: the
+        // settings form knows nothing of it, so it cannot reset it.
+        if key == ALBUM_ART {
+            let Some(album_art) = value.parse().ok().and_then(album_art_choice) else {
+                return;
+            };
+            if l.config.media.album_art != album_art {
+                let media = nexus_core::config::MediaConfig { album_art };
+                self.send(Edit::SetMedia { media });
+            }
+            return;
+        }
         let mut v = settings::flatten(&l.config);
         if settings::set(&mut v, key, value).is_none() {
             return;
@@ -2356,7 +2458,27 @@ impl Editor {
                 .collect::<Vec<_>>(),
         )));
         app.set_pref_font(p.font as i32);
+        app.set_pref_album_art(album_art_index(l.config.media.album_art) as i32);
     }
+}
+
+/// Settings' album covers: what `set-pref` is called with.
+const ALBUM_ART: &str = "album-art";
+
+/// The album cover choices in the order Settings lists them: the
+/// player's covers wherever they are, only those on this computer, none.
+const ALBUM_ART_CHOICES: [nexus_core::config::AlbumArt; 3] = [
+    nexus_core::config::AlbumArt::All,
+    nexus_core::config::AlbumArt::Local,
+    nexus_core::config::AlbumArt::Off,
+];
+
+fn album_art_choice(index: usize) -> Option<nexus_core::config::AlbumArt> {
+    ALBUM_ART_CHOICES.get(index).copied()
+}
+
+fn album_art_index(a: nexus_core::config::AlbumArt) -> usize {
+    ALBUM_ART_CHOICES.iter().position(|c| *c == a).unwrap_or(0)
 }
 
 /// Settings, News: the feeds and how headlines show.
@@ -2652,6 +2774,8 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
         Kind::Triggers => ("triggers", Vec::new()),
         Kind::Icon => ("icon", Vec::new()),
         Kind::Feeds => ("feeds", Vec::new()),
+        Kind::Town => ("town", Vec::new()),
+        Kind::Disclosure => ("disclosure", Vec::new()),
         Kind::Stepper { min, max } => ("stepper", vec![min.to_string(), max.to_string()]),
         Kind::Choice(options) => ("choice", options.clone()),
         Kind::Segmented(options) => ("segmented", options.clone()),
@@ -2667,7 +2791,10 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
             .get(f.value.trim())
             .map(|r| inspector::show_reading(r, ctx))
             .unwrap_or_else(|| {
-                if f.value.trim().is_empty() {
+                // No town: the form's Town row says so, once.
+                if f.value.trim().is_empty()
+                    || (f.value.trim().starts_with("weather.") && !ctx.town)
+                {
                     String::new()
                 } else {
                     "no reading yet".into()
@@ -2735,7 +2862,7 @@ pub fn describe(w: &Widget) -> String {
         Widget::Clock { .. } => "Clock".into(),
         Widget::Media { .. } => "Now playing".into(),
         Widget::News { .. } => "News".into(),
-        Widget::Forecast { .. } => "Forecast".into(),
+        Widget::Forecast { .. } => "Weather forecast".into(),
         Widget::Key { icon, label, .. } => label
             .iter()
             .chain(icon)
@@ -2821,6 +2948,19 @@ fn with_editor(f: impl FnOnce(&mut Editor)) {
     });
 }
 
+/// The track's artwork as the strip draws it; `None` when the strip shows
+/// the placeholder (a null reply) or the daemon cannot answer.
+fn fetch_art() -> Option<nexus_core::art::Art> {
+    let mut client = Client::connect().ok()?;
+    let data = client.request("art").ok()?.ok()?;
+    if data.is_null() {
+        return None;
+    }
+    serde_json::from_value::<nexus_control::ArtReply>(data)
+        .ok()?
+        .to_art()
+}
+
 /// Asks for the layout; `None` if the daemon cannot answer.
 fn fetch() -> Option<Layout> {
     let mut client = Client::connect().ok()?;
@@ -2849,6 +2989,18 @@ mod tests {
         assert!(!keep(&Failure::Lost, "import {}"));
         assert!(!keep(&Failure::Lost, "undo"));
         assert!(!keep(&Failure::Refused("no".into()), "edit {}"));
+    }
+
+    #[test]
+    fn album_cover_choices_round_trip_in_settings_order() {
+        use nexus_core::config::AlbumArt;
+        assert_eq!(album_art_choice(0), Some(AlbumArt::All));
+        assert_eq!(album_art_choice(1), Some(AlbumArt::Local));
+        assert_eq!(album_art_choice(2), Some(AlbumArt::Off));
+        assert_eq!(album_art_choice(3), None);
+        for a in [AlbumArt::All, AlbumArt::Local, AlbumArt::Off] {
+            assert_eq!(album_art_choice(album_art_index(a)), Some(a));
+        }
     }
 
     #[test]

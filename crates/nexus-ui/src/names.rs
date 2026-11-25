@@ -49,6 +49,16 @@ const KNOWN: [(&str, &str, char); 15] = [
     ("media.length", "Track length", icon::PLAY),
 ];
 
+/// Signals that are not readings: `media.art` names the track's artwork
+/// for the engine (a short hash), which nothing on a widget can show. Kept
+/// out of the pickers and the Signals list.
+const HIDDEN: [&str; 1] = ["media.art"];
+
+/// Whether a signal is plumbing rather than a reading to choose.
+pub fn hidden(signal: &str) -> bool {
+    HIDDEN.contains(&signal.trim())
+}
+
 /// The signal's human name and icon. One the app does not know (a user's
 /// own source) is named from its parts: `room.humidity` is "Room humidity".
 pub fn named(signal: &str) -> Named {
@@ -151,6 +161,13 @@ mod tests {
         assert_eq!(named("room.humidity").name, "Room humidity");
         assert_eq!(named("desk_temp").icon, icon::THERMOMETER);
         assert_eq!(named("").name, "Nothing chosen");
+    }
+
+    #[test]
+    fn the_artwork_key_is_not_a_reading() {
+        assert!(hidden("media.art"));
+        assert!(!hidden("media.title"));
+        assert!(known().all(|s| !hidden(s)));
     }
 
     #[test]

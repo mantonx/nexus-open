@@ -1299,7 +1299,9 @@ pub struct Outlook {
 }
 
 impl Outlook {
-    fn signals(&self) -> Vec<(&'static str, Value)> {
+    /// Its readings, as the weather source would publish them: the
+    /// settings window draws its example forecast with them.
+    pub fn signals(&self) -> Vec<(&'static str, Value)> {
         use crate::forecast::{self, DAYS, HOURS};
         let n = |v: f64| Value::Number(v, Unit::None);
         let c = |v: f64| Value::Number(v, Unit::Celsius);

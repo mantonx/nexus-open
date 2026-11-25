@@ -1688,4 +1688,67 @@ mod tests {
             let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
         }
     }
+
+    /// A forecast saved over another widget in a schema 5 database (what
+    /// the window met before migration 6) comes back with every field, and
+    /// the actions already stored survive the rebuild.
+    #[test]
+    fn a_schema_5_database_upgrades_and_takes_a_forecast() {
+        use nexus_core::config::ForecastShow;
+        let path = std::env::temp_dir().join(format!("nexus-store-v5-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let layout;
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            for sql in &schema::MIGRATIONS[..5] {
+                conn.execute_batch(sql).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 5).unwrap();
+            conn.pragma_update(None, "foreign_keys", true).unwrap();
+            let tx = conn.transaction().unwrap();
+            tx.execute("INSERT INTO layout (name) VALUES ('Default')", [])
+                .unwrap();
+            layout = tx.last_insert_rowid();
+            write_layout(&tx, layout, &fixture(), &Notes::default()).unwrap();
+            tx.execute(
+                "INSERT INTO settings (id, active_layout) VALUES (1, ?1)",
+                [layout],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let mut store = Store::open(&path).unwrap();
+        assert!(id(&store, "SELECT count(*) FROM action") > 0);
+        assert_eq!(
+            store.load(layout).unwrap().0.pages,
+            fixture().pages,
+            "loads identically"
+        );
+        let widget = store.ids(layout).unwrap().pages[0].widgets[0];
+        let width = store.load(layout).unwrap().0.pages[0].widgets[0].width();
+        for show in [ForecastShow::Hours, ForecastShow::Days, ForecastShow::Next] {
+            let value = Widget::Forecast {
+                width,
+                show,
+                icon: Some("cloud-sun".into()),
+                tap: Some(Action::Page("next".into())),
+                hold: Some(Action::Open("https://example.org/".into())),
+            };
+            store
+                .edit(&Edit::SetWidget {
+                    widget,
+                    value: value.clone(),
+                })
+                .unwrap();
+            assert_eq!(store.load(layout).unwrap().0.pages[0].widgets[0], value);
+        }
+        assert_eq!(
+            id(&store, "SELECT count(*) FROM pragma_foreign_key_check"),
+            0
+        );
+        drop(store);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+    }
 }

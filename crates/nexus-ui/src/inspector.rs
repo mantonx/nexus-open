@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use nexus_core::config::{
-    Action, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, NewsCommand, SLIDER_VALUE, SliderControl,
-    Widget,
+    Action, ForecastShow, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, NewsCommand, SLIDER_VALUE,
+    SliderControl, Widget,
 };
 
 /// A widget's values by key, in the window's words.
@@ -36,6 +36,8 @@ pub struct Context {
     pub signals: HashMap<String, Reading>,
     /// The news feeds, for a news widget's "Feeds" line.
     pub feeds: Vec<String>,
+    /// Settings has a town for the weather.
+    pub town: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +63,25 @@ pub enum Kind {
     /// The news feeds: how many, and a way to Settings, where they are
     /// edited (they are shared by every news widget).
     Feeds,
+    /// A heading that opens and closes the fields after it ("Limits and
+    /// scale"): its value is "open" or "closed", its help what is set.
+    Disclosure,
+    /// No town for the weather yet: what that means, and the way to the
+    /// town in Settings. Shown first, on a weather widget.
+    Town,
+}
+
+impl Kind {
+    /// The option at a position in a list or a segmented row: what the
+    /// window sends back when one is chosen.
+    pub fn option(&self, index: i32) -> Option<&str> {
+        match self {
+            Kind::Choice(options) | Kind::Segmented(options) => options
+                .get(usize::try_from(index).ok()?)
+                .map(String::as_str),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,6 +124,26 @@ const SLIDER: &str = "Slider";
 const MEDIA: &str = "Now playing";
 const KEY: &str = "Key";
 const NEWS: &str = "News";
+/// Its name in the window. The strip asks for a town on it as "Weather",
+/// so the window says both words.
+const FORECAST: &str = "Weather forecast";
+
+/// What a forecast shows, as the form says it, in `ForecastShow`'s order
+/// of use: the default first.
+const FORECAST_SHOWS: [(&str, ForecastShow); 3] = [
+    ("Next change", ForecastShow::Next),
+    // The modes, not counts: as many hours or days show as the width
+    // holds, so a count would promise what a narrow one cannot show.
+    ("Hours", ForecastShow::Hours),
+    ("Days", ForecastShow::Days),
+];
+
+fn forecast_word(show: ForecastShow) -> &'static str {
+    FORECAST_SHOWS
+        .iter()
+        .find(|(_, s)| *s == show)
+        .map_or(FORECAST_SHOWS[0].0, |(w, _)| *w)
+}
 
 const NO_GRAPH: &str = "None";
 const AREA: &str = "Area";
@@ -147,7 +188,10 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
         Widget::News { .. } => put("type", NEWS),
-        Widget::Forecast { .. } => put("type", "Forecast"),
+        Widget::Forecast { show, .. } => {
+            put("type", FORECAST);
+            put("show", forecast_word(*show));
+        }
         Widget::Key { label, sub, .. } => {
             put("type", KEY);
             put("label", label.as_deref().unwrap_or_default());
@@ -310,6 +354,16 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
         },
         NEWS => Widget::News {
             width,
+            icon,
+            tap,
+            hold,
+        },
+        FORECAST => Widget::Forecast {
+            width,
+            show: FORECAST_SHOWS
+                .iter()
+                .find(|(w, _)| *w == get("show"))
+                .map_or_else(ForecastShow::default, |(_, s)| *s),
             icon,
             tap,
             hold,
@@ -531,7 +585,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 "scale_from",
                 "Bar starts at",
                 Kind::Number,
-                format!("The empty bar's value{unit}. Both empty: the signal's usual scale."),
+                format!("The empty bar's value{unit}. Both empty: the usual scale."),
             );
             add(
                 "scale_to",
@@ -543,13 +597,13 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 "warn",
                 "Warn at",
                 Kind::Number,
-                format!("Shown amber from this value{unit}. Empty: never."),
+                format!("Amber from this value{unit}. Empty: never."),
             );
             add(
                 "crit",
                 "Critical at",
                 Kind::Number,
-                format!("Shown red from this value{unit}. Empty: never."),
+                format!("Red from this value{unit}. Empty: never."),
             );
             add(
                 "second",
@@ -613,6 +667,23 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 reading_help(&get("up"), ctx),
             );
         }
+        FORECAST => add(
+            "show",
+            "Show",
+            segmented(&FORECAST_SHOWS.map(|(w, _)| w)),
+            match get("show").as_str() {
+                "Hours" => format!(
+                    "Every {} hours, as many as fit: wider, it shows more, up to {}.",
+                    nexus_core::forecast::HOUR_STEP,
+                    nexus_core::forecast::HOUR_SLOTS
+                ),
+                "Days" => format!(
+                    "The days ahead, as many as fit: wider, it shows more, up to {}.",
+                    nexus_core::forecast::DAY_SLOTS
+                ),
+                _ => "The next change in the weather, and when it comes.".into(),
+            },
+        ),
         SLIDER => {
             add("label", "Label", Kind::Text, String::new());
             add(
@@ -704,7 +775,96 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
     if let Some(f) = out.iter_mut().find(|f| f.kind == Kind::Feeds) {
         f.value = crate::news::count(&ctx.feeds);
     }
+    // The weather needs a town first: said at the top, with the way there.
+    let weather = ty == FORECAST || (ty == READING && is_weather(&get("signal")));
+    if weather && !ctx.town {
+        out.insert(
+            0,
+            Field {
+                key: "town".into(),
+                label: "Town".into(),
+                kind: Kind::Town,
+                value: String::new(),
+                help: "Every weather widget shows the weather for one town, set in Settings."
+                    .into(),
+            },
+        );
+    }
     out
+}
+
+/// A reading of the weather, which comes from the town in Settings.
+fn is_weather(signal: &str) -> bool {
+    signal.trim().starts_with("weather.")
+}
+
+/// The key of the "Limits and scale" heading.
+pub const LIMITS: &str = "limits";
+/// What "Limits and scale" holds: what most people never change.
+const LIMIT_KEYS: [&str; 5] = ["scale_from", "scale_to", "warn", "crit", "note"];
+
+/// A reading's fields with its bar scale, warning limits and note folded
+/// under one "Limits and scale" heading, after the signal. `open` is the
+/// person's choice; by default it is open only when one of them is set.
+/// Fields of other widgets are returned as they are.
+pub fn group_limits(fields: Vec<Field>, open: Option<bool>) -> Vec<Field> {
+    if !fields.iter().any(|f| f.key == "scale_from") {
+        return fields;
+    }
+    let (limits, mut rest): (Vec<Field>, Vec<Field>) = fields
+        .into_iter()
+        .partition(|f| LIMIT_KEYS.contains(&f.key.as_str()));
+    let set = |k: &str| {
+        limits
+            .iter()
+            .find(|f| f.key == k)
+            .map(|f| f.value.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    let mut said = Vec::new();
+    if let Some(w) = set("warn") {
+        said.push(format!("amber from {w}"));
+    }
+    if let Some(c) = set("crit") {
+        said.push(format!("red from {c}"));
+    }
+    match (set("scale_from"), set("scale_to")) {
+        (None, None) => {}
+        (from, to) => said.push(format!(
+            "bar {} to {}",
+            from.as_deref().unwrap_or("usual"),
+            to.as_deref().unwrap_or("usual")
+        )),
+    }
+    if set("note").is_some() {
+        said.push("a note".into());
+    }
+    let open = open.unwrap_or(!said.is_empty());
+    let mut summary = said.join(", ");
+    if let Some(first) = summary.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    let header = Field {
+        key: LIMITS.into(),
+        label: "Limits and scale".into(),
+        kind: Kind::Disclosure,
+        value: if open { "open" } else { "closed" }.into(),
+        help: if summary.is_empty() {
+            "None set: the usual scale, and no warning".into()
+        } else {
+            summary
+        },
+    };
+    let at = rest
+        .iter()
+        .position(|f| f.key == "signal")
+        .map_or(rest.len(), |i| i + 1);
+    let mut folded = vec![header];
+    if open {
+        folded.extend(limits);
+    }
+    rest.splice(at..at, folded);
+    rest
 }
 
 /// One field changed: what to do about it. `drafts` are values not yet
@@ -751,6 +911,11 @@ fn reading_help(signal: &str, ctx: &Context) -> String {
         return String::new();
     }
     match ctx.signals.get(signal.trim()) {
+        // The form's Town row says there is none, once.
+        None if is_weather(signal) && !ctx.town => String::new(),
+        None if is_weather(signal) => {
+            "The weather has not come in yet: it is looked up every 15 minutes.".into()
+        }
         None => "Nothing has published this signal yet.".into(),
         Some(r) => format!("Now {}", show_reading(r, ctx)),
     }
@@ -839,6 +1004,49 @@ mod tests {
     use super::*;
     use nexus_core::config::Config;
 
+    fn reading(warn: &str) -> Vec<Field> {
+        let v = Values::from([
+            ("type".into(), READING.into()),
+            ("signal".into(), "cpu.temp".into()),
+            ("warn".into(), warn.into()),
+        ]);
+        let mut f = fields(&v, &ctx());
+        f.push(Field {
+            key: "note".into(),
+            label: "Note".into(),
+            kind: Kind::Note,
+            value: String::new(),
+            help: String::new(),
+        });
+        f
+    }
+
+    #[test]
+    fn limits_and_scale_fold_away_after_the_signal() {
+        let keys = |f: &[Field]| f.iter().map(|f| f.key.clone()).collect::<Vec<_>>();
+        // Nothing set: closed, and saying so.
+        let closed = group_limits(reading(""), None);
+        let k = keys(&closed);
+        assert_eq!(&k[..4], ["width", "label", "signal", LIMITS]);
+        for hidden in ["scale_from", "scale_to", "warn", "crit", "note"] {
+            assert!(!k.iter().any(|x| x == hidden), "{hidden}");
+        }
+        assert_eq!(closed[3].value, "closed");
+        // A limit set: open by default, the fields right under the heading.
+        let open = group_limits(reading("167"), None);
+        assert_eq!(open[3].value, "open");
+        assert_eq!(
+            &keys(&open)[3..9],
+            [LIMITS, "scale_from", "scale_to", "warn", "crit", "note"]
+        );
+        assert!(open[3].help.contains("167"), "{}", open[3].help);
+        // The person's choice wins.
+        assert_eq!(group_limits(reading("167"), Some(false))[3].value, "closed");
+        // Another widget is left as it is.
+        let key = fields(&Values::from([("type".into(), KEY.into())]), &ctx());
+        assert_eq!(keys(&group_limits(key.clone(), None)), keys(&key));
+    }
+
     fn ctx() -> Context {
         let mut signals = HashMap::new();
         signals.insert(
@@ -856,6 +1064,7 @@ mod tests {
             fahrenheit: true,
             signals,
             feeds: Vec::new(),
+            town: false,
         }
     }
 
@@ -1012,6 +1221,94 @@ mod tests {
             panic!("a news widget's width is sent");
         };
         assert_eq!(sent, w.clone().with_width(240));
+    }
+
+    /// A forecast saves from the form, keeping every field, and its
+    /// "Show" choice is the one thing the form changes.
+    #[test]
+    fn a_forecast_round_trips_and_changes_what_it_shows() {
+        let ctx = ctx();
+        for show in [ForecastShow::Next, ForecastShow::Hours, ForecastShow::Days] {
+            let w = Widget::Forecast {
+                width: 312,
+                show,
+                icon: Some("cloud-sun".into()),
+                tap: Some(Action::Page("Desk".into())),
+                hold: Some(Action::Open("https://example.org".into())),
+            };
+            let v = flatten(&w, &ctx);
+            assert_eq!(build(&v, &ctx).unwrap(), w, "{show:?}");
+            assert_eq!(
+                apply(&w, &Values::new(), "width", "312", &ctx),
+                Outcome::Unchanged
+            );
+        }
+        let w = Widget::Forecast {
+            width: 200,
+            show: ForecastShow::Next,
+            icon: None,
+            tap: None,
+            hold: None,
+        };
+        let v = flatten(&w, &ctx);
+        let show = fields(&v, &ctx)
+            .into_iter()
+            .find(|f| f.key == "show")
+            .unwrap();
+        assert_eq!(show.value, "Next change");
+        assert!(matches!(&show.kind, Kind::Segmented(o) if o == &["Next change", "Hours", "Days"]));
+        assert_eq!(show.kind.option(2), Some("Days"));
+        assert_eq!(show.kind.option(3), None);
+        assert_eq!(show.kind.option(-1), None);
+        let Outcome::Send(sent) = apply(&w, &Values::new(), "show", "Days", &ctx) else {
+            panic!("a new choice is sent");
+        };
+        let Widget::Forecast { show, width, .. } = sent else {
+            panic!("still a forecast");
+        };
+        assert_eq!((show, width), (ForecastShow::Days, 200));
+    }
+
+    /// Without a town, a weather widget's form says so first, with the way
+    /// to it, and says it only there.
+    #[test]
+    fn the_weather_asks_for_a_town_first() {
+        let mut ctx = ctx();
+        let forecast = Widget::Forecast {
+            width: 200,
+            show: ForecastShow::Next,
+            icon: None,
+            tap: None,
+            hold: None,
+        };
+        let preset = |name: &str| {
+            crate::gallery::presets()
+                .into_iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .widget
+        };
+        let weather = preset("Weather");
+        for w in [&forecast, &weather] {
+            let f = fields(&flatten(w, &ctx), &ctx);
+            assert_eq!(f[0].kind, Kind::Town, "{w:?}");
+        }
+        let help = &fields(&flatten(&weather, &ctx), &ctx)
+            .into_iter()
+            .find(|f| f.key == "signal")
+            .unwrap()
+            .help;
+        assert!(help.is_empty(), "the Town row says it, once: {help}");
+        ctx.town = true;
+        for w in [&forecast, &weather] {
+            let f = fields(&flatten(w, &ctx), &ctx);
+            assert!(f.iter().all(|f| f.kind != Kind::Town), "{w:?}");
+        }
+        let cpu = fields(
+            &flatten(&preset("CPU temperature"), &ctx),
+            &Context::default(),
+        );
+        assert!(cpu.iter().all(|f| f.kind != Kind::Town));
     }
 
     #[test]

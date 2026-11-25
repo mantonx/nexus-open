@@ -18,7 +18,7 @@ pub fn rows(signals: &HashMap<String, Reading>, filter: &str, ctx: &Context) -> 
     let filter = filter.trim().to_lowercase();
     let mut out: Vec<Row> = signals
         .iter()
-        .filter(|(name, _)| name.to_lowercase().contains(&filter))
+        .filter(|(name, _)| !crate::names::hidden(name) && name.to_lowercase().contains(&filter))
         .map(|(name, r)| Row {
             name: name.clone(),
             value: show_reading(r, ctx),
@@ -49,6 +49,13 @@ mod tests {
                 "media.title".into(),
                 Reading {
                     text: "Song".into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "media.art".into(),
+                Reading {
+                    text: "art-0123456789abcdef".into(),
                     ..Default::default()
                 },
             ),
