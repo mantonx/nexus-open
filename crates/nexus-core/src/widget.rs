@@ -3165,6 +3165,12 @@ impl Pen<'_> {
                 let ink = if on { self.a.ink } else { TEXT };
                 let label = self.fit(Face::Word, &TITLE, name, w - 2.0 * PAD);
                 self.text_c(Face::Word, &TITLE, &label, x + w / 2.0, PICKER_BASE, ink);
+                // The layout in use: a dot under its name, in the name's
+                // colour, so it still shows once the highlight moves off.
+                // Information, not a control, so never the accent.
+                if i == current {
+                    self.circle(x + w / 2.0, PICKER_DOT_Y, PICKER_DOT_R, ink);
+                }
             }
         }
     }

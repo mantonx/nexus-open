@@ -712,7 +712,13 @@ an up or down swipe.
   the store's order (by name), centred on the current layout. Cards are
   key faces (KEY, lit top edge) with the name in `TITLE`, cut by `fit`;
   the highlighted one is filled with the accent, name in its ink: it is
-  the control. Three whole cards fit; a card cut by the strip's end is
+  the control. The layout in use has a dot under its name
+  (`PICKER_DOT_R` 2 px, centred on the card at row `PICKER_DOT_Y` 42,
+  below any descender), in the name's colour: cream on KEY, the accent's
+  ink when it is also the highlighted card. It is information, so never
+  the accent, and it moves nothing: the card and the name stay where they
+  were, and the name is cut by `fit` as before (`picker-select-0.png`
+  shows the highlight two cards from it). Three whole cards fit; a card cut by the strip's end is
   drawn without its name (no letter cut through), and says there is more
   that way. With more than fit, the row shifts only as far as keeps the
   highlighted card `PICKER_MARGIN` 4 px inside the strip.
