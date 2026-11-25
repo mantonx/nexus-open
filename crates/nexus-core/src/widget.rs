@@ -3098,6 +3098,92 @@ impl Pen<'_> {
     }
 }
 
+// ------------------------------------------------------- layout picker
+
+/// Where the layout picker's cards sit: each card's left edge, in the
+/// layouts' order. The row is centred on the current layout, then shifted
+/// only as far as keeps the highlighted card `PICKER_MARGIN` inside the
+/// strip, so it scrolls when there are more names than fit.
+pub fn picker_lefts(count: usize, current: usize, selected: usize) -> Vec<f32> {
+    let pitch = PICKER_CARD_W + PICKER_GAP;
+    let mut origin = (WIDTH as f32 - PICKER_CARD_W) / 2.0 - current as f32 * pitch;
+    let left = origin + selected as f32 * pitch;
+    let (lo, hi) = (PICKER_MARGIN, WIDTH as f32 - PICKER_MARGIN - PICKER_CARD_W);
+    if left < lo {
+        origin += lo - left;
+    } else if left > hi {
+        origin -= left - hi;
+    }
+    (0..count)
+        .map(|i| (origin + i as f32 * pitch).round())
+        .collect()
+}
+
+impl Renderer {
+    /// The layout picker, over the whole strip and without page markers:
+    /// a row of key-coloured cards, one per layout, and the highlighted
+    /// one (what lifting switches to) filled with the accent, since it is
+    /// the control.
+    pub fn render_picker(&mut self, names: &[String], current: usize, selected: usize) -> Canvas {
+        let mut canvas = Canvas::new(WIDTH, HEIGHT, GROUND);
+        self.alerts.clear();
+        self.moving = false;
+        self.pen(&mut canvas).picker(names, current, selected);
+        canvas
+    }
+
+    /// The new layout's name, shown for a moment after a switch from the
+    /// strip: one card the width of the strip, "Layout" and the name.
+    /// Information, so no accent. Drawn over the page with the page
+    /// markers on top, as a takeover is.
+    pub fn render_layout_name(&mut self, name: &str) -> Canvas {
+        let mut canvas = Canvas::new(WIDTH, HEIGHT, GROUND);
+        self.alerts.clear();
+        self.moving = false;
+        self.pen(&mut canvas).layout_name(name);
+        canvas
+    }
+}
+
+impl Pen<'_> {
+    fn picker(&mut self, names: &[String], current: usize, selected: usize) {
+        let w = PICKER_CARD_W;
+        let strip = WIDTH as f32;
+        for (i, (name, &x)) in names
+            .iter()
+            .zip(&picker_lefts(names.len(), current, selected))
+            .enumerate()
+        {
+            if x + w <= 0.0 || x >= strip {
+                continue;
+            }
+            let on = i == selected;
+            self.key_face(x, CARD_Y, w, CARD_H, CARD_R, false, on);
+            // Only a whole card is named, so no letter is cut by the
+            // strip's end; a sliver of card says there is more that way.
+            if x >= 0.0 && x + w <= strip {
+                let ink = if on { self.a.ink } else { TEXT };
+                let label = self.fit(Face::Word, &TITLE, name, w - 2.0 * PAD);
+                self.text_c(Face::Word, &TITLE, &label, x + w / 2.0, PICKER_BASE, ink);
+            }
+        }
+    }
+
+    fn layout_name(&mut self, name: &str) {
+        let (x, w) = (EDGE, WIDTH as f32 - 2.0 * EDGE);
+        self.rrect(x, CARD_Y, w, CARD_H, CARD_R, CARD);
+        let lead = "Layout";
+        let lead_w = self.measure(Face::Word, &LABEL, lead);
+        let room = w - 2.0 * PAD - lead_w - LAYOUT_NAME_GAP;
+        let name = self.fit(Face::Word, &TITLE_BIG, name, room);
+        let name_w = self.measure(Face::Word, &TITLE_BIG, &name);
+        let x0 = (x + (w - lead_w - LAYOUT_NAME_GAP - name_w) / 2.0).round();
+        self.text(Face::Word, &LABEL, lead, x0, LAYOUT_NAME_BASE, TEXT2);
+        let nx = x0 + lead_w + LAYOUT_NAME_GAP;
+        self.text(Face::Word, &TITLE_BIG, &name, nx, LAYOUT_NAME_BASE, TEXT);
+    }
+}
+
 /// What a slider is drawn from.
 struct SliderLook<'a> {
     icon: char,

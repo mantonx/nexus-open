@@ -16,12 +16,12 @@ use std::time::{Duration, Instant};
 
 use jiff::Zoned;
 use nexus_control::{
-    ArtReply, Export, Layout, LayoutEntry, PageTarget, Request, SignalEntry, Status,
+    ArtReply, EditRequest, Export, Layout, LayoutEntry, PageTarget, Request, SignalEntry, Status,
 };
 use nexus_core::art::Art;
 use nexus_core::config;
 use nexus_core::demo;
-use nexus_core::engine::{Engine, Input};
+use nexus_core::engine::{Effect, Engine, Input};
 use nexus_core::signal::Value;
 use nexus_device::protocol::{TouchCalibration, parse_touch};
 use nexus_device::{DeviceError, Surface};
@@ -121,6 +121,7 @@ pub fn run(options: Options) -> Result<(), Box<dyn Error>> {
         daemon.last_device_error = Some("the strip is not used: started with --no-device".into());
     }
     daemon.sources.apply(&daemon.engine.config().sources);
+    daemon.tell_layouts();
     if options.demo {
         spawn_demo(publisher(tx));
     } else {
@@ -196,9 +197,7 @@ impl Daemon {
             // Timers fire on time even with no device or viewer to draw
             // for: a long press held still, the alarm clearing itself.
             self.engine.tick(self.origin.elapsed().as_secs_f64());
-            for effect in self.engine.take_effects() {
-                self.effects.carry_out(effect);
-            }
+            self.carry_out();
             let now = Zoned::now();
             self.show(&now);
 
@@ -255,10 +254,62 @@ impl Daemon {
                     }
                 }
             }
-            for effect in self.engine.take_effects() {
-                self.effects.carry_out(effect);
+            self.carry_out();
+        }
+    }
+
+    /// Carries out what the engine asked for. A layout switch is done here,
+    /// since this thread owns the store; the rest by `Effects`.
+    fn carry_out(&mut self) {
+        for effect in self.engine.take_effects() {
+            match effect {
+                Effect::SwitchLayout(name) => self.switch_layout(&name),
+                other => self.effects.carry_out(other),
             }
         }
+    }
+
+    /// Puts a layout on the strip, chosen with the layout picker. It is
+    /// the same edit the settings window sends (`Edit::Activate`), through
+    /// the same request, so it is undoable as "Switch layout", the store's
+    /// revision moves and the window follows, and the engine is told.
+    fn switch_layout(&mut self, name: &str) {
+        let id = match self.store.layout_named(name) {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                eprintln!(
+                    "nexusd: no layout called \"{name}\" to switch to; it may have just been renamed"
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!("nexusd: could not switch to the layout \"{name}\": {e}");
+                return;
+            }
+        };
+        let edit = Request::Edit(Box::new(EditRequest {
+            edit: Edit::Activate { layout: id },
+            base: None,
+        }));
+        if let Err(e) = self.control(edit) {
+            eprintln!("nexusd: could not switch to the layout \"{name}\": {e}");
+        }
+    }
+
+    /// Tells the engine the store's layouts and which is on the strip, for
+    /// the layout picker.
+    fn tell_layouts(&mut self) {
+        let layouts = match self.store.layouts() {
+            Ok(layouts) => layouts,
+            Err(e) => {
+                eprintln!("nexusd: could not list the layouts: {e}");
+                Vec::new()
+            }
+        };
+        let active = self.store.active_layout().ok();
+        let current = layouts.iter().position(|(id, _)| Some(*id) == active);
+        let names = layouts.into_iter().map(|(_, name)| name).collect();
+        self.engine.handle(Input::Layouts { names, current });
     }
 
     /// Passes a touch report to the engine, timed by when it was read.
@@ -509,6 +560,8 @@ impl Daemon {
                         .edit(&Edit::Activate { layout: id })
                         .map_err(|e| e.to_string())?;
                     self.reload()?;
+                } else {
+                    self.tell_layouts();
                 }
                 Ok(json!({ "layout": id }))
             }
@@ -551,6 +604,27 @@ impl Daemon {
                     down: false,
                     x: 0.0,
                     at: start + 0.31,
+                });
+                Ok(json!(null))
+            }
+            Request::HoldDrag { from, to } => {
+                // Still at `from` past the long press, a 0.4 s slide to
+                // `to`, and a rest there so the picker catches up with the
+                // finger before it lifts; 10 ms apart throughout.
+                let start = self.origin.elapsed().as_secs_f64();
+                let (hold, slide, rest): (u32, u32, u32) = (60, 40, 30);
+                for i in 0..=hold + slide + rest {
+                    let k = (i.saturating_sub(hold) as f32 / slide as f32).min(1.0);
+                    self.engine.handle(Input::Touch {
+                        down: true,
+                        x: from + (to - from) * k,
+                        at: start + f64::from(i) * 0.01,
+                    });
+                }
+                self.engine.handle(Input::Touch {
+                    down: false,
+                    x: 0.0,
+                    at: start + f64::from(hold + slide + rest + 1) * 0.01,
                 });
                 Ok(json!(null))
             }
@@ -597,6 +671,8 @@ impl Daemon {
         if &config != self.engine.config() {
             self.engine.handle(Input::Config(Box::new(config)));
         }
+        // Layouts may have been added, renamed, deleted or switched.
+        self.tell_layouts();
         Ok(())
     }
 
