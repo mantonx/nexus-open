@@ -509,6 +509,13 @@ export component AppWindow inherits Window {
     in-out property <string> sheet;
     /// Settings' section: 0 the strip, 1 news, 2 this window.
     in-out property <int> settings-tab;
+    /// The form's example of the selected widget (see FieldRow).
+    in property <image> example;
+    in property <int> example-width;
+    in property <string> example-note;
+    /// Settings opens with the town's field focused (from a weather
+    /// widget that has none).
+    property <bool> focus-town;
     property <bool> copied;
     /// Pages being reordered by their grip: from and to, or -1.
     property <int> reorder-from: -1;
@@ -529,6 +536,11 @@ export component AppWindow inherits Window {
     /// so the strips, their captions, the toolbar and the settings share
     /// one left edge, centred together in a wide window.
     property <length> column-w: strip-col;
+    /// A banner's line: about 70 characters of body text.
+    property <length> measure: 520px;
+    /// The banner under the header is up: the chip's popover then points
+    /// to it instead of saying it again.
+    property <bool> banner-up: (root.not-live || root.status.here) && root.status.banner != "";
 
     public function show-sheet(name: string) {
         root.sheet = name;
@@ -685,7 +697,9 @@ export component AppWindow inherits Window {
                         alignment: center;
                         status-chip := Rectangle {
                             height: 32px;
-                            width: max(168px, chip-row.preferred-width);
+                            // One fixed slot: a longer state never moves
+                            // the header's middle.
+                            width: 214px;
                             border-radius: 16px;
                             // A failed start is the one real fault: critical.
                             // What the app cannot do yet (no strip, in use, no
@@ -714,6 +728,8 @@ export component AppWindow inherits Window {
                                 }
                                 Text {
                                     text: root.status.chip == "" ? @tr("Checking…") : root.status.chip;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
                                     font-family: Theme.font;
                                     font-size: Theme.size-label;
                                     font-weight: status-chip.failed || status-chip.attention ? 600 : 500;
@@ -768,6 +784,7 @@ export component AppWindow inherits Window {
                             text: root.undo-label == "" ? @tr("Undo") : @tr("Undo: {}", root.undo-label);
                             label: root.undo-label == "" ? @tr("Undo: nothing to undo") : @tr("Undo: {}", root.undo-label);
                             enabled: root.connected && root.undo-label != "";
+                            locked: !root.connected;
                             clicked => {
                                 root.undo();
                             }
@@ -779,8 +796,20 @@ export component AppWindow inherits Window {
                             icon: Glyph.redo;
                             label: root.redo-label == "" ? @tr("Redo: nothing to redo") : @tr("Redo: {}", root.redo-label);
                             enabled: root.connected && root.redo-label != "";
+                            locked: !root.connected;
                             clicked => {
                                 root.redo();
+                            }
+                        }
+                    }
+                    // Settings in sight, not only in the menu.
+                    VerticalLayout {
+                        alignment: center;
+                        IconButton {
+                            icon: Glyph.gear;
+                            label: @tr("Settings: the town for the weather, the accent, the strip's lettering");
+                            clicked => {
+                                root.show-settings(0);
                             }
                         }
                     }
@@ -819,7 +848,7 @@ export component AppWindow inherits Window {
                             // only a start that failed is critical. The words
                             // come from status.rs, so the chip's popover and
                             // this banner tell one story.
-                            if (root.not-live || root.status.here) && root.status.banner != "": offline := Rectangle {
+                            if root.banner-up: offline := Rectangle {
                                 property <bool> failed: root.status.tone == "failed";
                                 height: offline-row.preferred-height + 20px;
                                 border-radius: Theme.r-surface;
@@ -841,68 +870,89 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                     VerticalLayout {
-                                        alignment: center;
+                                        alignment: start;
                                         spacing: 4px;
                                         horizontal-stretch: 1;
-                                        Text {
-                                            text: root.status.banner;
-                                            font-family: Theme.font;
-                                            font-size: Theme.size-body;
-                                            font-weight: 600;
-                                            color: offline.failed ? Theme.crit : Theme.text;
-                                            wrap: word-wrap;
-                                            accessible-role: text;
-                                        }
-                                        Text {
-                                            text: root.status.banner-body;
-                                            font-family: Theme.font;
-                                            font-size: Theme.size-body;
-                                            color: Theme.text-2;
-                                            wrap: word-wrap;
-                                            accessible-role: text;
-                                        }
-                                        // Starting: nothing to press, so a moving
-                                        // mark says it is under way.
-                                        if root.status.tone == "starting": HorizontalLayout {
-                                            padding-top: 6px;
-                                            Rectangle {
-                                                height: 3px;
-                                                width: 240px;
-                                                border-radius: 1.5px;
-                                                background: Theme.line-strong;
-                                                clip: true;
-                                                accessible-role: progress-indicator;
-                                                accessible-label: @tr("Waiting for the service to answer");
-                                                Rectangle {
-                                                    property <float> t: mod(animation-tick() / 1ms, 1600) / 1600;
-                                                    width: parent.width * 0.35;
-                                                    x: (parent.width + self.width) * self.t - self.width;
-                                                    border-radius: 1.5px;
-                                                    background: Theme.text-2;
-                                                }
+                                        // A measure of about 70 characters: the
+                                        // words keep it, the room after them is
+                                        // left empty.
+                                        HorizontalLayout {
+                                            Text {
+                                                text: root.status.banner;
+                                                horizontal-stretch: 0;
+                                                preferred-width: root.measure;
+                                                max-width: root.measure;
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-body;
+                                                font-weight: 600;
+                                                color: offline.failed ? Theme.crit : Theme.text;
+                                                wrap: word-wrap;
+                                                accessible-role: text;
                                             }
-                                            // Room after it, so the words keep the width.
                                             Rectangle {
                                                 horizontal-stretch: 1;
                                             }
                                         }
-                                        // One order everywhere, the first the main
-                                        // one: the chip's popover shows the same.
-                                        // Under the words, so they wrap at any width.
-                                        if root.status.actions.length > 0: StatusActions {
-                                            padding-top: 6px;
-                                            actions: root.status.actions;
-                                            act(a) => {
-                                                root.act(a);
+                                        // Two lines, always: the banner keeps its
+                                        // height through one problem. After Report,
+                                        // what it did takes their place.
+                                        HorizontalLayout {
+                                            Text {
+                                                text: root.report-note != "" ? root.report-note : root.status.banner-body;
+                                                horizontal-stretch: 0;
+                                                preferred-width: root.measure;
+                                                max-width: root.measure;
+                                                min-height: 2 * 18px;
+                                                max-height: 2 * 18px;
+                                                font-family: Theme.font;
+                                                font-size: Theme.size-body;
+                                                color: Theme.text-2;
+                                                wrap: word-wrap;
+                                                overflow: elide;
+                                                accessible-role: text;
+                                            }
+                                            Rectangle {
+                                                horizontal-stretch: 1;
                                             }
                                         }
-                                        if root.report-note != "": Text {
-                                            text: root.report-note;
-                                            font-family: Theme.font;
-                                            font-size: Theme.size-label;
-                                            color: Theme.text-2;
-                                            wrap: word-wrap;
-                                            accessible-role: text;
+                                        // One row, the same height in every state:
+                                        // the buttons, or while starting a moving
+                                        // mark, as there is nothing to press.
+                                        HorizontalLayout {
+                                            padding-top: 6px;
+                                            height: Theme.control-h + 6px;
+                                            spacing: 8px;
+                                            alignment: start;
+                                            if root.status.tone == "starting": VerticalLayout {
+                                                alignment: center;
+                                                Rectangle {
+                                                    height: 3px;
+                                                    width: 240px;
+                                                    border-radius: 1.5px;
+                                                    background: Theme.line-strong;
+                                                    clip: true;
+                                                    accessible-role: progress-indicator;
+                                                    accessible-label: @tr("Waiting for the service to answer");
+                                                    Rectangle {
+                                                        property <float> t: mod(animation-tick() / 1ms, 1600) / 1600;
+                                                        width: parent.width * 0.35;
+                                                        x: (parent.width + self.width) * self.t - self.width;
+                                                        border-radius: 1.5px;
+                                                        background: Theme.text-2;
+                                                    }
+                                                }
+                                            }
+                                            // One order everywhere, the first the
+                                            // main one.
+                                            for a[i] in root.status.actions: Button {
+                                                tier: i == 0 ? "primary" : "default";
+                                                icon: StatusAction.icon(a);
+                                                text: StatusAction.text(a);
+                                                label: StatusAction.label(a);
+                                                clicked => {
+                                                    root.act(a);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1428,6 +1478,7 @@ export component AppWindow inherits Window {
                                                 icon: Glyph.widths;
                                                 text: @tr("Equal widths");
                                                 enabled: root.editable && root.zones.length > 1;
+                                                locked: !root.editable;
                                                 label: @tr("Give every widget on {} the same width", row.name);
                                                 clicked => {
                                                     root.equal-widths();
@@ -1511,6 +1562,7 @@ export component AppWindow inherits Window {
                                                     text: @tr("Remove");
                                                     label: @tr("Remove {} from the page (undo brings it back)", root.panel-title);
                                                     enabled: root.editable;
+                                                    locked: !root.editable;
                                                     clicked => {
                                                         root.delete-widget();
                                                     }
@@ -1521,6 +1573,7 @@ export component AppWindow inherits Window {
                                                     icon: Glyph.trash;
                                                     text: @tr("Delete page");
                                                     enabled: root.editable && root.page-count > 1;
+                                                    locked: !root.editable;
                                                     label: @tr("Delete the page {} (undo brings it back)", root.panel-title);
                                                     clicked => {
                                                         root.delete-page();
@@ -1593,6 +1646,10 @@ export component AppWindow inherits Window {
                                             }
                                             for field in root.fields: FieldRow {
                                                 field: field;
+                                                example: root.example;
+                                                example-width: root.example-width;
+                                                example-note: root.example-note;
+                                                unit: root.unit;
                                                 enabled: root.editable || root.panel-kind == "new-takeover";
                                                 picks: root.picks;
                                                 triggers: root.triggers;
@@ -1616,6 +1673,10 @@ export component AppWindow inherits Window {
                                                 }
                                                 edit-feeds => {
                                                     root.show-settings(1);
+                                                }
+                                                edit-town => {
+                                                    root.focus-town = true;
+                                                    root.show-settings(0);
                                                 }
                                             }
                                             if root.draft-hint != "": HorizontalLayout {
@@ -1711,7 +1772,9 @@ export component AppWindow inherits Window {
                                     text: @tr("Takeovers");
                                 }
                                 Hint {
-                                    text: @tr("A takeover covers the page for a few seconds when a reading changes: the track, the volume. None yet.");
+                                    text: root.rows.length == 0 && !root.connected
+                                        ? @tr("A takeover covers the page for a few seconds when a reading changes. Yours show here once the service answers.")
+                                        : @tr("A takeover covers the page for a few seconds when a reading changes: the track, the volume. None yet.");
                                 }
                             }
                             HorizontalLayout {
@@ -2048,14 +2111,21 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                     accessible-role: text;
                 }
-                Text {
+                if root.banner-up: Text {
+                    text: @tr("What to do is in the banner under the header.");
+                    font-family: Theme.font;
+                    color: Theme.text-2;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                }
+                if !root.banner-up: Text {
                     text: root.status.body;
                     font-family: Theme.font;
                     color: Theme.text-2;
                     wrap: word-wrap;
                     accessible-role: text;
                 }
-                if root.status.tone == "starting": Rectangle {
+                if !root.banner-up && root.status.tone == "starting": Rectangle {
                     height: 3px;
                     border-radius: 1.5px;
                     background: Theme.line;
@@ -2070,8 +2140,9 @@ export component AppWindow inherits Window {
                         background: Theme.text-2;
                     }
                 }
-                // The same buttons as the banner, in the same order.
-                if root.status.actions.length > 0: StatusActions {
+                // The banner's buttons, when there is no banner: one
+                // primary on screen at a time.
+                if !root.banner-up && root.status.actions.length > 0: StatusActions {
                     actions: root.status.actions;
                     act(a) => {
                         root.act(a);
@@ -2081,7 +2152,7 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                if root.report-note != "": Text {
+                if !root.banner-up && root.report-note != "": Text {
                     text: root.report-note;
                     font-family: Theme.font;
                     font-size: Theme.size-label;
@@ -2410,7 +2481,7 @@ export component AppWindow inherits Window {
 
     if root.sheet == "settings": settings-sheet := Sheet {
         title: @tr("Settings");
-        subtitle: root.settings-tab == 0 ? @tr("For every layout: they show on the strip at once, and undo takes them back.")
+        subtitle: root.settings-tab == 0 ? @tr("These apply to every layout. Changes show on the strip at once; Undo takes them back.")
             : root.settings-tab == 1 ? @tr("Headlines on news widgets. Undo takes a change back.")
             : @tr("Only this window: the strip and undo leave these alone.");
         sheet-width: 700px;
@@ -2739,6 +2810,12 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         spacing: 4px;
                         for item in [{ v: root.pref-weather, epoch: root.resets }]: TextField {
+                            init => {
+                                if root.focus-town {
+                                    root.focus-town = false;
+                                    self.focus-input();
+                                }
+                            }
                             text: item.v;
                             committed-value: item.v;
                             placeholder: @tr("Your town, as in: Lyon, France");
@@ -2899,7 +2976,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         Hint {
-                            text: @tr("The first fetches a cover from your player's image host when the player keeps it online.");
+                            text: @tr("Covers from your player may be fetched from its image host, when the player keeps them online.");
                         }
                     }
                 }

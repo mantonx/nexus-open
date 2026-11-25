@@ -36,6 +36,8 @@ pub struct Context {
     pub signals: HashMap<String, Reading>,
     /// The news feeds, for a news widget's "Feeds" line.
     pub feeds: Vec<String>,
+    /// Settings has a town for the weather.
+    pub town: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +66,9 @@ pub enum Kind {
     /// A heading that opens and closes the fields after it ("Limits and
     /// scale"): its value is "open" or "closed", its help what is set.
     Disclosure,
+    /// No town for the weather yet: what that means, and the way to the
+    /// town in Settings. Shown first, on a weather widget.
+    Town,
 }
 
 impl Kind {
@@ -119,7 +124,9 @@ const SLIDER: &str = "Slider";
 const MEDIA: &str = "Now playing";
 const KEY: &str = "Key";
 const NEWS: &str = "News";
-const FORECAST: &str = "Forecast";
+/// Its name in the window. The strip asks for a town on it as "Weather",
+/// so the window says both words.
+const FORECAST: &str = "Weather forecast";
 
 /// What a forecast shows, as the form says it, in `ForecastShow`'s order
 /// of use: the default first.
@@ -662,7 +669,7 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             "show",
             "Show",
             segmented(&FORECAST_SHOWS.map(|(w, _)| w)),
-            "From the weather where Settings says. Wider, it shows more hours or days.".into(),
+            "Wider, it shows more hours or days.".into(),
         ),
         SLIDER => {
             add("label", "Label", Kind::Text, String::new());
@@ -755,7 +762,27 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
     if let Some(f) = out.iter_mut().find(|f| f.kind == Kind::Feeds) {
         f.value = crate::news::count(&ctx.feeds);
     }
+    // The weather needs a town first: said at the top, with the way there.
+    let weather = ty == FORECAST || (ty == READING && is_weather(&get("signal")));
+    if weather && !ctx.town {
+        out.insert(
+            0,
+            Field {
+                key: "town".into(),
+                label: "Town".into(),
+                kind: Kind::Town,
+                value: String::new(),
+                help: "Every weather widget shows the weather for one town, set in Settings."
+                    .into(),
+            },
+        );
+    }
     out
+}
+
+/// A reading of the weather, which comes from the town in Settings.
+fn is_weather(signal: &str) -> bool {
+    signal.trim().starts_with("weather.")
 }
 
 /// The key of the "Limits and scale" heading.
@@ -871,6 +898,12 @@ fn reading_help(signal: &str, ctx: &Context) -> String {
         return String::new();
     }
     match ctx.signals.get(signal.trim()) {
+        None if is_weather(signal) && !ctx.town => {
+            "No town is set yet, so there is no weather to show.".into()
+        }
+        None if is_weather(signal) => {
+            "The weather has not come in yet: it is looked up every 15 minutes.".into()
+        }
         None => "Nothing has published this signal yet.".into(),
         Some(r) => format!("Now {}", show_reading(r, ctx)),
     }
@@ -1019,6 +1052,7 @@ mod tests {
             fahrenheit: true,
             signals,
             feeds: Vec::new(),
+            town: false,
         }
     }
 
@@ -1223,6 +1257,51 @@ mod tests {
             panic!("still a forecast");
         };
         assert_eq!((show, width), (ForecastShow::Days, 200));
+    }
+
+    /// Without a town, a weather widget's form says so first, with the way
+    /// to it, and gives the real reason there is no reading, in plain words.
+    #[test]
+    fn the_weather_asks_for_a_town_first() {
+        let mut ctx = ctx();
+        let forecast = Widget::Forecast {
+            width: 200,
+            show: ForecastShow::Next,
+            icon: None,
+            tap: None,
+            hold: None,
+        };
+        let preset = |name: &str| {
+            crate::gallery::presets()
+                .into_iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .widget
+        };
+        let weather = preset("Weather");
+        for w in [&forecast, &weather] {
+            let f = fields(&flatten(w, &ctx), &ctx);
+            assert_eq!(f[0].kind, Kind::Town, "{w:?}");
+        }
+        let help = &fields(&flatten(&weather, &ctx), &ctx)
+            .into_iter()
+            .find(|f| f.key == "signal")
+            .unwrap()
+            .help;
+        assert!(help.contains("No town"), "{help}");
+        for word in ["signal", "published"] {
+            assert!(!help.contains(word), "{help}");
+        }
+        ctx.town = true;
+        for w in [&forecast, &weather] {
+            let f = fields(&flatten(w, &ctx), &ctx);
+            assert!(f.iter().all(|f| f.kind != Kind::Town), "{w:?}");
+        }
+        let cpu = fields(
+            &flatten(&preset("CPU temperature"), &ctx),
+            &Context::default(),
+        );
+        assert!(cpu.iter().all(|f| f.kind != Kind::Town));
     }
 
     #[test]

@@ -9,6 +9,7 @@
 //! thread. The track's artwork comes from the daemon as the strip draws
 //! it (`Job::Art`), so a media widget here shows the same cover.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -46,6 +47,13 @@ pub enum Job {
     /// The track's artwork, as the daemon prepared it: drawn from now on
     /// wherever `media.art` in the readings names it. Draws nothing.
     Art(Arc<Art>),
+    /// One widget alone, as an example: the form shows it while the
+    /// strip has nothing real to show for it.
+    Example {
+        widget: Box<Widget>,
+        config: Box<Config>,
+        readings: Vec<(String, Value)>,
+    },
 }
 
 pub enum Done {
@@ -56,6 +64,7 @@ pub enum Done {
     },
     Widgets(Vec<Pixels>),
     Starters(Vec<Pixels>),
+    Example(Pixels),
 }
 
 /// Starts the drawing thread; `done` is called on it with each answer.
@@ -97,7 +106,7 @@ fn handle(drawer: &mut Option<Drawer>, job: Job, art: Option<&Arc<Art>>, done: &
             readings,
             epoch,
         } => {
-            let d = Drawer::for_config(drawer, *config);
+            let d = Drawer::for_job(drawer, *config, &readings);
             d.readings(&readings, art);
             let pages = (0..d.engine.config().pages.len())
                 .map(|i| d.page(i))
@@ -129,16 +138,31 @@ fn handle(drawer: &mut Option<Drawer>, job: Job, art: Option<&Arc<Art>>, done: &
                     widgets: vec![w],
                 }];
                 c.takeovers.clear();
-                let d = Drawer::for_config(drawer, c);
+                let d = Drawer::for_job(drawer, c, &readings);
                 d.readings(&readings, art);
                 out.push(d.page(0));
             }
             done(Done::Widgets(out));
         }
+        Job::Example {
+            widget,
+            config,
+            readings,
+        } => {
+            let mut c = *config;
+            c.pages = vec![Page {
+                name: "Example".into(),
+                widgets: vec![*widget],
+            }];
+            c.takeovers.clear();
+            let d = Drawer::for_job(drawer, c, &readings);
+            d.readings(&readings, art);
+            done(Done::Example(d.page(0)));
+        }
         Job::Starters { configs, readings } => {
             let mut out = Vec::new();
             for c in configs {
-                let d = Drawer::for_config(drawer, c);
+                let d = Drawer::for_job(drawer, c, &readings);
                 d.readings(&readings, art);
                 out.push(d.page(0));
             }
@@ -151,19 +175,33 @@ fn handle(drawer: &mut Option<Drawer>, job: Job, art: Option<&Arc<Art>>, done: &
 struct Drawer {
     engine: Engine,
     mono: f64,
+    /// The readings the engine holds, by name.
+    known: HashSet<String>,
 }
 
 impl Drawer {
-    /// The drawer, made once (fonts load here) and given `config`.
-    fn for_config(slot: &mut Option<Drawer>, config: Config) -> &mut Drawer {
+    /// The drawer, given `config`, for a job with `readings`. Made once
+    /// (fonts load here) and kept while each job's readings cover the
+    /// last's; made again when one would leave a reading behind (the
+    /// gallery's examples, then the layout's own pictures), as an engine
+    /// keeps every reading it was given.
+    fn for_job<'a>(
+        slot: &'a mut Option<Drawer>,
+        config: Config,
+        readings: &[(String, Value)],
+    ) -> &'a mut Drawer {
+        let names: HashSet<String> = readings.iter().map(|(n, _)| n.clone()).collect();
         match slot {
-            Some(d) => {
+            Some(d) if d.known.is_subset(&names) => {
                 d.engine.handle(Input::Config(Box::new(config)));
+                d.known = names;
             }
-            None => {
+            _ => {
+                let mono = slot.as_ref().map_or(0.0, |d| d.mono);
                 *slot = Some(Drawer {
                     engine: Engine::new(config),
-                    mono: 0.0,
+                    mono,
+                    known: names,
                 });
             }
         }
@@ -222,15 +260,43 @@ pub fn value(text: &str, number: Option<f64>, unit: Option<&str>) -> Value {
 }
 
 /// Readings for pictures: the live ones, and the demo's for anything not
-/// published, so a gallery picture is never empty.
+/// published, so a gallery picture is never empty. With no forecast yet,
+/// an example one (a cloudy day with rain from 15:00), whole, so a
+/// forecast's picture shows what it would.
 pub fn with_demo(live: Vec<(String, Value)>) -> Vec<(String, Value)> {
+    let has = |list: &[(String, Value)], name: &str| list.iter().any(|(n, _)| n == name);
+    let example = if has_forecast(&live) {
+        Vec::new()
+    } else {
+        example_forecast()
+    };
     let mut out: Vec<(String, Value)> = nexus_core::demo::readings(0.0)
         .into_iter()
-        .filter(|(name, _)| !live.iter().any(|(n, _)| n == name))
         .map(|(n, v)| (n.to_string(), v))
+        .filter(|(name, _)| !has(&live, name) && !has(&example, name))
         .collect();
+    out.extend(example.into_iter().filter(|(name, _)| !has(&live, name)));
     out.extend(live);
     out
+}
+
+/// Whether there is a real forecast to show.
+pub fn has_forecast(live: &[(String, Value)]) -> bool {
+    live.iter().any(|(n, _)| n == nexus_core::forecast::NEXT)
+}
+
+/// The example forecast's readings: the design's rainy afternoon.
+fn example_forecast() -> Vec<(String, Value)> {
+    nexus_core::scenes::outlooks()
+        .into_iter()
+        .find(|o| o.name == "rainy-afternoon")
+        .map(|o| {
+            o.signals()
+                .into_iter()
+                .map(|(n, v)| (n.to_string(), v))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The left `width` columns of a strip's pixels.
@@ -299,6 +365,49 @@ mod tests {
             }
             _ => panic!("wrong answer"),
         }
+    }
+
+    /// A picture shows its own readings only: the gallery's examples never
+    /// reach the pictures of the layout drawn after them.
+    #[test]
+    fn a_picture_shows_only_its_own_readings() {
+        let config = Config::parse(
+            "[[page]]\nname = \"A\"\n[[page.widget]]\ntype = \"value\"\nwidth = 200\nlabel = \"Weather\"\nsignal = \"weather.temp\"\n",
+        )
+        .unwrap();
+        let draw = |slot: &mut Option<Drawer>, readings: Vec<(String, Value)>| {
+            let d = Drawer::for_job(slot, config.clone(), &readings);
+            d.readings(&readings, None);
+            d.page(0)
+        };
+        let fresh = draw(&mut None, Vec::new());
+        let mut slot = None;
+        let example = draw(&mut slot, with_demo(Vec::new()));
+        assert_ne!(example, fresh, "the example shows a temperature");
+        assert_eq!(draw(&mut slot, Vec::new()), fresh);
+    }
+
+    /// With no forecast, pictures get an example one; a real one is never
+    /// mixed with it.
+    #[test]
+    fn a_forecast_picture_has_an_example_until_a_real_one_comes() {
+        let none = with_demo(Vec::new());
+        assert!(has_forecast(&none), "the example is there");
+        let real = vec![(
+            nexus_core::forecast::NEXT.to_string(),
+            Value::Text("dry".into()),
+        )];
+        let mixed = with_demo(real.clone());
+        let next: Vec<_> = mixed
+            .iter()
+            .filter(|(n, _)| n == nexus_core::forecast::NEXT)
+            .collect();
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].1, real[0].1);
+        assert!(
+            !mixed.iter().any(|(n, _)| n.starts_with("weather.hour")),
+            "no example hours beside the real forecast"
+        );
     }
 
     /// The pictures show the track's artwork once the daemon has sent it,

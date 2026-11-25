@@ -168,7 +168,7 @@ pub fn presets() -> Vec<Preset> {
             widget: value(120, ("Weather", "weather.temp"), None, None, None),
         },
         Preset {
-            name: "Forecast",
+            name: "Weather forecast",
             about: "The weather to come: the next change, hours or days",
             group: 2,
             widget: Widget::Forecast {

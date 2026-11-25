@@ -150,6 +150,8 @@ pub struct Editor {
     /// "Limits and scale", opened or closed by hand for this form; `None`
     /// until then (open when something in it is set).
     limits_open: Option<bool>,
+    /// The widget the form's example picture is of, while it has one.
+    example_for: Option<Widget>,
     /// Inspector values not sent yet (see `inspector::apply`), and why.
     drafts: Values,
     draft_hint: String,
@@ -229,6 +231,7 @@ impl Editor {
             shown: Vec::new(),
             fields_for: None,
             limits_open: None,
+            example_for: None,
             drafts: Values::new(),
             draft_hint: String::new(),
             committed: HashMap::new(),
@@ -1287,6 +1290,7 @@ impl Editor {
                 .as_ref()
                 .map(|n| n.feeds.clone())
                 .unwrap_or_default(),
+            town: layout.config.weather.is_some(),
         }
     }
 
@@ -1323,6 +1327,7 @@ impl Editor {
     /// whose new value is the one just sent from it.
     fn show_fields(&mut self) {
         let selected = self.selected_index().filter(|_| self.editable());
+        self.show_example(selected);
         let form = match selected {
             Some(i) => self.widget_ids().get(i).copied().map(Form::Widget),
             None if self.adding.is_some() => Some(Form::NewTakeover),
@@ -1578,7 +1583,7 @@ impl Editor {
             );
             app.set_gallery_note(
                 format!(
-                    "{at}; the widgets already there make room for it. Pictures use your readings."
+                    "{at}; the widgets already there make room for it. Pictures use your readings, or examples where you have none yet."
                 )
                 .into(),
             );
@@ -2202,6 +2207,44 @@ impl Editor {
         });
     }
 
+    /// A forecast with nothing real to show yet (no town, or the weather
+    /// has not come in): an example of it under its Show choice, drawn
+    /// with made-up weather and said to be, so each choice can be judged
+    /// by looking.
+    fn show_example(&mut self, selected: Option<usize>) {
+        let readings = self.readings();
+        let widget = selected
+            .and_then(|i| self.widgets().get(i).cloned())
+            .filter(|w| matches!(w, Widget::Forecast { .. }))
+            .filter(|_| !thumbs::has_forecast(&readings));
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let Some(widget) = widget else {
+            self.example_for = None;
+            app.set_example_note(SharedString::new());
+            return;
+        };
+        if self.example_for.as_ref() == Some(&widget) {
+            return;
+        }
+        let (Some(jobs), Some(l)) = (&self.thumbs, &self.layout) else {
+            return;
+        };
+        let note = if l.config.weather.is_some() {
+            "Example, with made-up weather: yours shows once it comes in."
+        } else {
+            "Example, with made-up weather: yours shows once your town is set."
+        };
+        let _ = jobs.send(Job::Example {
+            widget: Box::new(widget.clone()),
+            config: Box::new(l.config.clone()),
+            readings: thumbs::with_demo(readings),
+        });
+        self.example_for = Some(widget);
+        app.set_example_note(crate::i18n::shown(note).into());
+    }
+
     /// Pictures arrived from `thumbs`.
     pub fn pictures(&mut self, done: Done) {
         let image = |px: &[u8], w: u32| {
@@ -2232,6 +2275,13 @@ impl Editor {
                         tile.image = image(&cropped, w);
                         self.tiles.set_row_data(i, tile);
                     }
+                }
+            }
+            Done::Example(px) => {
+                if let (Some(w), Some(app)) = (&self.example_for, self.app.upgrade()) {
+                    let (cropped, width) = thumbs::crop(&px, w.width());
+                    app.set_example(image(&cropped, width));
+                    app.set_example_width(width as i32);
                 }
             }
             Done::Starters(list) => {
@@ -2726,6 +2776,7 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
         Kind::Triggers => ("triggers", Vec::new()),
         Kind::Icon => ("icon", Vec::new()),
         Kind::Feeds => ("feeds", Vec::new()),
+        Kind::Town => ("town", Vec::new()),
         Kind::Disclosure => ("disclosure", Vec::new()),
         Kind::Stepper { min, max } => ("stepper", vec![min.to_string(), max.to_string()]),
         Kind::Choice(options) => ("choice", options.clone()),
@@ -2744,6 +2795,8 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
             .unwrap_or_else(|| {
                 if f.value.trim().is_empty() {
                     String::new()
+                } else if f.value.trim().starts_with("weather.") && !ctx.town {
+                    "no town yet".into()
                 } else {
                     "no reading yet".into()
                 }
@@ -2810,7 +2863,7 @@ pub fn describe(w: &Widget) -> String {
         Widget::Clock { .. } => "Clock".into(),
         Widget::Media { .. } => "Now playing".into(),
         Widget::News { .. } => "News".into(),
-        Widget::Forecast { .. } => "Forecast".into(),
+        Widget::Forecast { .. } => "Weather forecast".into(),
         Widget::Key { icon, label, .. } => label
             .iter()
             .chain(icon)

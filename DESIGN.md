@@ -1001,14 +1001,21 @@ this system so the two surfaces belong together:
 - **When the strip is not showing the layout** (the service is down or
   starting, or the strip is unplugged, held by another program, without
   access, or needs a replug), the previews dim and a banner under the
-  header says why and what to do, in the same words as the status chip's
-  popover, with the same buttons in the same order and one primary. The
-  chip stays neutral: it is a state, not a reading. Only a start that
-  failed is critical. While the service runs, editing stays on and says
-  so; while it does not, the fields dim, stop responding, and one line
-  says why. A start that fails twice offers to run the service from the
-  window for now, and to report the problem; terminal commands appear
-  only under "For those who use a terminal".
+  header says why and what to do: a heading, at most two short lines
+  (a measure of about 70 characters), and one row of buttons, the first
+  the one primary. Its height holds through one problem. The status
+  chip's popover then points to the banner instead of saying it again,
+  and keeps Copy diagnostics and the terminal commands. The chip has a
+  fixed slot and stays neutral: it is a state, not a reading. Only a
+  start that failed is critical, and the chip and the heading always
+  tell the same story. While the service runs, editing stays on and says
+  so; while it does not, every editing control (fields, Add, Equal
+  widths, Delete page, Remove, Undo and Redo, the keyboard row) dims to
+  one look, a flat well with faint words, stops responding, and one
+  line says why. A start that fails twice says so in its heading and
+  offers to run the service from the window for now, and to report the
+  problem; terminal commands appear only under "For those who use a
+  terminal".
 - **The strip itself**: wherever the window shows the strip, it shows these
   exact pixels (the preview is the live frame), so the window should frame
   it like an object on a walnut desk, not redraw it.

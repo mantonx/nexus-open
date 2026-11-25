@@ -282,6 +282,14 @@ export component FieldRow inherits HorizontalLayout {
     callback remove-trigger(string);
     /// The news widget's "Edit feeds…".
     callback edit-feeds();
+    callback edit-town();
+    /// An example of the widget, for its "show" field: the picture (as
+    /// many strip pixels wide as `example-width`, drawn at `unit` each)
+    /// and what it is. No note, no example.
+    in property <image> example;
+    in property <int> example-width;
+    in property <string> example-note;
+    in property <length> unit: 1px;
 
     spacing: 16px;
 
@@ -483,6 +491,28 @@ export component FieldRow inherits HorizontalLayout {
                 }
             }
         }
+        // No town for the weather yet: the reason, and the way to it.
+        if root.field.kind == "town": HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            Text {
+                text: @tr("No town set yet");
+                font-family: Theme.font;
+                font-size: Theme.size-body;
+                font-weight: 500;
+                color: root.enabled ? Theme.text : Theme.text-off;
+                vertical-alignment: center;
+            }
+            Button {
+                enabled: root.enabled;
+                icon: Glyph.map-pin;
+                text: @tr("Set your town…");
+                label: @tr("Set the town for the weather, in Settings");
+                clicked => {
+                    root.edit-town();
+                }
+            }
+        }
         if root.field.kind == "choice": Select {
             options: root.field.choices;
             current: root.field.index;
@@ -502,6 +532,37 @@ export component FieldRow inherits HorizontalLayout {
                 chose(i) => {
                     root.chose(root.field.key, i);
                 }
+            }
+        }
+        // What the choice looks like, while the strip has nothing real
+        // to show for it: in the strip's bezel, at the strip's scale.
+        if root.field.key == "show" && root.example-note != "": VerticalLayout {
+            spacing: 4px;
+            padding-top: 4px;
+            HorizontalLayout {
+                alignment: start;
+                Rectangle {
+                    width: root.example-width * root.unit + 8px;
+                    height: 48 * root.unit + 8px;
+                    border-radius: 6px;
+                    background: Theme.bezel;
+                    Image {
+                        source: root.example;
+                        width: root.example-width * root.unit;
+                        height: 48 * root.unit;
+                        image-rendering: pixelated;
+                        accessible-role: image;
+                        accessible-label: root.example-note;
+                    }
+                }
+            }
+            Text {
+                text: root.example-note;
+                font-family: Theme.font;
+                font-size: Theme.size-small;
+                font-weight: 500;
+                color: Theme.text-2;
+                wrap: word-wrap;
             }
         }
         if root.field.kind == "signal" || root.field.kind == "icon": signal-button := Rectangle {

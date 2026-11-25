@@ -35,6 +35,10 @@ export component Button inherits Rectangle {
     /// Said for the button by a screen reader, when the text alone is not
     /// enough; also shown as the reason when disabled, if given.
     in property <string> label;
+    /// Off because editing is locked (the service is not answering): then
+    /// it looks like every other locked control, a flat well with faint
+    /// words, whatever its tier.
+    in property <bool> locked: false;
     callback clicked();
 
     property <bool> primary: tier == "primary";
@@ -43,7 +47,7 @@ export component Button inherits Rectangle {
     min-width: fit ? row.preferred-width + (compact ? 16px : 24px) : 0px;
     horizontal-stretch: 0;
     border-radius: Theme.r-control;
-    background: !root.enabled ? (quiet ? transparent : Theme.surface-2)
+    background: !root.enabled ? (quiet && !root.locked ? transparent : Theme.surface-2)
         : primary ? (touch.pressed ? Theme.accent-fill : touch.has-hover ? Theme.accent-text : Theme.act)
         : quiet ? (touch.pressed ? Theme.surface-2.darker(0.1) : touch.has-hover ? Theme.surface-2 : transparent)
         : (touch.pressed ? Theme.surface-2 : touch.has-hover ? Theme.raised.brighter(0.08) : Theme.raised);
@@ -127,11 +131,13 @@ export component IconButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> fill: false;
     in property <bool> on: false;
+    /// Off because editing is locked: the flat well every locked control has.
+    in property <bool> locked: false;
     callback clicked();
     width: 34px;
     height: 34px;
     border-radius: Theme.r-control;
-    background: root.on ? Theme.surface-2
+    background: root.on || (root.locked && !root.enabled) ? Theme.surface-2
         : touch.pressed ? Theme.surface-2.darker(0.1) : touch.has-hover && root.enabled ? Theme.surface-2 : transparent;
     accessible-role: button;
     accessible-label: root.label;
@@ -630,9 +636,10 @@ export component KeyCap inherits Rectangle {
     height: 20px;
     min-width: cap.preferred-width + 10px;
     border-radius: 5px;
+    // Off, a key is only its faint letters: nothing to press.
     background: root.enabled ? Theme.surface-2 : transparent;
-    border-width: 1px;
-    border-color: root.enabled ? Theme.line-strong : Theme.line;
+    border-width: root.enabled ? 1px : 0px;
+    border-color: Theme.line-strong;
     accessible-role: none;
     cap := Text {
         text: root.text;

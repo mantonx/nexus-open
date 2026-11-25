@@ -84,8 +84,8 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
             headline: "The service is not running".into(),
             body: STOPPED.into(),
             actions: vec!["start", "log"],
-            banner: "The service is not running, so nothing here can be changed and these pictures are not live.".into(),
-            banner_body: "Your layouts are safe. Start the service to carry on.".into(),
+            banner: "The service is not running".into(),
+            banner_body: STOPPED.into(),
             detail: fix_of("daemon"),
             ..View::default()
         };
@@ -141,7 +141,7 @@ fn device_view(why: &str, fix: &str) -> View {
         chip: chip.into(),
         headline: headline.into(),
         banner: headline.into(),
-        banner_body: format!("{body}\n{STILL_EDITABLE}"),
+        banner_body: format!("{body} {STILL_EDITABLE}"),
         body,
         away: true,
         detail: fix.to_string(),
@@ -427,13 +427,7 @@ fn could_not_run(e: &std::io::Error) -> String {
 /// after more, starting it again is not the way forward, so the window
 /// offers to run it itself and to report the problem.
 pub fn did_not_start(v: View, why: &str, tries: u32) -> View {
-    failed(
-        v,
-        "Did not start",
-        "The service did not start",
-        &format!("{why} The log may say more."),
-        tries,
-    )
+    failed(v, "Did not start", "The service did not start", why, tries)
 }
 
 /// A start that ran, but the service has not answered since: not the
@@ -443,7 +437,7 @@ pub fn not_answering(v: View, tries: u32) -> View {
         v,
         "Not answering",
         "The service is not answering",
-        "It was started ten seconds ago and has not answered. The log may say why.",
+        "It was started, but has not answered since.",
         tries,
     )
 }
@@ -451,18 +445,20 @@ pub fn not_answering(v: View, tries: u32) -> View {
 fn failed(mut v: View, chip: &str, headline: &str, why: &str, tries: u32) -> View {
     v.tone = "failed";
     v.icon = "fail";
-    v.chip = chip.into();
-    v.headline = headline.into();
-    v.banner = format!("{headline}, so nothing here can be changed.");
     if tries < 2 {
+        v.chip = chip.into();
+        v.headline = headline.into();
         v.body = format!("{why} Your layouts are safe.");
         v.actions = vec!["retry", "log"];
     } else {
-        v.body = format!(
-            "{why} Starting it again did not help. This window can run it for now: the strip works until you quit the window. Report the problem too, so it can be fixed. Your layouts are safe."
-        );
+        // Trying again is not the way forward any more: the heading says
+        // so, and the words say what is.
+        v.chip = "Failed to start".into();
+        v.headline = "Starting the service failed twice".into();
+        v.body = "This window can run it for now, until you quit it. Report the problem too, so it can be fixed.".into();
         v.actions = vec!["run-here", "report", "log"];
     }
+    v.banner = v.headline.clone();
     v.banner_body = v.body.clone();
     v.detail = failed_detail(installed());
     v
@@ -472,7 +468,7 @@ fn failed(mut v: View, chip: &str, headline: &str, why: &str, tries: u32) -> Vie
 /// terminal: clear the failure, start it, read why.
 pub fn failed_detail(installed: bool) -> String {
     if installed {
-        "systemctl --user reset-failed nexusd\nsystemctl --user start nexusd\nWhy it stopped: journalctl --user -u nexusd -e".into()
+        "Clear the failure: systemctl --user reset-failed nexusd\nStart it: systemctl --user start nexusd\nWhy it stopped: journalctl --user -u nexusd -e".into()
     } else {
         "nexusd run".into()
     }
@@ -483,14 +479,18 @@ pub fn failed_detail(installed: bool) -> String {
 pub fn here_failed(mut v: View, why: &str) -> View {
     v.tone = "failed";
     v.icon = "fail";
-    v.chip = "Did not run".into();
-    v.headline = "It did not run from this window either".into();
-    v.body = format!(
-        "{why} Report the problem: Nexus Open copies the diagnostics for you to paste into it. Your layouts are safe."
-    );
-    v.banner =
-        "The service does not answer and this window cannot run it, so nothing here can be changed."
-            .into();
+    if why == crate::here::STILL_RUNNING {
+        // Refused, not failed: the service is there, it does not answer.
+        v.chip = "Not answering".into();
+        v.headline = "The service runs, but does not answer".into();
+        v.body =
+            "This window does not run a second one. Report the problem, so it can be fixed.".into();
+    } else {
+        v.chip = "Did not run".into();
+        v.headline = "It did not run from this window either".into();
+        v.body = format!("{why} Report the problem, so it can be fixed.");
+    }
+    v.banner = v.headline.clone();
     v.banner_body = v.body.clone();
     v.actions = vec!["report", "log"];
     v.detail = failed_detail(installed());
@@ -501,12 +501,12 @@ pub fn here_failed(mut v: View, why: &str) -> View {
 /// works, for as long as the window does. Said in a banner, as the pictures
 /// are live.
 pub fn from_window(mut v: View) -> View {
-    let note = "The service did not start, so this window runs it for now: the strip works until you quit the window (closed to the tray, it keeps running). Report the problem, so the service can be fixed.";
+    let note = "The strip works until you quit the window; closed to the tray, it keeps running. Report the problem, so the service can be fixed.";
     v.here = true;
     if v.away {
         // The strip's own problem leads; this is said after it.
-        v.body = format!("{} {note}", v.body);
-        v.banner_body = format!("{}\n{note}", v.banner_body);
+        v.body = format!("{} This window runs the service for now.", v.body);
+        v.banner_body = format!("{} This window runs the service for now.", v.banner_body);
     } else {
         v.tone = "note";
         v.icon = "info";
@@ -530,10 +530,9 @@ pub fn starting(mut v: View) -> View {
     v.icon = "wait";
     v.chip = "Starting…".into();
     v.headline = "Waiting for the service to answer".into();
-    v.body = "This takes a few seconds. The pictures come back to life when it answers. Your layouts are safe.".into();
-    v.banner = "Waiting for the service to answer, so nothing here can be changed yet.".into();
-    v.banner_body =
-        "This takes a few seconds. The pictures come back to life when it answers.".into();
+    v.body = "This takes a few seconds. Nothing here can be changed until then.".into();
+    v.banner = v.headline.clone();
+    v.banner_body = v.body.clone();
     v.actions = Vec::new();
     v
 }
@@ -568,12 +567,11 @@ pub fn report_address() -> String {
 pub const NO_ANSWER: &str = "no answer";
 
 /// The stopped service, in the popover.
-const STOPPED: &str = "Until it runs, the strip keeps its last picture and nothing here can be changed. Your layouts are safe.";
+const STOPPED: &str = "Nothing here can be changed until it runs. Your layouts are safe.";
 
 /// Said with every state where the strip is not showing the layout but the
 /// service runs.
-const STILL_EDITABLE: &str =
-    "You can keep editing: changes are saved, and the strip shows them when it is back.";
+const STILL_EDITABLE: &str = "You can keep editing meanwhile.";
 
 #[cfg(test)]
 mod tests {
@@ -680,18 +678,38 @@ mod tests {
         let twice = not_answering(view(None, &[]), 2);
         assert_eq!(twice.actions, ["run-here", "report", "log"]);
         assert!(twice.body.contains("run it for now"), "{}", twice.body);
+        assert_ne!(
+            once.headline, twice.headline,
+            "the heading says it failed again"
+        );
+        let refused = here_failed(view(None, &[]), crate::here::STILL_RUNNING);
+        assert_eq!(
+            refused.chip, "Not answering",
+            "the chip and the heading agree"
+        );
         let again = did_not_start(view(None, &[]), "No reason.", 3);
         assert_eq!(again.actions[0], "run-here");
         let gone = here_failed(view(None, &[]), "It stopped.");
         assert_eq!(gone.actions, ["report", "log"]);
         assert_eq!(gone.body.matches("Report the problem").count(), 1);
-        for v in [&once, &twice, &again, &gone] {
+        let stopped = view(None, &[]);
+        let wait = starting(view(None, &[]));
+        let here = from_window(view(Some(&status(None)), &[]));
+        for v in [
+            &once, &twice, &again, &gone, &refused, &stopped, &wait, &here,
+        ] {
             assert_eq!(v.body, v.banner_body, "one story");
+            assert_eq!(v.headline, v.banner, "one heading");
+            // Two short lines at most, at about 70 characters each.
+            assert!(v.body.chars().count() <= 140, "{}", v.body);
             for word in ["systemctl", "journalctl", "terminal"] {
                 assert!(!v.body.contains(word), "{}", v.body);
             }
         }
-        assert!(failed_detail(true).starts_with("systemctl --user reset-failed nexusd\n"));
+        assert!(
+            failed_detail(true)
+                .starts_with("Clear the failure: systemctl --user reset-failed nexusd\n")
+        );
         assert!(report_address().ends_with("/issues/new"));
         assert!(nexus_control::links::checked_link(&report_address()).is_ok());
     }
@@ -712,7 +730,7 @@ mod tests {
             &[],
         ));
         assert_eq!(away.chip, "No strip", "the strip's own problem leads");
-        assert!(away.here && away.banner_body.contains("this window runs it"));
+        assert!(away.here && away.banner_body.contains("This window runs the service"));
     }
 
     #[test]

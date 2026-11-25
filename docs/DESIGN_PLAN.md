@@ -727,3 +727,28 @@ README clip (now of the new strip), release verification.
   Proof: the rig, with a stub in front of systemctl, journalctl and
   xdg-open, and a fake MPRIS player serving a generated cover. Not yet
   on a real failing service, nor with a real player.
+  Round two, after reviews of 28/40 in both modes (also provisional):
+  - Weather: while no town is set, a weather or forecast widget's form
+    starts with "No town set yet" and "Set your town…", which opens
+    Settings with the town's field focused; its reading says "No town is
+    set yet, so there is no weather to show". Settings has a gear in the
+    header. The forecast is "Weather forecast" in the window, as the
+    strip asks for its town under "Weather".
+  - A forecast with nothing real to show has an example under Show,
+    drawn with the design's rainy afternoon and labelled as made up, so
+    each choice changes what is seen; the gallery's picture is the
+    example too. Pictures no longer keep another picture's readings:
+    the gallery's demo and example readings used to reach the layout's
+    own pictures (a weather widget showed the demo's temperature).
+  - Service states: one heading for chip, banner and popover; the
+    banner is at most two lines at about 70 characters, holds its height
+    through a problem, and has the only primary; the popover points to
+    it. A second failure is its own heading ("Starting the service
+    failed twice"); a refused run is "Not answering", not "Did not run".
+    Takeovers are not "None yet" before the service has answered.
+  - Locked editing: Undo, Redo, Equal widths, Delete page and Remove take
+    the same flat, faint look as Add; the keyboard row's keys lose their
+    caps.
+  Not done: a window opened while the service is already down still
+  shows no pages (it has never read them); reading the store directly
+  would fix that.

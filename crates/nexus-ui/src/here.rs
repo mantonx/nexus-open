@@ -78,6 +78,10 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Why running it here was refused: systemd says the service runs,
+/// though it does not answer. The status says so in its own words.
+pub const STILL_RUNNING: &str = "The service is still running, though it does not answer.";
+
 /// Starts the daemon as this window's child, or says why not.
 pub fn start() -> Result<(), String> {
     if state() == State::Running {
@@ -92,7 +96,7 @@ pub fn start() -> Result<(), String> {
         if let Ok(out) = Command::new(&argv[0]).args(&argv[1..]).output()
             && says_active(&String::from_utf8_lossy(&out.stdout))
         {
-            return Err("The service is still running, though it does not answer, so this window does not start a second one.".into());
+            return Err(STILL_RUNNING.into());
         }
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
