@@ -107,6 +107,9 @@ pub fn run() -> Result<(), slint::PlatformError> {
         _ => appearance::load(),
     };
     app.global::<Theme>().set_forced(chosen.index());
+    if let Some(mono) = monospace_family() {
+        app.global::<Theme>().set_mono(mono.into());
+    }
     app.invoke_apply_scheme();
     let weak = app.as_weak();
     app.on_set_appearance(move |i| {
@@ -296,7 +299,27 @@ fn show_status(app: &AppWindow) {
         banner: view.banner.into(),
         banner_body: view.banner_body.into(),
         detail: view.detail.into(),
+        commands: ModelRc::new(VecModel::from(
+            view.commands
+                .into_iter()
+                .map(|(does, line)| TermLine {
+                    does: does.into(),
+                    line: line.into(),
+                })
+                .collect::<Vec<_>>(),
+        )),
     });
+}
+
+/// The desktop's monospace family, as fontconfig names it: Slint takes
+/// a family's name, not the generic "monospace".
+fn monospace_family() -> Option<String> {
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{family[0]}", "monospace"])
+        .output()
+        .ok()?;
+    let name = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    (out.status.success() && !name.is_empty()).then_some(name)
 }
 
 /// "Start the service" (or "Run it from this window for now"): shows

@@ -1004,18 +1004,20 @@ this system so the two surfaces belong together:
   header says why and what to do: a heading, at most two short lines
   (a measure of about 70 characters), and one row of buttons, the first
   the one primary. Its height holds through one problem. The status
-  chip's popover then points to the banner instead of saying it again,
-  and keeps Copy diagnostics and the terminal commands. The chip has a
-  fixed slot and stays neutral: it is a state, not a reading. Only a
+  chip's popover then opens under the banner, never over it, and holds
+  only Copy diagnostics and the terminal commands that fit the state (none
+  when nothing typed would help), one to a line in a monospace face, each
+  copied on its own. The chip is a fixed slot whose colour, icon and word
+  change and nothing else, and it stays neutral: it is a state, not a
+  reading. Only a
   start that failed is critical, and the chip and the heading always
   tell the same story. While the service runs, editing stays on and says
   so; while it does not, every editing control (fields, Add, Equal
-  widths, Delete page, Remove, Undo and Redo, the keyboard row) dims to
-  one look, a flat well with faint words, stops responding, and one
-  line says why. A start that fails twice says so in its heading and
+  widths, Delete page, Remove, Undo and Redo, the keyboard row) keeps its
+  own shape and fades to 40%, never gaining a fill or box it does not have
+  when on, stops responding, and one line says why. A start that fails twice says so in its heading and
   offers to run the service from the window for now, and to report the
-  problem; terminal commands appear only under "For those who use a
-  terminal".
+  problem; terminal commands appear only in the chip's popover.
 - **The strip itself**: wherever the window shows the strip, it shows these
   exact pixels (the preview is the live frame), so the window should frame
   it like an object on a walnut desk, not redraw it.

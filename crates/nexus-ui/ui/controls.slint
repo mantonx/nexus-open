@@ -35,10 +35,6 @@ export component Button inherits Rectangle {
     /// Said for the button by a screen reader, when the text alone is not
     /// enough; also shown as the reason when disabled, if given.
     in property <string> label;
-    /// Off because editing is locked (the service is not answering): then
-    /// it looks like every other locked control, a flat well with faint
-    /// words, whatever its tier.
-    in property <bool> locked: false;
     callback clicked();
 
     property <bool> primary: tier == "primary";
@@ -47,11 +43,13 @@ export component Button inherits Rectangle {
     min-width: fit ? row.preferred-width + (compact ? 16px : 24px) : 0px;
     horizontal-stretch: 0;
     border-radius: Theme.r-control;
-    background: !root.enabled ? (quiet && !root.locked ? transparent : Theme.surface-2)
-        : primary ? (touch.pressed ? Theme.accent-fill : touch.has-hover ? Theme.accent-text : Theme.act)
+    // Off, a button keeps its own shape and fades: never a fill or a box
+    // it does not have when on, so it can never look heavier.
+    opacity: root.enabled ? 1 : 0.4;
+    background: primary ? (touch.pressed ? Theme.accent-fill : touch.has-hover ? Theme.accent-text : Theme.act)
         : quiet ? (touch.pressed ? Theme.surface-2.darker(0.1) : touch.has-hover ? Theme.surface-2 : transparent)
         : (touch.pressed ? Theme.surface-2 : touch.has-hover ? Theme.raised.brighter(0.08) : Theme.raised);
-    border-width: !quiet && !primary && root.enabled ? 1px : 0px;
+    border-width: !quiet && !primary ? 1px : 0px;
     border-color: Theme.dark ? Theme.raised-top.transparentize(0.5) : Theme.line-strong;
 
     accessible-role: button;
@@ -63,8 +61,7 @@ export component Button inherits Rectangle {
         }
     }
 
-    property <color> ink: !root.enabled ? Theme.text-off
-        : primary ? Theme.act-ink
+    property <color> ink: primary ? Theme.act-ink
         : destructive && touch.has-hover ? Theme.crit
         : quiet ? Theme.text-2 : Theme.text;
 
@@ -131,13 +128,13 @@ export component IconButton inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> fill: false;
     in property <bool> on: false;
-    /// Off because editing is locked: the flat well every locked control has.
-    in property <bool> locked: false;
     callback clicked();
     width: 34px;
     height: 34px;
     border-radius: Theme.r-control;
-    background: root.on || (root.locked && !root.enabled) ? Theme.surface-2
+    // Off, it fades in its own shape, like a Button.
+    opacity: root.enabled ? 1 : 0.4;
+    background: root.on ? Theme.surface-2
         : touch.pressed ? Theme.surface-2.darker(0.1) : touch.has-hover && root.enabled ? Theme.surface-2 : transparent;
     accessible-role: button;
     accessible-label: root.label;
@@ -151,7 +148,7 @@ export component IconButton inherits Rectangle {
         glyph: root.icon;
         fill: root.fill;
         font-size: 18px;
-        color: root.enabled ? Theme.text-2 : Theme.text-off;
+        color: Theme.text-2;
     }
     touch := TouchArea {
         enabled: root.enabled;
@@ -636,9 +633,10 @@ export component KeyCap inherits Rectangle {
     height: 20px;
     min-width: cap.preferred-width + 10px;
     border-radius: 5px;
-    // Off, a key is only its faint letters: nothing to press.
-    background: root.enabled ? Theme.surface-2 : transparent;
-    border-width: root.enabled ? 1px : 0px;
+    // Off, a key keeps its shape and fades, like a button.
+    opacity: root.enabled ? 1 : 0.4;
+    background: Theme.surface-2;
+    border-width: 1px;
     border-color: Theme.line-strong;
     accessible-role: none;
     cap := Text {
@@ -646,7 +644,7 @@ export component KeyCap inherits Rectangle {
         font-family: Theme.font;
         font-size: 11px;
         font-weight: 500;
-        color: root.enabled ? Theme.text-2 : Theme.text-off;
+        color: Theme.text-2;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -667,7 +665,8 @@ export component Shortcut inherits HorizontalLayout {
         text: " " + root.does;
         font-family: Theme.font;
         font-size: Theme.size-small;
-        color: root.enabled ? Theme.text-3 : Theme.text-off;
+        color: Theme.text-3;
+        opacity: root.enabled ? 1 : 0.4;
         vertical-alignment: center;
     }
 }
@@ -693,4 +692,27 @@ export component Heading inherits Text {
     font-weight: 600;
     color: Theme.text;
     vertical-alignment: center;
+}
+
+/// Waiting for something to answer: three dots that brighten in turn.
+/// Never a bar, which reads as a divider.
+export component Waiting inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 6px;
+    alignment: start;
+    accessible-role: progress-indicator;
+    accessible-label: root.label;
+    property <float> t: mod(animation-tick() / 1ms, 1200) / 1200;
+    for i in 3: VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.text-2;
+            // Each dot peaks a third of a turn after the one before it.
+            property <float> phase: mod(root.t - i / 3 + 1, 1);
+            opacity: 0.25 + 0.75 * max(0, 1 - abs(self.phase - 0.5) * 3);
+        }
+    }
 }

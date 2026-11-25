@@ -1199,30 +1199,22 @@ impl Editor {
                 to + 1,
                 widgets.len()
             ),
-            // At the strip's end there is no grip: its edge there cannot
+            // What it is, its size and place are the form's title, just
+            // below: here only what can be done on the strip itself. At
+            // the strip's end there is no grip: its edge there cannot
             // move, and the grip would sit on the edge flag.
             (_, Some(i)) if widths.iter().sum::<u32>() >= STRIP && i + 1 == widgets.len() => {
                 if i == 0 {
-                    format!(
-                        "{}, the whole strip. Make it narrower in Width below to put another beside it.",
-                        sized(i)
-                    )
+                    "It fills the strip. Make it narrower in Width below to put another beside it."
+                        .into()
                 } else {
-                    format!(
-                        "{}, {} of {}, to the strip's end. Drag it to move it; resize it in Width below.",
-                        sized(i),
-                        i + 1,
-                        widgets.len()
-                    )
+                    "It runs to the strip's end. Drag it to move it; resize it in Width below."
+                        .into()
                 }
             }
-            (_, Some(i)) => format!(
-                "{}, {} of {}. Drag it to move it; drag the grip on its right edge to resize.",
-                sized(i),
-                i + 1,
-                widgets.len()
-            ),
-            _ => "Click a widget to change it.".into(),
+            (_, Some(_)) => "Drag it to move it; drag the grip on its right edge to resize.".into(),
+            // The page's settings below say how to pick one.
+            _ => String::new(),
         }
     }
 }
@@ -1439,7 +1431,12 @@ impl Editor {
                     "widget",
                     describe(w),
                     widget_icon(w).to_string(),
-                    format!("{}, {width} px", geometry::class(width)),
+                    format!(
+                        "{}, {width} px, {} of {}",
+                        geometry::class(width),
+                        i + 1,
+                        self.widgets().len()
+                    ),
                 )
             }
             (Some(Form::NewTakeover), _) => (
@@ -2234,7 +2231,8 @@ impl Editor {
         let note = if l.config.weather.is_some() {
             "Example, with made-up weather: yours shows once it comes in."
         } else {
-            "Example, with made-up weather: yours shows once your town is set."
+            // The Town row above says there is no town.
+            "Example, with made-up weather."
         };
         let _ = jobs.send(Job::Example {
             widget: Box::new(widget.clone()),
@@ -2793,10 +2791,11 @@ fn row(f: &Field, ctx: &Context) -> FieldRow {
             .get(f.value.trim())
             .map(|r| inspector::show_reading(r, ctx))
             .unwrap_or_else(|| {
-                if f.value.trim().is_empty() {
+                // No town: the form's Town row says so, once.
+                if f.value.trim().is_empty()
+                    || (f.value.trim().starts_with("weather.") && !ctx.town)
+                {
                     String::new()
-                } else if f.value.trim().starts_with("weather.") && !ctx.town {
-                    "no town yet".into()
                 } else {
                     "no reading yet".into()
                 }

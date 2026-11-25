@@ -132,8 +132,10 @@ const FORECAST: &str = "Weather forecast";
 /// of use: the default first.
 const FORECAST_SHOWS: [(&str, ForecastShow); 3] = [
     ("Next change", ForecastShow::Next),
-    ("Every 3 hours", ForecastShow::Hours),
-    ("5 days", ForecastShow::Days),
+    // The modes, not counts: as many hours or days show as the width
+    // holds, so a count would promise what a narrow one cannot show.
+    ("Hours", ForecastShow::Hours),
+    ("Days", ForecastShow::Days),
 ];
 
 fn forecast_word(show: ForecastShow) -> &'static str {
@@ -669,7 +671,18 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
             "show",
             "Show",
             segmented(&FORECAST_SHOWS.map(|(w, _)| w)),
-            "Wider, it shows more hours or days.".into(),
+            match get("show").as_str() {
+                "Hours" => format!(
+                    "Every {} hours, as many as fit: wider, it shows more, up to {}.",
+                    nexus_core::forecast::HOUR_STEP,
+                    nexus_core::forecast::HOUR_SLOTS
+                ),
+                "Days" => format!(
+                    "The days ahead, as many as fit: wider, it shows more, up to {}.",
+                    nexus_core::forecast::DAY_SLOTS
+                ),
+                _ => "The next change in the weather, and when it comes.".into(),
+            },
         ),
         SLIDER => {
             add("label", "Label", Kind::Text, String::new());
@@ -898,9 +911,8 @@ fn reading_help(signal: &str, ctx: &Context) -> String {
         return String::new();
     }
     match ctx.signals.get(signal.trim()) {
-        None if is_weather(signal) && !ctx.town => {
-            "No town is set yet, so there is no weather to show.".into()
-        }
+        // The form's Town row says there is none, once.
+        None if is_weather(signal) && !ctx.town => String::new(),
         None if is_weather(signal) => {
             "The weather has not come in yet: it is looked up every 15 minutes.".into()
         }
@@ -1244,13 +1256,11 @@ mod tests {
             .find(|f| f.key == "show")
             .unwrap();
         assert_eq!(show.value, "Next change");
-        assert!(
-            matches!(&show.kind, Kind::Segmented(o) if o == &["Next change", "Every 3 hours", "5 days"])
-        );
-        assert_eq!(show.kind.option(2), Some("5 days"));
+        assert!(matches!(&show.kind, Kind::Segmented(o) if o == &["Next change", "Hours", "Days"]));
+        assert_eq!(show.kind.option(2), Some("Days"));
         assert_eq!(show.kind.option(3), None);
         assert_eq!(show.kind.option(-1), None);
-        let Outcome::Send(sent) = apply(&w, &Values::new(), "show", "5 days", &ctx) else {
+        let Outcome::Send(sent) = apply(&w, &Values::new(), "show", "Days", &ctx) else {
             panic!("a new choice is sent");
         };
         let Widget::Forecast { show, width, .. } = sent else {
@@ -1260,7 +1270,7 @@ mod tests {
     }
 
     /// Without a town, a weather widget's form says so first, with the way
-    /// to it, and gives the real reason there is no reading, in plain words.
+    /// to it, and says it only there.
     #[test]
     fn the_weather_asks_for_a_town_first() {
         let mut ctx = ctx();
@@ -1288,10 +1298,7 @@ mod tests {
             .find(|f| f.key == "signal")
             .unwrap()
             .help;
-        assert!(help.contains("No town"), "{help}");
-        for word in ["signal", "published"] {
-            assert!(!help.contains(word), "{help}");
-        }
+        assert!(help.is_empty(), "the Town row says it, once: {help}");
         ctx.town = true;
         for w in [&forecast, &weather] {
             let f = fields(&flatten(w, &ctx), &ctx);

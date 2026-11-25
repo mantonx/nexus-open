@@ -13,7 +13,7 @@
 
 import { AboutSlint, ScrollView, Palette, ListView } from "std-widgets.slint";
 import { Theme, Icon, Glyph } from "theme.slint";
-import { Button, IconButton, Segmented, Chip, TextField, Select, MenuRow, MenuDivider, KeyCap, Shortcut, Label, Hint, Heading, FocusRing } from "controls.slint";
+import { Button, IconButton, Segmented, Chip, TextField, Select, MenuRow, MenuDivider, KeyCap, Shortcut, Label, Hint, Heading, FocusRing, Waiting } from "controls.slint";
 import { Field, FieldRow, PickRow, Trigger, Grid } from "form.slint";
 
 export { Theme, Field, PickRow, Trigger }
@@ -81,6 +81,12 @@ export struct Starter {
     image: image,
 }
 
+/// A command to type, and what it does.
+export struct TermLine {
+    does: string,
+    line: string,
+}
+
 /// The header's status: see status.rs.
 export struct StatusView {
     tone: string,
@@ -97,8 +103,12 @@ export struct StatusView {
     away: bool,
     banner: string,
     banner-body: string,
+    /// What the checks found, in words, when no banner says it.
     detail: string,
+    /// The fix as terminal commands: only those that fit this state.
+    commands: [TermLine],
 }
+
 
 /// A news feed in Settings: its name (its title, else its site) and
 /// address.
@@ -517,6 +527,10 @@ export component AppWindow inherits Window {
     /// widget that has none).
     property <bool> focus-town;
     property <bool> copied;
+    /// The status popover's command just copied, or -1.
+    property <int> copied-line: -1;
+    /// The banner's height, for the popover to open under it.
+    property <length> banner-h;
     /// Pages being reordered by their grip: from and to, or -1.
     property <int> reorder-from: -1;
     property <int> reorder-to: -1;
@@ -532,14 +546,18 @@ export component AppWindow inherits Window {
     property <length> strip-w: 640 * unit;
     property <length> strip-h: 48 * unit;
     property <length> strip-col: strip-w + 2 * bezel;
-    /// The content column: exactly as wide as the strip, at 2x and at 1x,
-    /// so the strips, their captions, the toolbar and the settings share
-    /// one left edge, centred together in a wide window.
-    property <length> column-w: strip-col;
+    /// The content column. At 2x exactly as wide as the strip, so the
+    /// strips, their captions, the toolbar and the settings share one left
+    /// edge, centred together in a wide window. At 1x the window is small:
+    /// the column then takes all of its width, the strips at its left.
+    property <length> column-w: zoom == 2 ? strip-col : max(strip-col, board.visible-width - 2 * board-pad);
+    /// The settings card: as wide as its form (or the widget's example),
+    /// never wider, so no half of it is left empty.
+    property <length> card-w: min(column-w, 36px + Grid.label + 16px + max(Grid.control-max, root.example-width * root.unit + 8px));
     /// A banner's line: about 70 characters of body text.
     property <length> measure: 520px;
-    /// The banner under the header is up: the chip's popover then points
-    /// to it instead of saying it again.
+    /// The banner under the header is up: the chip's popover then opens
+    /// under it, and does not say it again.
     property <bool> banner-up: (root.not-live || root.status.here) && root.status.banner != "";
 
     public function show-sheet(name: string) {
@@ -575,6 +593,17 @@ export component AppWindow inherits Window {
         clip.clear-selection();
         root.copied = true;
     }
+    // One command from the status popover, the same way.
+    line-clip := TextInput {
+        visible: false;
+    }
+    function copy-line(line: string, i: int) {
+        line-clip.text = line;
+        line-clip.select-all();
+        line-clip.copy();
+        line-clip.clear-selection();
+        root.copied-line = i;
+    }
 
     function act(a: string) {
         if a == "start" || a == "retry" {
@@ -594,6 +623,13 @@ export component AppWindow inherits Window {
         running: root.copied;
         triggered => {
             root.copied = false;
+        }
+    }
+    Timer {
+        interval: 2s;
+        running: root.copied-line >= 0;
+        triggered => {
+            root.copied-line = -1;
         }
     }
 
@@ -692,14 +728,16 @@ export component AppWindow inherits Window {
                     Rectangle {
                         horizontal-stretch: 1;
                     }
-                    // The status chip.
-                    VerticalLayout {
-                        alignment: center;
+                    // The status: one fixed slot. Only its colour, icon and
+                    // word change with the state; its shape never does, and
+                    // its right edge stays put, so the header never moves.
+                    status-slot := Rectangle {
+                        width: 180px;
                         status-chip := Rectangle {
                             height: 32px;
-                            // One fixed slot: a longer state never moves
-                            // the header's middle.
-                            width: 214px;
+                            y: (parent.height - self.height) / 2;
+                            width: min(parent.width, chip-row.preferred-width);
+                            x: parent.width - self.width;
                             border-radius: 16px;
                             // A failed start is the one real fault: critical.
                             // What the app cannot do yet (no strip, in use, no
@@ -707,11 +745,7 @@ export component AppWindow inherits Window {
                             // amber: amber means a reading.
                             property <bool> failed: root.status.tone == "failed";
                             property <bool> attention: root.status.tone == "app" || root.status.tone == "stopped" || root.status.tone == "starting";
-                            background: failed ? Theme.crit-surface
-                                : attention ? (chip-touch.has-hover ? Theme.surface-2.darker(0.04) : Theme.surface-2)
-                                : chip-touch.has-hover ? Theme.surface-2 : transparent;
-                            border-width: failed || attention ? 1px : 0px;
-                            border-color: failed ? Theme.crit.transparentize(0.4) : Theme.line-strong;
+                            background: chip-touch.has-hover ? Theme.surface-2 : transparent;
                             accessible-role: button;
                             accessible-label: @tr("Status: {}. Opens the details and fixes.", root.status.chip);
                             accessible-action-default => {
@@ -728,7 +762,6 @@ export component AppWindow inherits Window {
                                 }
                                 Text {
                                     text: root.status.chip == "" ? @tr("Checking…") : root.status.chip;
-                                    horizontal-stretch: 1;
                                     overflow: elide;
                                     font-family: Theme.font;
                                     font-size: Theme.size-label;
@@ -777,14 +810,13 @@ export component AppWindow inherits Window {
                         Button {
                             tier: "quiet";
                             fit: false;
-                            min-width: 170px;
+                            min-width: 110px;
                             preferred-width: 230px;
                             max-width: 230px;
                             icon: Glyph.undo;
                             text: root.undo-label == "" ? @tr("Undo") : @tr("Undo: {}", root.undo-label);
                             label: root.undo-label == "" ? @tr("Undo: nothing to undo") : @tr("Undo: {}", root.undo-label);
                             enabled: root.connected && root.undo-label != "";
-                            locked: !root.connected;
                             clicked => {
                                 root.undo();
                             }
@@ -796,7 +828,6 @@ export component AppWindow inherits Window {
                             icon: Glyph.redo;
                             label: root.redo-label == "" ? @tr("Redo: nothing to redo") : @tr("Redo: {}", root.redo-label);
                             enabled: root.connected && root.redo-label != "";
-                            locked: !root.connected;
                             clicked => {
                                 root.redo();
                             }
@@ -851,6 +882,12 @@ export component AppWindow inherits Window {
                             if root.banner-up: offline := Rectangle {
                                 property <bool> failed: root.status.tone == "failed";
                                 height: offline-row.preferred-height + 20px;
+                                init => {
+                                    root.banner-h = self.height;
+                                }
+                                changed height => {
+                                    root.banner-h = self.height;
+                                }
                                 border-radius: Theme.r-surface;
                                 background: failed ? Theme.crit-surface : Theme.surface;
                                 border-width: 1px;
@@ -923,24 +960,8 @@ export component AppWindow inherits Window {
                                             height: Theme.control-h + 6px;
                                             spacing: 8px;
                                             alignment: start;
-                                            if root.status.tone == "starting": VerticalLayout {
-                                                alignment: center;
-                                                Rectangle {
-                                                    height: 3px;
-                                                    width: 240px;
-                                                    border-radius: 1.5px;
-                                                    background: Theme.line-strong;
-                                                    clip: true;
-                                                    accessible-role: progress-indicator;
-                                                    accessible-label: @tr("Waiting for the service to answer");
-                                                    Rectangle {
-                                                        property <float> t: mod(animation-tick() / 1ms, 1600) / 1600;
-                                                        width: parent.width * 0.35;
-                                                        x: (parent.width + self.width) * self.t - self.width;
-                                                        border-radius: 1.5px;
-                                                        background: Theme.text-2;
-                                                    }
-                                                }
+                                            if root.status.tone == "starting": Waiting {
+                                                label: @tr("Waiting for the service to answer");
                                             }
                                             // One order everywhere, the first the
                                             // main one.
@@ -1020,10 +1041,10 @@ export component AppWindow inherits Window {
                                     background: Theme.act-line;
                                 }
 
-                                // The name and the strip, as one: at 1x they are
-                                // centred in the column, which the settings use.
+                                // The name and the strip, as one, at the
+                                // column's left edge.
                                 HorizontalLayout {
-                                    alignment: center;
+                                    alignment: start;
                                     VerticalLayout {
                                         width: root.strip-col;
                                     // Name line.
@@ -1429,7 +1450,12 @@ export component AppWindow inherits Window {
                                 // Under the strip being edited: what is happening,
                                 // and what can be done to it. At 1x the words get
                                 // their own line above the buttons, so none is cut.
-                                if row.active: VerticalLayout {
+                                // As wide as the strip, so its buttons end
+                                // where the strip does.
+                                if row.active: HorizontalLayout {
+                                    alignment: start;
+                                VerticalLayout {
+                                    width: root.strip-col;
                                     padding-top: 8px;
                                     padding-bottom: 8px;
                                     spacing: 4px;
@@ -1478,7 +1504,6 @@ export component AppWindow inherits Window {
                                                 icon: Glyph.widths;
                                                 text: @tr("Equal widths");
                                                 enabled: root.editable && root.zones.length > 1;
-                                                locked: !root.editable;
                                                 label: @tr("Give every widget on {} the same width", row.name);
                                                 clicked => {
                                                     root.equal-widths();
@@ -1498,21 +1523,25 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
+                                }
                                 if row.active && !root.can-add && !root.trying && root.editable: Hint {
+                                    max-width: root.strip-col;
                                     text: root.add-reason;
                                     horizontal-alignment: right;
                                 }
 
                                 // The settings, attached to the strip.
-                                if row.active && !root.trying: panel := Rectangle {
-                                    property <length> most: max(220px, board.visible-height - root.strip-h - 2 * root.bezel - 34px - 50px - 32px);
-                                    height: min(panel-body.preferred-height, self.most);
+                                // It grows with its form; the page scrolls,
+                                // never the card.
+                                if row.active && !root.trying: HorizontalLayout {
+                                    alignment: start;
+                                    panel := Rectangle {
+                                    width: root.card-w;
+                                    height: panel-body.preferred-height;
                                     border-radius: Theme.r-surface;
                                     background: Theme.surface;
                                     border-width: 1px;
                                     border-color: Theme.line;
-                                    clip: true;
-                                    panel-scroll := ScrollView {
                                         panel-body := VerticalLayout {
                                             padding: 18px;
                                             padding-top: 14px;
@@ -1562,7 +1591,6 @@ export component AppWindow inherits Window {
                                                     text: @tr("Remove");
                                                     label: @tr("Remove {} from the page (undo brings it back)", root.panel-title);
                                                     enabled: root.editable;
-                                                    locked: !root.editable;
                                                     clicked => {
                                                         root.delete-widget();
                                                     }
@@ -1573,7 +1601,6 @@ export component AppWindow inherits Window {
                                                     icon: Glyph.trash;
                                                     text: @tr("Delete page");
                                                     enabled: root.editable && root.page-count > 1;
-                                                    locked: !root.editable;
                                                     label: @tr("Delete the page {} (undo brings it back)", root.panel-title);
                                                     clicked => {
                                                         root.delete-page();
@@ -1710,7 +1737,8 @@ export component AppWindow inherits Window {
                                                 spacing: 16px;
                                                 Icon {
                                                     glyph: Glyph.keyboard;
-                                                    color: root.editable ? Theme.text-3 : Theme.text-off;
+                                                    color: Theme.text-3;
+                                                    opacity: root.editable ? 1 : 0.4;
                                                 }
                                                 Shortcut {
                                                     enabled: root.editable;
@@ -2089,7 +2117,11 @@ export component AppWindow inherits Window {
 
     status-menu := PopupWindow {
         x: max(8px, status-chip.absolute-position.x - root.absolute-position.x + status-chip.width - self.width);
-        y: header.height - 6px;
+        // With a banner up, it opens under the banner, never over it:
+        // the banner says what is wrong and what to do; this adds only
+        // the commands and the diagnostics.
+        y: root.banner-up ? max(header.height - 6px, header.height + 12px + root.banner-h + board.content-y + 8px)
+            : header.height - 6px;
         width: 440px;
         close-policy: PopupClosePolicy.close-on-click-outside;
         Rectangle {
@@ -2102,19 +2134,12 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 18px;
                 spacing: 10px;
-                Text {
+                if !root.banner-up: Text {
                     text: root.status.headline;
                     font-family: Theme.font;
                     font-size: Theme.size-title;
                     font-weight: 600;
                     color: Theme.text;
-                    wrap: word-wrap;
-                    accessible-role: text;
-                }
-                if root.banner-up: Text {
-                    text: @tr("What to do is in the banner under the header.");
-                    font-family: Theme.font;
-                    color: Theme.text-2;
                     wrap: word-wrap;
                     accessible-role: text;
                 }
@@ -2125,20 +2150,8 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                     accessible-role: text;
                 }
-                if !root.banner-up && root.status.tone == "starting": Rectangle {
-                    height: 3px;
-                    border-radius: 1.5px;
-                    background: Theme.line;
-                    clip: true;
-                    accessible-role: progress-indicator;
-                    accessible-label: @tr("Waiting for the service to answer");
-                    Rectangle {
-                        property <float> t: mod(animation-tick() / 1ms, 1600) / 1600;
-                        width: parent.width * 0.35;
-                        x: (parent.width + self.width) * self.t - self.width;
-                        border-radius: 1.5px;
-                        background: Theme.text-2;
-                    }
+                if !root.banner-up && root.status.tone == "starting": Waiting {
+                    label: @tr("Waiting for the service to answer");
                 }
                 // The banner's buttons, when there is no banner: one
                 // primary on screen at a time.
@@ -2160,6 +2173,67 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                     accessible-role: text;
                 }
+                if !root.banner-up && root.status.detail != "": Hint {
+                    text: root.status.detail;
+                }
+                // Only the commands that fit this state, one to a line,
+                // each copied on its own.
+                if root.status.commands.length > 0: VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: @tr("In a terminal");
+                        font-family: Theme.font;
+                        font-size: Theme.size-label;
+                        font-weight: 600;
+                        color: Theme.text-2;
+                        accessible-role: text;
+                    }
+                    for c[ci] in root.status.commands: VerticalLayout {
+                        spacing: 3px;
+                        if c.does != "": Text {
+                            text: c.does;
+                            font-family: Theme.font;
+                            font-size: Theme.size-small;
+                            color: Theme.text-3;
+                            accessible-role: text;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 6px;
+                                background: Theme.surface-2;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    padding-top: 6px;
+                                    padding-bottom: 6px;
+                                    TextInput {
+                                        text: c.line;
+                                        read-only: true;
+                                        single-line: false;
+                                        wrap: word-wrap;
+                                        font-family: Theme.mono;
+                                        font-size: 12px;
+                                        color: Theme.text;
+                                        vertical-alignment: center;
+                                        accessible-label: c.does != "" ? c.does : @tr("Command");
+                                    }
+                                }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                IconButton {
+                                    icon: root.copied-line == ci ? Glyph.check : Glyph.copy;
+                                    label: root.copied-line == ci ? @tr("Copied") : @tr("Copy: {}", c.line);
+                                    clicked => {
+                                        root.copy-line(c.line, ci);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 HorizontalLayout {
                     alignment: start;
                     Button {
@@ -2170,33 +2244,6 @@ export component AppWindow inherits Window {
                         enabled: root.diagnostics != "";
                         clicked => {
                             root.copy-diagnostics();
-                        }
-                    }
-                }
-                if root.status.detail != "": VerticalLayout {
-                    spacing: 4px;
-                    Hint {
-                        text: @tr("For those who use a terminal:");
-                    }
-                    Rectangle {
-                        border-radius: 8px;
-                        background: Theme.surface-2;
-                        // Sized by its words, so a long command wraps
-                        // inside rather than running out of the box.
-                        VerticalLayout {
-                            padding: 8px;
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            TextInput {
-                                text: root.status.detail;
-                                read-only: true;
-                                single-line: false;
-                                wrap: word-wrap;
-                                font-family: "monospace";
-                                font-size: 12px;
-                                color: Theme.text-2;
-                                accessible-label: @tr("The fix as commands");
-                            }
                         }
                     }
                 }
@@ -3298,7 +3345,7 @@ export component AppWindow inherits Window {
                     read-only: true;
                     single-line: false;
                     wrap: word-wrap;
-                    font-family: "monospace";
+                    font-family: Theme.mono;
                     font-size: 12px;
                     color: Theme.text-2;
                     accessible-label: @tr("The service's log");

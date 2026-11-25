@@ -61,8 +61,85 @@ pub struct View {
     /// what follows it. Empty when all is well.
     pub banner: String,
     pub banner_body: String,
-    /// The fix as commands, for those who want it; may be empty.
+    /// What the checks found, in words, when there is no banner to say
+    /// it; may be empty.
     pub detail: String,
+    /// The fix as terminal commands, for those who use one: what each
+    /// does, and the command, one per line. Only the ones that fit this
+    /// state; none when the window has nothing to add.
+    pub commands: Vec<(String, String)>,
+}
+
+/// A command to type, and what it does.
+fn command(does: &str, line: &str) -> (String, String) {
+    (does.into(), line.into())
+}
+
+/// The commands in a doctor's fix, which mixes words and commands: each
+/// command, with the words that introduce it ("…, then apply it:") or
+/// that lead it ("Start it: …"). The words alone are said elsewhere.
+fn commands_in(fix: &str) -> Vec<(String, String)> {
+    let is_command = |l: &str| {
+        ["sudo ", "systemctl ", "journalctl ", "nexusd", "nexusctl "]
+            .iter()
+            .any(|c| l.starts_with(c))
+    };
+    let mut out = Vec::new();
+    let mut lead = "";
+    for line in fix.lines().map(str::trim) {
+        if is_command(line) {
+            out.push(command(lead, line));
+            lead = "";
+        } else if let Some((does, cmd)) = line.split_once(": ").filter(|(_, c)| is_command(c)) {
+            out.push(command(does, cmd));
+            lead = "";
+        } else {
+            lead = line.strip_suffix(':').unwrap_or("");
+        }
+    }
+    out
+}
+
+const RESET: &str = "systemctl --user reset-failed nexusd";
+const START: &str = "systemctl --user start nexusd";
+const RESTART: &str = "systemctl --user restart nexusd";
+const JOURNAL: &str = "journalctl --user -u nexusd -e";
+
+/// Not running, and it has not failed: start it, and read why it stopped.
+fn stopped_commands(installed: bool) -> Vec<(String, String)> {
+    if installed {
+        vec![
+            command("Start it", START),
+            command("Why it stopped", JOURNAL),
+        ]
+    } else {
+        vec![command("Start it", "nexusd run")]
+    }
+}
+
+/// A start that failed: clear the failure, start it, read why.
+pub fn failed_commands(installed: bool) -> Vec<(String, String)> {
+    if installed {
+        vec![
+            command("Clear the failure", RESET),
+            command("Start it", START),
+            command("Why it stopped", JOURNAL),
+        ]
+    } else {
+        stopped_commands(false)
+    }
+}
+
+/// It runs, but does not answer: restart it, and read what it last did.
+fn stuck_commands(installed: bool) -> Vec<(String, String)> {
+    if installed {
+        vec![
+            command("Restart it", RESTART),
+            command("What it last did", JOURNAL),
+        ]
+    } else {
+        stopped_commands(false)
+    }
 }
 
 /// The status for the chip. `status` is the daemon's latest answer, or
@@ -86,7 +163,7 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
             actions: vec!["start", "log"],
             banner: "The service is not running".into(),
             banner_body: STOPPED.into(),
-            detail: fix_of("daemon"),
+            commands: stopped_commands(installed()),
             ..View::default()
         };
     };
@@ -100,7 +177,7 @@ pub fn view(status: Option<&Status>, checks: &[Check]) -> View {
                 "The strip shows the default layout, and nothing changed here is kept, because the file that holds your layouts cannot be used: {e}. The log may say more."
             ),
             actions: vec!["log"],
-            detail: fix_of("store"),
+            commands: commands_in(&fix_of("store")),
             ..View::default()
         };
     }
@@ -144,7 +221,7 @@ fn device_view(why: &str, fix: &str) -> View {
         banner_body: format!("{body} {STILL_EDITABLE}"),
         body,
         away: true,
-        detail: fix.to_string(),
+        commands: commands_in(fix),
         ..View::default()
     };
     if why.contains("--no-device") {
@@ -427,7 +504,15 @@ fn could_not_run(e: &std::io::Error) -> String {
 /// after more, starting it again is not the way forward, so the window
 /// offers to run it itself and to report the problem.
 pub fn did_not_start(v: View, why: &str, tries: u32) -> View {
-    failed(v, "Did not start", "The service did not start", why, tries)
+    let commands = failed_commands(installed());
+    failed(
+        v,
+        "Did not start",
+        "The service did not start",
+        why,
+        tries,
+        commands,
+    )
 }
 
 /// A start that ran, but the service has not answered since: not the
@@ -439,10 +524,18 @@ pub fn not_answering(v: View, tries: u32) -> View {
         "The service is not answering",
         "It was started, but has not answered since.",
         tries,
+        stuck_commands(installed()),
     )
 }
 
-fn failed(mut v: View, chip: &str, headline: &str, why: &str, tries: u32) -> View {
+fn failed(
+    mut v: View,
+    chip: &str,
+    headline: &str,
+    why: &str,
+    tries: u32,
+    commands: Vec<(String, String)>,
+) -> View {
     v.tone = "failed";
     v.icon = "fail";
     if tries < 2 {
@@ -460,18 +553,8 @@ fn failed(mut v: View, chip: &str, headline: &str, why: &str, tries: u32) -> Vie
     }
     v.banner = v.headline.clone();
     v.banner_body = v.body.clone();
-    v.detail = failed_detail(installed());
+    v.commands = commands;
     v
-}
-
-/// The fix as commands after a failed start, for those who use a
-/// terminal: clear the failure, start it, read why.
-pub fn failed_detail(installed: bool) -> String {
-    if installed {
-        "Clear the failure: systemctl --user reset-failed nexusd\nStart it: systemctl --user start nexusd\nWhy it stopped: journalctl --user -u nexusd -e".into()
-    } else {
-        "nexusd run".into()
-    }
 }
 
 /// The daemon run from this window stopped, or could not start: the end
@@ -485,15 +568,17 @@ pub fn here_failed(mut v: View, why: &str) -> View {
         v.headline = "The service runs, but does not answer".into();
         v.body =
             "This window does not run a second one. Report the problem, so it can be fixed.".into();
+        v.commands = stuck_commands(installed());
     } else {
         v.chip = "Did not run".into();
         v.headline = "It did not run from this window either".into();
         v.body = format!("{why} Report the problem, so it can be fixed.");
+        // In a terminal, its own words say why it stops.
+        v.commands = vec![command("Run it here, to see why it stops", "nexusd run")];
     }
     v.banner = v.headline.clone();
     v.banner_body = v.body.clone();
     v.actions = vec!["report", "log"];
-    v.detail = failed_detail(installed());
     v
 }
 
@@ -510,14 +595,13 @@ pub fn from_window(mut v: View) -> View {
     } else {
         v.tone = "note";
         v.icon = "info";
-        v.chip = "Running from this window".into();
+        v.chip = "Running here".into();
         v.headline = "Running from this window for now".into();
         v.body = note.into();
         v.banner = v.headline.clone();
         v.banner_body = note.into();
     }
     v.actions = vec!["report", "log"];
-    v.detail = failed_detail(installed());
     v
 }
 
@@ -534,6 +618,8 @@ pub fn starting(mut v: View) -> View {
     v.banner = v.headline.clone();
     v.banner_body = v.body.clone();
     v.actions = Vec::new();
+    // It is being started: nothing to type meanwhile.
+    v.commands = Vec::new();
     v
 }
 
@@ -706,9 +792,18 @@ mod tests {
                 assert!(!v.body.contains(word), "{}", v.body);
             }
         }
-        assert!(
-            failed_detail(true)
-                .starts_with("Clear the failure: systemctl --user reset-failed nexusd\n")
+        // Each state its own commands, or none.
+        assert_eq!(
+            failed_commands(true)[0],
+            command("Clear the failure", RESET)
+        );
+        assert_eq!(stuck_commands(true)[0].1, RESTART);
+        assert!(here.commands.is_empty(), "nothing to type while it runs");
+        assert!(wait.commands.is_empty());
+        assert_ne!(refused.commands, gone.commands);
+        assert_ne!(
+            once.commands,
+            did_not_start(view(None, &[]), "No reason.", 1).commands
         );
         assert!(report_address().ends_with("/issues/new"));
         assert!(nexus_control::links::checked_link(&report_address()).is_ok());

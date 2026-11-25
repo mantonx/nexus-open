@@ -719,8 +719,8 @@ README clip (now of the new strip), release verification.
   - The widget form keeps Width, Label and Signal in view; Bar
     starts/ends, Warn, Critical and Note fold under "Limits and scale",
     open at first only when one is set, its summary saying what is set.
-  - Forecast in the form: a "Show" choice (Next change / Every 3 hours /
-    5 days) and a gallery preset; snow, storm and fog are in the window's
+  - Forecast in the form: a "Show" choice (Next change / Hours / Days,
+    renamed in round three) and a gallery preset; snow, storm and fog are in the window's
     icon font. Two bugs found on the way: the store refused the
     `forecast` type (migration 6 adds it), and no segmented choice in the
     form was ever applied (the slider's Controls neither).
@@ -749,6 +749,34 @@ README clip (now of the new strip), release verification.
   - Locked editing: Undo, Redo, Equal widths, Delete page and Remove take
     the same flat, faint look as Add; the keyboard row's keys lose their
     caps.
+  Round three, after reviews of 29/40 in both modes (also provisional):
+  - Off is faded, never heavier: a disabled button, icon button or key
+    keeps its own shape (no added fill or box) at 40% opacity. The flat
+    well of round two is gone, and so is the `locked` property.
+  - The status is one fixed slot of 180 px in the header: only its
+    colour, icon and word change (no pill, no border), its right edge
+    stays put. "Running from this window" is "Running here" in the chip.
+  - Say it once. With a banner up, the chip's popover opens under the
+    banner, never over it, and holds only the terminal commands and Copy
+    diagnostics. Each state has its own commands (a failed start: clear,
+    start, why; not answering: restart, its log; a run from the window
+    that stopped: `nexusd run` to see why; running from the window or
+    starting: none), one to a line in the desktop's monospace face, each
+    with its own copy button. "No town" is said once, on the Town row.
+    The caption under the strip no longer repeats the form's title: the
+    title says the size and place ("Medium, 200 px, 3 of 5") and the
+    caption only what can be done on the strip.
+  - The widget form has no scroll of its own: the card grows and the
+    page scrolls. The card is as wide as its form (or the forecast's
+    example), so no half of it is empty. At 1x (a window under about
+    1,330 px) the column takes the whole width, the strip and the card at
+    its left; at 2x it is the strip's width, as before. Undo can narrow to
+    110 px, so the header keeps its right gutter at 1024 px.
+  - A forecast's Show says the mode, not a count ("Hours", "Days"): as
+    many as fit are shown, and the help says up to how many.
+  - Waiting for the service is three dots, not a bar that read as a
+    divider.
   Not done: a window opened while the service is already down still
   shows no pages (it has never read them); reading the store directly
-  would fix that.
+  would fix that. The strip's own forecast card still asks for a town
+  under "Weather" (crates/nexus-core/src/widget.rs, left alone).
