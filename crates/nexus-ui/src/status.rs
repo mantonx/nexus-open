@@ -483,12 +483,14 @@ pub fn failed_detail(installed: bool) -> String {
 pub fn here_failed(mut v: View, why: &str) -> View {
     v.tone = "failed";
     v.icon = "fail";
-    v.chip = "Did not start".into();
+    v.chip = "Did not run".into();
     v.headline = "It did not run from this window either".into();
     v.body = format!(
         "{why} Report the problem: Nexus Open copies the diagnostics for you to paste into it. Your layouts are safe."
     );
-    v.banner = "The service did not start, so nothing here can be changed.".into();
+    v.banner =
+        "The service does not answer and this window cannot run it, so nothing here can be changed."
+            .into();
     v.banner_body = v.body.clone();
     v.actions = vec!["report", "log"];
     v.detail = failed_detail(installed());
@@ -682,6 +684,7 @@ mod tests {
         assert_eq!(again.actions[0], "run-here");
         let gone = here_failed(view(None, &[]), "It stopped.");
         assert_eq!(gone.actions, ["report", "log"]);
+        assert_eq!(gone.body.matches("Report the problem").count(), 1);
         for v in [&once, &twice, &again, &gone] {
             assert_eq!(v.body, v.banner_body, "one story");
             for word in ["systemctl", "journalctl", "terminal"] {

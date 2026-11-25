@@ -692,3 +692,38 @@ README clip (now of the new strip), release verification.
   Matt's recorded taps, swipes and lift bounces; frames `picker-*`,
   `layout-name*`. Not yet tried on the real strip: whether 24 px and
   72 px feel right under a finger is the first thing to check.
+- 2026-11-25 — **The window's follow-up (provisional, Matt to overturn
+  any of it).** After reviews of 31/40 (light) and 30/40 (dark):
+  - Album art: the window asks the daemon for the cover when
+    `media.art` changes and draws it in its previews; `media.art` is not
+    offered as a reading. Settings has "Album covers": use covers from
+    the player / only covers stored on this computer / never, with one
+    line saying the first fetches from the player's image host. It saves
+    through `set-media`; an exported layout leaves `[media]` out.
+  - No terminal needed when the service will not start. "Start the
+    service" runs `reset-failed` then `start`. After a second failure the
+    banner offers **Run it from this window for now** (`nexusd run` as the
+    window's child, tied to it by a pipe: it ends when the window does,
+    and it is refused while the service answers or systemd says it is
+    active, so there is never a second daemon on the strip), **Report the
+    problem** (copies the diagnostics, opens the new-issue page with the
+    safe link opener, and says to paste them) and **Open the log**.
+    Commands stay under "For those who use a terminal".
+  - Banner and popover share one button order and one primary;
+    "Starting…" shows once; "If it stops again" is gone.
+  - Blocked editing looks blocked: fields dim and stop responding, the
+    keyboard legend and actions are off, one line with a lock says why;
+    disabled text uses `text-off` (3:1 or better).
+  - One column: previews, captions, toolbar and editor share one left
+    edge, at most the strip's width, centred on wide windows.
+  - The widget form keeps Width, Label and Signal in view; Bar
+    starts/ends, Warn, Critical and Note fold under "Limits and scale",
+    open at first only when one is set, its summary saying what is set.
+  - Forecast in the form: a "Show" choice (Next change / Every 3 hours /
+    5 days) and a gallery preset; snow, storm and fog are in the window's
+    icon font. Two bugs found on the way: the store refused the
+    `forecast` type (migration 6 adds it), and no segmented choice in the
+    form was ever applied (the slider's Controls neither).
+  Proof: the rig, with a stub in front of systemctl, journalctl and
+  xdg-open, and a fake MPRIS player serving a generated cover. Not yet
+  on a real failing service, nor with a real player.

@@ -92,7 +92,7 @@ pub fn start() -> Result<(), String> {
         if let Ok(out) = Command::new(&argv[0]).args(&argv[1..]).output()
             && says_active(&String::from_utf8_lossy(&out.stdout))
         {
-            return Err("The service is still running, though it does not answer, so this window does not start a second one. Report the problem, so it can be fixed.".into());
+            return Err("The service is still running, though it does not answer, so this window does not start a second one.".into());
         }
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;

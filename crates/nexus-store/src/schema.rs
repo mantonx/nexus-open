@@ -203,4 +203,28 @@ CREATE INDEX action_target ON action(target_page);
 ALTER TABLE settings ADD COLUMN album_art TEXT NOT NULL DEFAULT 'all'
   CHECK (album_art IN ('local', 'all', 'off'));
 "#,
+    // 6: the forecast widget, a new kind; its `show` is in props. Only the
+    // widget table is rebuilt, as in migration 4: the action table points
+    // to it by name and finds the new one.
+    r#"
+CREATE TABLE widget_6 (
+  id          INTEGER PRIMARY KEY,
+  page_id     INTEGER REFERENCES page(id) ON DELETE CASCADE,
+  takeover_id INTEGER REFERENCES takeover(id) ON DELETE CASCADE,
+  position    INTEGER NOT NULL,
+  type        TEXT NOT NULL
+              CHECK (type IN ('clock', 'value', 'rate', 'slider', 'media', 'key', 'news',
+                              'forecast')),
+  width       INTEGER NOT NULL CHECK (width BETWEEN 40 AND 640),
+  props       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props)),
+  note        TEXT NOT NULL DEFAULT '',
+  CHECK ((page_id IS NULL) <> (takeover_id IS NULL))
+);
+INSERT INTO widget_6 (id, page_id, takeover_id, position, type, width, props, note)
+  SELECT id, page_id, takeover_id, position, type, width, props, note FROM widget;
+DROP TABLE widget;
+ALTER TABLE widget_6 RENAME TO widget;
+CREATE INDEX widget_on_page     ON widget(page_id, position);
+CREATE INDEX widget_on_takeover ON widget(takeover_id, position);
+"#,
 ];

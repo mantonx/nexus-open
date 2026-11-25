@@ -2005,10 +2005,8 @@ impl Editor {
             .shown
             .iter()
             .find(|f| f.key == key)
-            .and_then(|f| match &f.kind {
-                Kind::Choice(options) => options.get(usize::try_from(index).ok()?).cloned(),
-                _ => None,
-            });
+            .and_then(|f| f.kind.option(index))
+            .map(str::to_owned);
         if let Some(option) = option {
             self.field_changed(key, &option);
         }

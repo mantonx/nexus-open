@@ -1002,9 +1002,13 @@ this system so the two surfaces belong together:
   starting, or the strip is unplugged, held by another program, without
   access, or needs a replug), the previews dim and a banner under the
   header says why and what to do, in the same words as the status chip's
-  popover. The chip stays neutral: it is a state, not a reading. Only a
-  start that failed is critical. While the service runs, editing stays on
-  and says so.
+  popover, with the same buttons in the same order and one primary. The
+  chip stays neutral: it is a state, not a reading. Only a start that
+  failed is critical. While the service runs, editing stays on and says
+  so; while it does not, the fields dim, stop responding, and one line
+  says why. A start that fails twice offers to run the service from the
+  window for now, and to report the problem; terminal commands appear
+  only under "For those who use a terminal".
 - **The strip itself**: wherever the window shows the strip, it shows these
   exact pixels (the preview is the live frame), so the window should frame
   it like an object on a walnut desk, not redraw it.

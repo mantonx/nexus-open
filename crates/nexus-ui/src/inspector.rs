@@ -66,6 +66,19 @@ pub enum Kind {
     Disclosure,
 }
 
+impl Kind {
+    /// The option at a position in a list or a segmented row: what the
+    /// window sends back when one is chosen.
+    pub fn option(&self, index: i32) -> Option<&str> {
+        match self {
+            Kind::Choice(options) | Kind::Segmented(options) => options
+                .get(usize::try_from(index).ok()?)
+                .map(String::as_str),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Field {
     pub key: String,
@@ -1200,6 +1213,9 @@ mod tests {
         assert!(
             matches!(&show.kind, Kind::Segmented(o) if o == &["Next change", "Every 3 hours", "5 days"])
         );
+        assert_eq!(show.kind.option(2), Some("5 days"));
+        assert_eq!(show.kind.option(3), None);
+        assert_eq!(show.kind.option(-1), None);
         let Outcome::Send(sent) = apply(&w, &Values::new(), "show", "5 days", &ctx) else {
             panic!("a new choice is sent");
         };
