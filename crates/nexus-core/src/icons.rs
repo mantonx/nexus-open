@@ -3,7 +3,7 @@
 //! share code points, so an icon is a `char` plus the weight to draw it in.
 //!
 //! Layouts name icons by Phosphor's names (`icon = "fan"`); `NAMES` is
-//! every icon the bundled subset has but the `WEATHER_ONLY` ones.
+//! every icon the bundled subset has.
 
 /// Phosphor code points, by role.
 pub const CPU: char = '\u{e610}';
@@ -39,13 +39,12 @@ pub const WARNING: char = '\u{e4e0}';
 pub const ARROWS: char = '\u{e0a0}';
 pub const NEWSPAPER: char = '\u{e344}';
 
-/// Icons the strip draws for the weather but a layout cannot name yet:
-/// the settings window lists every name in its own Phosphor subset,
-/// which does not have these, so naming them waits for that subset.
+/// The weather's own icons. Once drawn only for the weather, they are
+/// now in the settings window's subset too, so a layout can name them.
 pub const WEATHER_ONLY: [char; 3] = [CLOUD_SNOW, CLOUD_LIGHTNING, CLOUD_FOG];
 
 /// Every icon a layout can name, with its code point.
-pub const NAMES: [(&str, char); 67] = [
+pub const NAMES: [(&str, char); 70] = [
     ("activity", '\u{e000}'),
     ("arrow-down", '\u{e03e}'),
     ("arrow-up", '\u{e08e}'),
@@ -59,8 +58,10 @@ pub const NAMES: [(&str, char); 67] = [
     ("check-circle", '\u{e184}'),
     ("clock", '\u{e19a}'),
     ("cloud", '\u{e1aa}'),
+    ("cloud-lightning", '\u{e1b2}'),
     ("cloud-rain", '\u{e1b4}'),
     ("cloud-slash", '\u{e1b6}'),
+    ("cloud-snow", '\u{e1b8}'),
     ("code", '\u{e1bc}'),
     ("drop", '\u{e210}'),
     ("envelope-simple", '\u{e218}'),
@@ -98,6 +99,7 @@ pub const NAMES: [(&str, char); 67] = [
     ("arrow-fat-down", '\u{e518}'),
     ("arrow-fat-up", '\u{e52e}'),
     ("calculator", '\u{e538}'),
+    ("cloud-fog", '\u{e53c}'),
     ("cloud-moon", '\u{e53e}'),
     ("cloud-sun", '\u{e540}'),
     ("moon-stars", '\u{e58e}'),

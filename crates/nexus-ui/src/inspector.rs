@@ -11,8 +11,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use nexus_core::config::{
-    Action, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, NewsCommand, SLIDER_VALUE, SliderControl,
-    Widget,
+    Action, ForecastShow, GraphStyle, MIN_WIDGET_WIDTH, MediaCommand, NewsCommand, SLIDER_VALUE,
+    SliderControl, Widget,
 };
 
 /// A widget's values by key, in the window's words.
@@ -106,6 +106,22 @@ const SLIDER: &str = "Slider";
 const MEDIA: &str = "Now playing";
 const KEY: &str = "Key";
 const NEWS: &str = "News";
+const FORECAST: &str = "Forecast";
+
+/// What a forecast shows, as the form says it, in `ForecastShow`'s order
+/// of use: the default first.
+const FORECAST_SHOWS: [(&str, ForecastShow); 3] = [
+    ("Next change", ForecastShow::Next),
+    ("Every 3 hours", ForecastShow::Hours),
+    ("5 days", ForecastShow::Days),
+];
+
+fn forecast_word(show: ForecastShow) -> &'static str {
+    FORECAST_SHOWS
+        .iter()
+        .find(|(_, s)| *s == show)
+        .map_or(FORECAST_SHOWS[0].0, |(w, _)| *w)
+}
 
 const NO_GRAPH: &str = "None";
 const AREA: &str = "Area";
@@ -150,7 +166,10 @@ pub fn flatten(widget: &Widget, ctx: &Context) -> Values {
         Widget::Clock { .. } => put("type", CLOCK),
         Widget::Media { .. } => put("type", MEDIA),
         Widget::News { .. } => put("type", NEWS),
-        Widget::Forecast { .. } => put("type", "Forecast"),
+        Widget::Forecast { show, .. } => {
+            put("type", FORECAST);
+            put("show", forecast_word(*show));
+        }
         Widget::Key { label, sub, .. } => {
             put("type", KEY);
             put("label", label.as_deref().unwrap_or_default());
@@ -313,6 +332,16 @@ pub fn build(v: &Values, ctx: &Context) -> Result<Widget, Missing> {
         },
         NEWS => Widget::News {
             width,
+            icon,
+            tap,
+            hold,
+        },
+        FORECAST => Widget::Forecast {
+            width,
+            show: FORECAST_SHOWS
+                .iter()
+                .find(|(w, _)| *w == get("show"))
+                .map_or_else(ForecastShow::default, |(_, s)| *s),
             icon,
             tap,
             hold,
@@ -616,6 +645,12 @@ pub fn fields(v: &Values, ctx: &Context) -> Vec<Field> {
                 reading_help(&get("up"), ctx),
             );
         }
+        FORECAST => add(
+            "show",
+            "Show",
+            segmented(&FORECAST_SHOWS.map(|(w, _)| w)),
+            "From the weather where Settings says. Wider, it shows more hours or days.".into(),
+        ),
         SLIDER => {
             add("label", "Label", Kind::Text, String::new());
             add(
@@ -1127,6 +1162,51 @@ mod tests {
             panic!("a news widget's width is sent");
         };
         assert_eq!(sent, w.clone().with_width(240));
+    }
+
+    /// A forecast saves from the form, keeping every field, and its
+    /// "Show" choice is the one thing the form changes.
+    #[test]
+    fn a_forecast_round_trips_and_changes_what_it_shows() {
+        let ctx = ctx();
+        for show in [ForecastShow::Next, ForecastShow::Hours, ForecastShow::Days] {
+            let w = Widget::Forecast {
+                width: 312,
+                show,
+                icon: Some("cloud-sun".into()),
+                tap: Some(Action::Page("Desk".into())),
+                hold: Some(Action::Open("https://example.org".into())),
+            };
+            let v = flatten(&w, &ctx);
+            assert_eq!(build(&v, &ctx).unwrap(), w, "{show:?}");
+            assert_eq!(
+                apply(&w, &Values::new(), "width", "312", &ctx),
+                Outcome::Unchanged
+            );
+        }
+        let w = Widget::Forecast {
+            width: 200,
+            show: ForecastShow::Next,
+            icon: None,
+            tap: None,
+            hold: None,
+        };
+        let v = flatten(&w, &ctx);
+        let show = fields(&v, &ctx)
+            .into_iter()
+            .find(|f| f.key == "show")
+            .unwrap();
+        assert_eq!(show.value, "Next change");
+        assert!(
+            matches!(&show.kind, Kind::Segmented(o) if o == &["Next change", "Every 3 hours", "5 days"])
+        );
+        let Outcome::Send(sent) = apply(&w, &Values::new(), "show", "5 days", &ctx) else {
+            panic!("a new choice is sent");
+        };
+        let Widget::Forecast { show, width, .. } = sent else {
+            panic!("still a forecast");
+        };
+        assert_eq!((show, width), (ForecastShow::Days, 200));
     }
 
     #[test]

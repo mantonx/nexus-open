@@ -2,7 +2,7 @@
 //! size, in three groups. The gallery shows each one rendered (see
 //! `thumbs`); choosing one inserts it and makes room (`geometry::make_room`).
 
-use nexus_core::config::{Action, MediaCommand, SliderControl, Widget};
+use nexus_core::config::{Action, ForecastShow, MediaCommand, SliderControl, Widget};
 
 /// A group in the gallery.
 pub const GROUPS: [&str; 3] = ["Readings", "Controls", "Time and weather"];
@@ -166,6 +166,18 @@ pub fn presets() -> Vec<Preset> {
             about: "The temperature outside",
             group: 2,
             widget: value(120, ("Weather", "weather.temp"), None, None, None),
+        },
+        Preset {
+            name: "Forecast",
+            about: "The weather to come: the next change, hours or days",
+            group: 2,
+            widget: Widget::Forecast {
+                width: 200,
+                show: ForecastShow::Next,
+                icon: None,
+                tap: None,
+                hold: None,
+            },
         },
     ]
 }
