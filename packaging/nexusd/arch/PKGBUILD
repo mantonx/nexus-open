@@ -53,6 +53,9 @@ prepare() {
 build() {
     cd "$pkgname-$pkgver"
     export CARGO_TARGET_DIR=target
+    # Panic messages carry source paths; keep the build directory out of
+    # the binary (makepkg warns "Package contains reference to $srcdir").
+    export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build"
     cargo build --frozen --release -p nexusd -p nexusctl
 }
 
