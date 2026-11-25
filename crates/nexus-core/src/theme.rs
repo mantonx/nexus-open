@@ -477,6 +477,11 @@ pub const PICKER_MARGIN: f32 = 4.0;
 /// Baselines: a name on a picker card (`TITLE`), and the new layout's
 /// name after a switch (`TITLE_BIG`, with "Layout" before it in `LABEL`).
 pub const PICKER_BASE: f32 = 34.0;
+/// The current layout's card has a small dot under its name, in the
+/// name's colour: its centre row and radius. Below the lowest descender
+/// (row 37) and above the bottom `SAFE` rows; the name does not move.
+pub const PICKER_DOT_Y: f32 = 42.0;
+pub const PICKER_DOT_R: f32 = 2.0;
 pub const LAYOUT_NAME_BASE: f32 = 36.0;
 /// Between "Layout" and the name.
 pub const LAYOUT_NAME_GAP: f32 = 12.0;

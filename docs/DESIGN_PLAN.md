@@ -791,3 +791,12 @@ README clip (now of the new strip), release verification.
   readable measure; the status popover anchored to its chip; a short
   "Back" confirmation when the service returns. The strip's forecast
   card now asks for a town under "Forecast", matching the window.
+- 2026-11-25 — The layout picker marks the layout in use: a 4 px dot
+  under its name, in the name's colour (cream, or the accent's ink on
+  the highlighted card). Once the highlight moved off it, nothing said
+  which layout was current. Not the accent (that is the control), not an
+  underline (it would read as a page marker or a link), not beside the
+  name (it would move the name or eat into the `fit` width). Frames:
+  every `picker-*.png` that shows the current card whole;
+  `picker-select-0.png` and `picker-select-4.png` show the highlight two
+  cards from it, so no new frame was needed.
