@@ -466,6 +466,21 @@ pub const ALARM_OK_W: f32 = 84.0;
 pub const ALARM_OK_H: f32 = 36.0;
 pub const ALARM_OK_RIGHT: f32 = 10.0;
 
+/// The layout picker: one card per layout, this wide and this far apart,
+/// in one row at the card band. Three whole cards fit, with a sliver of
+/// the next at each end when there are more.
+pub const PICKER_CARD_W: f32 = 180.0;
+pub const PICKER_GAP: f32 = 8.0;
+/// The highlighted card is kept this far in from the strip's ends as the
+/// row scrolls.
+pub const PICKER_MARGIN: f32 = 4.0;
+/// Baselines: a name on a picker card (`TITLE`), and the new layout's
+/// name after a switch (`TITLE_BIG`, with "Layout" before it in `LABEL`).
+pub const PICKER_BASE: f32 = 34.0;
+pub const LAYOUT_NAME_BASE: f32 = 36.0;
+/// Between "Layout" and the name.
+pub const LAYOUT_NAME_GAP: f32 = 12.0;
+
 /// Page markers: small pills above the cards, centred.
 pub const MARKER_Y: f32 = SAFE;
 pub const MARKER_H: f32 = 2.0;
@@ -528,6 +543,9 @@ pub const MS_ALARM_BREATHE: u32 = 2400;
 pub const MS_MARQUEE_REST: u32 = 2500;
 /// How far a takeover rises as it fades in, in pixels.
 pub const TAKEOVER_RISE: f32 = 3.0;
+/// After a switch from the strip, the new layout's name stays this long
+/// between fading in and fading out.
+pub const MS_LAYOUT_NAME: u32 = 1000;
 /// The alarm's red eases down to this brightness and back.
 pub const ALARM_BREATHE_LOW: f32 = 0.88;
 pub const MARQUEE_PX_PER_S: f32 = 28.0;

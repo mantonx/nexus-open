@@ -286,7 +286,7 @@ without one. `graph` from older layouts is accepted and drawn as the bar.
 
 A key is what to press for something: give it a `tap`, and a `hold` if
 you like. Pressing lights it at once; while a `hold` is pending it fills
-from the left.
+from the left, and full, it runs when the finger lifts.
 
 A media widget showing a track has transport keys where it draws them:
 a compact one has a play/pause key; a medium one is one play/pause key
@@ -386,9 +386,10 @@ whole bar is the whole range, and the value stops at its ends.
 ## Actions
 
 `tap` and `hold` (a long press) take one action, written as a one-key
-table. A long press acts as soon as the finger has been held half a
-second, while it is still down; lifting afterwards does nothing more.
-Lifting sooner is a tap.
+table. A long press is ready once the finger has been held still half a
+second (the card fills to show it) and acts when the finger lifts.
+Sliding the finger away instead cancels it (see Gestures). Lifting
+sooner is a tap.
 
 | Action                                         | Does                                                         |
 | ---------------------------------------------- | ------------------------------------------------------------ |
@@ -403,6 +404,28 @@ Lifting sooner is a tap.
 Only `https://` and `http://` links are opened, passed to the desktop's
 opener as they are, never through a shell. A link with spaces, control
 characters or invisible characters in it is not opened.
+
+## Gestures
+
+The strip senses where a finger is along its length, and nothing else.
+
+| Gesture         | How                                                        | Does |
+| --------------- | ---------------------------------------------------------- | ---- |
+| Tap             | Touch and lift within half a second                        | The widget's `tap` |
+| Hold            | Keep the finger still half a second, then lift             | The widget's `hold`, on the lift |
+| Swipe           | Move along the strip straight away                         | The next or previous page |
+| Drag            | Move along a slider                                        | Sets the slider; never changes page |
+| Hold, then slide | Keep the finger still half a second, then slide it either way | Opens the layout picker: slide to a layout's name and lift to switch to it, or lift back on the current one to leave things as they are |
+
+Hold, then slide works anywhere except on a slider, and only with two
+or more layouts. It takes the place of a widget's `hold`: the hold
+action does not run once the finger slides away. Layouts appear in the
+order the settings window lists them. After a switch the strip shows the
+layout's name for a moment, then its first page.
+
+Up and down swipes are not possible on this hardware: the strip reports
+no vertical position, and a vertical swipe arrives as a tap
+([USB_PROTOCOL.md](USB_PROTOCOL.md)).
 
 ## `[[takeover]]`
 
@@ -438,7 +461,8 @@ shows while it is up. It stays until one of:
 
 - OK is tapped (or long-pressed), which acknowledges every reading
   critical at the time, and shows the page with the reading;
-- the strip is swiped, which does the same and does not change page;
+- the strip is swiped (or held, then slid), which does the same and does
+  not change page or layout;
 - the reading has been back under its `crit` for 10 seconds.
 
 Then the page it covered is back. If several readings go critical, it

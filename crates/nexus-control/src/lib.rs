@@ -66,6 +66,13 @@ pub enum Request {
         from: f32,
         to: f32,
     },
+    /// A simulated hold-then-slide: a still finger at `from` past the long
+    /// press, then a slide to `to`, resting there before it lifts. On the
+    /// page it switches layout as the layout picker does.
+    HoldDrag {
+        from: f32,
+        to: f32,
+    },
     Frames,
     Edit(Box<EditRequest>),
     Undo,
@@ -244,20 +251,21 @@ impl Request {
                     hold: word == "hold",
                 })
             }
-            "drag" => {
+            "drag" | "hold-drag" => {
                 let xs: Vec<f32> = rest
                     .split_whitespace()
                     .filter_map(|x| x.parse().ok())
                     .filter(|x| (0.0..640.0).contains(x))
                     .collect();
                 match xs[..] {
-                    [from, to] => Ok(Request::Drag { from, to }),
-                    _ => Err("drag needs two x positions from 0 to 639".into()),
+                    [from, to] if word == "drag" => Ok(Request::Drag { from, to }),
+                    [from, to] => Ok(Request::HoldDrag { from, to }),
+                    _ => Err(format!("{word} needs two x positions from 0 to 639")),
                 }
             }
             "" => Err("empty request".into()),
             other => Err(format!(
-                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold, drag, frames, edit, undo, redo, export, import or art"
+                "unknown request \"{other}\"; expected status, signals, page, reload, publish, tap, hold, drag, hold-drag, frames, edit, undo, redo, export, import or art"
             )),
         }
     }
@@ -551,6 +559,13 @@ mod tests {
                 to: 300.0
             })
         );
+        assert_eq!(
+            Request::parse("hold-drag 300 450"),
+            Ok(Request::HoldDrag {
+                from: 300.0,
+                to: 450.0
+            })
+        );
         for bad in [
             "tap",
             "tap 640",
@@ -558,6 +573,7 @@ mod tests {
             "tap left",
             "drag 10",
             "drag 10 700",
+            "hold-drag 300",
         ] {
             assert!(Request::parse(bad).is_err(), "{bad}");
         }

@@ -529,11 +529,14 @@ What can be touched looks like it; what cannot does not.
   move down 1 px), turns `Accent::soft` (the primary key: accent mixed 25 %
   toward ink) with a 1.5 px accent rim. Shown in `specimen-key-pressed.png`,
   `specimen-media-pressed.png`, `takeover-alarm-ok-pressed.png`.
-- **Holding**: a long press fires at 0.5 s (`MS_HOLD`) while still held.
-  On the way, the key's face fills from the left with KEY mixed
-  `HOLD_MIX` 45 % toward the accent, linearly in time; when full it fires
-  and the key flashes `base` for one frame-pair. `specimen-key-holding.png`
-  shows 60 %.
+- **Holding**: a finger kept within `HOLD_STILL` 24 px of where it landed
+  for 0.5 s (`MS_HOLD`) **arms** the long press, and it fires when the
+  finger lifts (provisional, 2026-11-22; before, it fired at 0.5 s with
+  the finger down). On the way, the key's face fills from the left with
+  KEY mixed `HOLD_MIX` 45 % toward the accent, linearly in time; full, it
+  is armed and stays full until the lift. Sliding the armed finger
+  `HOLD_SLIDE` 24 px away cancels it and opens the layout picker
+  instead (Layout picker, below). `specimen-key-holding.png` shows 60 %.
 - **Sliders are relative**: landing changes nothing; dragging moves the
   value by the finger's travel (full track width = 0–100). At rest the
   thumb is `THUMB_R` 7.5 px; while held it grows to `THUMB_R_HELD` 10 px,
@@ -688,6 +691,47 @@ content.
   breathes: its red eases between 100 % and 88 % brightness over
   `MS_ALARM_BREATHE` 2.4 s, the only looping motion in the system.
 
+### Layout picker
+
+*Provisional (2026-11-22), Matt's to overturn.* Pages go left and right;
+layouts would be the other axis, but the strip senses no vertical
+position (`docs/USB_PROTOCOL.md`), so **hold, then slide** stands in for
+an up or down swipe.
+
+- **Gesture.** A finger held within `HOLD_STILL` 24 px for 0.5 s arms;
+  moving `HOLD_SLIDE` 24 px from there opens the picker, which then
+  tracks the finger. Lifting switches to the highlighted layout; lifting
+  on the current one cancels. It opens only with two or more layouts;
+  with one, the slide ends quietly (no hold action, no swipe). A swipe
+  never opens it: none stays within 24 px for half a second first
+  (`swipe-slow.trace`, `swipe-matt.trace`); nor does a tap or a brush.
+  It never opens from a slider: past its 4 px dead zone a slider moves,
+  even after a still hold.
+- **The scene** (`picker-*.png`) covers the whole strip, page markers
+  too: one row of `PICKER_CARD_W` 180 px cards, `PICKER_GAP` 8 apart, in
+  the store's order (by name), centred on the current layout. Cards are
+  key faces (KEY, lit top edge) with the name in `TITLE`, cut by `fit`;
+  the highlighted one is filled with the accent, name in its ink: it is
+  the control. Three whole cards fit; a card cut by the strip's end is
+  drawn without its name (no letter cut through), and says there is more
+  that way. With more than fit, the row shifts only as far as keeps the
+  highlighted card `PICKER_MARGIN` 4 px inside the strip.
+- **Selection** moves one card per `PICKER_STEP` 72 px (about 14 mm) of
+  travel from where the picker opened, each card's span centred on it,
+  and stops at the ends without wrapping.
+- **The alarm wins.** Over the alarm a hold-then-slide is a swipe (it
+  puts the alarm away) and the picker never opens; if the alarm rises
+  while it is open, it closes without switching.
+- **After a switch** the new layout shows from its first page (the
+  engine keeps no page per layout), under its name for a moment
+  (`layout-name.png`): one full-width card, "Layout" in `LABEL` TEXT2 and
+  the name in `TITLE_BIG` TEXT, no accent, page markers above. It fades
+  in as a takeover does, stays `MS_LAYOUT_NAME` 1 s and fades out; a
+  touch on the strip ends it at once. A switch made from the window or
+  `nexusctl` shows no name and keeps the page, as before.
+- The switch is the window's own edit (`Edit::Activate`), so it is
+  undoable as "Switch layout" and the window follows it live.
+
 ### Motion
 
 Calm and quick, never bouncy. All eases are ease-out (decelerating, like
@@ -701,6 +745,8 @@ something settling), except where noted.
 | Page swipe | follows the finger; release settles in `MS_PAGE` 280 ms | Existing gesture physics; ease-out |
 | Takeover in | `MS_TAKEOVER_IN` 220 ms | Fades and rises 3 px into place |
 | Takeover out | `MS_TAKEOVER_OUT` 320 ms | Fades; slower out than in |
+| Layout picker | immediate; the highlight moves at once, card by card | Follows the finger, nothing slides |
+| Layout name after a switch | takeover in, `MS_LAYOUT_NAME` 1 s, takeover out | As a takeover |
 | Alarm in | immediate cut | Never animated in: it must not be missed |
 | Alarm breathing | `MS_ALARM_BREATHE` 2.4 s, sine | Slow, like breathing, not flashing |
 | Thumb grow on hold | `MS_PRESS` | |
@@ -803,7 +849,7 @@ All optional; existing layouts keep working unchanged.
 | `icon` | any widget | a Phosphor name, e.g. `"fan"` | Override the default icon (which comes from the signal) |
 | `align` | `[[takeover]]` | `"full"` (default), `"left"`, `"right"` | A takeover narrower than the strip covers only that side |
 | `width` | `[[takeover]]` | px | Its width when `align` is `left` or `right`; snapped to the nearest card edge of the page under it when that is within 40 % of it |
-| `type = "key"` | widget | with `icon`, optional `label`, `sub`, `tap`, `hold` | The new key widget: runs `tap` (any existing action: `run`, `open`, `page`, `media`, `publish`); `hold` fires at 0.5 s |
+| `type = "key"` | widget | with `icon`, optional `label`, `sub`, `tap`, `hold` | The new key widget: runs `tap` (any existing action: `run`, `open`, `page`, `media`, `publish`); `hold` arms at 0.5 s and fires on the lift |
 | `critical` | `[[takeover]]`-like rule, built in | – | The alarm needs no key: any widget with `crit` arms it |
 | `[news]` | top level | `feeds`, `rotate`, `max_age` | The feeds to read; see docs/LAYOUT.md |
 | `album_art` | `[media]` | `"all"` (default), `"local"`, `"off"` | Where the media widget's artwork may come from; `"all"` fetches covers from the player's image host. See docs/LAYOUT.md |
